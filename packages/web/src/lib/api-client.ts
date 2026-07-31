@@ -1,0 +1,131 @@
+/**
+ * lib/api-client.ts — Axios 实例 + JWT 拦截器 + 响应信封解包
+ *
+ * - 请求拦截器：自动注入 Authorization: Bearer <token>
+ * - 响应拦截器：
+ *   - code === 0 → 返回 data 字段
+ *   - code === 1001/1002（未认证/Token 过期） → 清除 token，跳转 /login
+ *   - code !== 0 → Toast 提示 message，抛出错误
+ * - 调用方使用 apiClient.request/get/post/... 即可直接拿到 data，无需手动解包
+ */
+
+import axios, {
+  type AxiosInstance,
+  type AxiosRequestConfig,
+  type AxiosResponse,
+  type InternalAxiosRequestConfig,
+} from 'axios';
+import { toast } from 'sonner';
+import { API_BASE_URL, AUTH_TOKEN_KEY, ROUTE_PATH } from './constants';
+import type { ApiResponse } from '@investment-tracker/shared';
+
+/** 业务错误（响应信封 code !== 0） */
+export class ApiError extends Error {
+  code: number;
+  constructor(code: number, message: string) {
+    super(message);
+    this.name = 'ApiError';
+    this.code = code;
+  }
+}
+
+/** 未认证错误码（401 / Token 过期） */
+const UNAUTH_CODES = [1001, 1002];
+
+/** 创建 Axios 实例 */
+const apiClient: AxiosInstance = axios.create({
+  baseURL: API_BASE_URL,
+  timeout: 30_000,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
+
+/** 请求拦截器：注入 JWT */
+apiClient.interceptors.request.use(
+  (config: InternalAxiosRequestConfig) => {
+    const token = localStorage.getItem(AUTH_TOKEN_KEY);
+    if (token && config.headers) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    return config;
+  },
+  (error) => Promise.reject(error),
+);
+
+/** 响应拦截器：解包信封 + 错误处理 */
+apiClient.interceptors.response.use(
+  (response: AxiosResponse<ApiResponse>) => {
+    const body = response.data;
+    // 兼容 Blob 等非信封响应（如未来文件下载）
+    if (!body || typeof body !== 'object' || !('code' in body)) {
+      return response;
+    }
+    if (body.code === 0) {
+      // 把 data 放回 response.data，方便调用方直接拿
+      // @ts-expect-error 重新赋值为已解包的 data
+      response.data = body.data;
+      return response;
+    }
+    // 业务错误
+    if (UNAUTH_CODES.includes(body.code)) {
+      // Token 失效，清理并跳转登录
+      localStorage.removeItem(AUTH_TOKEN_KEY);
+      toast.error('登录已失效，请重新登录');
+      if (window.location.pathname !== ROUTE_PATH.LOGIN) {
+        window.location.href = ROUTE_PATH.LOGIN;
+      }
+      return Promise.reject(new ApiError(body.code, body.message));
+    }
+    // 其他业务错误：Toast 提示
+    toast.error(body.message || '请求失败');
+    return Promise.reject(new ApiError(body.code, body.message));
+  },
+  (error) => {
+    // HTTP 层错误（非 2xx）
+    if (error.response) {
+      const status = error.response.status;
+      const body = error.response.data as ApiResponse | undefined;
+      if (status === 401 || (body && UNAUTH_CODES.includes(body.code))) {
+        localStorage.removeItem(AUTH_TOKEN_KEY);
+        toast.error('登录已失效，请重新登录');
+        if (window.location.pathname !== ROUTE_PATH.LOGIN) {
+          window.location.href = ROUTE_PATH.LOGIN;
+        }
+        return Promise.reject(
+          new ApiError(body?.code ?? 1001, body?.message ?? '未认证'),
+        );
+      }
+      const message = body?.message || `请求失败 (${status})`;
+      toast.error(message);
+      return Promise.reject(new ApiError(body?.code ?? status, message));
+    }
+    if (error.request) {
+      toast.error('网络异常，请检查网络连接');
+    } else {
+      toast.error(error.message || '请求失败');
+    }
+    return Promise.reject(error);
+  },
+);
+
+/**
+ * 封装快捷方法：直接返回 data 字段（T 类型）。
+ *
+ * 拦截器已把信封解包到 response.data，这里再取出 response.data 返回，
+ * 这样调用方拿到的就是纯数据 T，而非整个 AxiosResponse。
+ */
+export const http = {
+  get: <T>(url: string, config?: AxiosRequestConfig) =>
+    apiClient.get<unknown, AxiosResponse<T>>(url, config).then((r) => r.data),
+  post: <T>(url: string, data?: unknown, config?: AxiosRequestConfig) =>
+    apiClient.post<unknown, AxiosResponse<T>>(url, data, config).then((r) => r.data),
+  put: <T>(url: string, data?: unknown, config?: AxiosRequestConfig) =>
+    apiClient.put<unknown, AxiosResponse<T>>(url, data, config).then((r) => r.data),
+  patch: <T>(url: string, data?: unknown, config?: AxiosRequestConfig) =>
+    apiClient.patch<unknown, AxiosResponse<T>>(url, data, config).then((r) => r.data),
+  delete: <T>(url: string, config?: AxiosRequestConfig) =>
+    apiClient.delete<unknown, AxiosResponse<T>>(url, config).then((r) => r.data),
+};
+
+export default apiClient;

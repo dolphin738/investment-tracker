@@ -1,0 +1,144 @@
+// ===========================================================================
+// 投资收益统计系统 — Prisma Schema
+// ===========================================================================
+// 数据库：PostgreSQL 16
+// 数据精度约定（ARCHITECTURE.md §3.2）：
+//   交易金额 / 资产快照金额   DECIMAL(18,2)  — 2 位小数（分）
+//   单位/累计/当年净值          DECIMAL(12,6)  — 6 位小数（展示取 4 位）
+//   份额                        DECIMAL(18,6)  — 6 位小数
+//   XIRR                        DECIMAL(10,8)  — 8 位小数（小数形式，展示为百分比）
+// ===========================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==================== 用户表 ====================
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  name         String?
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  portfolios Portfolio[]
+
+  @@map("users")
+}
+
+// ==================== 投资组合表 ====================
+model Portfolio {
+  id          String    @id @default(uuid())
+  userId      String    @map("user_id")
+  name        String
+  description String?
+  // 成立日：首笔买入日，首次录入买入交易时自动设置，设置后不可更改
+  baseDate    DateTime? @map("base_date") @db.Date
+  currency    String    @default("CNY")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  user         User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions Transaction[]
+  snapshots    AssetSnapshot[]
+  dailyNavs    DailyNav[]
+  dailyXirrs   DailyXirr[]
+
+  @@index([userId])
+  @@map("portfolios")
+}
+
+// ==================== 交易记录表 ====================
+model Transaction {
+  id          String          @id @default(uuid())
+  portfolioId String          @map("portfolio_id")
+  date        DateTime        @db.Date
+  // BUY = 买入（现金流为负），SELL = 卖出（现金流为正）
+  type        TransactionType
+  amount      Decimal         @db.Decimal(18, 2) // 交易金额，始终 > 0
+  note        String?
+  createdAt   DateTime        @default(now()) @map("created_at")
+  updatedAt   DateTime        @updatedAt @map("updated_at")
+
+  portfolio Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+
+  // 查询索引：按组合 + 日期查询交易序列（XIRR/净值计算核心查询）
+  @@index([portfolioId, date])
+  @@map("transactions")
+}
+
+enum TransactionType {
+  BUY
+  SELL
+}
+
+// ==================== 资产快照表 ====================
+model AssetSnapshot {
+  id          String   @id @default(uuid())
+  portfolioId String   @map("portfolio_id")
+  date        DateTime @db.Date
+  totalAsset  Decimal  @db.Decimal(18, 2) // 当日持仓总市值，始终 > 0
+  note        String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  portfolio Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+
+  // 唯一约束：每个组合每日仅一条快照（重复录入时 upsert 覆盖）
+  @@unique([portfolioId, date])
+  @@index([portfolioId, date])
+  @@map("asset_snapshots")
+}
+
+// ==================== 每日净值表 ====================
+model DailyNav {
+  id                String   @id @default(uuid())
+  portfolioId       String   @map("portfolio_id")
+  date              DateTime @db.Date
+  // 当日单位净值 = 当日资产快照 / 上日末份额（成立日 = 1.0000）
+  unitNav           Decimal  @map("unit_nav") @db.Decimal(12, 6)
+  // 累计净值 = 单位净值（v1 无分红，累计净值即单位净值）
+  cumulativeNav     Decimal  @map("cumulative_nav") @db.Decimal(12, 6)
+  // 当年净值 = 当日累计净值 / base_cumulative_nav（当年首日 = 1.0000）
+  yearNav           Decimal  @map("year_nav") @db.Decimal(12, 6)
+  // 当日末总份额
+  shares            Decimal  @db.Decimal(18, 6)
+  // 当年基准累计净值（上年末最后一个有快照交易日的累计净值，当年首日设置后年内不变）
+  baseCumulativeNav Decimal? @map("base_cumulative_nav") @db.Decimal(12, 6)
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  portfolio Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+
+  // 唯一约束：每个组合每日仅一条净值记录
+  @@unique([portfolioId, date])
+  // 核心查询索引：按组合 + 日期范围查询净值序列
+  @@index([portfolioId, date])
+  @@map("daily_nav")
+}
+
+// ==================== 每日 XIRR 表 ====================
+model DailyXirr {
+  id          String   @id @default(uuid())
+  portfolioId String   @map("portfolio_id")
+  date        DateTime @db.Date
+  // 累计 XIRR 年化收益率（小数形式，如 0.1234 表示 12.34%），null 表示数据不足
+  // 精度 20 位整数 + 8 位小数，覆盖任何合理 XIRR 值（-10^12 ~ 10^12）
+  xirrValue   Decimal? @map("xirr_value") @db.Decimal(20, 8)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  portfolio Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+
+  // 唯一约束：每个组合每日仅一条 XIRR 记录
+  @@unique([portfolioId, date])
+  // 核心查询索引：按组合 + 日期范围查询 XIRR 序列
+  @@index([portfolioId, date])
+  @@map("daily_xirr")
+}

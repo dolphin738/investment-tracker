@@ -1,0 +1,24 @@
+{
+  "name": "@investment-tracker/shared",
+  "version": "1.0.0",
+  "private": true,
+  "description": "投资收益统计系统 — 三端共享 TypeScript 类型与 API 契约",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "lint": "echo 'shared: lint not configured'",
+    "clean": "rimraf dist"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3",
+    "rimraf": "^5.0.5"
+  }
+}

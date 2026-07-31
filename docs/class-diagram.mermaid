@@ -1,0 +1,172 @@
+%% 投资收益统计系统 — 类图
+
+classDiagram
+    class User {
+        +string id
+        +string email
+        +string passwordHash
+        +string? name
+        +Date createdAt
+        +Date updatedAt
+    }
+
+    class Portfolio {
+        +string id
+        +string userId
+        +string name
+        +string? description
+        +Date? baseDate
+        +string currency
+        +Date createdAt
+        +Date updatedAt
+    }
+
+    class Transaction {
+        +string id
+        +string portfolioId
+        +Date date
+        +TransactionType type
+        +Decimal amount
+        +string? note
+        +Date createdAt
+        +Date updatedAt
+    }
+
+    class AssetSnapshot {
+        +string id
+        +string portfolioId
+        +Date date
+        +Decimal totalAsset
+        +string? note
+        +Date createdAt
+        +Date updatedAt
+    }
+
+    class DailyNav {
+        +string id
+        +string portfolioId
+        +Date date
+        +Decimal unitNav
+        +Decimal cumulativeNav
+        +Decimal yearNav
+        +Decimal shares
+        +Decimal? baseCumulativeNav
+        +Date createdAt
+        +Date updatedAt
+    }
+
+    class DailyXirr {
+        +string id
+        +string portfolioId
+        +Date date
+        +Decimal? xirrValue
+        +Date createdAt
+        +Date updatedAt
+    }
+
+    class TransactionType {
+        <<enumeration>>
+        BUY
+        SELL
+    }
+
+    class XirrService {
+        -INITIAL_RATE: number = 0.1
+        -MAX_ITERATIONS: number = 100
+        -TOLERANCE: number = 1e-7
+        -MIN_RATE: number = -0.999
+        +calculateXirr(cashflows: Cashflow[]) number|null
+        -calculateNpv(rate: number, cashflows: Cashflow[], firstDate: Date) number
+        -calculateDerivative(rate: number, cashflows: Cashflow[], firstDate: Date) number
+        +calculateXirrForDate(portfolioId: string, date: Date) Promise~number|null~
+    }
+
+    class NavService {
+        +calculateNavForDate(portfolioId: string, date: Date) Promise~NavResult|null~
+        -isYearFirstTradingDay(currentDate: Date, prevDate: Date) boolean
+    }
+
+    class NavResult {
+        +number unitNav
+        +number cumulativeNav
+        +number yearNav
+        +number shares
+        +number|null baseCumulativeNav
+    }
+
+    class Cashflow {
+        +Date date
+        +number amount
+    }
+
+    class CalculationService {
+        +triggerCalculation(portfolioId: string, date: Date) Promise~void~
+        +batchRecalculate(portfolioId: string, startDate: Date, endDate?: Date) Promise~number~
+        -ensureBaseDate(portfolioId: string, date: Date) Promise~void~
+    }
+
+    class RecalculationService {
+        +recalculateFromDate(portfolioId: string, startDate: Date) Promise~number~
+        -getAffectedDates(portfolioId: string, startDate: Date) Promise~Date[]~
+    }
+
+    class QueryService {
+        +queryXirrSeries(portfolioId: string, params: QueryDto) Promise~XirrSeriesPoint[]~
+        +queryNavSeries(portfolioId: string, params: QueryDto) Promise~NavSeriesPoint[]~
+        +getSummary(portfolioId: string) Promise~PortfolioSummary~
+        -aggregateByGranularity(records: DailyXirr[]|DailyNav[], granularity: string, aggregation: string) SeriesPoint[]
+    }
+
+    class TransactionService {
+        +create(portfolioId: string, dto: CreateTransactionDto) Promise~Transaction~
+        +findAll(portfolioId: string, query: DateRangeQuery) Promise~Paginated~Transaction~~
+        +update(portfolioId: string, id: string, dto: UpdateTransactionDto) Promise~Transaction~
+        +remove(portfolioId: string, id: string) Promise~void~
+    }
+
+    class SnapshotService {
+        +createOrUpdate(portfolioId: string, dto: CreateSnapshotDto) Promise~AssetSnapshot~
+        +findAll(portfolioId: string, query: DateRangeQuery) Promise~Paginated~AssetSnapshot~~
+        +update(portfolioId: string, id: string, dto: UpdateSnapshotDto) Promise~AssetSnapshot~
+        +remove(portfolioId: string, id: string) Promise~void~
+    }
+
+    class AuthService {
+        +register(dto: RegisterDto) Promise~User~
+        +login(dto: LoginDto) Promise~{ accessToken, user }~
+        +validateUser(email: string, password: string) Promise~User~
+    }
+
+    class PortfolioService {
+        +findAll(userId: string) Promise~Portfolio[]~
+        +create(userId: string, dto: CreatePortfolioDto) Promise~Portfolio~
+        +findOne(userId: string, id: string) Promise~Portfolio~
+        +update(userId: string, id: string, dto: UpdatePortfolioDto) Promise~Portfolio~
+        +remove(userId: string, id: string) Promise~void~
+    }
+
+    User "1" --> "N" Portfolio : owns
+    Portfolio "1" --> "N" Transaction : has
+    Portfolio "1" --> "N" AssetSnapshot : has
+    Portfolio "1" --> "N" DailyNav : has
+    Portfolio "1" --> "N" DailyXirr : has
+    Transaction --> TransactionType : type
+
+    XirrService ..> Cashflow : uses
+    XirrService ..> Transaction : reads
+    XirrService ..> AssetSnapshot : reads terminal value
+    NavService ..> NavResult : returns
+    NavService ..> AssetSnapshot : reads
+    NavService ..> Transaction : reads buy/sell
+
+    CalculationService --> XirrService : delegates
+    CalculationService --> NavService : delegates
+    RecalculationService --> CalculationService : calls per date
+
+    TransactionService --> CalculationService : triggers on create/update
+    TransactionService ..> RecalculationService : triggers on historical edit
+    SnapshotService --> CalculationService : triggers on create/update
+    SnapshotService ..> RecalculationService : triggers on historical edit
+
+    QueryService ..> DailyXirr : queries
+    QueryService ..> DailyNav : queries

@@ -1,0 +1,13 @@
+{
+  "src": [
+    "pages/Index",
+    "pages/Login",
+    "pages/Register",
+    "pages/Dashboard",
+    "pages/Transactions",
+    "pages/Snapshots",
+    "pages/XirrAnalysis",
+    "pages/NavAnalysis",
+    "pages/Settings"
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "string": [
+    { "name": "module_desc", "value": "投资收益统计系统入口模块" },
+    { "name": "EntryAbility_desc", "value": "投资收益统计系统" },
+    { "name": "EntryAbility_label", "value": "投资收益统计" },
+    { "name": "page_login", "value": "登录" },
+    { "name": "page_register", "value": "注册" },
+    { "name": "page_dashboard", "value": "首页" },
+    { "name": "page_transactions", "value": "交易记录" },
+    { "name": "page_snapshots", "value": "资产快照" },
+    { "name": "page_xirr_analysis", "value": "XIRR收益分析" },
+    { "name": "page_nav_analysis", "value": "净值分析" },
+    { "name": "page_settings", "value": "设置" }
+  ]
+}

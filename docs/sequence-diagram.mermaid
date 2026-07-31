@@ -1,0 +1,171 @@
+%% 投资收益统计系统 — 核心流程时序图
+%% 包含 4 个核心流程
+
+%% ============================================
+%% 流程 A：录入资产快照 → 触发净值计算 → 触发 XIRR 计算
+%% ============================================
+sequenceDiagram
+    participant U as 用户 (Web/APP)
+    participant C as SnapshotController
+    participant SS as SnapshotService
+    participant CS as CalculationService
+    participant NS as NavService
+    participant XS as XirrService
+    participant PS as PrismaService
+    participant DB as PostgreSQL
+
+    U->>C: POST /portfolios/:id/snapshots { date, totalAsset }
+    C->>SS: createOrUpdate(portfolioId, dto)
+    SS->>PS: upsert asset_snapshots (portfolioId, date, totalAsset)
+    PS->>DB: INSERT ... ON CONFLICT UPDATE
+    DB-->>PS: AssetSnapshot
+    PS-->>SS: snapshot
+
+    SS->>CS: triggerCalculation(portfolioId, date)
+    CS->>NS: calculateNavForDate(portfolioId, date)
+
+    NS->>PS: findPrevNav(portfolioId, date)
+    PS->>DB: SELECT * FROM daily_nav WHERE portfolio_id=? AND date < ? ORDER BY date DESC LIMIT 1
+    DB-->>PS: prevNav (or null)
+    PS-->>NS: prevNav
+
+    alt 成立日 (prevNav is null)
+        NS->>PS: findFirstBuyTransactions(portfolioId, date)
+        PS->>DB: SELECT * FROM transactions WHERE portfolio_id=? AND date=? AND type='BUY'
+        DB-->>PS: transactions
+        NS->>NS: shares = sum(buyAmount), nav = 1.0, cumNav = 1.0, yearNav = 1.0
+    else 非成立日
+        NS->>PS: findSnapshot(portfolioId, date)
+        PS->>DB: SELECT total_asset FROM asset_snapshots WHERE portfolio_id=? AND date=?
+        DB-->>PS: snapshot
+        NS->>NS: unitNav = snapshot.totalAsset / prevNav.shares
+        NS->>NS: cumNav = unitNav
+        NS->>NS: 处理当日买卖 更新 shares
+        NS->>NS: 判断当年首日 yearNav = 1.0 或 cumNav / base
+    end
+
+    NS->>PS: upsert daily_nav
+    PS->>DB: INSERT ... ON CONFLICT UPDATE
+    DB-->>PS: dailyNav
+    PS-->>NS: navRecord
+    NS-->>CS: navResult
+
+    CS->>XS: calculateXirrForDate(portfolioId, date)
+    XS->>PS: findAllTransactions(portfolioId, lte date)
+    PS->>DB: SELECT * FROM transactions WHERE portfolio_id=? AND date <= ? ORDER BY date
+    DB-->>PS: transactions
+    PS-->>XS: transactions
+
+    XS->>PS: findSnapshot(portfolioId, date)
+    PS-->>XS: snapshot (terminal value)
+
+    XS->>XS: buildCashflows = transactions(BUY=-amt, SELL=+amt) + [{date, +totalAsset}]
+    XS->>XS: newtonRaphson(cashflows, rate=0.1, maxIter=100, tol=1e-7)
+    XS-->>CS: xirrValue (or null if all same sign)
+
+    CS->>PS: upsert daily_xirr
+    PS->>DB: INSERT ... ON CONFLICT UPDATE
+    DB-->>PS: dailyXirr
+    PS-->>CS: xirrRecord
+
+    CS-->>SS: done
+    SS-->>C: snapshot
+    C-->>U: 200 { code:0, data: snapshot }
+
+%% ============================================
+%% 流程 B：录入交易 → 若当日有快照则触发重算
+%% ============================================
+sequenceDiagram
+    participant U as 用户
+    participant C as TransactionController
+    participant TS as TransactionService
+    participant PS as PrismaService
+    participant CS as CalculationService
+    participant DB as PostgreSQL
+
+    U->>C: POST /portfolios/:id/transactions { date, type, amount }
+    C->>TS: create(portfolioId, dto)
+    TS->>PS: create transaction
+    PS->>DB: INSERT INTO transactions ...
+    DB-->>PS: transaction
+    PS-->>TS: transaction
+
+    TS->>PS: findSnapshot(portfolioId, date)
+    PS->>DB: SELECT * FROM asset_snapshots WHERE portfolio_id=? AND date=?
+    DB-->>PS: snapshot?
+
+    alt 当日有快照
+        TS->>CS: triggerCalculation(portfolioId, date)
+        Note over CS: 同流程 A：净值计算 + XIRR 计算
+        CS-->>TS: done
+    else 当日无快照
+        Note over TS: 不触发计算，等待快照录入
+    end
+
+    TS-->>C: transaction
+    C-->>U: 200 { code:0, data: transaction }
+
+%% ============================================
+%% 流程 C：按月查询 XIRR/净值 → 后端聚合 → 返回时间序列
+%% ============================================
+sequenceDiagram
+    participant U as 用户
+    participant C as QueryController
+    participant QS as QueryService
+    participant PS as PrismaService
+    participant DB as PostgreSQL
+
+    U->>C: GET /portfolios/:id/xirr?granularity=month&startDate=2025-01-01&endDate=2025-06-30&aggregation=last
+    C->>QS: queryXirrSeries(portfolioId, params)
+    QS->>PS: findDailyXirrs(portfolioId, startDate, endDate)
+    PS->>DB: SELECT * FROM daily_xirr WHERE portfolio_id=? AND date BETWEEN ? AND ? ORDER BY date
+    DB-->>PS: dailyXirrRecords[]
+    PS-->>QS: records[]
+
+    QS->>QS: 按月分组 (group by year-month)
+    QS->>QS: 每组取 aggregation=last 最后一条记录的 xirrValue
+    QS->>QS: 构建 XirrSeriesPoint[] (date, xirrValue, label)
+    QS-->>C: seriesPoint[]
+    C-->>U: 200 { code:0, data: seriesPoint[] }
+
+%% ============================================
+%% 流程 D：历史数据修改 → 批量重算受影响日期
+%% ============================================
+sequenceDiagram
+    participant U as 用户
+    participant C as TransactionController
+    participant TS as TransactionService
+    participant RS as RecalculationService
+    participant CS as CalculationService
+    participant PS as PrismaService
+    participant DB as PostgreSQL
+
+    U->>C: PATCH /portfolios/:id/transactions/:tid { amount: newAmount }
+    C->>TS: update(portfolioId, transactionId, dto)
+    TS->>PS: findTransaction(transactionId)
+    PS->>DB: SELECT * FROM transactions WHERE id=?
+    DB-->>PS: oldTransaction (含 oldDate)
+    PS-->>TS: oldTransaction
+
+    TS->>PS: update transaction
+    PS->>DB: UPDATE transactions SET ... WHERE id=?
+    DB-->>PS: updatedTransaction
+    PS-->>TS: transaction
+
+    TS->>RS: recalculateFromDate(portfolioId, oldTransaction.date)
+    RS->>PS: findSnapshotDates(portfolioId, gte oldDate)
+    PS->>DB: SELECT DISTINCT date FROM asset_snapshots WHERE portfolio_id=? AND date >= ? ORDER BY date
+    DB-->>PS: affectedDates[]
+    PS-->>RS: dates[]
+
+    loop 对每个受影响日期 (按日期升序)
+        RS->>CS: triggerCalculation(portfolioId, date)
+        Note over CS: 重算净值 (依赖前一日份额, 需顺序计算)
+        CS->>PS: upsert daily_nav
+        Note over CS: 重算 XIRR
+        CS->>PS: upsert daily_xirr
+    end
+
+    RS-->>TS: { affectedDates: count }
+    TS-->>C: transaction
+    C-->>U: 200 { code:0, data: transaction }

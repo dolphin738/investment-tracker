@@ -1,0 +1,64 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+build/
+out/
+*.tsbuildinfo
+
+# Coverage
+coverage/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Turbo
+.turbo/
+
+# Prisma
+packages/backend/prisma/migrations/dev/
+
+# HarmonyOS build
+packages/harmonyos/.cxx/
+packages/harmonyos/build/
+packages/harmonyos/entry/build/
+packages/harmonyos/.preview/
+
+# Test
+*.spec.tsx
+
+# Migration outputs (generated SQL, throwaway)
+migrate_output*.txt
+
+# Assistant / tool internal state
+.workbuddy/
+
+# Leftover / archive dirs (from cleanup)
+node_modules.bak*/
+_已清理归档_*/
+
+# Vite build cache (temp timestamp files)
+vite.config.ts.timestamp-*.mjs
+
+# Compiled prisma seed (source of truth is seed.ts)
+packages/backend/prisma/seed.js
+packages/backend/prisma/seed.js.map
