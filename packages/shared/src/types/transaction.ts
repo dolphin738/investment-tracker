@@ -4,6 +4,9 @@
  * 对应 Prisma model Transaction（transactions 表）。
  * BUY = 买入（现金流为负），SELL = 卖出（现金流为正）。
  * 交易金额 amount 始终 > 0，正负号由 type 决定（XIRR 计算时转换）。
+ *
+ * TransactionType 枚举维持 BUY / SELL 两值不变（C-10 约束）。
+ * 分红与费用在持仓模块独立建表（DividendRecord / FeeRecord），不进入 Transaction。
  */
 
 /**
@@ -48,10 +51,62 @@ export interface Transaction {
    * Decimal 以 string 传输，避免 JSON 精度丢失（如 "10000.00"）。
    */
   amount: string;
+  /** 🆕 关联标的 ID（可空，向后兼容存量数据） */
+  securityId: string | null;
+  /** 🆕 交易数量（可空） */
+  quantity: string | null;
+  /** 🆕 成交单价（可空） */
+  price: string | null;
+  /** 🆕 手续费（可空，信息记录，已包含在 amount 内） */
+  fee: string | null;
   /** 备注，可为空 */
   note: string | null;
   /** 创建时间 ISO 8601 */
   createdAt: string;
   /** 更新时间 ISO 8601 */
   updatedAt: string;
+}
+
+/**
+ * 创建交易 DTO
+ */
+export interface CreateTransactionDto {
+  /** 交易日期 YYYY-MM-DD */
+  date: string;
+  /** 交易类型：买入 / 卖出 */
+  type: TransactionType;
+  /** 交易金额，> 0 */
+  amount: string;
+  /** 🆕 关联标的 ID（可选） */
+  securityId?: string;
+  /** 🆕 交易数量（可选） */
+  quantity?: string;
+  /** 🆕 成交单价（可选） */
+  price?: string;
+  /** 🆕 手续费（可选） */
+  fee?: string;
+  /** 备注（可选） */
+  note?: string;
+}
+
+/**
+ * 更新交易 DTO（所有字段可选）
+ */
+export interface UpdateTransactionDto {
+  /** 交易日期 YYYY-MM-DD */
+  date?: string;
+  /** 交易类型 */
+  type?: TransactionType;
+  /** 交易金额 */
+  amount?: string;
+  /** 🆕 关联标的 ID */
+  securityId?: string | null;
+  /** 🆕 交易数量 */
+  quantity?: string | null;
+  /** 🆕 成交单价 */
+  price?: string | null;
+  /** 🆕 手续费 */
+  fee?: string | null;
+  /** 备注 */
+  note?: string | null;
 }

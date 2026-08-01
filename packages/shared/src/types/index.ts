@@ -13,3 +13,9 @@ export * from './nav.js';
 export * from './xirr.js';
 export * from './api.js';
 export * from './query.js';
+
+// 🆕 五大模块增量类型
+export * from './security.js';
+export * from './dividend.js';
+export * from './fee.js';
+export * from './preference.js';

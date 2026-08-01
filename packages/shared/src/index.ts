@@ -13,6 +13,12 @@ export * from './types/snapshot.js';
 export * from './types/nav.js';
 export * from './types/xirr.js';
 
+// ===== 五大模块增量类型 =====
+export * from './types/security.js';
+export * from './types/dividend.js';
+export * from './types/fee.js';
+export * from './types/preference.js';
+
 // ===== 通用 API 类型 =====
 export * from './types/api.js';
 export * from './types/query.js';

@@ -31,7 +31,8 @@ model User {
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
-  portfolios Portfolio[]
+  portfolios  Portfolio[]
+  preferences UserPreference?
 
   @@map("users")
 }
@@ -45,14 +46,20 @@ model Portfolio {
   // 成立日：首笔买入日，首次录入买入交易时自动设置，设置后不可更改
   baseDate    DateTime? @map("base_date") @db.Date
   currency    String    @default("CNY")
+  // 归档时间：非 null 表示已归档，从组合选择器隐藏（P1 功能）
+  archivedAt  DateTime? @map("archived_at")
   createdAt   DateTime  @default(now()) @map("created_at")
   updatedAt   DateTime  @updatedAt @map("updated_at")
 
-  user         User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  transactions Transaction[]
-  snapshots    AssetSnapshot[]
-  dailyNavs    DailyNav[]
-  dailyXirrs   DailyXirr[]
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions    Transaction[]
+  snapshots       AssetSnapshot[]
+  dailyNavs       DailyNav[]
+  dailyXirrs      DailyXirr[]
+  securities      Security[]
+  holdings        Holding[]
+  dividendRecords DividendRecord[]
+  feeRecords      FeeRecord[]
 
   @@index([userId])
   @@map("portfolios")
@@ -64,16 +71,25 @@ model Transaction {
   portfolioId String          @map("portfolio_id")
   date        DateTime        @db.Date
   // BUY = 买入（现金流为负），SELL = 卖出（现金流为正）
+  // TransactionType 枚举维持 BUY / SELL 两值不变（C-10 约束）
   type        TransactionType
   amount      Decimal         @db.Decimal(18, 2) // 交易金额，始终 > 0
+  // 🆕 明细扩展字段（全部可空，向后兼容存量数据）
+  securityId  String?         @map("security_id")
+  quantity    Decimal?        @db.Decimal(18, 6) // 交易数量
+  price       Decimal?        @db.Decimal(18, 6) // 成交单价
+  fee         Decimal?        @db.Decimal(18, 2) // 手续费（信息记录，已包含在 amount 内）
   note        String?
   createdAt   DateTime        @default(now()) @map("created_at")
   updatedAt   DateTime        @updatedAt @map("updated_at")
 
   portfolio Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  security  Security? @relation(fields: [securityId], references: [id], onDelete: SetNull)
 
   // 查询索引：按组合 + 日期查询交易序列（XIRR/净值计算核心查询）
   @@index([portfolioId, date])
+  // 🆕 索引：支持按类型筛选
+  @@index([portfolioId, type])
   @@map("transactions")
 }
 
@@ -145,4 +161,142 @@ model DailyXirr {
   // 核心查询索引：按组合 + 日期范围查询 XIRR 序列
   @@index([portfolioId, date])
   @@map("daily_xirr")
+}
+
+// ===========================================================================
+// 🆕 五大模块增量模型（PRD-modules v1.2 + ARCHITECTURE-modules §3.2）
+// ===========================================================================
+
+// ==================== 新增枚举 ====================
+
+/// 标的类型（HOLD-P0-01）
+enum SecurityType {
+  STOCK  // 股票
+  FUND   // 基金
+  BOND   // 债券
+  CASH   // 现金
+  OTHER  // 其他
+}
+
+/// 分红类型（D-02）
+enum DividendType {
+  CASH             // 现金分红
+  STOCK_DIVIDEND   // 红利再投（v1 仅记录，不录入交易）
+}
+
+/// 费用类型（D-03）
+enum FeeType {
+  COMMISSION  // 佣金
+  STAMP_TAX   // 印花税
+  OTHER       // 其他费用
+}
+
+// ==================== 标的主数据表 ====================
+model Security {
+  id          String       @id @default(uuid())
+  portfolioId String       @map("portfolio_id")
+  code        String       // 标的代码，如 600519、510300
+  name        String       // 标的名称
+  type        SecurityType @default(STOCK)
+  currency    String       @default("CNY")
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+
+  portfolio Portfolio        @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  holdings  Holding[]
+  dividends DividendRecord[]
+  fees      FeeRecord[]
+  transactions Transaction[]
+
+  // 同一组合内 code 唯一（HOLD-P0-01 验收标准 1）
+  @@unique([portfolioId, code])
+  @@index([portfolioId])
+  @@map("securities")
+}
+
+// ==================== 持仓快照表 ====================
+// 每日持仓快照，标的 × 日期唯一（HOLD-P0-02）
+// marketValue（市值）、profit（盈亏）、weight（占比）为派生值，不落库
+model Holding {
+  id          String   @id @default(uuid())
+  portfolioId String   @map("portfolio_id")
+  securityId  String   @map("security_id")
+  date        DateTime @db.Date
+  quantity    Decimal  @db.Decimal(18, 6) // 持仓数量
+  avgCost     Decimal  @map("avg_cost")     @db.Decimal(18, 6) // 移动加权平均成本价
+  marketPrice Decimal  @map("market_price") @db.Decimal(18, 6) // 现价（手工录入）
+  note        String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  portfolio Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  security  Security  @relation(fields: [securityId], references: [id], onDelete: Cascade)
+
+  // 每标的每日唯一（HOLD-P0-02 验收标准 2）
+  @@unique([securityId, date])
+  @@index([portfolioId, date])
+  @@map("holdings")
+}
+
+// ==================== 分红记录表 ====================
+// 持仓模块独立建表，不参与 XIRR/净值计算（C-08 / C-09）
+model DividendRecord {
+  id          String       @id @default(uuid())
+  portfolioId String       @map("portfolio_id")
+  securityId  String       @map("security_id")
+  date        DateTime     @db.Date
+  amount      Decimal      @db.Decimal(18, 2) // 分红金额
+  type        DividendType @default(CASH)
+  note        String?
+  createdAt   DateTime     @default(now()) @map("created_at")
+
+  portfolio Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  security  Security  @relation(fields: [securityId], references: [id], onDelete: Cascade)
+
+  @@index([portfolioId, date])
+  @@index([securityId, date])
+  @@map("dividend_records")
+}
+
+// ==================== 费用记录表 ====================
+// 持仓模块独立建表，不参与 XIRR/净值计算（C-08 / C-09）
+model FeeRecord {
+  id            String   @id @default(uuid())
+  portfolioId   String   @map("portfolio_id")
+  securityId    String   @map("security_id")
+  date          DateTime @db.Date
+  amount        Decimal  @db.Decimal(18, 2) // 费用金额
+  type          FeeType  @default(OTHER)
+  transactionId String?  @map("transaction_id") // 关联交易 ID（可选）
+  note          String?
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  portfolio Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  security  Security  @relation(fields: [securityId], references: [id], onDelete: Cascade)
+
+  @@index([portfolioId, date])
+  @@index([securityId, date])
+  @@map("fee_records")
+}
+
+// ==================== 用户偏好表 ====================
+// 列式存储（非 JSON），Prisma 类型安全、可索引（SET-P0-02）
+model UserPreference {
+  id                 String   @id @default(uuid())
+  userId             String   @unique @map("user_id")
+  defaultPortfolioId String?  @map("default_portfolio_id")
+  defaultGranularity String   @default("month") @map("default_granularity")
+  defaultDateRange   String   @default("1y")    @map("default_date_range")
+  aggregation        String   @default("last")
+  weekStartsOn       Int      @default(1)       @map("week_starts_on")
+  navDecimals        Int      @default(4)       @map("nav_decimals")
+  xirrDecimals       Int      @default(2)       @map("xirr_decimals")
+  theme              String   @default("system")
+  staleDays          Int      @default(3)       @map("stale_days")
+  createdAt          DateTime @default(now())   @map("created_at")
+  updatedAt          DateTime @updatedAt        @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_preferences")
 }
