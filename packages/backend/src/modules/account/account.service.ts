@@ -15,15 +15,15 @@ export interface AccountStatsResponse {
   /** 用户拥有的组合数量 */
   portfolioCount: number;
   /** 所有组合的累计交易笔数 */
-  totalTransactionCount: number;
+  transactionCount: number;
   /** 有快照数据的天数（跨组合去重） */
   snapshotDays: number;
   /** 最早数据日期（YYYY-MM-DD），null 表示无数据 */
-  earliestDate: string | null;
+  firstDate: string | null;
   /** 最晚数据日期（YYYY-MM-DD），null 表示无数据 */
-  latestDate: string | null;
-  /** 账户注册天数 */
-  accountAgeDays: number;
+  lastDate: string | null;
+  /** 数据的记录天数 */
+  recordDays: number;
 }
 
 /** 日期格式化为 YYYY-MM-DD */
@@ -95,11 +95,11 @@ export class AccountService {
 
     return {
       portfolioCount,
-      totalTransactionCount,
+      transactionCount: totalTransactionCount,
       snapshotDays,
-      earliestDate: earliestDate ? formatDate(earliestDate) : null,
-      latestDate: latestDate ? formatDate(latestDate) : null,
-      accountAgeDays,
+      firstDate: earliestDate ? formatDate(earliestDate) : null,
+      lastDate: latestDate ? formatDate(latestDate) : null,
+      recordDays: accountAgeDays,
     };
   }
 }

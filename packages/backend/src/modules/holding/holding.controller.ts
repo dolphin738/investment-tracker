@@ -21,6 +21,7 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  Post,
   Put,
   Query,
 } from '@nestjs/common';
@@ -85,5 +86,15 @@ export class HoldingController {
     @Param('id') id: string,
   ) {
     return this.holdingService.remove(portfolioId, id, user.userId);
+  }
+
+  @Post('sync-snapshot')
+  @ApiOperation({ summary: '一键同步：持仓合计 → 当日资产快照 + 级联重算' })
+  async syncToSnapshot(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('portfolioId') portfolioId: string,
+    @Body() body: { date: string },
+  ) {
+    return this.holdingService.syncToSnapshot(portfolioId, user.userId, body.date);
   }
 }

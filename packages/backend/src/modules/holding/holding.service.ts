@@ -18,6 +18,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { SnapshotService } from '../snapshot/snapshot.service';
 import type { UpsertHoldingDto } from './dto/upsert-holding.dto';
 import type { HoldingQueryDto } from './dto/holding-query.dto';
 import { Prisma } from '@prisma/client';
@@ -53,7 +54,10 @@ export interface HoldingsAggregate {
 
 @Injectable()
 export class HoldingService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly snapshotService: SnapshotService,
+  ) {}
 
   /**
    * 验证组合归属权（数据隔离）
@@ -370,6 +374,72 @@ export class HoldingService {
 
     await this.prisma.holding.delete({ where: { id } });
     return null;
+  }
+
+  /**
+   * 一键同步：将指定日期所有持仓市值合计写入资产快照
+   *
+   * 流程：
+   * 1. 获取该组合指定日期的所有持仓
+   * 2. 汇总计算总市值（∑ quantity × marketPrice）
+   * 3. 调用 SnapshotService.upsert 写入 AssetSnapshot
+   * 4. upsert 触发 SnapshotService 内部的级联重算
+   *
+   * @returns 快照结果及受影响的快照天数
+   */
+  async syncToSnapshot(
+    portfolioId: string,
+    userId: string,
+    date: string,
+  ): Promise<{ snapshot: unknown; affectedDays: number }> {
+    await this.validatePortfolioOwnership(portfolioId, userId);
+
+    // 校验日期
+    const dateObj = new Date(date);
+    const today = new Date();
+    today.setHours(23, 59, 59, 999);
+    if (dateObj > today) {
+      throw new BadRequestException('日期不可为未来');
+    }
+
+    // 获取该组合该日期的所有持仓
+    const holdings = await this.prisma.holding.findMany({
+      where: { portfolioId, date: dateObj },
+    });
+
+    if (holdings.length === 0) {
+      throw new BadRequestException(`日期 ${date} 无持仓数据，无法同步`);
+    }
+
+    // 汇总总市值
+    let totalMarketValue = 0;
+    for (const h of holdings) {
+      const qty = Number(h.quantity);
+      const mktP = Number(h.marketPrice);
+      totalMarketValue += qty * mktP;
+    }
+
+    // 写入资产快照（upsert 内部触发级联重算）
+    const snapshot = await this.snapshotService.upsert(userId, portfolioId, {
+      date,
+      totalAsset: totalMarketValue,
+      note: `从持仓同步（${holdings.length} 个标的）`,
+    });
+
+    // 统计受影响的快照天数：该日期及之后的所有快照日期数
+    const affectedSnapshots = await this.prisma.assetSnapshot.findMany({
+      where: {
+        portfolioId,
+        date: { gte: dateObj },
+      },
+      select: { date: true },
+      distinct: ['date'],
+    });
+
+    return {
+      snapshot,
+      affectedDays: affectedSnapshots.length,
+    };
   }
 
   /**
