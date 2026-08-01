@@ -122,14 +122,17 @@ export default function SettingsPage(): JSX.Element {
   // 偏好 hooks
   const { data: serverPrefs, isLoading: prefsLoading } = usePreferences();
   const updatePrefsMutation = useUpdatePreferences();
-  const prefStore = usePreferenceStore();
+  // 只订阅 action，不订阅整个 store：
+  // usePreferenceStore() 无选择器会订阅全量 state，setPreferences 每次都会产生新的
+  // state 引用，导致下面的 effect 依赖恒变 → 无限更新循环 → 整页白屏。
+  const setPreferences = usePreferenceStore((s) => s.setPreferences);
 
   // 同步服务端偏好到本地 store
   useEffect(() => {
     if (serverPrefs) {
-      prefStore.setPreferences(serverPrefs);
+      setPreferences(serverPrefs);
     }
-  }, [serverPrefs, prefStore]);
+  }, [serverPrefs, setPreferences]);
 
   const [editing, setEditing] = useState<Portfolio | null>(null);
   const [creating, setCreating] = useState(false);
