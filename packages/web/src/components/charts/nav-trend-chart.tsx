@@ -12,6 +12,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
+import type { TooltipValueType } from 'recharts';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { formatDecimal } from '@/lib/utils';
@@ -55,8 +56,11 @@ export function NavTrendChart({
                 tickFormatter={(v: number) => v.toFixed(2)}
               />
               <Tooltip
-                formatter={(value: number | string, name: string) => {
-                  if (value === null || value === undefined) return ['数据不足', name];
+                formatter={(
+                  value: TooltipValueType | undefined,
+                  name: number | string | undefined,
+                ) => {
+                  if (value === null || value === undefined) return ['数据不足', name ?? ''];
                   if (name === '累计净值' || name === '当年净值') {
                     return [formatDecimal(Number(value), 4), name];
                   }

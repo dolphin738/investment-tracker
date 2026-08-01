@@ -14,6 +14,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
+import type { TooltipValueType } from 'recharts';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { formatPercent } from '@/lib/utils';
@@ -60,7 +61,7 @@ export function YearlyBarChart({
                 tickFormatter={(v: number) => `${(v * 100).toFixed(0)}%`}
               />
               <Tooltip
-                formatter={(value: number | string) => [
+                formatter={(value: TooltipValueType | undefined) => [
                   value === null || value === undefined
                     ? '数据不足'
                     : formatPercent(Number(value)),
