@@ -14,10 +14,12 @@ import { AppLayout } from '@/components/layout/app-layout';
 import LoginPage from '@/pages/login';
 import RegisterPage from '@/pages/register';
 import DashboardPage from '@/pages/dashboard';
+import HoldingsPage from '@/pages/HoldingsPage';
 import TransactionsPage from '@/pages/transactions';
 import SnapshotsPage from '@/pages/snapshots';
 import XirrAnalysisPage from '@/pages/xirr-analysis';
 import NavAnalysisPage from '@/pages/nav-analysis';
+import AccountPage from '@/pages/AccountPage';
 import SettingsPage from '@/pages/settings';
 import NotFoundPage from '@/pages/not-found';
 import { useAuthStore } from '@/stores/auth.store';
@@ -84,10 +86,12 @@ export default function App(): JSX.Element {
             }
           >
             <Route path={ROUTE_PATH.DASHBOARD} element={<DashboardPage />} />
+            <Route path={ROUTE_PATH.HOLDINGS} element={<HoldingsPage />} />
             <Route path={ROUTE_PATH.TRANSACTIONS} element={<TransactionsPage />} />
             <Route path={ROUTE_PATH.SNAPSHOTS} element={<SnapshotsPage />} />
             <Route path={ROUTE_PATH.XIRR_ANALYSIS} element={<XirrAnalysisPage />} />
             <Route path={ROUTE_PATH.NAV_ANALYSIS} element={<NavAnalysisPage />} />
+            <Route path={ROUTE_PATH.ACCOUNT} element={<AccountPage />} />
             <Route path={ROUTE_PATH.SETTINGS} element={<SettingsPage />} />
           </Route>
 

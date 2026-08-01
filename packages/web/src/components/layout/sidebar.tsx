@@ -1,27 +1,31 @@
 /**
  * components/layout/sidebar.tsx — 侧边导航
  *
- * 导航项：Dashboard / 交易 / 快照 / XIRR 分析 / 净值分析 / 设置
+ * 导航项：概览 / 持仓 / 交易 / 快照 / 收益分析 / 净值分析 / 账户 / 设置
  */
 
 import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard,
+  Briefcase,
   ArrowLeftRight,
   Camera,
   TrendingUp,
   LineChart,
+  User,
   Settings,
 } from 'lucide-react';
 import { ROUTE_PATH } from '@/lib/constants';
 import { cn } from '@/lib/utils';
 
 const NAV_ITEMS = [
-  { to: ROUTE_PATH.DASHBOARD, label: 'Dashboard', icon: LayoutDashboard },
+  { to: ROUTE_PATH.DASHBOARD, label: '概览', icon: LayoutDashboard },
+  { to: ROUTE_PATH.HOLDINGS, label: '持仓', icon: Briefcase },
   { to: ROUTE_PATH.TRANSACTIONS, label: '交易', icon: ArrowLeftRight },
   { to: ROUTE_PATH.SNAPSHOTS, label: '快照', icon: Camera },
   { to: ROUTE_PATH.XIRR_ANALYSIS, label: '收益分析', icon: TrendingUp },
   { to: ROUTE_PATH.NAV_ANALYSIS, label: '净值分析', icon: LineChart },
+  { to: ROUTE_PATH.ACCOUNT, label: '账户', icon: User },
   { to: ROUTE_PATH.SETTINGS, label: '设置', icon: Settings },
 ] as const;
 

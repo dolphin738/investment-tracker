@@ -1,0 +1,49 @@
+/**
+ * hooks/use-preferences.ts — 用户偏好 TanStack Query hooks
+ */
+
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
+import {
+  getPreferences,
+  updatePreferences,
+} from '@/api/preference.api';
+import type { UpdatePreferenceDto } from '@investment-tracker/shared';
+
+/** 偏好查询 key */
+export const PREFERENCE_KEY = ['users', 'preferences'] as const;
+
+/** 获取用户偏好 */
+export function usePreferences() {
+  return useQuery({
+    queryKey: PREFERENCE_KEY,
+    queryFn: () => getPreferences(),
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+/** 更新用户偏好（乐观更新） */
+export function useUpdatePreferences() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: UpdatePreferenceDto) => updatePreferences(payload),
+    onMutate: async (payload) => {
+      await queryClient.cancelQueries({ queryKey: PREFERENCE_KEY });
+      const previous = queryClient.getQueryData(PREFERENCE_KEY);
+      queryClient.setQueryData(PREFERENCE_KEY, (old: unknown) => {
+        if (!old || typeof old !== 'object') return old;
+        return { ...(old as Record<string, unknown>), ...payload };
+      });
+      return { previous };
+    },
+    onError: (_err, _payload, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(PREFERENCE_KEY, context.previous);
+      }
+    },
+    onSuccess: () => {
+      toast.success('偏好已保存');
+      queryClient.invalidateQueries({ queryKey: PREFERENCE_KEY });
+    },
+  });
+}

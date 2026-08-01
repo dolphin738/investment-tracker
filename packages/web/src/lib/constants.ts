@@ -20,10 +20,12 @@ export const ROUTE_PATH = {
   LOGIN: '/login',
   REGISTER: '/register',
   DASHBOARD: '/',
+  HOLDINGS: '/holdings',
   TRANSACTIONS: '/transactions',
   SNAPSHOTS: '/snapshots',
   XIRR_ANALYSIS: '/analysis/xirr',
   NAV_ANALYSIS: '/analysis/nav',
+  ACCOUNT: '/account',
   SETTINGS: '/settings',
 } as const;
 

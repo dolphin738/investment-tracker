@@ -143,3 +143,61 @@ export interface NavQueryParams {
   aggregation?: AggregationMethod;
   metric?: NavMetric;
 }
+
+// ===== Overview =====
+export interface OverviewResponse {
+  totalAsset: string;
+  cumulativeNav: number;
+  yearNav: number;
+  xirr: number | null;
+  netInvested: string;
+  totalReturnRate: number;
+  yearReturnRate: number;
+  latestDate: string;
+}
+
+export interface PortfolioSummary {
+  id: string;
+  name: string;
+  totalAsset: string;
+  cumulativeNav: number | null;
+  cumulativeReturnRate: number | null;
+  yearReturnRate: number | null;
+  xirr: number | null;
+  latestDate: string | null;
+}
+
+// ===== Holding =====
+import type { HoldingResponse, HoldingsAggregate, UpsertHoldingDto, Holding } from '@investment-tracker/shared';
+export type { HoldingResponse, HoldingsAggregate, UpsertHoldingDto, Holding };
+
+export interface HoldingsListResponse {
+  items: HoldingResponse[];
+  aggregate: HoldingsAggregate;
+}
+
+// ===== Securities =====
+import type { Security, CreateSecurityDto, UpdateSecurityDto } from '@investment-tracker/shared';
+export type { Security, CreateSecurityDto, UpdateSecurityDto };
+
+// ===== Dividend =====
+import type { DividendRecord, CreateDividendRecordDto, DividendType } from '@investment-tracker/shared';
+export type { DividendRecord, CreateDividendRecordDto, DividendType };
+
+// ===== Fee =====
+import type { FeeRecord, CreateFeeRecordDto, FeeType } from '@investment-tracker/shared';
+export type { FeeRecord, CreateFeeRecordDto, FeeType };
+
+// ===== Preference =====
+import type { UserPreference, UpdatePreferenceDto } from '@investment-tracker/shared';
+export type { UserPreference, UpdatePreferenceDto };
+
+// ===== Account =====
+export interface AccountStats {
+  portfolioCount: number;
+  transactionCount: number;
+  snapshotDays: number;
+  recordDays: number;
+  firstDate: string | null;
+  lastDate: string | null;
+}
