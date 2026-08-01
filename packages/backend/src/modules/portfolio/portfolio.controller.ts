@@ -5,6 +5,7 @@
  *
  * 接口：
  * - GET    /api/portfolios          — 获取当前用户组合列表
+ * - GET    /api/portfolios/summary  — 全部组合摘要（name/id/总资产/持仓数/更新时间）
  * - POST   /api/portfolios          — 创建组合
  * - GET    /api/portfolios/:id      — 获取组合详情
  * - PATCH  /api/portfolios/:id      — 更新组合
@@ -42,6 +43,15 @@ export class PortfolioController {
   @ApiOperation({ summary: '获取当前用户组合列表' })
   async findAll(@CurrentUser() user: AuthenticatedUser) {
     return this.portfolioService.findAll(user.userId);
+  }
+
+  @Get('summary')
+  @ApiOperation({
+    summary: '获取全部组合摘要（name/id/总资产/持仓数/最近更新时间）',
+    description: '供概览页对比（DASH-P1-01）+ 账户页列表（ACC-P0-04）共用。一次查询返回全部组合摘要。',
+  })
+  async getSummary(@CurrentUser() user: AuthenticatedUser) {
+    return this.portfolioService.getSummary(user.userId);
   }
 
   @Post()

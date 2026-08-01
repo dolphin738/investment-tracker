@@ -4,10 +4,11 @@
  * 路由前缀：/api/portfolios/:portfolioId/transactions
  *
  * 接口：
- * - GET    /api/portfolios/:portfolioId/transactions          — 查询交易列表
- * - POST   /api/portfolios/:portfolioId/transactions          — 录入交易
- * - GET    /api/portfolios/:portfolioId/transactions/:id      — 查询单笔交易
- * - PATCH  /api/portfolios/:portfolioId/transactions/:id      — 编辑交易
+ * - GET    /api/portfolios/:portfolioId/transactions          — 查询交易列表（🆕 支持 type/securityId 筛选）
+ * - POST   /api/portfolios/:portfolioId/transactions          — 录入交易（🆕 支持 securityId/quantity/price/fee）
+ * - GET    /api/portfolios/:portfolioId/transactions/aggregated — 交易多维聚合查询（🆕 T03）
+ * - GET    /api/portfolios/:portfolioId/transactions/:id      — 查询单笔交易（🆕 返回 securityName）
+ * - PATCH  /api/portfolios/:portfolioId/transactions/:id      — 编辑交易（🆕 支持新字段）
  * - DELETE /api/portfolios/:portfolioId/transactions/:id      — 删除交易
  */
 
@@ -27,8 +28,8 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { TransactionService } from './transaction.service';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
 import { UpdateTransactionDto } from './dto/update-transaction.dto';
-import { PaginationDto } from '../../common/dto/pagination.dto';
-import { DateRangeDto } from '../../common/dto/date-range.dto';
+import { TransactionQueryDto } from './dto/transaction-query.dto';
+import { TransactionAggregatedQueryDto } from './dto/transaction-aggregated-query.dto';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../../common/decorators/current-user.decorator';
 
@@ -39,17 +40,17 @@ export class TransactionController {
   constructor(private readonly transactionService: TransactionService) {}
 
   @Get()
-  @ApiOperation({ summary: '获取交易列表（分页 + 日期范围）' })
+  @ApiOperation({ summary: '获取交易列表（分页 + 日期范围 + 类型 + 标的筛选）' })
   async findAll(
     @CurrentUser() user: AuthenticatedUser,
     @Param('portfolioId') portfolioId: string,
-    @Query() query: PaginationDto & DateRangeDto,
+    @Query() query: TransactionQueryDto,
   ) {
     return this.transactionService.findAll(user.userId, portfolioId, query);
   }
 
   @Post()
-  @ApiOperation({ summary: '录入交易' })
+  @ApiOperation({ summary: '录入交易（支持标的/数量/单价/费用）' })
   async create(
     @CurrentUser() user: AuthenticatedUser,
     @Param('portfolioId') portfolioId: string,
@@ -58,8 +59,18 @@ export class TransactionController {
     return this.transactionService.create(user.userId, portfolioId, dto);
   }
 
+  @Get('aggregated')
+  @ApiOperation({ summary: '交易多维聚合查询（按年/月/周/日聚合买入/卖出/净现金流/笔数）' })
+  async findAggregated(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('portfolioId') portfolioId: string,
+    @Query() query: TransactionAggregatedQueryDto,
+  ) {
+    return this.transactionService.findAggregated(user.userId, portfolioId, query);
+  }
+
   @Get(':id')
-  @ApiOperation({ summary: '查询单笔交易' })
+  @ApiOperation({ summary: '查询单笔交易（含标的名称）' })
   async findOne(
     @CurrentUser() user: AuthenticatedUser,
     @Param('portfolioId') portfolioId: string,
@@ -69,7 +80,7 @@ export class TransactionController {
   }
 
   @Patch(':id')
-  @ApiOperation({ summary: '编辑交易' })
+  @ApiOperation({ summary: '编辑交易（支持新字段）' })
   async update(
     @CurrentUser() user: AuthenticatedUser,
     @Param('portfolioId') portfolioId: string,

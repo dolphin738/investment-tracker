@@ -19,6 +19,7 @@ import {
 import type { Portfolio as PrismaPortfolio } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RecalculationService } from '../calculation/recalculation.service';
+import type { PortfolioSummaryDto } from './dto/portfolio-summary.dto';
 
 /** API 响应中的组合结构（日期字段转为字符串） */
 export interface PortfolioResponse {
@@ -131,6 +132,82 @@ export class PortfolioService {
     await this.findOne(userId, id);
     await this.prisma.portfolio.delete({ where: { id } });
     return null;
+  }
+
+  /**
+   * 获取全部组合摘要（name/id/总资产/持仓数/最近更新时间）
+   *
+   * 供概览页对比（DASH-P1-01）+ 账户页列表（ACC-P0-04）共用。
+   * 一次查询返回全部组合摘要，避免 N+1 问题。
+   */
+  async getSummary(userId: string): Promise<PortfolioSummaryDto[]> {
+    const portfolios = await this.prisma.portfolio.findMany({
+      where: { userId },
+      include: {
+        snapshots: {
+          orderBy: { date: 'desc' },
+          take: 1,
+          select: { totalAsset: true, date: true },
+        },
+        holdings: {
+          orderBy: { date: 'desc' },
+          take: 1,
+          select: { date: true },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    // 批量获取各组合的持仓数量（最新日期的去重标的数）
+    const portfolioIds = portfolios.map((p) => p.id);
+    const holdingsCounts = portfolioIds.length > 0
+      ? await Promise.all(
+          portfolioIds.map(async (pid) => {
+            const latestHolding = await this.prisma.holding.findFirst({
+              where: { portfolioId: pid },
+              orderBy: { date: 'desc' },
+              select: { date: true },
+            });
+            if (!latestHolding) return { pid, count: 0 };
+            const count = await this.prisma.holding.count({
+              where: {
+                portfolioId: pid,
+                date: latestHolding.date,
+                quantity: { gt: 0 },
+              },
+            });
+            return { pid, count };
+          }),
+        )
+      : [];
+
+    const countMap = new Map(holdingsCounts.map((h) => [h.pid, h.count]));
+
+    return portfolios.map((p) => {
+      const latestSnapshot = p.snapshots[0] ?? null;
+      const latestHolding = p.holdings[0] ?? null;
+
+      // 计算最近更新时间
+      let lastUpdatedAt: string | null = null;
+      if (latestSnapshot && latestHolding) {
+        lastUpdatedAt =
+          latestSnapshot.date > latestHolding.date
+            ? latestSnapshot.date.toISOString().split('T')[0]
+            : latestHolding.date.toISOString().split('T')[0];
+      } else if (latestSnapshot) {
+        lastUpdatedAt = latestSnapshot.date.toISOString().split('T')[0];
+      } else if (latestHolding) {
+        lastUpdatedAt = latestHolding.date.toISOString().split('T')[0];
+      }
+
+      return {
+        id: p.id,
+        name: p.name,
+        totalAsset: latestSnapshot?.totalAsset.toString() ?? '0',
+        holdingsCount: countMap.get(p.id) ?? 0,
+        lastUpdatedAt,
+      };
+    });
   }
 
   /**

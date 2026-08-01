@@ -3,6 +3,11 @@
  *
  * 支持按 日/周/月/年 聚合 XIRR 和净值时间序列。
  *
+ * 🆕 T03 增强：
+ *   - getTransactions：按粒度聚合交易数据（买入/卖出/净现金流/笔数）
+ *   - getNavHistory：净值历史查询（委托现有聚合逻辑，带分页）
+ *   - getXirrHistory：XIRR 历史查询（委托现有聚合逻辑，带分页）
+ *
  * 聚合规则：
  * - day：返回每日原始数据（不聚合）
  * - week：按 ISO 周分组（周一为周首日），取周末值或周均
@@ -22,6 +27,7 @@ import {
   XirrSeriesPoint,
 } from '@investment-tracker/shared';
 import { PrismaService } from '../../prisma/prisma.service';
+import type { TransactionType } from '@investment-tracker/shared';
 
 /** 分组后的数据组 */
 interface Group<T> {
@@ -31,6 +37,22 @@ interface Group<T> {
   label: string;
   /** 组内记录（已按日期升序排列） */
   items: T[];
+}
+
+/** 交易聚合结果 */
+export interface TransactionAggregationPoint {
+  /** 周期标识（如 "2025-03"） */
+  period: string;
+  /** 显示标签 */
+  label: string;
+  /** 买入总额 */
+  buyAmount: string;
+  /** 卖出总额 */
+  sellAmount: string;
+  /** 净现金流（买入为负，卖出为正，sellAmount - buyAmount） */
+  netFlow: string;
+  /** 交易笔数 */
+  transactionCount: number;
 }
 
 /** 日期格式化为 YYYY-MM-DD（使用 UTC 避免时区偏移） */
@@ -87,7 +109,6 @@ function groupByGranularity<T extends { date: Date }>(
   granularity: QueryGranularity,
 ): Group<T>[] {
   if (granularity === QueryGranularity.DAY) {
-    // day 粒度不聚合，每条记录自成一组
     return records.map((r) => {
       const { key, label } = getGroupKey(r.date, granularity);
       return { key, label, items: [r] };
@@ -105,7 +126,6 @@ function groupByGranularity<T extends { date: Date }>(
     }
   }
 
-  // 按 key 排序（字符串排序对 YYYY-MM 和 YYYY 的时间顺序正确）
   return Array.from(groupMap.values()).sort((a, b) => a.key.localeCompare(b.key));
 }
 
@@ -125,7 +145,6 @@ function aggregateValues(
     return nonNull.reduce((sum, v) => sum + v, 0) / nonNull.length;
   }
 
-  // last：取最后一个值（原始数组的最后一个，包括 null）
   return values[values.length - 1] ?? null;
 }
 
@@ -297,5 +316,226 @@ export class QueryService {
       yearNav: Number(latest.yearNav),
       shares: Number(latest.shares),
     };
+  }
+
+  // ==========================================================
+  // 🆕 T03 增强方法
+  // ==========================================================
+
+  /**
+   * 按粒度聚合交易数据
+   *
+   * 返回每个时间周期的：
+   * - buyAmount：买入总额
+   * - sellAmount：卖出总额
+   * - netFlow：净现金流（sellAmount - buyAmount）
+   * - transactionCount：交易笔数
+   *
+   * 支持按 type（BUY/SELL）和 securityId 筛选。
+   */
+  async getTransactions(
+    userId: string,
+    portfolioId: string,
+    query: {
+      granularity?: QueryGranularity;
+      startDate?: string;
+      endDate?: string;
+      type?: TransactionType;
+      securityId?: string;
+      page?: number;
+      pageSize?: number;
+    },
+  ): Promise<{
+    items: TransactionAggregationPoint[];
+    total: number;
+    page: number;
+    pageSize: number;
+  }> {
+    await this.verifyOwnership(userId, portfolioId);
+
+    const granularity = query.granularity || QueryGranularity.MONTH;
+    const page = Number(query.page) || 1;
+    const pageSize = Number(query.pageSize) || 20;
+
+    // 构建 where 条件
+    const where: Record<string, unknown> = {
+      portfolioId,
+    };
+
+    // 日期范围
+    if (query.startDate || query.endDate) {
+      where.date = {
+        ...(query.startDate ? { gte: new Date(query.startDate) } : {}),
+        ...(query.endDate ? { lte: new Date(query.endDate) } : {}),
+      };
+    }
+
+    // 类型筛选
+    if (query.type) {
+      where.type = query.type;
+    }
+
+    // 标的筛选
+    if (query.securityId) {
+      where.securityId = query.securityId;
+    }
+
+    // 查询所有符合条件的交易
+    const records = await this.prisma.transaction.findMany({
+      where,
+      orderBy: { date: 'asc' },
+    });
+
+    // 按粒度分组
+    const groups = groupByGranularity(records, granularity);
+
+    // 聚合每组数据
+    const allItems: TransactionAggregationPoint[] = groups.map((group) => {
+      let buyAmount = 0;
+      let sellAmount = 0;
+
+      for (const t of group.items) {
+        const amt = Number(t.amount);
+        if (t.type === 'BUY') {
+          buyAmount += amt;
+        } else {
+          sellAmount += amt;
+        }
+      }
+
+      return {
+        period: group.key,
+        label: group.label,
+        buyAmount: buyAmount.toFixed(2),
+        sellAmount: sellAmount.toFixed(2),
+        netFlow: (sellAmount - buyAmount).toFixed(2),
+        transactionCount: group.items.length,
+      };
+    });
+
+    const total = allItems.length;
+
+    // 分页
+    const items = allItems.slice((page - 1) * pageSize, page * pageSize);
+
+    return { items, total, page, pageSize };
+  }
+
+  /**
+   * 净值历史查询（带分页）
+   *
+   * 委托现有 queryNavSeries 聚合逻辑，额外支持分页。
+   */
+  async getNavHistory(
+    userId: string,
+    portfolioId: string,
+    query: {
+      granularity?: QueryGranularity;
+      aggregation?: AggregationMethod;
+      startDate?: string;
+      endDate?: string;
+      page?: number;
+      pageSize?: number;
+    },
+  ): Promise<{
+    items: NavSeriesPoint[];
+    total: number;
+    page: number;
+    pageSize: number;
+  }> {
+    await this.verifyOwnership(userId, portfolioId);
+
+    const granularity = query.granularity || QueryGranularity.MONTH;
+    const aggregation = query.aggregation || AggregationMethod.LAST;
+    const page = Number(query.page) || 1;
+    const pageSize = Number(query.pageSize) || 20;
+
+    const records = await this.prisma.dailyNav.findMany({
+      where: this.buildDateRange(portfolioId, query.startDate, query.endDate),
+      orderBy: { date: 'asc' },
+    });
+
+    const groups = groupByGranularity(records, granularity);
+
+    const allItems: NavSeriesPoint[] = groups.map((group) => {
+      const cumValues = group.items.map((r) =>
+        r.cumulativeNav !== null ? Number(r.cumulativeNav) : null,
+      );
+      const yearValues = group.items.map((r) =>
+        r.yearNav !== null ? Number(r.yearNav) : null,
+      );
+      const shareValues = group.items.map((r) =>
+        r.shares !== null ? Number(r.shares) : null,
+      );
+      const lastRecord = group.items[group.items.length - 1];
+
+      return {
+        date: formatDate(lastRecord.date),
+        cumulativeNav: aggregateValues(cumValues, aggregation),
+        yearNav: aggregateValues(yearValues, aggregation),
+        shares: aggregateValues(shareValues, aggregation),
+        label: group.label,
+      };
+    });
+
+    const total = allItems.length;
+    const items = allItems.slice((page - 1) * pageSize, page * pageSize);
+
+    return { items, total, page, pageSize };
+  }
+
+  /**
+   * XIRR 历史查询（带分页）
+   *
+   * 委托现有 queryXirrSeries 聚合逻辑，额外支持分页。
+   */
+  async getXirrHistory(
+    userId: string,
+    portfolioId: string,
+    query: {
+      granularity?: QueryGranularity;
+      aggregation?: AggregationMethod;
+      startDate?: string;
+      endDate?: string;
+      page?: number;
+      pageSize?: number;
+    },
+  ): Promise<{
+    items: XirrSeriesPoint[];
+    total: number;
+    page: number;
+    pageSize: number;
+  }> {
+    await this.verifyOwnership(userId, portfolioId);
+
+    const granularity = query.granularity || QueryGranularity.MONTH;
+    const aggregation = query.aggregation || AggregationMethod.LAST;
+    const page = Number(query.page) || 1;
+    const pageSize = Number(query.pageSize) || 20;
+
+    const records = await this.prisma.dailyXirr.findMany({
+      where: this.buildDateRange(portfolioId, query.startDate, query.endDate),
+      orderBy: { date: 'asc' },
+    });
+
+    const groups = groupByGranularity(records, granularity);
+
+    const allItems: XirrSeriesPoint[] = groups.map((group) => {
+      const values = group.items.map((r) =>
+        r.xirrValue !== null ? Number(r.xirrValue) : null,
+      );
+      const lastRecord = group.items[group.items.length - 1];
+
+      return {
+        date: formatDate(lastRecord.date),
+        xirrValue: aggregateValues(values, aggregation),
+        label: group.label,
+      };
+    });
+
+    const total = allItems.length;
+    const items = allItems.slice((page - 1) * pageSize, page * pageSize);
+
+    return { items, total, page, pageSize };
   }
 }
