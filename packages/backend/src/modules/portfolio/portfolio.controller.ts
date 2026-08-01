@@ -9,6 +9,9 @@
  * - GET    /api/portfolios/:id      — 获取组合详情
  * - PATCH  /api/portfolios/:id      — 更新组合
  * - DELETE /api/portfolios/:id      — 删除组合（级联删除子数据）
+ * - POST   /api/portfolios/:id/recalculate — 全量重算净值与 XIRR
+ *
+ * 全局 JwtAuthGuard 已保证所有路由需鉴权；组合归属校验在 Service 层完成。
  */
 
 import {
@@ -77,5 +80,20 @@ export class PortfolioController {
     @Param('id') id: string,
   ) {
     return this.portfolioService.remove(user.userId, id);
+  }
+
+  @Post(':id/recalculate')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: '全量重算组合净值与 XIRR',
+    description:
+      '从组合成立日（第一笔买入日）重算到最后一个有快照的日期。' +
+      '用于计算口径变更或历史数据修复后重建全部净值/XIRR。组合尚无买入交易时返回 400。',
+  })
+  async recalculate(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ) {
+    return this.portfolioService.recalculateAll(user.userId, id);
   }
 }

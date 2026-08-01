@@ -5,9 +5,13 @@
  * - 快照 upsert（每日唯一，重复则覆盖）
  * - 查询列表（分页 + 日期范围）
  * - 删除快照
- * - 计算触发：
- *   - upsert → 触发当日净值+XIRR 计算
+ * - 计算触发（均为级联重算）：
+ *   - upsert → 从该快照日期起批量重算（含当日）
  *   - 删除 → 从原快照日期起批量重算
+ *
+ * 为什么 upsert 也必须级联：净值是逐日结转的（当日份额依赖上日份额），
+ * XIRR 是累计口径（终值随快照变化），因此覆盖任意一天的历史快照都会
+ * 污染其后所有日期的净值与 XIRR，只重算当日会留下静默错误数据。
  *
  * 快照是触发当日计算的前提（PRD §3.5）。
  */
@@ -20,7 +24,6 @@ import {
 } from '@nestjs/common';
 import type { AssetSnapshot as PrismaAssetSnapshot } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { CalculationService } from '../calculation/calculation.service';
 import { RecalculationService } from '../calculation/recalculation.service';
 import { UpsertSnapshotDto } from './dto/upsert-snapshot.dto';
 import { SnapshotQueryDto } from './dto/snapshot-query.dto';
@@ -65,7 +68,6 @@ export class SnapshotService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly calculationService: CalculationService,
     private readonly recalculationService: RecalculationService,
   ) {}
 
@@ -85,7 +87,7 @@ export class SnapshotService {
   /**
    * 录入/覆盖快照（upsert 语义：每日唯一，重复则覆盖）
    *
-   * 副作用：触发当日净值+XIRR 计算
+   * 副作用：从该快照日期起级联重算净值+XIRR（含当日）
    */
   async upsert(
     userId: string,
@@ -110,8 +112,10 @@ export class SnapshotService {
       },
     });
 
-    // 触发当日净值+XIRR 计算
-    await this.calculationService.triggerCalculation(portfolioId, date);
+    // 从该快照日期起级联重算（含当日）
+    // 覆盖历史快照会改变当日单位净值与份额，进而改变其后每一天的结转结果，
+    // 因此不能只算当日 —— 与 remove() 及 TransactionService 的 update/delete 保持一致。
+    await this.recalculationService.recalculateFromDate(portfolioId, date);
 
     return toResponse(snapshot);
   }

@@ -2,13 +2,19 @@
  * 计算编排服务
  *
  * 职责：
- * - triggerCalculation：触发单日计算（净值 + XIRR），快照录入/修改时调用
+ * - triggerCalculation：触发【单日】计算（净值 + XIRR）
  * - ensureBaseDate：首次计算时自动设置组合成立日（首笔买入日）
+ *
+ * 调用约定：本服务只负责「算某一天」，不负责跨日级联。
+ * 业务侧（交易/快照的增删改）一律通过 RecalculationService 进入，
+ * 由它按日期升序逐日回调 triggerCalculation —— 因为净值逐日结转、XIRR 为累计口径，
+ * 改动任意一天都会影响其后所有日期，直接调用本服务会留下未重算的脏数据。
  *
  * 计算顺序：先净值后 XIRR（两者无相互依赖，但净值结果存储后 XIRR 可独立计算）
  *
  * 依赖方向（无循环依赖）：
- *   Transaction/SnapshotService → CalculationService → NavService + XirrService → PrismaService
+ *   Portfolio/Transaction/SnapshotService → RecalculationService → CalculationService
+ *     → NavService + XirrService → PrismaService
  */
 
 import { Injectable, Logger } from '@nestjs/common';

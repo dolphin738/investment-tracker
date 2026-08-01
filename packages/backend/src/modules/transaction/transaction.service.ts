@@ -5,10 +5,14 @@
  * - 交易 CRUD（创建 / 查询列表 / 查询单个 / 更新 / 删除）
  * - 数据隔离：通过 verifyOwnership 校验组合归属
  * - 校验：金额 > 0、日期非未来、首笔必须买入
- * - 计算触发：
- *   - 创建交易 → 若当日有快照，触发当日计算
+ * - 计算触发（均为级联重算）：
+ *   - 创建交易 → 从该交易日期起批量重算（交易日无快照时，仍会重算其后有快照的日期）
  *   - 更新交易 → 从 min(原日期, 新日期) 起批量重算
  *   - 删除交易 → 从原交易日期起批量重算
+ *
+ * 为什么创建也必须级联：净值逐日结转、XIRR 累计口径，任何一笔交易都会改变
+ * 其后每一天的份额与现金流序列。补录一笔历史交易时，即使当天没有快照，
+ * 其后所有有快照的日期也必须重算。
  */
 
 import {
@@ -20,7 +24,6 @@ import {
 import type { Transaction as PrismaTransaction } from '@prisma/client';
 import { TransactionType } from '@investment-tracker/shared';
 import { PrismaService } from '../../prisma/prisma.service';
-import { CalculationService } from '../calculation/calculation.service';
 import { RecalculationService } from '../calculation/recalculation.service';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
 import { UpdateTransactionDto } from './dto/update-transaction.dto';
@@ -72,7 +75,6 @@ export class TransactionService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly calculationService: CalculationService,
     private readonly recalculationService: RecalculationService,
   ) {}
 
@@ -93,7 +95,7 @@ export class TransactionService {
   /**
    * 创建交易
    *
-   * 副作用：若当日已有资产快照，触发当日净值+XIRR 计算
+   * 副作用：从该交易日期起级联重算净值+XIRR
    */
   async create(
     userId: string,
@@ -140,14 +142,11 @@ export class TransactionService {
       },
     });
 
-    // 若当日有快照，触发当日计算
-    const snapshot = await this.prisma.assetSnapshot.findUnique({
-      where: { portfolioId_date: { portfolioId, date } },
-      select: { id: true },
-    });
-    if (snapshot) {
-      await this.calculationService.triggerCalculation(portfolioId, date);
-    }
+    // 从该交易日期起级联重算
+    // 不再要求「当日必须有快照」：补录历史交易时当日常常没有快照，
+    // 但该交易会改变其后所有日期的份额结转与 XIRR 现金流序列，必须一并重算。
+    // recalculateFromDate 内部按 date >= 交易日 查询快照，当日无快照自然跳过当日。
+    await this.recalculationService.recalculateFromDate(portfolioId, date);
 
     return toResponse(transaction);
   }
