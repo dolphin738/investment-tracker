@@ -46,6 +46,9 @@ packages/harmonyos/.preview/
 # Test
 *.spec.tsx
 
+# Local helper scripts (commit-free; may carry env/token wiring)
+scripts/
+
 # Migration outputs (generated SQL, throwaway)
 migrate_output*.txt
 
