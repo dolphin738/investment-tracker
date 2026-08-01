@@ -82,27 +82,70 @@ export interface UpdatePortfolioRequest {
 export type PortfolioResponse = Portfolio;
 
 // ===== Transaction =====
+/** 创建交易请求（扩展：新增 securityId/quantity/price/fee 可选字段） */
 export interface CreateTransactionRequest {
   date: string;
   type: 'BUY' | 'SELL';
   amount: string;
+  /** 🆕 关联标的 ID（可选） */
+  securityId?: string;
+  /** 🆕 交易数量（可选） */
+  quantity?: string;
+  /** 🆕 成交单价（可选） */
+  price?: string;
+  /** 🆕 手续费（可选） */
+  fee?: string;
   note?: string;
 }
 
+/** 更新交易请求（扩展：新增 securityId/quantity/price/fee） */
 export interface UpdateTransactionRequest {
   date?: string;
   type?: 'BUY' | 'SELL';
   amount?: string;
-  note?: string;
+  /** 🆕 关联标的 ID（可选，传 null 清空） */
+  securityId?: string | null;
+  /** 🆕 交易数量（可选，传 null 清空） */
+  quantity?: string | null;
+  /** 🆕 成交单价（可选，传 null 清空） */
+  price?: string | null;
+  /** 🆕 手续费（可选，传 null 清空） */
+  fee?: string | null;
+  note?: string | null;
 }
 
-export type TransactionResponse = Transaction;
+/** 🆕 扩展交易响应（后端返回含 securityName） */
+export interface TransactionResponse {
+  id: string;
+  portfolioId: string;
+  date: string;
+  type: 'BUY' | 'SELL';
+  amount: string;
+  /** 🆕 关联标的 ID */
+  securityId: string | null;
+  /** 🆕 标的名称（后端关联查询返回） */
+  securityName: string | null;
+  /** 🆕 交易数量 */
+  quantity: string | null;
+  /** 🆕 成交单价 */
+  price: string | null;
+  /** 🆕 手续费 */
+  fee: string | null;
+  note: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
 
+/** 🆕 扩展交易查询参数 */
 export interface TransactionQuery {
   startDate?: string;
   endDate?: string;
   page?: number;
   pageSize?: number;
+  /** 🆕 交易类型筛选 */
+  type?: 'BUY' | 'SELL';
+  /** 🆕 标的 ID 筛选 */
+  securityId?: string;
 }
 
 export interface PaginatedResponse<T> {

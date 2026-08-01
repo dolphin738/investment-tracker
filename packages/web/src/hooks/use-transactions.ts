@@ -1,7 +1,7 @@
 /**
  * hooks/use-transactions.ts — 交易 CRUD TanStack Query hooks
  *
- * - useTransactions：列表 query（分页 + 日期范围）
+ * - useTransactions：列表 query（分页 + 日期范围 + 类型 + 标的）
  * - useCreateTransaction / useUpdateTransaction / useDeleteTransaction：mutation
  * - mutation 成功后失效列表 + 相关净值/XIRR 查询缓存
  */
@@ -17,6 +17,7 @@ import {
 import type {
   CreateTransactionRequest,
   TransactionQuery,
+  TransactionResponse,
   UpdateTransactionRequest,
 } from '@/api/types';
 
@@ -32,7 +33,12 @@ export function transactionsKey(
 export function useTransactions(portfolioId: string | null, query: TransactionQuery = {}) {
   return useQuery({
     queryKey: portfolioId ? transactionsKey(portfolioId, query) : ['transactions', 'disabled'],
-    queryFn: () => listApi(portfolioId!, query),
+    queryFn: () => listApi(portfolioId!, query) as Promise<{
+      items: TransactionResponse[];
+      total: number;
+      page: number;
+      pageSize: number;
+    }>,
     enabled: Boolean(portfolioId),
     staleTime: 30 * 1000,
   });

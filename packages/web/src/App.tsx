@@ -5,8 +5,11 @@
  * - TanStack Query Provider
  * - Sonner Toaster
  * - 路由守卫 ProtectedRoute：未登录跳转 /login
+ *
+ * 🆕 T05：全局主题初始化（根据用户偏好设置 dark mode）
  */
 
+import { useEffect } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { Toaster } from 'sonner';
@@ -23,6 +26,7 @@ import AccountPage from '@/pages/AccountPage';
 import SettingsPage from '@/pages/settings';
 import NotFoundPage from '@/pages/not-found';
 import { useAuthStore } from '@/stores/auth.store';
+import { usePreferenceStore, DEFAULT_PREFERENCES } from '@/stores/preference.store';
 import { ROUTE_PATH } from '@/lib/constants';
 import type { JSX, ReactNode } from 'react';
 
@@ -54,10 +58,54 @@ function PublicOnlyRoute({ children }: { children: ReactNode }): JSX.Element {
   return <>{children}</>;
 }
 
+/** 🆕 主题初始化：根据 preference.store 中的 theme 值应用 dark mode */
+function ThemeInitializer(): null {
+  const theme = usePreferenceStore((s) => s.preferences?.theme ?? DEFAULT_PREFERENCES.theme);
+
+  useEffect(() => {
+    const root = document.documentElement;
+
+    const applyTheme = (t: string) => {
+      if (t === 'dark') {
+        root.classList.add('dark');
+      } else if (t === 'light') {
+        root.classList.remove('dark');
+      } else {
+        // system
+        const mq = window.matchMedia('(prefers-color-scheme: dark)');
+        if (mq.matches) {
+          root.classList.add('dark');
+        } else {
+          root.classList.remove('dark');
+        }
+      }
+    };
+
+    applyTheme(theme);
+
+    // 监听 system 主题变化
+    if (theme === 'system') {
+      const mq = window.matchMedia('(prefers-color-scheme: dark)');
+      const handler = (e: MediaQueryListEvent) => {
+        if (e.matches) {
+          root.classList.add('dark');
+        } else {
+          root.classList.remove('dark');
+        }
+      };
+      mq.addEventListener('change', handler);
+      return () => mq.removeEventListener('change', handler);
+    }
+  }, [theme]);
+
+  return null;
+}
+
 export default function App(): JSX.Element {
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
+        <ThemeInitializer />
         <Routes>
           {/* 公开路由 */}
           <Route

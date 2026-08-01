@@ -2,6 +2,8 @@
  * features/transaction/transaction-list.tsx — 交易记录表格
  *
  * 支持编辑（弹出 Dialog）、删除（确认 AlertDialog）。
+ *
+ * 🆕 T05：新增标的/数量/价格/手续费列
  */
 
 import { useState } from 'react';
@@ -36,13 +38,13 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useTransactions, useDeleteTransaction } from '@/hooks/use-transactions';
 import { TransactionForm } from './transaction-form';
 import { formatCurrency, formatDate } from '@/lib/utils';
-import type { Transaction } from '@investment-tracker/shared';
+import type { TransactionQuery, TransactionResponse } from '@/api/types';
 import { TransactionType } from '@investment-tracker/shared';
 
 export interface TransactionListProps {
   portfolioId: string;
   /** 列表查询参数 */
-  query?: { startDate?: string; endDate?: string; page?: number; pageSize?: number };
+  query?: TransactionQuery;
   className?: string;
   /** 空状态时的提示文案 */
   emptyText?: string;
@@ -56,7 +58,7 @@ export function TransactionList({
 }: TransactionListProps): JSX.Element {
   const { data, isLoading, isError } = useTransactions(portfolioId, query ?? {});
   const deleteMutation = useDeleteTransaction();
-  const [editing, setEditing] = useState<Transaction | null>(null);
+  const [editing, setEditing] = useState<TransactionResponse | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const handleConfirmDelete = () => {
@@ -85,64 +87,92 @@ export function TransactionList({
           {emptyText}
         </div>
       ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>日期</TableHead>
-              <TableHead>类型</TableHead>
-              <TableHead className="text-right">金额</TableHead>
-              <TableHead>备注</TableHead>
-              <TableHead className="text-right">操作</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {data.items.map((tx) => (
-              <TableRow key={tx.id}>
-                <TableCell className="font-mono text-sm">
-                  {formatDate(tx.date)}
-                </TableCell>
-                <TableCell>
-                  <Badge
-                    variant={tx.type === TransactionType.BUY ? 'success' : 'destructive'}
-                  >
-                    {tx.type === TransactionType.BUY ? '买入' : '卖出'}
-                  </Badge>
-                </TableCell>
-                <TableCell className="text-right font-mono">
-                  {formatCurrency(tx.amount)}
-                </TableCell>
-                <TableCell className="text-sm text-muted-foreground">
-                  {tx.note || '-'}
-                </TableCell>
-                <TableCell className="text-right">
-                  <div className="flex justify-end gap-1">
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      onClick={() => setEditing(tx)}
-                      title="编辑"
-                    >
-                      <Pencil className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      onClick={() => setDeletingId(tx.id)}
-                      title="删除"
-                    >
-                      <Trash2 className="h-4 w-4 text-red-500" />
-                    </Button>
-                  </div>
-                </TableCell>
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-[100px]">日期</TableHead>
+                <TableHead className="w-[60px]">类型</TableHead>
+                <TableHead className="w-[120px]">标的</TableHead>
+                <TableHead className="w-[80px] text-right">数量</TableHead>
+                <TableHead className="w-[90px] text-right">单价</TableHead>
+                <TableHead className="w-[100px] text-right">金额</TableHead>
+                <TableHead className="w-[70px] text-right">费用</TableHead>
+                <TableHead className="w-[120px]">备注</TableHead>
+                <TableHead className="w-[70px] text-right">操作</TableHead>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+            </TableHeader>
+            <TableBody>
+              {data.items.map((tx) => {
+                const txResp = tx as unknown as TransactionResponse;
+                return (
+                  <TableRow key={txResp.id}>
+                    <TableCell className="font-mono text-sm whitespace-nowrap">
+                      {formatDate(txResp.date)}
+                    </TableCell>
+                    <TableCell>
+                      <Badge
+                        variant={
+                          txResp.type === TransactionType.BUY ? 'success' : 'destructive'
+                        }
+                      >
+                        {txResp.type === TransactionType.BUY ? '买入' : '卖出'}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-sm whitespace-nowrap">
+                      {txResp.securityName ?? '-'}
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-sm whitespace-nowrap">
+                      {txResp.quantity
+                        ? Number(txResp.quantity).toLocaleString('zh-CN', {
+                            minimumFractionDigits: 0,
+                            maximumFractionDigits: 2,
+                          })
+                        : '-'}
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-sm whitespace-nowrap">
+                      {txResp.price ? formatCurrency(txResp.price) : '-'}
+                    </TableCell>
+                    <TableCell className="text-right font-mono whitespace-nowrap">
+                      {formatCurrency(txResp.amount)}
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-sm whitespace-nowrap">
+                      {txResp.fee ? formatCurrency(txResp.fee) : '-'}
+                    </TableCell>
+                    <TableCell className="max-w-[120px] truncate text-sm text-muted-foreground">
+                      {txResp.note || '-'}
+                    </TableCell>
+                    <TableCell className="text-right whitespace-nowrap">
+                      <div className="flex justify-end gap-1">
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={() => setEditing(txResp)}
+                          title="编辑"
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={() => setDeletingId(txResp.id)}
+                          title="删除"
+                        >
+                          <Trash2 className="h-4 w-4 text-red-500" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </div>
       )}
 
       {/* 编辑对话框 */}
       <Dialog open={Boolean(editing)} onOpenChange={(o) => !o && setEditing(null)}>
-        <DialogContent>
+        <DialogContent className="max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>编辑交易</DialogTitle>
           </DialogHeader>
