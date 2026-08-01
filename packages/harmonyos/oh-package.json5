@@ -4,7 +4,7 @@
   "description": "投资收益统计 HarmonyOS APP",
   "main": "",
   "author": "",
-  "license": "ISC",
+  "license": "AGPL-3.0",
   "dependencies": {},
   "devDependencies": {
     "@ohos/hypium": "1.0.6"

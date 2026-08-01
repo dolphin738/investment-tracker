@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "description": "投资收益统计系统 — 基于 XIRR 的多端投资组合收益与净值追踪平台",
-  "license": "ISC",
+  "license": "AGPL-3.0",
   "scripts": {
     "dev": "turbo run dev",
     "dev:backend": "cd packages/backend && node ../../node_modules/@nestjs/cli/bin/nest.js start --watch",

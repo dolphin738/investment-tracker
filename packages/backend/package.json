@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "description": "投资收益统计系统 — NestJS 后端 API",
-  "license": "ISC",
+  "license": "AGPL-3.0",
   "scripts": {
     "build": "nest build",
     "start": "nest start",
