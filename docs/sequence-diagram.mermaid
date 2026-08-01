@@ -1,171 +1,63 @@
-%% 投资收益统计系统 — 核心流程时序图
-%% 包含 4 个核心流程
-
-%% ============================================
-%% 流程 A：录入资产快照 → 触发净值计算 → 触发 XIRR 计算
-%% ============================================
-sequenceDiagram
-    participant U as 用户 (Web/APP)
-    participant C as SnapshotController
-    participant SS as SnapshotService
-    participant CS as CalculationService
-    participant NS as NavService
-    participant XS as XirrService
-    participant PS as PrismaService
-    participant DB as PostgreSQL
-
-    U->>C: POST /portfolios/:id/snapshots { date, totalAsset }
-    C->>SS: createOrUpdate(portfolioId, dto)
-    SS->>PS: upsert asset_snapshots (portfolioId, date, totalAsset)
-    PS->>DB: INSERT ... ON CONFLICT UPDATE
-    DB-->>PS: AssetSnapshot
-    PS-->>SS: snapshot
-
-    SS->>CS: triggerCalculation(portfolioId, date)
-    CS->>NS: calculateNavForDate(portfolioId, date)
-
-    NS->>PS: findPrevNav(portfolioId, date)
-    PS->>DB: SELECT * FROM daily_nav WHERE portfolio_id=? AND date < ? ORDER BY date DESC LIMIT 1
-    DB-->>PS: prevNav (or null)
-    PS-->>NS: prevNav
-
-    alt 成立日 (prevNav is null)
-        NS->>PS: findFirstBuyTransactions(portfolioId, date)
-        PS->>DB: SELECT * FROM transactions WHERE portfolio_id=? AND date=? AND type='BUY'
-        DB-->>PS: transactions
-        NS->>NS: shares = sum(buyAmount), nav = 1.0, cumNav = 1.0, yearNav = 1.0
-    else 非成立日
-        NS->>PS: findSnapshot(portfolioId, date)
-        PS->>DB: SELECT total_asset FROM asset_snapshots WHERE portfolio_id=? AND date=?
-        DB-->>PS: snapshot
-        NS->>NS: unitNav = snapshot.totalAsset / prevNav.shares
-        NS->>NS: cumNav = unitNav
-        NS->>NS: 处理当日买卖 更新 shares
-        NS->>NS: 判断当年首日 yearNav = 1.0 或 cumNav / base
-    end
-
-    NS->>PS: upsert daily_nav
-    PS->>DB: INSERT ... ON CONFLICT UPDATE
-    DB-->>PS: dailyNav
-    PS-->>NS: navRecord
-    NS-->>CS: navResult
-
-    CS->>XS: calculateXirrForDate(portfolioId, date)
-    XS->>PS: findAllTransactions(portfolioId, lte date)
-    PS->>DB: SELECT * FROM transactions WHERE portfolio_id=? AND date <= ? ORDER BY date
-    DB-->>PS: transactions
-    PS-->>XS: transactions
-
-    XS->>PS: findSnapshot(portfolioId, date)
-    PS-->>XS: snapshot (terminal value)
-
-    XS->>XS: buildCashflows = transactions(BUY=-amt, SELL=+amt) + [{date, +totalAsset}]
-    XS->>XS: newtonRaphson(cashflows, rate=0.1, maxIter=100, tol=1e-7)
-    XS-->>CS: xirrValue (or null if all same sign)
-
-    CS->>PS: upsert daily_xirr
-    PS->>DB: INSERT ... ON CONFLICT UPDATE
-    DB-->>PS: dailyXirr
-    PS-->>CS: xirrRecord
-
-    CS-->>SS: done
-    SS-->>C: snapshot
-    C-->>U: 200 { code:0, data: snapshot }
-
-%% ============================================
-%% 流程 B：录入交易 → 若当日有快照则触发重算
-%% ============================================
 sequenceDiagram
     participant U as 用户
-    participant C as TransactionController
-    participant TS as TransactionService
-    participant PS as PrismaService
-    participant CS as CalculationService
+    participant D as DashboardPage
+    participant OV as Overview API
+    participant POV as PortfolioOverviewService
     participant DB as PostgreSQL
 
-    U->>C: POST /portfolios/:id/transactions { date, type, amount }
-    C->>TS: create(portfolioId, dto)
-    TS->>PS: create transaction
-    PS->>DB: INSERT INTO transactions ...
-    DB-->>PS: transaction
-    PS-->>TS: transaction
-
-    TS->>PS: findSnapshot(portfolioId, date)
-    PS->>DB: SELECT * FROM asset_snapshots WHERE portfolio_id=? AND date=?
-    DB-->>PS: snapshot?
-
-    alt 当日有快照
-        TS->>CS: triggerCalculation(portfolioId, date)
-        Note over CS: 同流程 A：净值计算 + XIRR 计算
-        CS-->>TS: done
-    else 当日无快照
-        Note over TS: 不触发计算，等待快照录入
+    Note over U,DB: === 概览数据聚合 (Overview) ===
+    D->>OV: GET /api/portfolios/:id/overview
+    OV->>POV: getOverview(portfolioId)
+    par 并行查询
+        POV->>DB: SELECT totalAsset, date FROM asset_snapshots ORDER BY date DESC LIMIT 1
+        POV->>DB: SELECT * FROM daily_nav ORDER BY date DESC LIMIT 1
+        POV->>DB: SELECT * FROM daily_xirr ORDER BY date DESC LIMIT 1
+        POV->>DB: SELECT SUM(amount) FROM transactions GROUP BY type
     end
+    DB-->>POV: 当前总资产 + 最新净值 + 最新XIRR + 净投入
+    POV->>POV: totalReturnRate = cumulativeNav - 1<br/>yearReturnRate = yearNav - 1
+    POV-->>OV: { totalAsset, cumulativeNav, yearNav, xirr, netInvested, totalReturnRate, yearReturnRate, latestDate }
+    OV-->>D: 概览数据
+    D->>D: 渲染 6 张 StatCard
 
-    TS-->>C: transaction
-    C-->>U: 200 { code:0, data: transaction }
+    ---
+    Note over U,DB: === 持仓录入 + 一键同步 ===
+    U->>D: 录入/更新持仓（标的+数量+成本+现价）
+    D->>D: PUT /api/portfolios/:id/holdings
+    Note right of D: ⚠️ 持仓保存不触发 NAV/XIRR (C-09)
+    D->>D: 刷新持仓表格 + 汇总条
+    U->>D: 点击「一键同步」
+    D->>D: POST /api/portfolios/:id/holdings/sync-snapshot
+    Note over D,DB: 持仓合计写入 AssetSnapshot
+    Note over D,DB: snapshot.upsert 触发 recalculateFromDate
+    Note over D,DB: 逐日重算净值 + XIRR (按日期升序)
+    D->>D: Toast: "已同步 ¥X 至资产快照，并重算 N 天"
 
-%% ============================================
-%% 流程 C：按月查询 XIRR/净值 → 后端聚合 → 返回时间序列
-%% ============================================
-sequenceDiagram
-    participant U as 用户
-    participant C as QueryController
-    participant QS as QueryService
-    participant PS as PrismaService
-    participant DB as PostgreSQL
+    ---
+    Note over U,DB: === 交易录入 + 级联重算 ===
+    U->>D: 填写交易（标的+数量+单价+费用）
+    D->>D: zod 校验 + 自动推算 amount
+    D->>D: POST /api/portfolios/:id/transactions
+    Note over D,DB: INSERT Transaction (含扩展字段)
+    Note over D,DB: recalculateFromDate(portfolioId, date)
+    Note over D,DB: 逐日重算净值 + XIRR
+    D->>D: Toast: "已保存，重算 2025-03-15 起 138 天"
 
-    U->>C: GET /portfolios/:id/xirr?granularity=month&startDate=2025-01-01&endDate=2025-06-30&aggregation=last
-    C->>QS: queryXirrSeries(portfolioId, params)
-    QS->>PS: findDailyXirrs(portfolioId, startDate, endDate)
-    PS->>DB: SELECT * FROM daily_xirr WHERE portfolio_id=? AND date BETWEEN ? AND ? ORDER BY date
-    DB-->>PS: dailyXirrRecords[]
-    PS-->>QS: records[]
+    ---
+    Note over U,DB: === 净值查询（四维度） ===
+    U->>D: 选择维度「按月」+ 范围「近 1 年」
+    D->>D: GET /api/portfolios/:id/nav<br/>?granularity=month&aggregation=last
+    Note over D,DB: SELECT daily_nav WHERE date BETWEEN
+    Note over D,DB: 按月聚合（取每月最后交易日值）
+    D->>D: NavTrendChart 渲染双线图
 
-    QS->>QS: 按月分组 (group by year-month)
-    QS->>QS: 每组取 aggregation=last 最后一条记录的 xirrValue
-    QS->>QS: 构建 XirrSeriesPoint[] (date, xirrValue, label)
-    QS-->>C: seriesPoint[]
-    C-->>U: 200 { code:0, data: seriesPoint[] }
-
-%% ============================================
-%% 流程 D：历史数据修改 → 批量重算受影响日期
-%% ============================================
-sequenceDiagram
-    participant U as 用户
-    participant C as TransactionController
-    participant TS as TransactionService
-    participant RS as RecalculationService
-    participant CS as CalculationService
-    participant PS as PrismaService
-    participant DB as PostgreSQL
-
-    U->>C: PATCH /portfolios/:id/transactions/:tid { amount: newAmount }
-    C->>TS: update(portfolioId, transactionId, dto)
-    TS->>PS: findTransaction(transactionId)
-    PS->>DB: SELECT * FROM transactions WHERE id=?
-    DB-->>PS: oldTransaction (含 oldDate)
-    PS-->>TS: oldTransaction
-
-    TS->>PS: update transaction
-    PS->>DB: UPDATE transactions SET ... WHERE id=?
-    DB-->>PS: updatedTransaction
-    PS-->>TS: transaction
-
-    TS->>RS: recalculateFromDate(portfolioId, oldTransaction.date)
-    RS->>PS: findSnapshotDates(portfolioId, gte oldDate)
-    PS->>DB: SELECT DISTINCT date FROM asset_snapshots WHERE portfolio_id=? AND date >= ? ORDER BY date
-    DB-->>PS: affectedDates[]
-    PS-->>RS: dates[]
-
-    loop 对每个受影响日期 (按日期升序)
-        RS->>CS: triggerCalculation(portfolioId, date)
-        Note over CS: 重算净值 (依赖前一日份额, 需顺序计算)
-        CS->>PS: upsert daily_nav
-        Note over CS: 重算 XIRR
-        CS->>PS: upsert daily_xirr
-    end
-
-    RS-->>TS: { affectedDates: count }
-    TS-->>C: transaction
-    C-->>U: 200 { code:0, data: transaction }
+    ---
+    Note over U,DB: === 数据导入 ===
+    U->>D: 上传 CSV 文件
+    D->>D: POST /api/portfolios/:id/import (multipart)
+    Note over D,DB: 逐行校验（行号+字段+原因）
+    Note over D,DB: 预览前 10 行
+    U->>D: 确认导入
+    Note over D,DB: 批量 INSERT
+    Note over D,DB: recalculateAll() 全量重算
+    D->>D: Toast: "已导入 N 条，重算 M 天"

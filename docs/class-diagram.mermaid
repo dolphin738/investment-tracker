@@ -1,172 +1,140 @@
-%% 投资收益统计系统 — 类图
-
 classDiagram
+    direction TB
+
     class User {
-        +string id
-        +string email
-        +string passwordHash
-        +string? name
-        +Date createdAt
-        +Date updatedAt
+        +String id
+        +String email
+        +String passwordHash
+        +String name
+        +String avatar
+        +String phone
+        +String bio
+        +DateTime createdAt
+    }
+
+    class UserPreference {
+        +String id
+        +String userId
+        +String defaultPortfolioId
+        +String defaultGranularity
+        +String defaultDateRange
+        +String aggregation
+        +Int weekStartsOn
+        +Int navDecimals
+        +Int xirrDecimals
+        +String theme
+        +Int staleDays
     }
 
     class Portfolio {
-        +string id
-        +string userId
-        +string name
-        +string? description
-        +Date? baseDate
-        +string currency
-        +Date createdAt
-        +Date updatedAt
+        +String id
+        +String userId
+        +String name
+        +String description
+        +Date baseDate
+        +String currency
+        +DateTime archivedAt
+    }
+
+    class Security {
+        +String id
+        +String portfolioId
+        +String code
+        +String name
+        +SecurityType type
+        +String currency
+    }
+
+    class Holding {
+        +String id
+        +String portfolioId
+        +String securityId
+        +Date date
+        +Decimal quantity
+        +Decimal avgCost
+        +Decimal marketPrice
+        +String note
     }
 
     class Transaction {
-        +string id
-        +string portfolioId
+        +String id
+        +String portfolioId
         +Date date
         +TransactionType type
         +Decimal amount
-        +string? note
-        +Date createdAt
-        +Date updatedAt
+        +String securityId
+        +Decimal quantity
+        +Decimal price
+        +Decimal fee
+        +String note
     }
 
     class AssetSnapshot {
-        +string id
-        +string portfolioId
+        +String id
+        +String portfolioId
         +Date date
         +Decimal totalAsset
-        +string? note
-        +Date createdAt
-        +Date updatedAt
+        +String note
     }
 
     class DailyNav {
-        +string id
-        +string portfolioId
+        +String id
+        +String portfolioId
         +Date date
         +Decimal unitNav
         +Decimal cumulativeNav
         +Decimal yearNav
         +Decimal shares
-        +Decimal? baseCumulativeNav
-        +Date createdAt
-        +Date updatedAt
+        +Decimal baseCumulativeNav
     }
 
     class DailyXirr {
-        +string id
-        +string portfolioId
+        +String id
+        +String portfolioId
         +Date date
-        +Decimal? xirrValue
-        +Date createdAt
-        +Date updatedAt
+        +Decimal xirrValue
     }
 
-    class TransactionType {
-        <<enumeration>>
-        BUY
-        SELL
-    }
-
-    class XirrService {
-        -INITIAL_RATE: number = 0.1
-        -MAX_ITERATIONS: number = 100
-        -TOLERANCE: number = 1e-7
-        -MIN_RATE: number = -0.999
-        +calculateXirr(cashflows: Cashflow[]) number|null
-        -calculateNpv(rate: number, cashflows: Cashflow[], firstDate: Date) number
-        -calculateDerivative(rate: number, cashflows: Cashflow[], firstDate: Date) number
-        +calculateXirrForDate(portfolioId: string, date: Date) Promise~number|null~
-    }
-
-    class NavService {
-        +calculateNavForDate(portfolioId: string, date: Date) Promise~NavResult|null~
-        -isYearFirstTradingDay(currentDate: Date, prevDate: Date) boolean
-    }
-
-    class NavResult {
-        +number unitNav
-        +number cumulativeNav
-        +number yearNav
-        +number shares
-        +number|null baseCumulativeNav
-    }
-
-    class Cashflow {
+    class DividendRecord {
+        +String id
+        +String portfolioId
+        +String securityId
         +Date date
-        +number amount
+        +Decimal amount
+        +DividendType type
+        +String note
     }
 
-    class CalculationService {
-        +triggerCalculation(portfolioId: string, date: Date) Promise~void~
-        +batchRecalculate(portfolioId: string, startDate: Date, endDate?: Date) Promise~number~
-        -ensureBaseDate(portfolioId: string, date: Date) Promise~void~
+    class FeeRecord {
+        +String id
+        +String portfolioId
+        +String securityId
+        +Date date
+        +Decimal amount
+        +FeeType type
+        +String transactionId
+        +String note
     }
 
-    class RecalculationService {
-        +recalculateFromDate(portfolioId: string, startDate: Date) Promise~number~
-        -getAffectedDates(portfolioId: string, startDate: Date) Promise~Date[]~
-    }
+    %% 关系
+    User "1" --> "0..1" UserPreference : has
+    User "1" --> "*" Portfolio : owns
+    Portfolio "1" --> "*" Security : contains
+    Portfolio "1" --> "*" Holding : contains
+    Portfolio "1" --> "*" Transaction : contains
+    Portfolio "1" --> "*" AssetSnapshot : contains
+    Portfolio "1" --> "*" DailyNav : contains
+    Portfolio "1" --> "*" DailyXirr : contains
+    Portfolio "1" --> "*" DividendRecord : contains
+    Portfolio "1" --> "*" FeeRecord : contains
+    Security "1" --> "*" Holding : references
+    Security "1" --> "0..*" Transaction : optionally_ref
+    Security "1" --> "*" DividendRecord : references
+    Security "1" --> "*" FeeRecord : references
 
-    class QueryService {
-        +queryXirrSeries(portfolioId: string, params: QueryDto) Promise~XirrSeriesPoint[]~
-        +queryNavSeries(portfolioId: string, params: QueryDto) Promise~NavSeriesPoint[]~
-        +getSummary(portfolioId: string) Promise~PortfolioSummary~
-        -aggregateByGranularity(records: DailyXirr[]|DailyNav[], granularity: string, aggregation: string) SeriesPoint[]
-    }
-
-    class TransactionService {
-        +create(portfolioId: string, dto: CreateTransactionDto) Promise~Transaction~
-        +findAll(portfolioId: string, query: DateRangeQuery) Promise~Paginated~Transaction~~
-        +update(portfolioId: string, id: string, dto: UpdateTransactionDto) Promise~Transaction~
-        +remove(portfolioId: string, id: string) Promise~void~
-    }
-
-    class SnapshotService {
-        +createOrUpdate(portfolioId: string, dto: CreateSnapshotDto) Promise~AssetSnapshot~
-        +findAll(portfolioId: string, query: DateRangeQuery) Promise~Paginated~AssetSnapshot~~
-        +update(portfolioId: string, id: string, dto: UpdateSnapshotDto) Promise~AssetSnapshot~
-        +remove(portfolioId: string, id: string) Promise~void~
-    }
-
-    class AuthService {
-        +register(dto: RegisterDto) Promise~User~
-        +login(dto: LoginDto) Promise~{ accessToken, user }~
-        +validateUser(email: string, password: string) Promise~User~
-    }
-
-    class PortfolioService {
-        +findAll(userId: string) Promise~Portfolio[]~
-        +create(userId: string, dto: CreatePortfolioDto) Promise~Portfolio~
-        +findOne(userId: string, id: string) Promise~Portfolio~
-        +update(userId: string, id: string, dto: UpdatePortfolioDto) Promise~Portfolio~
-        +remove(userId: string, id: string) Promise~void~
-    }
-
-    User "1" --> "N" Portfolio : owns
-    Portfolio "1" --> "N" Transaction : has
-    Portfolio "1" --> "N" AssetSnapshot : has
-    Portfolio "1" --> "N" DailyNav : has
-    Portfolio "1" --> "N" DailyXirr : has
-    Transaction --> TransactionType : type
-
-    XirrService ..> Cashflow : uses
-    XirrService ..> Transaction : reads
-    XirrService ..> AssetSnapshot : reads terminal value
-    NavService ..> NavResult : returns
-    NavService ..> AssetSnapshot : reads
-    NavService ..> Transaction : reads buy/sell
-
-    CalculationService --> XirrService : delegates
-    CalculationService --> NavService : delegates
-    RecalculationService --> CalculationService : calls per date
-
-    TransactionService --> CalculationService : triggers on create/update
-    TransactionService ..> RecalculationService : triggers on historical edit
-    SnapshotService --> CalculationService : triggers on create/update
-    SnapshotService ..> RecalculationService : triggers on historical edit
-
-    QueryService ..> DailyXirr : queries
-    QueryService ..> DailyNav : queries
+    %% 计算引擎隔离标注
+    note for DailyNav "计算引擎输入:<br/>AssetSnapshot + Transaction"
+    note for DailyXirr "计算引擎输入:<br/>AssetSnapshot + Transaction"
+    note for Holding "永不进入计算引擎<br/>(C-08/C-09)"
+    note for DividendRecord "永不进入计算引擎"
+    note for FeeRecord "永不进入计算引擎"
