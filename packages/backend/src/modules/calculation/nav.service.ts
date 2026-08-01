@@ -8,8 +8,9 @@
  *   shares = 当日买入金额之和, baseCumulativeNav = 1.0
  *
  * 非成立日：
- *   unitNav = (当日资产快照 - 当日申购 + 当日赎回) / 上日末份额
- *   （totalAsset 含当日申赎，需剔除当日申购本金并加回当日赎回，还原为纯持仓市值）
+ *   unitNav = 当日资产快照 / 上日末份额
+ *   （PRD 第 5.4 节：nav_t = asset_t / shares_{t-1}；资产快照口径为「当日申赎发生前」
+ *     的持仓总额，先按上日份额定价出当日单位净值，再按该净值处理当日申赎）
  *   cumulativeNav = unitNav（v1 无分红）
  *   处理申赎：shares = 上日份额 + 买入额/unitNav - 卖出额/unitNav
  *
@@ -103,10 +104,10 @@ export class NavService {
       return null;
     }
 
-    // 剔除当日申赎金额：totalAsset 含当日申赎，需还原为纯持仓市值
-    // （买入本金不应计为收益，卖出已离开持仓需加回还原前日持仓价值）
-    const pureAssetValue = Number(snapshot.totalAsset) - buyAmount + sellAmount;
-    const unitNav = pureAssetValue / prevShares;
+    // Step 1：按上日末份额对当日资产快照定价，得到当日单位净值
+    // PRD 第 5.4 节：nav_t = asset_t / shares_{t-1}
+    // （资产快照为当日申赎发生前的持仓总额，故此处不得再加减当日申赎金额）
+    const unitNav = Number(snapshot.totalAsset) / prevShares;
     const cumulativeNav = unitNav;
 
     // 处理当日申赎（买入新增份额，卖出赎回份额）

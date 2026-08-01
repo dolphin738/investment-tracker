@@ -5,11 +5,14 @@
     "lib": ["ES2021"],
     "module": "ESNext",
     "moduleResolution": "Bundler",
-    "noEmit": true,
     "allowSyntheticDefaultImports": true,
-    "declaration": false,
+    "composite": true,
+    "declaration": true,
     "declarationMap": false,
-    "sourceMap": false
+    "sourceMap": false,
+    "emitDeclarationOnly": true,
+    "outDir": "./node_modules/.tmp/tsconfig.node",
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo"
   },
   "include": ["vite.config.ts"]
 }

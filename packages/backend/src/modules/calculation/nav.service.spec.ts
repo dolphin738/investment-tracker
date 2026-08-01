@@ -408,4 +408,238 @@ describe('NavService - calculateNavForDate', () => {
     // 当年净值 = 1.815/1.5 = 1.21
     expect(result2!.yearNav).toBeCloseTo(1.21, 4);
   });
+
+  // ============================================================
+  // K1 回归测试组 — 单位净值口径：nav_t = asset_t / shares_{t-1}
+  //
+  // 历史缺陷 K1：曾把当日申赎金额二次加减到资产快照上
+  //   pureAssetValue = totalAsset - buyAmount + sellAmount
+  //   unitNav = pureAssetValue / prevShares
+  // 但资产快照口径本就是「当日申赎发生前」的持仓总额（PRD 3.3 / PRD 5.4 /
+  // ARCHITECTURE 7.2 三处自洽），二次加减会让单位净值随当日申赎金额漂移，
+  // 极端情况下甚至算出负净值。
+  //
+  // 下列用例锁定修复口径：单位净值只由「当日资产快照 / 上日末份额」决定，
+  // 与当日申赎金额完全无关。每个用例在旧实现下都会失败。
+  // ============================================================
+  describe('K1 回归 — 单位净值不受当日申赎金额影响', () => {
+    /** 统一场景：当日资产快照 12000，上日末份额 10000 → 单位净值恒为 1.2 */
+    const SNAPSHOT_ASSET = 12000;
+    const PREV_SHARES = 10000;
+    const EXPECTED_NAV = 1.2;
+
+    /** 按给定申赎组合装配 mock 并执行计算 */
+    async function calcWithTrades(buy: number, sell: number) {
+      const date = d('2024-01-02');
+      const txs: ReturnType<typeof makeTx>[] = [];
+      if (buy > 0) txs.push(makeTx('BUY', buy, date));
+      if (sell > 0) txs.push(makeTx('SELL', sell, date));
+
+      mockPrisma.assetSnapshot.findUnique.mockResolvedValue(
+        makeSnapshot(SNAPSHOT_ASSET, date),
+      );
+      mockPrisma.dailyNav.findFirst.mockResolvedValue(
+        makePrevNav({
+          date: d('2024-01-01'),
+          shares: PREV_SHARES,
+          cumulativeNav: 1.0,
+          baseCumulativeNav: 1.0,
+        }),
+      );
+      mockPrisma.transaction.findMany.mockResolvedValue(txs);
+
+      return service.calculateNavForDate('portfolio-1', date);
+    }
+
+    // ----------------------------------------------------------
+    // K1-1: 不变量 — 同一快照 + 同一上日份额，任意申赎组合下单位净值恒定
+    // ----------------------------------------------------------
+    it.each([
+      { desc: '无申赎', buy: 0, sell: 0, expectedShares: 10000 },
+      { desc: '仅买入 6000', buy: 6000, sell: 0, expectedShares: 15000 },
+      { desc: '仅卖出 1200', buy: 0, sell: 1200, expectedShares: 9000 },
+      { desc: '买入 6000 + 卖出 1200', buy: 6000, sell: 1200, expectedShares: 14000 },
+      { desc: '买卖等额 3000（旧实现下误差恰好抵消）', buy: 3000, sell: 3000, expectedShares: 10000 },
+      {
+        desc: '买入额超过当日资产（旧实现会算出负净值 -0.8）',
+        buy: 20000,
+        sell: 0,
+        expectedShares: 10000 + 20000 / 1.2,
+      },
+    ])(
+      'should keep unitNav = asset/prevShares regardless of same-day flows — $desc',
+      async ({ buy, sell, expectedShares }) => {
+        const result = await calcWithTrades(buy, sell);
+
+        expect(result).not.toBeNull();
+        // 核心断言：单位净值与当日申赎金额无关
+        expect(result!.unitNav).toBeCloseTo(EXPECTED_NAV, 6);
+        expect(result!.cumulativeNav).toBeCloseTo(EXPECTED_NAV, 6);
+        expect(result!.unitNav).toBeGreaterThan(0);
+        // 申赎按该净值折算份额
+        expect(result!.shares).toBeCloseTo(expectedShares, 4);
+      },
+    );
+
+    // ----------------------------------------------------------
+    // K1-2: 会计恒等式 — 当日末份额 × 单位净值 = 快照资产 + 净申购额
+    // ----------------------------------------------------------
+    it('should satisfy accounting identity: shares_t * nav_t = asset_t + buy - sell', async () => {
+      const date = d('2024-03-15');
+      const asset = 13750;
+      const prevShares = 11000; // → nav = 1.25
+      const buy = 4400;
+      const sell = 1100;
+
+      mockPrisma.assetSnapshot.findUnique.mockResolvedValue(makeSnapshot(asset, date));
+      mockPrisma.dailyNav.findFirst.mockResolvedValue(
+        makePrevNav({
+          date: d('2024-03-14'),
+          shares: prevShares,
+          cumulativeNav: 1.1,
+          baseCumulativeNav: 1.0,
+        }),
+      );
+      mockPrisma.transaction.findMany.mockResolvedValue([
+        makeTx('BUY', buy, date),
+        makeTx('SELL', sell, date),
+      ]);
+
+      const result = await service.calculateNavForDate('portfolio-1', date);
+
+      expect(result).not.toBeNull();
+      expect(result!.unitNav).toBeCloseTo(1.25, 6); // 13750/11000
+      // 11000 + 4400/1.25 - 1100/1.25 = 11000 + 3520 - 880 = 13640
+      expect(result!.shares).toBeCloseTo(13640, 4);
+      // 恒等式：13640 × 1.25 = 17050 = 13750 + 4400 - 1100
+      expect(result!.shares * result!.unitNav).toBeCloseTo(asset + buy - sell, 4);
+    });
+
+    // ----------------------------------------------------------
+    // K1-3: PRD 3.3 文档示例逐字回归（Day 30 / Day 60）
+    // ----------------------------------------------------------
+    it('should reproduce the PRD 3.3 worked example (Day30 nav=1.2, Day60 nav=1.1)', async () => {
+      // Day 30：资产快照 12000，上日份额 10000 → 净值 1.2；又买入 6000 → 总份额 15000
+      const day30 = d('2024-01-30');
+      mockPrisma.assetSnapshot.findUnique.mockResolvedValue(makeSnapshot(12000, day30));
+      mockPrisma.dailyNav.findFirst.mockResolvedValue(
+        makePrevNav({
+          date: d('2024-01-29'),
+          shares: 10000,
+          cumulativeNav: 1.0,
+          baseCumulativeNav: 1.0,
+        }),
+      );
+      mockPrisma.transaction.findMany.mockResolvedValue([makeTx('BUY', 6000, day30)]);
+
+      const r30 = await service.calculateNavForDate('portfolio-1', day30);
+      expect(r30).not.toBeNull();
+      expect(r30!.unitNav).toBeCloseTo(1.2, 6); // PRD: 12000/10000 = 1.2000
+      expect(r30!.shares).toBeCloseTo(15000, 4); // PRD: 10000 + 6000/1.2 = 15000
+
+      // Day 60：资产快照 16500，上日份额 15000 → 净值 1.1
+      const day60 = d('2024-03-01');
+      mockPrisma.assetSnapshot.findUnique.mockResolvedValue(makeSnapshot(16500, day60));
+      mockPrisma.dailyNav.findFirst.mockResolvedValue(
+        makePrevNav({
+          date: d('2024-02-29'),
+          shares: 15000,
+          cumulativeNav: 1.2,
+          baseCumulativeNav: 1.0,
+        }),
+      );
+      mockPrisma.transaction.findMany.mockResolvedValue([]);
+
+      const r60 = await service.calculateNavForDate('portfolio-1', day60);
+      expect(r60).not.toBeNull();
+      expect(r60!.unitNav).toBeCloseTo(1.1, 6); // PRD: 16500/15000 = 1.1000
+      expect(r60!.shares).toBeCloseTo(15000, 4); // 无申赎，份额不变
+    });
+
+    // ----------------------------------------------------------
+    // K1-4: 边界 — 上日份额为 0 / 负数时返回 null，且不产生 NaN / Infinity
+    // ----------------------------------------------------------
+    it.each([
+      { desc: '上日份额为 0（首笔尚未建仓）', prevShares: 0 },
+      { desc: '上日份额为负（脏数据）', prevShares: -100 },
+    ])('should return null without NaN/Infinity when prevShares <= 0 — $desc', async ({ prevShares }) => {
+      const date = d('2024-01-02');
+
+      mockPrisma.assetSnapshot.findUnique.mockResolvedValue(makeSnapshot(10000, date));
+      mockPrisma.dailyNav.findFirst.mockResolvedValue(
+        makePrevNav({
+          date: d('2024-01-01'),
+          shares: prevShares,
+          cumulativeNav: 1.0,
+          baseCumulativeNav: 1.0,
+        }),
+      );
+      mockPrisma.transaction.findMany.mockResolvedValue([makeTx('BUY', 5000, date)]);
+
+      // 必须安全返回 null，而不是抛错或产出 Infinity/NaN 净值
+      await expect(
+        service.calculateNavForDate('portfolio-1', date),
+      ).resolves.toBeNull();
+    });
+
+    // ----------------------------------------------------------
+    // K1-5: 卖出金额超过当日持仓市值 → 抛 BadRequestException
+    //
+    // 该防护分支依赖正确的 unitNav：
+    // 修复后 nav = 9000/10000 = 0.9，持仓市值 9000，卖 10000 → 份额转负 → 抛错。
+    // 旧实现 nav = (9000+10000)/10000 = 1.9，持仓市值被虚增为 19000，
+    // 份额仍为正 → 不抛错，超额赎回被静默放行。
+    // ----------------------------------------------------------
+    it('should throw BadRequestException when sell amount exceeds holding market value', async () => {
+      const date = d('2024-01-02');
+
+      mockPrisma.assetSnapshot.findUnique.mockResolvedValue(makeSnapshot(9000, date));
+      mockPrisma.dailyNav.findFirst.mockResolvedValue(
+        makePrevNav({
+          date: d('2024-01-01'),
+          shares: 10000,
+          cumulativeNav: 1.0,
+          baseCumulativeNav: 1.0,
+        }),
+      );
+      mockPrisma.transaction.findMany.mockResolvedValue([makeTx('SELL', 10000, date)]);
+
+      await expect(
+        service.calculateNavForDate('portfolio-1', date),
+      ).rejects.toThrow(BadRequestException);
+
+      // 报错信息应基于正确口径的持仓市值 9000（旧实现会虚增为 19000）
+      await expect(
+        service.calculateNavForDate('portfolio-1', date),
+      ).rejects.toThrow(/9000\.00/);
+    });
+
+    // ----------------------------------------------------------
+    // K1-6: 跨年首日 + 当日申赎 — 年度字段同样不受申赎金额干扰
+    // ----------------------------------------------------------
+    it('should keep unitNav and year fields correct on year-first day with same-day buy', async () => {
+      const date = d('2025-01-02');
+
+      mockPrisma.assetSnapshot.findUnique.mockResolvedValue(makeSnapshot(16000, date));
+      mockPrisma.dailyNav.findFirst.mockResolvedValue(
+        makePrevNav({
+          date: d('2024-12-31'),
+          shares: 10000,
+          cumulativeNav: 1.5,
+          baseCumulativeNav: 1.2,
+        }),
+      );
+      mockPrisma.transaction.findMany.mockResolvedValue([makeTx('BUY', 8000, date)]);
+
+      const result = await service.calculateNavForDate('portfolio-1', date);
+
+      expect(result).not.toBeNull();
+      // 净值仍为 16000/10000 = 1.6（旧实现会算成 (16000-8000)/10000 = 0.8）
+      expect(result!.unitNav).toBeCloseTo(1.6, 6);
+      expect(result!.shares).toBeCloseTo(10000 + 8000 / 1.6, 4); // 15000
+      // 跨年 → yearNav 重置，base = 上年末累计净值
+      expect(result!.yearNav).toBe(1.0);
+      expect(result!.baseCumulativeNav).toBeCloseTo(1.5, 6);
+    });
+  });
 });
