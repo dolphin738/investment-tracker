@@ -2,16 +2,23 @@
  * api/auth.api.ts — 认证 API
  *
  * 对应后端：
- * - POST /api/auth/register — 注册（公开）
- * - POST /api/auth/login — 登录（公开）
- * - GET  /api/auth/profile — 获取当前用户（需认证）
+ * - POST  /api/auth/register — 注册（公开）
+ * - POST  /api/auth/login — 登录（公开）
+ * - GET   /api/auth/profile — 获取当前用户（需认证）
+ * - PATCH /api/auth/password — 修改密码（需认证）
+ * - PATCH /api/auth/email — 修改邮箱（需认证）
+ * - PATCH /api/auth/profile — 修改个人资料（需认证）
  */
 
 import { http } from '@/lib/api-client';
 import type {
+  AuthTokenResponse,
   LoginRequest,
   LoginResponse,
   RegisterRequest,
+  UpdateEmailRequest,
+  UpdatePasswordRequest,
+  UpdateProfileRequest,
   UserProfile,
 } from './types';
 import type { UserPublic } from '@investment-tracker/shared';
@@ -29,4 +36,19 @@ export function login(payload: LoginRequest): Promise<LoginResponse> {
 /** 获取当前登录用户信息 */
 export function getProfile(): Promise<UserProfile> {
   return http.get<UserProfile>('/auth/profile');
+}
+
+/** 修改密码，成功后返回重签的 accessToken + 用户信息 */
+export function updatePassword(payload: UpdatePasswordRequest): Promise<AuthTokenResponse> {
+  return http.patch<AuthTokenResponse>('/auth/password', payload);
+}
+
+/** 修改邮箱，成功后返回重签的 accessToken + 用户信息 */
+export function updateEmail(payload: UpdateEmailRequest): Promise<AuthTokenResponse> {
+  return http.patch<AuthTokenResponse>('/auth/email', payload);
+}
+
+/** 修改个人资料，返回最新用户信息 */
+export function updateProfile(payload: UpdateProfileRequest): Promise<UserPublic> {
+  return http.patch<UserPublic>('/auth/profile', payload);
 }

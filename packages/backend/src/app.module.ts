@@ -9,6 +9,7 @@
  * - SnapshotModule（资产快照 upsert + 触发计算）
  * - CalculationModule（计算引擎：XIRR + 净值 + 批量重算）
  * - QueryModule（四维度查询聚合）
+ * - UploadModule（文件上传：头像）
  *
  * 全局注册：
  * - APP_FILTER：HttpExceptionFilter（统一错误响应）
@@ -26,6 +27,7 @@ import { TransactionModule } from './modules/transaction/transaction.module';
 import { SnapshotModule } from './modules/snapshot/snapshot.module';
 import { CalculationModule } from './modules/calculation/calculation.module';
 import { QueryModule } from './modules/query/query.module';
+import { UploadModule } from './modules/upload/upload.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
@@ -46,6 +48,7 @@ import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
     TransactionModule,
     SnapshotModule,
     QueryModule,
+    UploadModule,
   ],
   providers: [
     // 全局异常过滤器（统一错误响应 { code, data: null, message }）

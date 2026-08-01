@@ -25,7 +25,10 @@ const registerSchema = z
   .object({
     email: z.string().email('请输入有效的邮箱'),
     name: z.string().max(50, '名称最多 50 字').optional(),
-    password: z.string().min(6, '密码至少 6 位'),
+    password: z
+      .string()
+      .min(8, '密码至少 8 位')
+      .regex(/^(?=.*[A-Za-z])(?=.*\d)/, '密码需同时包含字母和数字'),
     confirmPassword: z.string(),
   })
   .refine((data) => data.password === data.confirmPassword, {

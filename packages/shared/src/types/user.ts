@@ -17,6 +17,12 @@ export interface User {
   passwordHash: string;
   /** 显示名称，可为空 */
   name: string | null;
+  /** 头像 URL（http/https），可为空 */
+  avatar: string | null;
+  /** 手机号（中国大陆 11 位），可为空 */
+  phone: string | null;
+  /** 个人简介，最长 200 字，可为空 */
+  bio: string | null;
   /** 创建时间 ISO 8601 */
   createdAt: string;
   /** 更新时间 ISO 8601 */
@@ -30,4 +36,10 @@ export interface UserPublic {
   id: string;
   email: string;
   name: string | null;
+  /** 头像 URL（http/https），可为空 */
+  avatar: string | null;
+  /** 手机号（中国大陆 11 位），可为空 */
+  phone: string | null;
+  /** 个人简介，最长 200 字，可为空 */
+  bio: string | null;
 }

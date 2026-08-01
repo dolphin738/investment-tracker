@@ -62,6 +62,9 @@ _已清理归档_*/
 # Vite build cache (temp timestamp files)
 vite.config.ts.timestamp-*.mjs
 
+# User uploads (runtime artifacts; production should mount a persistent volume)
+packages/backend/uploads/
+
 # Compiled prisma seed (source of truth is seed.ts)
 packages/backend/prisma/seed.js
 packages/backend/prisma/seed.js.map

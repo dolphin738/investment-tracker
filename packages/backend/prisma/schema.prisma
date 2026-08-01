@@ -24,6 +24,10 @@ model User {
   email        String   @unique
   passwordHash String   @map("password_hash")
   name         String?
+  // 个人资料字段（设置页账户修改功能）：均可空，列名为单词无需 @map
+  avatar       String?  @db.VarChar(512)
+  phone        String?  @db.VarChar(20)
+  bio          String?  @db.VarChar(200)
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 

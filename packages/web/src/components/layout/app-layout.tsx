@@ -7,8 +7,9 @@
 
 import { useState } from 'react';
 import { Outlet, useNavigate } from 'react-router-dom';
-import { LogOut, Menu, User as UserIcon, X } from 'lucide-react';
+import { LogOut, Menu, Settings, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { UserAvatar } from '@/components/user-avatar';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -57,28 +58,48 @@ export function AppLayout(): JSX.Element {
           <PortfolioSelector onCreateClick={() => setPortfolioDialogOpen(true)} />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" aria-label="用户菜单">
-                <UserIcon className="h-5 w-5" />
+              <Button
+                variant="ghost"
+                className="flex h-9 items-center gap-2 px-2"
+                aria-label="用户菜单"
+              >
+                <UserAvatar
+                  size="sm"
+                  src={user?.avatar}
+                  name={user?.name}
+                  email={user?.email ?? ''}
+                />
+                <span className="hidden max-w-[8rem] truncate text-sm md:inline">
+                  {user?.name || user?.email || '用户'}
+                </span>
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56">
               <DropdownMenuLabel>
-                <div className="flex flex-col">
-                  <span className="text-sm font-medium">
-                    {user?.name || user?.email || '用户'}
-                  </span>
-                  {user?.email && (
-                    <span className="text-xs text-muted-foreground">
-                      {user.email}
+                <div className="flex items-center gap-2">
+                  <UserAvatar
+                    size="sm"
+                    src={user?.avatar}
+                    name={user?.name}
+                    email={user?.email ?? ''}
+                  />
+                  <div className="flex min-w-0 flex-col">
+                    <span className="truncate text-sm font-medium">
+                      {user?.name || user?.email || '用户'}
                     </span>
-                  )}
+                    {user?.email && (
+                      <span className="truncate text-xs font-normal text-muted-foreground">
+                        {user.email}
+                      </span>
+                    )}
+                  </div>
                 </div>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 onClick={() => navigate(ROUTE_PATH.SETTINGS)}
               >
-                <UserIcon className="mr-2 h-4 w-4" />
+                <Settings className="mr-2 h-4 w-4" />
                 设置
               </DropdownMenuItem>
               <DropdownMenuItem onClick={handleLogout}>

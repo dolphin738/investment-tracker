@@ -28,12 +28,44 @@ export interface RegisterRequest {
   name?: string;
 }
 
-export interface LoginResponse {
+/** 登录 / 改密码 / 改邮箱 统一返回：新 token + 最新用户信息 */
+export interface AuthTokenResponse {
   accessToken: string;
   user: UserPublic;
 }
 
+export type LoginResponse = AuthTokenResponse;
+
 export type UserProfile = UserPublic;
+
+/** 修改密码请求（confirmPassword 仅前端校验，不发送给后端） */
+export interface UpdatePasswordRequest {
+  currentPassword: string;
+  newPassword: string;
+}
+
+/** 修改邮箱请求 */
+export interface UpdateEmailRequest {
+  currentPassword: string;
+  newEmail: string;
+}
+
+/** 修改个人资料请求：字段缺省=不修改，null/'' =清空 */
+export interface UpdateProfileRequest {
+  name?: string | null;
+  avatar?: string | null;
+  phone?: string | null;
+  bio?: string | null;
+}
+
+// ===== Upload =====
+/** 头像上传响应：新地址 + 已写库的最新用户信息 */
+export interface UploadAvatarResponse {
+  /** 站内相对路径，如 /api/uploads/avatar/<uuid>.png */
+  url: string;
+  /** 更新后的用户公开信息（avatar 已指向 url） */
+  user: UserPublic;
+}
 
 // ===== Portfolio =====
 export interface CreatePortfolioRequest {

@@ -1,0 +1,108 @@
+classDiagram
+    class UploadController {
+        -uploadService: UploadService
+        +uploadAvatar(userId: string, file: MulterFile) Promise~UploadAvatarResult~
+    }
+
+    class UploadService {
+        -storage: StorageService
+        -prisma: PrismaService
+        -logger: Logger
+        +uploadAvatar(userId: string, file: MulterFile) Promise~UploadAvatarResult~
+        -validate(file: MulterFile) string
+        -cleanupOldAvatar(oldAvatar: string|null) void
+    }
+
+    class StorageService {
+        <<abstract>>
+        +save(buffer: Buffer, ext: string, scope: string)* Promise~StorageSaveResult~
+        +remove(url: string)* Promise~void~
+        +canRemove(url: string)* boolean
+    }
+
+    class LocalDiskStorage {
+        -baseDir: string
+        -logger: Logger
+        +constructor(config: ConfigService)
+        +save(buffer, ext, scope) Promise~StorageSaveResult~
+        +remove(url: string) Promise~void~
+        +canRemove(url: string) boolean
+        -resolveAbsolutePath(url: string) string|null
+    }
+
+    class StorageSaveResult {
+        <<interface>>
+        +url: string
+        +absolutePath: string
+        +filename: string
+    }
+
+    class UploadAvatarResult {
+        <<interface>>
+        +url: string
+        +user: UserPublic
+    }
+
+    class FileUploadExceptionFilter {
+        +catch(exception: HttpException, host: ArgumentsHost) void
+    }
+
+    class UploadConstants {
+        <<module>>
+        +ALLOWED_MIME: string[]
+        +MIME_EXT_MAP: Record
+        +MAX_FILE_SIZE: number
+        +AVATAR_URL_PREFIX: string
+        +ERROR_CODE_FILE_INVALID: number
+        +sniffImageMime(buffer: Buffer) string|null
+    }
+
+    class PrismaService {
+        +user: UserDelegate
+    }
+
+    class UpdateProfileDto {
+        +name?: string|null
+        +avatar?: string|null
+        +phone?: string|null
+        +bio?: string|null
+    }
+
+    UploadController --> UploadService : 依赖注入
+    UploadController ..> FileUploadExceptionFilter : @UseFilters
+    UploadService --> StorageService : 依赖注入(抽象)
+    UploadService --> PrismaService : 依赖注入
+    StorageService <|-- LocalDiskStorage : 实现
+    LocalDiskStorage ..> StorageSaveResult : 返回
+    UploadService ..> UploadAvatarResult : 返回
+    UploadService ..> UploadConstants : 使用
+    UpdateProfileDto ..> UploadConstants : 复用 AVATAR_URL_PREFIX 校验
+
+    class UploadApi {
+        <<web/api/upload.api.ts>>
+        +uploadAvatar(file: File) Promise~UploadAvatarResponse~
+    }
+    class useUploadAvatar {
+        <<web/hooks/use-account.ts>>
+        +mutate(file: File) void
+        +isPending: boolean
+    }
+    class EditProfileDialog {
+        <<web/features/account>>
+        -fileInputRef: RefObject
+        +handleFileSelect(e) void
+        +handleRemoveAvatar() void
+    }
+    class AppLayout {
+        <<web/components/layout>>
+    }
+    class UserAvatar {
+        <<web/components, 不改动>>
+        +src?: string|null
+        +size: sm|lg
+    }
+
+    useUploadAvatar --> UploadApi : 调用
+    EditProfileDialog --> useUploadAvatar : 使用
+    EditProfileDialog --> UserAvatar : 渲染
+    AppLayout --> UserAvatar : 渲染

@@ -41,13 +41,44 @@ const apiClient: AxiosInstance = axios.create({
   },
 });
 
-/** 请求拦截器：注入 JWT */
+/**
+ * 移除请求头上的 Content-Type。
+ *
+ * axios v1 的 config.headers 是 AxiosHeaders 实例（有大小写不敏感的 delete 方法），
+ * 但在部分场景下也可能是普通对象，这里两种都兼容。
+ */
+function stripContentType(headers: InternalAxiosRequestConfig['headers']): void {
+  if (!headers) {
+    return;
+  }
+  const bag = headers as unknown as {
+    delete?: (name: string) => boolean;
+    [key: string]: unknown;
+  };
+  if (typeof bag.delete === 'function') {
+    bag.delete('Content-Type');
+    return;
+  }
+  delete bag['Content-Type'];
+}
+
+/** 请求拦截器：注入 JWT + FormData 放行 multipart */
 apiClient.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
     const token = localStorage.getItem(AUTH_TOKEN_KEY);
     if (token && config.headers) {
       config.headers.Authorization = `Bearer ${token}`;
     }
+
+    // 实例级写死了 'Content-Type': 'application/json'，
+    // 而 axios 的 transformRequest 一旦看到 JSON 类型头，会把 FormData 序列化成 JSON
+    // （formDataToJSON），导致后端 multer 收不到任何文件。
+    // 请求拦截器早于 transformRequest 执行，此处删掉该头，
+    // 浏览器才会自动补上 multipart/form-data; boundary=...
+    if (typeof FormData !== 'undefined' && config.data instanceof FormData) {
+      stripContentType(config.headers);
+    }
+
     return config;
   },
   (error) => Promise.reject(error),

@@ -26,6 +26,17 @@ function isValidToken(token: string | null): token is string {
   return Boolean(token) && token !== 'undefined' && token !== 'null';
 }
 
+/** 把可能缺失 avatar/phone/bio 的旧缓存 user 归一化（undefined → null） */
+function normalizeUserPublic(user: UserPublic | null): UserPublic | null {
+  if (!user) return null;
+  return {
+    ...user,
+    avatar: user.avatar ?? null,
+    phone: user.phone ?? null,
+    bio: user.bio ?? null,
+  };
+}
+
 /** 从 localStorage 恢复初始状态（含防御性解析） */
 function loadInitialState(): Pick<AuthState, 'token' | 'user' | 'isAuthenticated'> {
   if (typeof window === 'undefined') {
@@ -37,7 +48,7 @@ function loadInitialState(): Pick<AuthState, 'token' | 'user' | 'isAuthenticated
 
   if (userJson) {
     try {
-      user = JSON.parse(userJson) as UserPublic;
+      user = normalizeUserPublic(JSON.parse(userJson) as UserPublic);
     } catch {
       // 脏数据（如字符串 "undefined"），清除并重置
       localStorage.removeItem(AUTH_USER_KEY);
@@ -66,9 +77,10 @@ export const useAuthStore = create<AuthState>((set) => ({
     if (!token || !user) {
       return;
     }
+    const normalized = normalizeUserPublic(user);
     localStorage.setItem(AUTH_TOKEN_KEY, token);
-    localStorage.setItem(AUTH_USER_KEY, JSON.stringify(user));
-    set({ token, user, isAuthenticated: true });
+    localStorage.setItem(AUTH_USER_KEY, JSON.stringify(normalized));
+    set({ token, user: normalized, isAuthenticated: true });
   },
   logout: () => {
     localStorage.removeItem(AUTH_TOKEN_KEY);
@@ -76,7 +88,8 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ token: null, user: null, isAuthenticated: false });
   },
   setUser: (user) => {
-    localStorage.setItem(AUTH_USER_KEY, JSON.stringify(user));
-    set({ user });
+    const normalized = normalizeUserPublic(user);
+    localStorage.setItem(AUTH_USER_KEY, JSON.stringify(normalized));
+    set({ user: normalized });
   },
 }));

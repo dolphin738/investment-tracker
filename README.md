@@ -56,7 +56,6 @@ investment-tracker/
 │   ├── web/                       # Vite + React 前端
 │   ├── harmonyos/                 # HarmonyOS App（DevEco Studio 工程）
 │   └── shared/                    # 共享类型与 API 契约
-├── scripts/                       # 本地辅助脚本（未纳入版本控制）
 ├── pnpm-workspace.yaml
 ├── turbo.json
 ├── tsconfig.base.json
@@ -174,6 +173,4 @@ AGPL 是强 copyleft 协议：任何人可自由使用、修改、商用本代�
 
 ## 八、说明
 
-- `scripts/` 目录为本地辅助脚本，**已排除在版本控制之外**，不会随仓库提交。
 - 金融计算口径（XIRR / 净值）的全部细节以 `docs/ARCHITECTURE.md` 与 PRD 为准。
-- 真实数据库密码、JWT 密钥等敏感信息仅存于 `.env`，已被 `.gitignore` 排除，请勿提交。

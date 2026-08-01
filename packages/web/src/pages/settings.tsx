@@ -2,7 +2,7 @@
  * pages/settings.tsx — 设置页
  *
  * 包含：
- * - 账户：用户信息 / 退出登录
+ * - 账户：用户信息 / 修改邮箱 / 修改密码 / 编辑资料 / 退出登录
  * - 组合管理：列表 + 新建 + 编辑 + 删除
  * - 偏好设置：聚合方式（localStorage 持久化）
  * - 数据管理：清空当前组合数据（危险操作，仅占位）
@@ -10,7 +10,7 @@
 
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { LogOut, Pencil, Plus, Trash2, Loader2 } from 'lucide-react';
+import { Lock, LogOut, Mail, Pencil, Plus, Trash2, Loader2 } from 'lucide-react';
 import {
   Card,
   CardContent,
@@ -46,6 +46,10 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { PortfolioDialog } from '@/features/portfolio/portfolio-dialog';
+import { ChangeEmailDialog } from '@/features/account/change-email-dialog';
+import { ChangePasswordDialog } from '@/features/account/change-password-dialog';
+import { EditProfileDialog } from '@/features/account/edit-profile-dialog';
+import { UserAvatar } from '@/components/user-avatar';
 import { useAuthStore } from '@/stores/auth.store';
 import {
   useDeletePortfolio,
@@ -70,6 +74,11 @@ export default function SettingsPage(): JSX.Element {
   const [editing, setEditing] = useState<Portfolio | null>(null);
   const [creating, setCreating] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  // 账户修改对话框显隐
+  const [emailDialogOpen, setEmailDialogOpen] = useState<boolean>(false);
+  const [passwordDialogOpen, setPasswordDialogOpen] = useState<boolean>(false);
+  const [profileDialogOpen, setProfileDialogOpen] = useState<boolean>(false);
 
   // 偏好：聚合方式
   const [aggregation, setAggregation] = useState<AggregationMethod>(
@@ -96,6 +105,11 @@ export default function SettingsPage(): JSX.Element {
     localStorage.setItem(PREF_AGGREGATION_KEY, v);
   };
 
+  /** 手机号脱敏展示：138****8000 */
+  const maskedPhone = user?.phone
+    ? `${user.phone.slice(0, 3)}****${user.phone.slice(7)}`
+    : '-';
+
   return (
     <div className="space-y-6">
       <div>
@@ -109,23 +123,72 @@ export default function SettingsPage(): JSX.Element {
       <Card>
         <CardHeader>
           <CardTitle className="text-base">账户</CardTitle>
-          <CardDescription>当前登录用户信息</CardDescription>
+          <CardDescription>当前登录用户信息与安全设置</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-2 gap-4 text-sm">
-            <div>
-              <Label className="text-xs text-muted-foreground">邮箱</Label>
-              <p className="mt-1">{user?.email ?? '-'}</p>
-            </div>
-            <div>
-              <Label className="text-xs text-muted-foreground">名称</Label>
-              <p className="mt-1">{user?.name ?? '-'}</p>
+          {/* 头像 + 昵称 + 邮箱 */}
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+            <UserAvatar
+              size="lg"
+              src={user?.avatar}
+              name={user?.name}
+              email={user?.email ?? ''}
+            />
+            <div className="min-w-0">
+              <p className="truncate text-base font-medium">
+                {user?.name || '未设置'}
+              </p>
+              <p className="truncate text-sm text-muted-foreground">
+                {user?.email ?? '-'}
+              </p>
             </div>
           </div>
-          <Button variant="outline" onClick={handleLogout}>
-            <LogOut className="mr-2 h-4 w-4" />
-            退出登录
-          </Button>
+
+          {/* 资料明细 */}
+          <div className="grid grid-cols-1 gap-4 text-sm sm:grid-cols-2">
+            <div>
+              <Label className="text-xs text-muted-foreground">手机号</Label>
+              <p className="mt-1 font-mono">{maskedPhone}</p>
+            </div>
+            <div>
+              <Label className="text-xs text-muted-foreground">个人简介</Label>
+              <p className="mt-1 whitespace-pre-wrap break-words">
+                {user?.bio || '-'}
+              </p>
+            </div>
+          </div>
+
+          {/* 操作区 */}
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setEmailDialogOpen(true)}
+            >
+              <Mail className="mr-2 h-4 w-4" />
+              修改邮箱
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPasswordDialogOpen(true)}
+            >
+              <Lock className="mr-2 h-4 w-4" />
+              修改密码
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setProfileDialogOpen(true)}
+            >
+              <Pencil className="mr-2 h-4 w-4" />
+              编辑资料
+            </Button>
+            <Button variant="outline" size="sm" onClick={handleLogout}>
+              <LogOut className="mr-2 h-4 w-4" />
+              退出登录
+            </Button>
+          </div>
         </CardContent>
       </Card>
 
@@ -269,6 +332,20 @@ export default function SettingsPage(): JSX.Element {
           <div>基于 XIRR 算法的投资收益统计系统</div>
         </CardContent>
       </Card>
+
+      {/* 账户修改对话框 */}
+      <ChangeEmailDialog
+        open={emailDialogOpen}
+        onOpenChange={setEmailDialogOpen}
+      />
+      <ChangePasswordDialog
+        open={passwordDialogOpen}
+        onOpenChange={setPasswordDialogOpen}
+      />
+      <EditProfileDialog
+        open={profileDialogOpen}
+        onOpenChange={setProfileDialogOpen}
+      />
 
       {/* 创建/编辑组合对话框 */}
       <PortfolioDialog

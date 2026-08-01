@@ -1,0 +1,55 @@
+sequenceDiagram
+    participant U as 用户
+    participant D as EditProfileDialog
+    participant H as useUploadAvatar
+    participant A as api-client(axios)
+    participant C as UploadController
+    participant F as FileUploadExceptionFilter
+    participant S as UploadService
+    participant ST as LocalDiskStorage
+    participant P as PrismaService
+    participant Z as authStore
+
+    U->>D: 点击头像区
+    D->>D: fileInputRef.current.click()
+    U->>D: 选择文件
+    D->>D: 预校验 MIME 白名单 + size<=2MB
+    alt 预校验不通过
+        D-->>U: toast.error（不发请求）
+    else 预校验通过
+        D->>D: setUploading(true) 禁用保存按钮
+        D->>H: mutate(file)
+        H->>A: uploadAvatar(file) → FormData{file}
+        A->>A: 请求拦截器: 注入 JWT + 删除 Content-Type(FormData)
+        A->>C: POST /api/upload/avatar (multipart)
+        C->>C: JwtAuthGuard 通过 → @CurrentUser('userId')
+        C->>C: FileInterceptor 解析 → memoryStorage Buffer
+        C->>S: uploadAvatar(userId, file)
+        S->>S: validate: 存在性 / mimetype 白名单 / sniffImageMime / size<=2MB
+        alt 校验失败
+            S-->>C: throw BadRequestException({code:1006, message})
+            C->>F: controller 作用域过滤器
+            F-->>A: 400 {code:1006, data:null, message}
+            A-->>H: reject ApiError(1006)（拦截器已 toast）
+            H-->>D: onError → setUploading(false)
+        else 校验通过
+            S->>ST: save(buffer, ext, 'avatar')
+            ST->>ST: mkdir -p <UPLOAD_DIR>/avatar
+            ST->>ST: crypto.randomUUID() + writeFile
+            ST-->>S: {url:'/api/uploads/avatar/<uuid>.<ext>', absolutePath}
+            S->>P: user.findUnique(id) 取 oldAvatar
+            S->>P: user.update({avatar: url}) → UserPublic
+            P-->>S: user
+            S-)ST: void remove(oldAvatar) 异步(canRemove 通过才删)
+            Note over ST: 删除失败仅 logger.warn，不影响响应
+            S-->>C: {url, user}
+            C-->>A: 200 {code:0, data:{url,user}, message:'上传成功'}
+            A->>A: 响应拦截器解包 → data
+            A-->>H: {url, user}
+            H->>Z: setUser(user) 同步 authStore + localStorage
+            H->>H: invalidateQueries(['auth','profile'])
+            H-->>D: onSuccess → setUploading(false)
+            D-->>U: 头像即时预览更新 + toast 成功
+            Note over Z: AppLayout 订阅同一 store → 导航栏头像同步刷新
+        end
+    end

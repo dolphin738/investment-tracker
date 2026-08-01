@@ -2072,4 +2072,85 @@ graph LR
 
 ---
 
+## 14. 附录：头像上传模块（AC-11 / AC-15，增量交付）
+
+### 14.1 目录结构
+
+```
+packages/backend/src/modules/upload/
+├── upload.constants.ts                      # 白名单/上限/URL 前缀/目录解析（单一事实来源）
+├── upload.types.ts                          # UploadedFileLike（不依赖 @types/multer）
+├── upload.module.ts                         # controller/service + StorageService factory
+├── upload.controller.ts                     # POST /api/upload/avatar
+├── upload.service.ts                        # 校验 → 魔数嗅探 → 落盘 → 清旧 → 写库
+├── upload.service.spec.ts                   # 单元测试（mock storage / prisma）
+├── filters/file-upload-exception.filter.ts  # 413/415/multer 错误 → 400 + 1006
+└── storage/
+    ├── storage.service.ts                   # 抽象驱动（save/remove/canRemove/resolvePath）
+    └── local-disk.storage.ts                # 本地磁盘实现
+```
+
+### 14.2 关键约定
+
+| 项 | 值 | 说明 |
+|----|----|------|
+| 接口 | `POST /api/upload/avatar` | 全局前缀 `/api` + `@Controller('upload')` |
+| 表单字段 | `file`（唯一 part） | 不带任何额外字段，天然规避 `forbidNonWhitelisted` |
+| 静态资源前缀 | `/api/uploads/` | `setGlobalPrefix` **不作用于** express 静态中间件，prefix 必须手写 `/api` |
+| 返回 URL | `/api/uploads/avatar/<uuid>.<ext>` | 相对路径，前后端同源/经 vite `/api` 代理 |
+| 落盘路径 | `<UPLOAD_DIR>/avatar/<uuid>.<ext>` | `UPLOAD_DIR` 默认 `<cwd>/uploads`，生产用绝对路径挂持久卷 |
+| 类型白名单 | `image/jpeg` `image/png` `image/webp` | mimetype 快筛 + **魔数嗅探**双重校验 |
+| 大小上限 | 2 MB | multer `limits.fileSize` + service 兜底 |
+| 错误码 | `1006`（HTTP 400） | 类型 / 大小 / 内容不符 / 文件缺失统一用 1006 |
+| 存储驱动 | `STORAGE_DRIVER=local` | factory provider 选择实现，cos / s3 预留 |
+
+### 14.3 三处易踩的坑（已修复）
+
+1. **M1 — 用户 ID 字段名**：`AuthenticatedUser` 是 `{ userId, email }`，取 `user.userId`，不是 `user.id`。
+2. **M2 — FormData 被序列化成 JSON**：axios 实例级写死了 `Content-Type: application/json`，
+   而 `transformRequest` 一旦看到 JSON 头就会把 FormData 转成 JSON（`formDataToJSON`），
+   后端 multer 收不到文件。修复：**请求拦截器**（早于 transformRequest）检测到 FormData 时删除该头。
+3. **M3 — 413 落到 5000**：`FileInterceptor` 把 multer 的 `LIMIT_FILE_SIZE` 转成
+   `PayloadTooLargeException(413)`，而全局 `http-exception.filter.ts` 无 413 分支 → 返回 5000。
+   修复：controller 作用域的 `FileUploadExceptionFilter`，把无自定义 code 的异常收敛为 400 + 1006；
+   **401/403 保持原样映射 1001/1002**，不能被改写，否则前端识别不出「登录已失效」。
+
+### 14.4 安全设计
+
+- 文件名 = `crypto.randomUUID()`，扩展名由**魔数嗅探**推导，**绝不使用 `file.originalname`** → 杜绝路径穿越。
+- `canRemove(url)` 三重校验后才允许删除旧文件：
+  URL 前缀 `/api/uploads/avatar/` + 文件名匹配 `^[0-9a-f-]{36}\.(jpg|png|webp)$` + `path.resolve` 后仍在 baseDir 内。
+- 旧文件删除是 fire-and-forget（`void ... .catch(logger.warn)`），失败只告警，不影响上传结果。
+- 「移除头像」只把 `avatar` 置 NULL，**不删磁盘文件**（避免误操作不可逆）。
+
+### 14.5 头像地址契约放宽（P0-5）
+
+`UpdateProfileDto.avatar` 原来是 `@IsUrl({ require_protocol: true })`，会把上传返回的相对路径判为非法。
+现改为正则，同时放行站内相对路径与 http(s) 外链：
+
+```
+/^(?:\/(?!\/)[\w\-.\/]*|https?:\/\/[\w-]+(\.[\w-]+)+\S*)$/i
+```
+
+`(?!\/)` 用于排除 `//evil.com` 这类协议相对 URL。空串 `''` 仍表示清空（由 `@ValidateIf` 跳过校验，service 转 NULL）。
+
+### 14.6 手工联调清单（10 项）
+
+| # | 场景 | 预期 |
+|---|------|------|
+| 1 | **M2 验证**：设置页点头像上传 JPG，看 Network 请求头 | `Content-Type: multipart/form-data; boundary=...`（**不是** application/json） |
+| 2 | **M3 验证**：`curl -X POST /api/upload/avatar -H "Authorization: Bearer <t>" -F file=@3mb.jpg` | HTTP **400** + `{"code":1006,...}`（不是 413，也不是 5000） |
+| 3 | **P0-5 验证**：上传成功后返回体 | `data.url` 形如 `/api/uploads/avatar/<uuid>.jpg`，`data.user.avatar` 同值 |
+| 4 | **P0-5 验证**：`PATCH /api/auth/profile {"avatar":"/api/uploads/avatar/x.png"}` | 200，不再 400 |
+| 5 | **P0-5 验证**：`PATCH /api/auth/profile {"avatar":""}` | 200，头像被清空为 NULL |
+| 6 | 静态资源可达：浏览器直接访问返回的 url | 图片正常显示（走 vite `/api` 代理 → express static） |
+| 7 | 类型拦截：上传 `.pdf`（改后缀伪装成 .png 也测一次） | 400 + 1006 + 「仅支持 JPG / PNG / WebP」/「内容与格式不符」 |
+| 8 | 前端预校验：选 5MB 图片 | 直接 toast 报错，**Network 里没有请求发出** |
+| 9 | 换头像清理：连续上传两张图 | `<UPLOAD_DIR>/avatar/` 下只剩最新一张，旧文件已删 |
+| 10 | **AC-15 验证**：上传成功后不刷新页面 | 顶栏头像 + 下拉菜单头像立即变成新图；点「移除头像」后回落首字母占位 |
+
+补充：未带 token 调 `/api/upload/avatar` 应返回 **401 + 1001**（不能被过滤器改写成 1006）。
+
+---
+
 > **文档结束** | 架构师 高见远（Gao） | 如有疑问请联系

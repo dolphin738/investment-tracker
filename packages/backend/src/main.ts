@@ -5,18 +5,27 @@
  * - 全局前缀 /api（所有路由自动添加 /api 前缀）
  * - CORS 跨域（支持自建服务器部署，源通过 CORS_ORIGIN 环境变量配置）
  * - ValidationPipe 全局校验（class-validator + class-transformer）
+ * - 静态资源 /api/uploads（用户上传的头像等文件）
  * - Swagger 文档（/api/docs，仅开发环境启用）
  */
 
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
+import type { NestExpressApplication } from '@nestjs/platform-express';
+import * as fs from 'node:fs/promises';
 import { AppModule } from './app.module';
 import { PrismaService } from './prisma/prisma.service';
+import {
+  AVATAR_SUBDIR,
+  STATIC_ASSETS_PREFIX,
+  resolveAvatarDir,
+  resolveUploadDir,
+} from './modules/upload/upload.constants';
 
 async function bootstrap(): Promise<void> {
   const logger = new Logger('Bootstrap');
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
   // ---- 全局前缀 ----
   app.setGlobalPrefix('api');
@@ -40,6 +49,16 @@ async function bootstrap(): Promise<void> {
       },
     }),
   );
+
+  // ---- 静态资源：用户上传文件 ----
+  // 注意：setGlobalPrefix('api') 不作用于 express 静态中间件，
+  // 所以 prefix 必须手写 /api，否则 vite 的 /api 代理转发不到（P0-5）。
+  const uploadDir = resolveUploadDir((key) => process.env[key]);
+  const avatarDir = resolveAvatarDir((key) => process.env[key]);
+  await fs.mkdir(avatarDir, { recursive: true });
+  app.useStaticAssets(uploadDir, { prefix: STATIC_ASSETS_PREFIX });
+  logger.log(`📁 上传目录: ${uploadDir}（子目录 ${AVATAR_SUBDIR}）`);
+  logger.log(`🖼️  静态资源已挂载: ${STATIC_ASSETS_PREFIX}`);
 
   // ---- Swagger 文档（仅开发环境） ----
   if (process.env.NODE_ENV !== 'production') {
