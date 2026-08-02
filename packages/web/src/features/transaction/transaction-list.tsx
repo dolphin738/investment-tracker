@@ -116,7 +116,7 @@ export function TransactionList({
                           txResp.type === TransactionType.BUY ? 'success' : 'destructive'
                         }
                       >
-                        {txResp.type === TransactionType.BUY ? '买入' : '卖出'}
+                        {txResp.type === TransactionType.BUY ? '存入' : '取出'}
                       </Badge>
                     </TableCell>
                     <TableCell className="text-sm whitespace-nowrap">

@@ -143,7 +143,7 @@ export function TransactionForm({
   const priceValue = watch('price');
   const feeValue = watch('fee');
 
-  /** 🆕 自动推算金额：买入 = qty × price + fee，卖出 = qty × price − fee */
+  /** 🆕 自动推算金额：存入 = qty × price + fee，取出 = qty × price − fee */
   const suggestedAmount = useMemo(() => {
     const qty = Number(qtyValue);
     const price = Number(priceValue);
@@ -221,8 +221,8 @@ export function TransactionForm({
               <SelectValue placeholder="选择交易类型" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value={TransactionType.BUY}>买入</SelectItem>
-              <SelectItem value={TransactionType.SELL}>卖出</SelectItem>
+              <SelectItem value={TransactionType.BUY}>存入</SelectItem>
+              <SelectItem value={TransactionType.SELL}>取出</SelectItem>
             </SelectContent>
           </Select>
           {errors.type && (

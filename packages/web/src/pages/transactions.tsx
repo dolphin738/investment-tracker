@@ -90,7 +90,7 @@ export default function TransactionsPage(): JSX.Element {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">交易管理</h1>
           <p className="text-sm text-muted-foreground">
-            录入买入/卖出交易，修改后系统将自动重算受影响日期的净值与 XIRR
+            录入存入/取出交易，修改后系统将自动重算受影响日期的净值与 XIRR
           </p>
         </div>
         <Button onClick={() => setOpen(true)}>
@@ -111,8 +111,8 @@ export default function TransactionsPage(): JSX.Element {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">全部</SelectItem>
-                  <SelectItem value="BUY">买入</SelectItem>
-                  <SelectItem value="SELL">卖出</SelectItem>
+                  <SelectItem value="BUY">存入</SelectItem>
+                  <SelectItem value="SELL">取出</SelectItem>
                 </SelectContent>
               </Select>
             </div>

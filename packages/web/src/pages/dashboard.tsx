@@ -95,8 +95,8 @@ function resolveDateRange(
 
 /** 交易类型中文映射 */
 const TYPE_LABEL: Record<string, string> = {
-  BUY: '买入',
-  SELL: '卖出',
+  BUY: '存入',
+  SELL: '取出',
 };
 
 export default function DashboardPage(): JSX.Element {
@@ -331,7 +331,7 @@ export default function DashboardPage(): JSX.Element {
         <StatCard
           title="净投入本金"
           value={netInvested ? `¥${formatCurrency(netInvested)}` : '暂无数据'}
-          description="买入 - 卖出"
+          description="存入 - 取出"
           trend="neutral"
         />
       </div>
