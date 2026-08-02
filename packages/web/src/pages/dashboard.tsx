@@ -413,8 +413,8 @@ export default function DashboardPage(): JSX.Element {
                         className={cn(
                           'text-xs font-medium',
                           tx.type === TransactionType.BUY
-                            ? 'text-red-600'
-                            : 'text-emerald-600',
+                            ? 'text-emerald-600'
+                            : 'text-red-600',
                         )}
                       >
                         {TYPE_LABEL[tx.type] || tx.type}

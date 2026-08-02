@@ -10,7 +10,7 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "lint": "echo 'web: lint not configured'",
-    "test": "vitest",
+    "test": "vitest run",
     "clean": "rimraf dist"
   },
   "dependencies": {
