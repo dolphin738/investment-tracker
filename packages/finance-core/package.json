@@ -1,0 +1,39 @@
+{
+  "name": "@investment-tracker/finance-core",
+  "version": "1.0.0",
+  "private": true,
+  "description": "投资收益统计系统 — 纯金融算法核心（XIRR / 净值单位份额法），零运行时依赖",
+  "license": "AGPL-3.0",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing/index.d.ts",
+      "default": "./dist/testing/index.js"
+    }
+  },
+  "typesVersions": {
+    "*": {
+      "testing": ["./dist/testing/index.d.ts"]
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "lint": "echo 'finance-core: lint not configured'",
+    "clean": "rimraf dist"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.12",
+    "jest": "^29.7.0",
+    "rimraf": "^5.0.5",
+    "ts-jest": "^29.1.2",
+    "typescript": "^5.3.3"
+  }
+}

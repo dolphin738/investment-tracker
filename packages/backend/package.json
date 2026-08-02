@@ -24,6 +24,7 @@
     "seed": "ts-node prisma/seed.ts"
   },
   "dependencies": {
+    "@investment-tracker/finance-core": "workspace:*",
     "@investment-tracker/shared": "workspace:*",
     "@nestjs/common": "^10.3.0",
     "@nestjs/config": "^3.1.0",

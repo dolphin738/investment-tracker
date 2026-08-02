@@ -47,7 +47,7 @@ import { CalculationService } from './calculation.service';
 import { NavService } from './nav.service';
 import { RecalculationService } from './recalculation.service';
 import { XirrService } from './xirr.service';
-import { InMemoryPrisma, daysBetween, utc } from './testing/in-memory-prisma';
+import { InMemoryPrisma, daysBetween, utc } from '@investment-tracker/finance-core/testing';
 
 // ============================================================
 // 场景定义
