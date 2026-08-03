@@ -10,6 +10,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
   archivePortfolio as archiveApi,
+  clearPortfolioData as clearDataApi,
   createPortfolio as createApi,
   deletePortfolio as deleteApi,
   listPortfolios as listApi,
@@ -95,6 +96,19 @@ export function useDeletePortfolio() {
         clearCurrent();
       }
       queryClient.invalidateQueries({ queryKey: PORTFOLIOS_KEY });
+    },
+  });
+}
+
+/** 清空组合全部数据（保留组合本身，SET-P0-05 危险操作区） */
+export function useClearPortfolioData() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => clearDataApi(id),
+    onSuccess: () => {
+      toast.success('组合数据已清空');
+      // 清空后概览/分析/持仓等数据全部失效，统一失效重取
+      queryClient.invalidateQueries();
     },
   });
 }

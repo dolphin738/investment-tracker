@@ -26,6 +26,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toaster } from 'sonner';
 import { AppLayout } from '@/components/layout/app-layout';
 import { AuthGuard } from '@/components/auth-guard';
+import { PreferenceBootstrap } from '@/components/preference-bootstrap';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { ROUTE_PATH } from '@/lib/constants';
 
@@ -86,7 +87,9 @@ const router = createBrowserRouter([
   {
     element: (
       <AuthGuard>
-        <AppLayout />
+        <PreferenceBootstrap>
+          <AppLayout />
+        </PreferenceBootstrap>
       </AuthGuard>
     ),
     children: [

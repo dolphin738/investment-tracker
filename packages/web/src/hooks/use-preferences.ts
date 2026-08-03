@@ -8,7 +8,8 @@ import {
   getPreferences,
   updatePreferences,
 } from '@/api/preference.api';
-import type { UpdatePreferenceDto } from '@/api/types';
+import type { UpdatePreferenceDto, UserPreference } from '@/api/types';
+import { usePreferenceStore } from '@/stores/preference.store';
 
 /** 偏好查询 key */
 export const PREFERENCE_KEY = ['users', 'preferences'] as const;
@@ -41,9 +42,18 @@ export function useUpdatePreferences() {
         queryClient.setQueryData(PREFERENCE_KEY, context.previous);
       }
     },
-    onSuccess: () => {
+    onSuccess: (_data, payload) => {
       toast.success('偏好已保存');
       queryClient.invalidateQueries({ queryKey: PREFERENCE_KEY });
+      // 同步本地 store：把增量 payload 合并进现有偏好，
+      // 保证概览页 / 分析页即使不重新请求也能立即读到新默认值。
+      const state = usePreferenceStore.getState();
+      if (state.preferences) {
+        state.setPreferences({
+          ...state.preferences,
+          ...payload,
+        } as UserPreference);
+      }
     },
   });
 }

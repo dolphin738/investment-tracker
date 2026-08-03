@@ -54,3 +54,8 @@ export function archivePortfolio(
 export function deletePortfolio(id: string): Promise<null> {
   return http.delete<null>(`/portfolios/${id}`);
 }
+
+/** 清空组合全部数据（保留组合本身，SET-P0-05） */
+export function clearPortfolioData(id: string): Promise<null> {
+  return http.delete<null>(`/portfolios/${id}/data`);
+}

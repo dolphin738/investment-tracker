@@ -56,8 +56,9 @@ export function updateProfile(payload: UpdateProfileRequest): Promise<UserPublic
 /**
  * 注销当前账户（SET-P1-06）。
  *
- * 对应后端 DELETE /api/auth/account（JWT 保护），
- * 成功后用户及其全部组合/交易/快照/净值/XIRR 数据被级联删除。
+ * 对应后端 DELETE /api/auth/account（JWT 保护）。
+ * 后端为软删除：账户及其全部组合数据保留 30 天可恢复，期间不能登录。
+ * 前端要求输入当前邮箱二次确认后才能提交。
  */
 export function deleteAccount(): Promise<null> {
   return http.delete<null>('/auth/account');

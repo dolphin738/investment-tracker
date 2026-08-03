@@ -89,6 +89,10 @@ export interface UserPreference {
   theme: string;
   /** 快照过期提醒阈值（天数），默认 3 */
   staleDays: number;
+  /** 出入金后现金余额软提示开关（SET-P0-07），默认 true */
+  cashHintOnCashflow: boolean;
+  /** 证券买卖后现金余额软提示开关（SET-P0-07），默认 true */
+  cashHintOnTrade: boolean;
   /** 创建时间 ISO 8601 */
   createdAt: string;
   /** 更新时间 ISO 8601 */
@@ -117,4 +121,8 @@ export interface UpdatePreferenceDto {
   theme?: string;
   /** 快照过期提醒阈值 */
   staleDays?: number;
+  /** 出入金后现金余额软提示开关 */
+  cashHintOnCashflow?: boolean;
+  /** 证券买卖后现金余额软提示开关 */
+  cashHintOnTrade?: boolean;
 }

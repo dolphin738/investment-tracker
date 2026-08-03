@@ -40,6 +40,7 @@ import { PageHeader } from '@/components/PageHeader';
 import { CashflowForm } from '@/features/cashflow/cashflow-form';
 import { SecurityTradeForm } from '@/features/security-trade/security-trade-form';
 import { usePortfolioStore } from '@/stores/portfolio.store';
+import { usePreferenceStore } from '@/stores/preference.store';
 import { usePortfolios } from '@/hooks/use-portfolios';
 import {
   useLatestXirr,
@@ -72,11 +73,12 @@ const GRANULARITY_TABS = [
   { value: 'year', label: '年' },
 ] as const;
 
-/** 快捷日期范围（PRD §7.4：近1月/3月/1年/全部） */
+/** 快捷日期范围（PRD §7.4：近1月/3月/1年/全部；另加「今年至今」以覆盖偏好 defaultDateRange=ytd） */
 const DATE_RANGE_OPTIONS = [
   { value: '1m', label: '近1月' },
   { value: '3m', label: '近3月' },
   { value: '1y', label: '近1年' },
+  { value: 'ytd', label: '今年至今' },
   { value: 'all', label: '全部' },
 ] as const;
 
@@ -94,6 +96,9 @@ function resolveDateRange(range: string): { startDate: string; endDate: string }
       break;
     case '1y':
       start.setFullYear(start.getFullYear() - 1);
+      break;
+    case 'ytd':
+      start.setMonth(0, 1);
       break;
     case 'all':
       start.setFullYear(2000, 0, 1);
@@ -118,9 +123,15 @@ export default function DashboardPage(): JSX.Element {
   const [cashflowOpen, setCashflowOpen] = useState(false);
   const [tradeOpen, setTradeOpen] = useState(false);
 
-  // 维度状态
-  const [granularity, setGranularity] = useState<string>('month');
-  const [dateRange, setDateRange] = useState<string>('1y');
+  // 维度状态（SET-P0-02 验收 4：启动时读取偏好作为默认值；
+  // PreferenceBootstrap 已在应用启动时把服务端偏好同步进 preference.store）
+  const getPreference = usePreferenceStore((s) => s.getPreference);
+  const [granularity, setGranularity] = useState<string>(
+    getPreference('defaultGranularity'),
+  );
+  const [dateRange, setDateRange] = useState<string>(
+    getPreference('defaultDateRange'),
+  );
   const { startDate, endDate } = useMemo(
     () => resolveDateRange(dateRange),
     [dateRange],

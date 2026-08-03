@@ -50,6 +50,8 @@ const fixtures = vi.hoisted(() => {
     xirrDecimals: 2,
     theme: 'system',
     staleDays: 3,
+    cashHintOnCashflow: true,
+    cashHintOnTrade: true,
     createdAt: '2024-01-01T00:00:00.000Z',
     updatedAt: '2024-01-01T00:00:00.000Z',
   };
@@ -88,13 +90,15 @@ vi.mock('@/hooks/use-preferences', () => ({
 }));
 
 // 组合 API hooks：PortfolioDialog（即使 open=false 组件函数体也会执行）
-// 同样依赖本模块，故 create/update 一并提供桩
+// 同样依赖本模块，故 create/update/delete/clearData 一并提供桩
 vi.mock('@/hooks/use-portfolios', () => ({
   PORTFOLIOS_KEY: ['portfolios'],
   usePortfolios: () => ({ data: fixtures.portfolios, isLoading: false }),
   useCreatePortfolio: () => ({ mutate: vi.fn(), isPending: false }),
   useUpdatePortfolio: () => ({ mutate: vi.fn(), isPending: false }),
   useDeletePortfolio: () => ({ mutate: vi.fn(), isPending: false }),
+  useArchivePortfolio: () => ({ mutate: vi.fn(), isPending: false }),
+  useClearPortfolioData: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
 // 必须在 vi.mock 之后再导入被测页面与真实 store

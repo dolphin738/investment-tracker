@@ -127,6 +127,43 @@ export class PortfolioService {
   }
 
   /**
+   * 清空组合全部业务数据（SET-P0-05 危险操作区 · 保留组合本身）
+   *
+   * 删除：出入金 / 证券买卖流水 / 标的最新价 / 现金余额 / 总资产记录 /
+   *       每日净值 / 每日 XIRR / 分红 / 费用。
+   * 保留：组合本身与标的主数据（securities 仅剩空壳，可继续录入新交易）。
+   * 重置：Portfolio.baseDate = null。
+   *
+   * 说明：派生表（snapshots/dailyNavs/dailyXirr）直接删除即可，
+   * 无需再触发全量重算（重算依赖「第一笔买入」，清空后必然不存在，调用会 400）。
+   * 后续重新录入数据时，CRUD 模块会自动按需重算。
+   *
+   * @throws NotFoundException 组合不存在或不属于当前用户
+   */
+  async clearData(userId: string, id: string): Promise<null> {
+    await this.findOne(userId, id);
+
+    await this.prisma.$transaction([
+      this.prisma.cashFlow.deleteMany({ where: { portfolioId: id } }),
+      this.prisma.securityTrade.deleteMany({ where: { portfolioId: id } }),
+      this.prisma.securityPrice.deleteMany({ where: { portfolioId: id } }),
+      this.prisma.cashBalance.deleteMany({ where: { portfolioId: id } }),
+      this.prisma.assetSnapshot.deleteMany({ where: { portfolioId: id } }),
+      this.prisma.dailyNav.deleteMany({ where: { portfolioId: id } }),
+      this.prisma.dailyXirr.deleteMany({ where: { portfolioId: id } }),
+      this.prisma.dividendRecord.deleteMany({ where: { portfolioId: id } }),
+      this.prisma.feeRecord.deleteMany({ where: { portfolioId: id } }),
+    ]);
+
+    await this.prisma.portfolio.update({
+      where: { id },
+      data: { baseDate: null },
+    });
+
+    return null;
+  }
+
+  /**
    * 删除组合（级联删除其下所有交易/快照/净值/XIRR）
    */
   async remove(userId: string, id: string): Promise<null> {

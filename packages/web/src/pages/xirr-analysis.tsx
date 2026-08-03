@@ -30,6 +30,7 @@ import type { DimensionSwitcherValue } from '@/features/query/dimension-switcher
 import { XirrTrendChart } from '@/components/charts/xirr-trend-chart';
 import { YearlyBarChart } from '@/components/charts/yearly-bar-chart';
 import { usePortfolioStore } from '@/stores/portfolio.store';
+import { usePreferenceStore } from '@/stores/preference.store';
 import { useXirrSeries, useLatestXirr } from '@/hooks/use-query-data';
 import { formatPercent, formatChange, formatDate } from '@/lib/utils';
 import { getDefaultDateRange } from '@/lib/constants';
@@ -43,8 +44,10 @@ export default function XirrAnalysisPage(): JSX.Element {
   const currentPortfolioId = usePortfolioStore((s) => s.currentPortfolioId);
   const { startDate, endDate } = getDefaultDateRange();
 
+  // 维度初始值（SET-P0-02 验收 4：读取偏好 defaultGranularity 作为默认维度）
+  const getPreference = usePreferenceStore((s) => s.getPreference);
   const [dimension, setDimension] = useState<DimensionSwitcherValue>({
-    granularity: QueryGranularity.MONTH,
+    granularity: getPreference('defaultGranularity') as QueryGranularity,
     startDate,
     endDate,
     aggregation: AggregationMethod.LAST,

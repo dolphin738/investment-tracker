@@ -6,7 +6,8 @@
  * - 用户登录：校验密码，签发 JWT
  * - 获取当前用户信息：根据 userId 查询用户公开信息
  * - 账户修改：修改密码 / 修改邮箱 / 修改个人资料
- * - 注销账户：删除用户，子数据由 Prisma onDelete: Cascade 级联清理
+ * - 注销账户：软删除（deletedAt = now，SET-P1-06），
+ *   子数据仍保留在库中，30 天内可恢复；软删除用户不能登录
  *
  * 错误码约定（见 shared/types/api.ts）：
  * - 1003 邮箱已被注册（HTTP 409）
@@ -94,10 +95,10 @@ export class AuthService {
     }
   }
 
-  /** 按 id 查询用户，不存在抛 UnauthorizedException */
+  /** 按 id 查询用户，不存在或已软删除抛 UnauthorizedException */
   private async findUserOrThrow(userId: string): Promise<User> {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
-    if (!user) {
+    if (!user || user.deletedAt) {
       throw new UnauthorizedException('用户不存在或 Token 无效');
     }
     return user;
@@ -113,6 +114,8 @@ export class AuthService {
    * @throws ConflictException 邮箱已被注册
    */
   async register(email: string, password: string, name?: string): Promise<UserPublic> {
+    // 邮箱唯一约束覆盖软删除用户：deleted_at 记录仍占用 email，
+    // 避免「重注册同邮箱 → 旧数据与新账户混淆」以及唯一索引冲突。
     const existing = await this.prisma.user.findUnique({ where: { email } });
     if (existing) {
       throw new ConflictException('邮箱已被注册');
@@ -133,7 +136,8 @@ export class AuthService {
    */
   async login(email: string, password: string): Promise<AuthTokenResult> {
     const user = await this.prisma.user.findUnique({ where: { email } });
-    if (!user) {
+    // 软删除用户（deletedAt 非空）一律视为不存在，不能登录（SET-P1-06）
+    if (!user || user.deletedAt) {
       throw new UnauthorizedException('邮箱或密码错误');
     }
 
@@ -254,16 +258,20 @@ export class AuthService {
   }
 
   /**
-   * 注销账户：删除用户记录。
+   * 注销账户：软删除（SET-P1-06）。
    *
-   * 组合 / 现金流 / 交易 / 快照 / 净值 / XIRR / 偏好等子数据
-   * 由 Prisma Schema 中的 onDelete: Cascade 级联清理，无需逐个删除。
+   * 仅置 deletedAt = now，用户及其全部组合/现金流/交易/快照/净值/XIRR 数据
+   * 仍保留在库中（保留 30 天可恢复）。软删除期间该用户不能登录，
+   * email 仍占用唯一索引；到期后由运维/定时任务彻底清理。
    *
    * @throws UnauthorizedException 用户不存在或 Token 无效
    */
   async deleteAccount(userId: string): Promise<null> {
     await this.findUserOrThrow(userId);
-    await this.prisma.user.delete({ where: { id: userId } });
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { deletedAt: new Date() },
+    });
     return null;
   }
 }

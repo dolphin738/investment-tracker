@@ -33,6 +33,7 @@ import type { DimensionSwitcherValue } from '@/features/query/dimension-switcher
 import { NavTrendChart } from '@/components/charts/nav-trend-chart';
 import { MonthlyHeatmap } from '@/components/charts/monthly-heatmap';
 import { usePortfolioStore } from '@/stores/portfolio.store';
+import { usePreferenceStore } from '@/stores/preference.store';
 import { useNavSeries, useLatestNav } from '@/hooks/use-query-data';
 import { formatDecimal, formatPercent, formatDate } from '@/lib/utils';
 import { getDefaultDateRange } from '@/lib/constants';
@@ -102,8 +103,10 @@ export default function NavAnalysisPage(): JSX.Element {
   const currentPortfolioId = usePortfolioStore((s) => s.currentPortfolioId);
   const { startDate, endDate } = getDefaultDateRange();
 
+  // 维度初始值（SET-P0-02 验收 4：读取偏好 defaultGranularity 作为默认维度）
+  const getPreference = usePreferenceStore((s) => s.getPreference);
   const [dimension, setDimension] = useState<DimensionSwitcherValue>({
-    granularity: QueryGranularity.MONTH,
+    granularity: getPreference('defaultGranularity') as QueryGranularity,
     startDate,
     endDate,
     aggregation: AggregationMethod.LAST,
@@ -116,7 +119,9 @@ export default function NavAnalysisPage(): JSX.Element {
   });
   const latest = useLatestNav(currentPortfolioId);
 
-  // 热力图 + 每日明细表使用日维度数据（独立查询）
+  // 热力图 + 每日明细表固定使用日维度数据（独立查询）。
+  // 注意：这里是技术必需（每日收益/月度热力图依赖日粒度），不是用户偏好，
+  // 因此不读取 defaultGranularity，保持 DAY 硬编码。
   const dayParams: typeof dimension = {
     ...dimension,
     granularity: QueryGranularity.DAY,

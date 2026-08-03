@@ -79,6 +79,10 @@ export interface UserPreference {
   xirrDecimals: number;
   theme: string;
   staleDays: number;
+  /** 出入金后现金余额软提示开关（SET-P0-07） */
+  cashHintOnCashflow: boolean;
+  /** 证券买卖后现金余额软提示开关（SET-P0-07） */
+  cashHintOnTrade: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -94,6 +98,8 @@ export interface UpdatePreferenceDto {
   xirrDecimals?: number;
   theme?: string;
   staleDays?: number;
+  cashHintOnCashflow?: boolean;
+  cashHintOnTrade?: boolean;
 }
 
 // ============================================================================

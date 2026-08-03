@@ -10,6 +10,7 @@
  * - GET    /api/portfolios/:id      — 获取组合详情
  * - PATCH  /api/portfolios/:id      — 更新组合
  * - DELETE /api/portfolios/:id      — 删除组合（级联删除子数据）
+ * - DELETE /api/portfolios/:id/data — 清空组合全部数据（保留组合本身，SET-P0-05）
  * - PATCH  /api/portfolios/:id/archive — 归档 / 取消归档组合
  * - POST   /api/portfolios/:id/recalculate — 全量重算净值与 XIRR
  *
@@ -92,6 +93,21 @@ export class PortfolioController {
     @Param('id') id: string,
   ) {
     return this.portfolioService.remove(user.userId, id);
+  }
+
+  @Delete(':id/data')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: '清空组合全部数据（保留组合本身，SET-P0-05）',
+    description:
+      '删除该组合下全部出入金/证券买卖/现价/现金余额/总资产记录/分红/费用/净值/XIRR，' +
+      '并将 baseDate 重置为 null。组合本身与标的主数据保留。',
+  })
+  async clearData(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ) {
+    return this.portfolioService.clearData(user.userId, id);
   }
 
   @Patch(':id/archive')

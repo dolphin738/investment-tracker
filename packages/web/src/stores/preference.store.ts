@@ -21,6 +21,8 @@ export const DEFAULT_PREFERENCES: Omit<UserPreference, 'id' | 'userId' | 'create
   xirrDecimals: 2,
   theme: 'system',
   staleDays: 3,
+  cashHintOnCashflow: true,
+  cashHintOnTrade: true,
 };
 
 interface PreferenceState {

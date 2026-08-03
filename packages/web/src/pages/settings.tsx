@@ -71,9 +71,10 @@ import { ChangePasswordDialog } from '@/features/account/change-password-dialog'
 import { EditProfileDialog } from '@/features/account/edit-profile-dialog';
 import { UserAvatar } from '@/components/user-avatar';
 import { useAuthStore } from '@/stores/auth.store';
-import { useDeleteAccount } from '@/hooks/use-account';
+import { useDeleteAccount, useUpdateProfile } from '@/hooks/use-account';
 import {
   useArchivePortfolio,
+  useClearPortfolioData,
   useDeletePortfolio,
   usePortfolios,
 } from '@/hooks/use-portfolios';
@@ -148,9 +149,27 @@ export default function SettingsPage(): JSX.Element {
   const [passwordDialogOpen, setPasswordDialogOpen] = useState<boolean>(false);
   const [profileDialogOpen, setProfileDialogOpen] = useState<boolean>(false);
 
-  // 注销账户（危险操作）
+  // 注销账户（危险操作 · SET-P1-06）
   const [deleteAccountOpen, setDeleteAccountOpen] = useState<boolean>(false);
+  const [deleteAccountEmail, setDeleteAccountEmail] = useState<string>('');
   const deleteAccountMutation = useDeleteAccount();
+
+  // 清空当前组合数据（危险操作 · SET-P0-05）
+  const [clearDataOpen, setClearDataOpen] = useState<boolean>(false);
+  const [clearDataConfirmName, setClearDataConfirmName] = useState<string>('');
+  const clearDataMutation = useClearPortfolioData();
+  const currentPortfolio = portfolios.find((p) => p.id === currentPortfolioId) ?? null;
+
+  // 头像 URL 设置（SET-P0-01 验收 2：本地上传 + URL 设置两种方式）
+  const [avatarUrl, setAvatarUrl] = useState<string>(user?.avatar ?? '');
+  const updateProfileMutation = useUpdateProfile();
+  const handleApplyAvatarUrl = (): void => {
+    const url = avatarUrl.trim();
+    if (!url) {
+      return;
+    }
+    updateProfileMutation.mutate({ avatar: url });
+  };
 
   // 🆕 偏好本地编辑状态（乐观更新）
   const [prefForm, setPrefForm] = useState({
@@ -279,6 +298,34 @@ export default function SettingsPage(): JSX.Element {
             </div>
           </div>
 
+          {/* 头像 URL 设置（SET-P0-01 验收 2：本地上传 + URL 设置两种方式） */}
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+            <div className="flex-1 space-y-1.5">
+              <Label htmlFor="avatar-url">头像 URL</Label>
+              <Input
+                id="avatar-url"
+                type="url"
+                placeholder="https://example.com/avatar.png"
+                value={avatarUrl}
+                onChange={(e) => setAvatarUrl(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">
+                输入图片 URL 后点「应用」即可设为头像；也可在「编辑资料」中本地上传
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleApplyAvatarUrl}
+              disabled={!avatarUrl.trim() || updateProfileMutation.isPending}
+            >
+              {updateProfileMutation.isPending && (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              )}
+              应用 URL
+            </Button>
+          </div>
+
           {/* 操作区 */}
           <div className="flex flex-wrap gap-2">
             <Button
@@ -313,25 +360,52 @@ export default function SettingsPage(): JSX.Element {
         </CardContent>
       </Card>
 
-      {/* 危险操作区 */}
+      {/* 危险操作区（SET-P0-05 清空数据 + SET-P1-06 注销账户，语义严格区分） */}
       <Card className="border-destructive/40">
         <CardHeader>
           <CardTitle className="text-base text-destructive">危险操作区</CardTitle>
-          <CardDescription>以下操作不可恢复，请谨慎执行</CardDescription>
+          <CardDescription>以下操作不可恢复或代价极高，请谨慎执行</CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-4">
+          {/* 清空当前组合数据（SET-P0-05）：只清数据、保留组合 */}
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <p className="text-sm font-medium">注销账户</p>
+              <p className="text-sm font-medium">清空当前组合数据</p>
               <p className="text-xs text-muted-foreground">
-                永久删除账户及其全部组合、交易与快照数据（SET-P1-06）
+                删除当前组合的全部出入金、证券买卖、净值与 XIRR 等数据，
+                但保留组合本身（SET-P0-05）
               </p>
             </div>
             <Button
               variant="outline"
               size="sm"
               className="text-destructive hover:text-destructive"
-              onClick={() => setDeleteAccountOpen(true)}
+              onClick={() => {
+                setClearDataConfirmName('');
+                setClearDataOpen(true);
+              }}
+              disabled={!currentPortfolio}
+              title={currentPortfolio ? undefined : '请先在顶部选择一个组合'}
+            >
+              清空数据
+            </Button>
+          </div>
+
+          {/* 注销账户（SET-P1-06）：软删除账户本身及全部数据 */}
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-3">
+            <div>
+              <p className="text-sm font-semibold text-destructive">注销账户</p>
+              <p className="text-xs text-muted-foreground">
+                软删除账户本身及全部组合（保留 30 天可恢复，到期后彻底删除）（SET-P1-06）
+              </p>
+            </div>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => {
+                setDeleteAccountEmail('');
+                setDeleteAccountOpen(true);
+              }}
             >
               注销账户
             </Button>
@@ -742,7 +816,7 @@ export default function SettingsPage(): JSX.Element {
         onOpenChange={setProfileDialogOpen}
       />
 
-      {/* 注销账户确认 */}
+      {/* 注销账户确认（SET-P1-06：邮箱二次确认 + 软删除文案） */}
       <AlertDialog
         open={deleteAccountOpen}
         onOpenChange={setDeleteAccountOpen}
@@ -751,23 +825,98 @@ export default function SettingsPage(): JSX.Element {
           <AlertDialogHeader>
             <AlertDialogTitle>确认注销账户？</AlertDialogTitle>
             <AlertDialogDescription>
-              注销后将永久删除您的账户及全部组合、交易、快照、净值与 XIRR 数据，
-              此操作不可撤销。
+              注销将删除账户本身及全部组合（软删除保留 30 天可恢复，到期后彻底删除）。
+              30 天内无法登录，如需恢复请联系客服。
+              此操作与「清空当前组合数据」不同：后者仅清空单个组合数据、保留账户。
             </AlertDialogDescription>
           </AlertDialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="delete-account-email">
+              请输入当前邮箱 <span className="font-mono">{user?.email ?? ''}</span> 以确认
+            </Label>
+            <Input
+              id="delete-account-email"
+              type="email"
+              placeholder={user?.email ?? '请输入当前邮箱'}
+              value={deleteAccountEmail}
+              onChange={(e) => setDeleteAccountEmail(e.target.value)}
+            />
+          </div>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={deleteAccountMutation.isPending}>
               取消
             </AlertDialogCancel>
             <AlertDialogAction
               onClick={() => deleteAccountMutation.mutate()}
-              disabled={deleteAccountMutation.isPending}
+              disabled={
+                deleteAccountMutation.isPending ||
+                deleteAccountEmail.trim() !== (user?.email ?? '')
+              }
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               {deleteAccountMutation.isPending && (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               )}
               确认注销
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* 清空当前组合数据确认（SET-P0-05：手动输入组合名称 + 列出删除类型） */}
+      <AlertDialog open={clearDataOpen} onOpenChange={setClearDataOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认清空该组合数据？</AlertDialogTitle>
+            <AlertDialogDescription>
+              将删除组合「{currentPortfolio?.name ?? ''}」下的以下全部数据，
+              组合本身保留，此操作不可撤销：
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <ul className="list-disc space-y-0.5 pl-5 text-sm text-muted-foreground">
+            <li>出入金流水</li>
+            <li>证券买卖流水</li>
+            <li>标的最新价 / 现金余额</li>
+            <li>总资产记录（快照）</li>
+            <li>每日净值 / 每日 XIRR</li>
+            <li>分红 / 费用</li>
+          </ul>
+          <div className="space-y-2">
+            <Label htmlFor="clear-data-confirm">
+              请输入组合名称 <span className="font-mono">{currentPortfolio?.name ?? ''}</span> 以确认
+            </Label>
+            <Input
+              id="clear-data-confirm"
+              placeholder={currentPortfolio?.name ?? '请输入组合名称'}
+              value={clearDataConfirmName}
+              onChange={(e) => setClearDataConfirmName(e.target.value)}
+            />
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={clearDataMutation.isPending}>
+              取消
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (currentPortfolio) {
+                  clearDataMutation.mutate(currentPortfolio.id, {
+                    onSuccess: () => {
+                      setClearDataOpen(false);
+                      setClearDataConfirmName('');
+                    },
+                  });
+                }
+              }}
+              disabled={
+                clearDataMutation.isPending ||
+                clearDataConfirmName.trim() !== (currentPortfolio?.name ?? '')
+              }
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {clearDataMutation.isPending && (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              )}
+              确认清空
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
