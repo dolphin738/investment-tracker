@@ -599,7 +599,7 @@ enum FeeType { COMMISSION STAMP_TAX OTHER }
 
 ### 3.2 设计要点说明
 
-#### 多组合关联
+#### 3.2.1 多组合关联
 
 ```
 User (1) ──< Portfolio (N)
@@ -619,7 +619,7 @@ User (1) ──< Portfolio (N)
 - 级联删除：`onDelete: Cascade` 贯穿；删除 User 级联其所有 Portfolio 及子记录。
 - **🔴 `Holding` 表已废除**（方案B：持仓不落库，由 `SecurityTrade` 回放推导，见 §9）。
 
-#### 数据精度（C-04，统一为 (20,8)）
+#### 3.2.2 数据精度（C-04，统一为 (20,8)）
 
 | 数据项 | Prisma / PostgreSQL | 精度 |
 |--------|---------------------|------|
@@ -630,13 +630,13 @@ User (1) ──< Portfolio (N)
 
 > **XIRR 精度裁定（E2 决策）**：以代码实际 `Decimal(20,8)` 为准，反向统一 PRD §9.1 与 MEMORY.md（原 (10,8)/(10,6) 整条订正为 (20,8)）。展示仍为百分比 2 位小数，无变化。
 
-#### AssetSnapshot 每日唯一不变量（数据库层）
+#### 3.2.3 AssetSnapshot 每日唯一不变量（数据库层）
 
 - `UNIQUE(portfolioId, date)` **不含 `source`** → 每组合每自然日至多一行，是全局硬约束（REG-05）。
 - 两写方写同一行：`persistDerived()`（自动，遇 `MANUAL` 跳过）与 `upsertManual()`（手工，无条件覆盖）。读取直接读当日那一行，无需优先级判断（C-12）。
 - 详细写入/冲突规范与 `source`/`valuationFlag` 语义见 **§8 总资产派生层**。
 
-#### SecurityType.CASH 口径裁决
+#### 3.2.4 SecurityType.CASH 口径裁决
 
 - 枚举值保留（避免破坏性迁移），标注 `@deprecated`；新建标的时**隐藏 CASH 选项**，CASH 类记录不予建立，避免与 `CashBalance` 在 `totalAsset` 中双计（PRD §5.3 决策 A′）。
 
@@ -654,7 +654,7 @@ User (1) ──< Portfolio (N)
 
 ### 4.2 API 接口列表
 
-#### 认证模块
+#### 4.2.1 认证模块
 
 | Method | Path | 说明 | 请求体 | 响应 data |
 |--------|------|------|--------|-----------|
@@ -663,7 +663,7 @@ User (1) ──< Portfolio (N)
 | GET | `/api/auth/me` | 获取当前用户 | — | `{ id, email, name }` |
 | PATCH | `/api/auth/profile` | 更新个人资料（写入口，**仅 `/settings` 调用**）| `{ name?, avatar? }` | `{ id, email, name, avatar }` |
 
-#### 组合管理
+#### 4.2.2 组合管理
 
 | Method | Path | 说明 | 请求体/参数 | 响应 data |
 |--------|------|------|------------|-----------|
@@ -676,7 +676,7 @@ User (1) ──< Portfolio (N)
 
 > 🔴 **副作用**：`/data` 清除在事务内逐层删（`asset_snapshots` → `cashflows` → `security_trades` → `security_prices`），删完后对整个组合触发一次 `recalculateNavRange`（起点=首笔事件日，终点=today），确保 daily_nav/daily_xirr 表清空至初始状态。对应 PRD `SNAP-P0-06`(4) 删除功能 + US-S5「清空组合重来」。
 
-#### 出入金管理（`/cashflows`）
+#### 4.2.3 出入金管理（`/cashflows`）
 
 > **命名变更（v2.0）**：原 `transactions` 端点**重命名为 `cashflows`**。旧路径 `/api/portfolios/:portfolioId/transactions` 保留 **301 重定向**至 `/api/portfolios/:portfolioId/cashflows`，至少保留 2 个大版本（避免前端/APP 断链）。出入金是 XIRR 现金流与 NAV 申赎项的**唯一来源**，**不含** `securityId/quantity/price/fee`（证券明细归属 `security-trades`，见 §9）。
 
@@ -689,7 +689,7 @@ User (1) ──< Portfolio (N)
 
 > **副作用**：经 `recalculation.service` 统一入口触发区间重建(见 §7.3 / §12)。出入金不含证券明细，现金流口径以 `amount` 唯一（C-02）。
 
-#### 总资产记录管理（`/snapshots` · 每日唯一）
+#### 4.2.4 总资产记录管理（`/snapshots` · 每日唯一）
 
 > 🔴 **每日唯一一条**（`UNIQUE(portfolioId, date)`，不含 `source`）。读取直接读当日那一行，无需优先级判断（C-12）。两写方：派生层 `persistDerived()`（遇 `MANUAL` 跳过）与手工 `upsertManual()`（无条件覆盖）。详见 §8。
 
@@ -705,7 +705,7 @@ User (1) ──< Portfolio (N)
 > **手工记录校验**：`totalAsset ≥ 0`；`marketValue`/`cashBalance` 选填；`note` 强提示；不允许未来日期。
 > 🔴 **写操作的级联义务（T5，见 §7.3.1 / §8.1 / REG-06）**：`POST` / `PATCH` / `DELETE` / `reset` 四个写接口**均须**在同一事务内调用 `recalculateNavRange(portfolioId, date)`，重算 `[date, today]` 的 `daily_nav` / `daily_xirr`。**快照层只动当日那一行，计算层必须级联至今日** —— 漏做即产生「改了历史总资产但其后净值/XIRR 不变」的静默数据错误。四个接口的响应体统一附加 `meta.recalculatedDays: number`，供前端 toast 反馈「已重算 N 天」（`SNAP-P0-06` 验收 4 / `SNAP-P0-07` 验收 5）。
 
-#### 标的管理（`/securities`）
+#### 4.2.5 标的管理（`/securities`）
 
 | Method | Path | 说明 | 请求体/参数 | 响应 data |
 |--------|------|------|------------|-----------|
@@ -714,7 +714,7 @@ User (1) ──< Portfolio (N)
 | PATCH | `/api/portfolios/:portfolioId/securities/:id` | 编辑标的 | `{ name?, type? }` | `Security` |
 | DELETE | `/api/portfolios/:portfolioId/securities/:id` | 删除标的（级联删其 trades/prices） | — | `null` |
 
-#### 证券买卖流水（`/security-trades` · 方案B 持仓推导来源）
+#### 4.2.6 证券买卖流水（`/security-trades` · 方案B 持仓推导来源）
 
 | Method | Path | 说明 | 请求体/参数 | 响应 data |
 |--------|------|------|------------|-----------|
@@ -725,7 +725,7 @@ User (1) ──< Portfolio (N)
 
 > **硬校验（卖出）**：卖出数量不得超过当前持仓；若会导致负持仓（含未来日期）→ 拒绝（400）。`avgCost` 由回放推导，用户不手填（Q-04 改判）。
 
-#### 标的最新价（`/security-prices`）
+#### 4.2.7 标的最新价（`/security-prices`）
 
 | Method | Path | 说明 | 请求体/参数 | 响应 data |
 |--------|------|------|------------|-----------|
@@ -736,7 +736,7 @@ User (1) ──< Portfolio (N)
 
 > 更新现价触发受影响日期自动记录重建（手工记录日期跳过）。批量保存合并为单次区间重建（Q-B8）。
 
-#### 现金余额（`/cash-balances` · 独立 · 零联动）
+#### 4.2.8 现金余额（`/cash-balances` · 独立 · 零联动）
 
 | Method | Path | 说明 | 请求体/参数 | 响应 data |
 |--------|------|------|------------|-----------|
@@ -747,7 +747,7 @@ User (1) ──< Portfolio (N)
 
 > 🔴 **零联动（决策 B）**：存入/取出、证券买卖**不改**它；仅在保存后给软提示。修改任一条 → 从该 `asOf` 起级联重算、覆盖 `DERIVED` 记录，手工记录跳过（CASH-P0-03）。单一录入入口 = 出入金管理页「现金余额」区块（CASH-P0-02）。
 
-#### 持仓查询（`/holdings` · 方案B 派生，只读）
+#### 4.2.9 持仓查询（`/holdings` · 方案B 派生，只读）
 
 > 🔴 方案B 持仓**不入库**，由 `SecurityTrade` 流水按 `(date, createdAt)` 升序回放推导（见 §9）。本端点为只读查询，**无 CRUD**；卖出硬校验口径见 §9.2。
 
@@ -755,14 +755,14 @@ User (1) ──< Portfolio (N)
 |--------|------|------|---------|-----------|
 | GET | `/api/portfolios/:portfolioId/holdings` | 持仓列表（实时推导）| `?date&securityId&includeClosed` | `HoldingView[]`（含 `quantity`/`costTotal`/`avgCost`/`marketValue`/`pnl`/`ratio`）|
 
-#### 组合概览（`/overview` · Dashboard 落地页）
+#### 4.2.10 组合概览（`/overview` · Dashboard 落地页）
 
 | Method | Path | 说明 | 请求参数 | 响应 data |
 |--------|------|------|---------|-----------|
 | GET | `/api/portfolios/:portfolioId/overview` | 核心指标 + 趋势（一屏） | `?range` | `OverviewDTO`（当前总资产/累计XIRR/当年XIRR/净值序列片段/近期出入金） |
 | GET | `/api/portfolios/summary` | 多组合对比摘要（一次查询） | — | `PortfolioSummary[]` |
 
-#### XIRR 查询（四维度）
+#### 4.2.11 XIRR 查询（四维度）
 
 | Method | Path | 说明 | 请求参数 | 响应 data |
 |--------|------|------|---------|-----------|
@@ -778,7 +778,7 @@ User (1) ──< Portfolio (N)
 }
 ```
 
-#### 净值查询（四维度）
+#### 4.2.12 净值查询（四维度）
 
 | Method | Path | 说明 | 请求参数 | 响应 data |
 |--------|------|------|---------|-----------|
@@ -796,13 +796,13 @@ User (1) ──< Portfolio (N)
 }
 ```
 
-#### 计算触发
+#### 4.2.13 计算触发
 
 | Method | Path | 说明 | 请求体 | 响应 data |
 |--------|------|------|--------|-----------|
 | POST | `/api/portfolios/:portfolioId/recalculate` | 手动触发批量重算 | `{ startDate, endDate? }` | `{ affectedDates: number, duration: number }` |
 
-#### 统计摘要（Dashboard 卡片）
+#### 4.2.14 统计摘要（Dashboard 卡片）
 
 | Method | Path | 说明 | 请求参数 | 响应 data |
 |--------|------|------|---------|-----------|
@@ -820,7 +820,7 @@ User (1) ──< Portfolio (N)
 }
 ```
 
-#### 最大回撤（`/metrics/drawdown` · P1）
+#### 4.2.15 最大回撤（`/metrics/drawdown` · P1）
 
 | Method | Path | 说明 | 请求参数 | 响应 data |
 |--------|------|------|---------|-----------|
@@ -838,7 +838,7 @@ User (1) ──< Portfolio (N)
 
 > `maxDrawdown` 在 `PortfolioSummary` 中仍保留为单值摘要字段（P1，v1 可返回 null），本端点提供时间序列视图。
 
-#### 账户与设置（`/account` 只读 · `/settings` 写）
+#### 4.2.16 账户与设置（`/account` 只读 · `/settings` 写）
 
 > **职责重划（SET-P0-02）**：`/account` 为纯只读聚合视图，数据来自 `GET /api/auth/me` + `GET /api/account/stats`；所有「写」动作（资料、头像、偏好、重置重算）统一收口 `/settings`，经 `PATCH /api/auth/profile` + `GET/PATCH /api/users/preferences`（与 §10.1 前端职责一致）。
 
@@ -1052,7 +1052,7 @@ export interface PortfolioSummary {
 
 ### 7.1 XIRR 计算服务
 
-#### 方案选择：自实现 Newton-Raphson（不用 npm 包）
+#### 7.1.1 方案选择：自实现 Newton-Raphson（不用 npm 包）
 
 **理由**：
 1. PRD 已提供完整伪代码，实现约 60 行
@@ -1060,7 +1060,7 @@ export interface PortfolioSummary {
 3. 自实现可完全控制精度阈值、迭代上限、边界返回值
 4. 金融计算需要可审计、可测试的确定性实现
 
-#### 核心实现
+#### 7.1.2 核心实现
 
 ```typescript
 // packages/backend/src/modules/calculation/xirr.service.ts
@@ -1156,13 +1156,13 @@ export class XirrService {
 }
 ```
 
-#### 数据精度（E2 决策 · XIRR = `DECIMAL(20,8)`）
+#### 7.1.3 数据精度（E2 决策 · XIRR = `DECIMAL(20,8)`）
 
 - **存储精度**：`DailyXirr.xirrValue DECIMAL(20,8)`（8 位小数）。以代码实际 `Decimal(20,8)` 为准，反向统一 PRD §9.1 与 MEMORY.md（原 `(10,8)`/`(10,6)` 整条订正为 `(20,8)`）。
 - **展示精度**：百分比 2 位小数（`xirrDecimals = 2`，见 `UserPreference`），无变化。
 - **计算中间值**：Newton-Raphson 在 JS `number` 双精度下迭代，落库时四舍五入至 8 位（`prisma Decimal` 序列化为字符串传输，避免前端精度丢失）。
 
-#### 边界处理
+#### 7.1.4 边界处理
 
 | 场景 | 处理方式 |
 |------|---------|
@@ -1175,7 +1175,7 @@ export class XirrService {
 
 ### 7.2 净值计算服务
 
-#### 份额法实现
+#### 7.2.1 份额法实现
 
 ```typescript
 // packages/backend/src/modules/calculation/nav.service.ts
@@ -1269,7 +1269,7 @@ export class NavService {
 }
 ```
 
-#### 关键逻辑说明
+#### 7.2.2 关键逻辑说明
 
 | 场景 | 处理 |
 |------|------|
@@ -1493,7 +1493,7 @@ ON CONFLICT (portfolio_id, date) DO UPDATE
 
 ### 10.1 Web 端
 
-#### 页面路由结构
+#### 10.1.1 页面路由结构
 
 ```
 /login                          → 登录页
@@ -1513,7 +1513,7 @@ ON CONFLICT (portfolio_id, date) DO UPDATE
 
 > ✅ **ANL-P0-06 配色已裁决（PRD v3.1.4 闭环）**：每日收益明细表采用 **正收益红色、负收益绿色**（A 股涨跌色），统一口径见 **PRD §9.5 全局涨跌配色约定**。前端常量与 `UserPreference.theme` 以 PRD §9.5 为唯一权威，不再保留任何反向表述（原「待 PM 澄清」标注已随 v3.1.4 裁决关闭）。
 
-#### 组件分层
+#### 10.1.2 组件分层
 
 | 层级 | 目录 | 职责 |
 |------|------|------|
@@ -1525,7 +1525,7 @@ ON CONFLICT (portfolio_id, date) DO UPDATE
 | **stores** | `src/stores/` | Zustand 全局状态（auth token、当前选中组合） |
 | **lib** | `src/lib/` | 工具函数（cn, format, api-client） |
 
-#### 状态管理分工
+#### 10.1.3 状态管理分工
 
 | 状态类型 | 管理方案 | 示例 |
 |---------|---------|------|
@@ -1533,7 +1533,7 @@ ON CONFLICT (portfolio_id, date) DO UPDATE
 | 客户端 UI 状态（选中组合、token、用户信息） | **Zustand** | `useAuthStore()`, `usePortfolioStore()` |
 | 表单状态 | **React Hook Form** | 交易录入表单、快照录入表单 |
 
-#### shadcn/ui 组件使用清单
+#### 10.1.4 shadcn/ui 组件使用清单
 
 | 组件 | 用途 |
 |------|------|
@@ -1548,7 +1548,7 @@ ON CONFLICT (portfolio_id, date) DO UPDATE
 | Toast (Sonner) | 消息提示 |
 | Calendar + Popover | 日期选择器 |
 
-#### 图表组件设计
+#### 10.1.5 图表组件设计
 
 | 图表 | 库 | 组件 | 用途 |
 |------|---|------|------|
@@ -1933,7 +1933,7 @@ graph LR
 
 > **P2 降级（P0-9）**：HarmonyOS APP **不在 P0 交付任务内**（§14 任务列表 T01–T04 不含 APP；T05 已移出）。本附录仅固化 P2 交互基线，待 Web 端稳定后独立排期。
 
-### 工程结构
+### 18.1 工程结构
 
 ```
 entry/src/main/ets/
@@ -1947,7 +1947,7 @@ entry/src/main/ets/
 └── utils/                        # 工具函数
 ```
 
-### 页面路由
+### 18.2 页面路由
 
 采用 **Navigation 组件**（HarmonyOS API 12+ 推荐）管理页面栈：
 
@@ -1977,7 +1977,7 @@ struct EntryAbility {
 }
 ```
 
-### 状态管理
+### 18.3 状态管理
 
 | 装饰器 | 用途 |
 |--------|------|
@@ -1989,7 +1989,7 @@ struct EntryAbility {
 
 全局状态（认证 token、当前组合）使用 `@Observed` class + `AppStorage` 管理。
 
-### 网络请求封装
+### 18.4 网络请求封装
 
 ```typescript
 // network/HttpClient.ets
@@ -2020,7 +2020,7 @@ export class HttpClient {
 }
 ```
 
-### 图表方案（推荐）
+### 18.5 图表方案（推荐）
 
 | 图表类型 | 方案 | 理由 |
 |---------|------|------|
@@ -2055,7 +2055,7 @@ struct LineChart {
 }
 ```
 
-### 与 Web 端共用 API 契约
+### 18.6 与 Web 端共用 API 契约
 
 - HarmonyOS APP 无法直接引用 npm `shared` 包
 - 通过 `packages/shared/src/` 中的 TypeScript 类型定义作为**契约文档**
