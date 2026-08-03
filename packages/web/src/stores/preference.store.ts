@@ -8,7 +8,7 @@
  */
 
 import { create } from 'zustand';
-import type { UserPreference } from '@investment-tracker/shared';
+import type { UserPreference } from '@/api/types';
 
 /** 系统默认偏好 */
 export const DEFAULT_PREFERENCES: Omit<UserPreference, 'id' | 'userId' | 'createdAt' | 'updatedAt'> = {

@@ -84,7 +84,7 @@ import {
   FeeType,
   type HoldingResponse,
   type Security,
-} from '@investment-tracker/shared';
+} from '@/api/types';
 import { formatCurrency, formatPercent, formatDate } from '@/lib/utils';
 import { cn } from '@/lib/utils';
 import { ROUTE_PATH } from '@/lib/constants';

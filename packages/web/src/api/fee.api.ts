@@ -8,7 +8,7 @@
  */
 
 import { http } from '@/lib/api-client';
-import type { FeeRecord, CreateFeeRecordDto } from '@investment-tracker/shared';
+import type { FeeRecord, CreateFeeRecordDto } from './types';
 
 /** 获取费用记录列表 */
 export function listFees(portfolioId: string): Promise<FeeRecord[]> {

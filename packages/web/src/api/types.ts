@@ -1,22 +1,240 @@
 /**
- * api/types.ts — API 请求/响应类型
+ * api/types.ts — API 请求/响应类型（Web 端本地定义）
  *
- * 复用 shared 包的核心类型，扩展请求 DTO 类型。
+ * 此文件定义所有 Web 端使用的 API 请求/响应类型。
+ * shared 包中已存在的类型（CashFlow, SecurityTrade, AssetSnapshot 等）从 @investment-tracker/shared import。
+ * shared 包中不存在的 UI 辅助类型（UserPublic, Security, HoldingResponse 等）在此本地定义。
  */
 
 import type {
   AssetSnapshot,
   Portfolio,
-  Transaction,
-  UserPublic,
-} from '@investment-tracker/shared';
-import type {
+  CashFlow,
+  SnapshotSource,
+  SnapshotValuation,
   AggregationMethod,
-  NavMetric,
   QueryGranularity,
 } from '@investment-tracker/shared';
 
-// ===== Auth =====
+// ============================================================================
+// 本地枚举（shared 包中不存在的 UI 层枚举）
+// ============================================================================
+
+/** 标的产品类型 */
+export enum SecurityType {
+  STOCK = 'STOCK',
+  FUND = 'FUND',
+  BOND = 'BOND',
+  CASH = 'CASH',
+  OTHER = 'OTHER',
+}
+
+/** 分红类型 */
+export enum DividendType {
+  CASH = 'CASH',
+  STOCK_DIVIDEND = 'STOCK_DIVIDEND',
+}
+
+/** 费用类型 */
+export enum FeeType {
+  COMMISSION = 'COMMISSION',
+  STAMP_TAX = 'STAMP_TAX',
+  OTHER = 'OTHER',
+}
+
+/** 净值指标切换 */
+export enum NavMetric {
+  CUMULATIVE = 'cumulative',
+  YEAR = 'year',
+  BOTH = 'both',
+}
+
+// ============================================================================
+// 用户相关
+// ============================================================================
+
+/** 用户公开信息（Web 端展示用） */
+export interface UserPublic {
+  id: string;
+  email: string;
+  name: string | null;
+  avatar: string | null;
+  phone: string | null;
+  bio: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** 用户偏好 */
+export interface UserPreference {
+  id: string;
+  userId: string;
+  defaultPortfolioId: string | null;
+  defaultGranularity: string;
+  defaultDateRange: string;
+  aggregation: string;
+  weekStartsOn: number;
+  navDecimals: number;
+  xirrDecimals: number;
+  theme: string;
+  staleDays: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** 更新偏好 DTO */
+export interface UpdatePreferenceDto {
+  defaultPortfolioId?: string | null;
+  defaultGranularity?: string;
+  defaultDateRange?: string;
+  aggregation?: string;
+  weekStartsOn?: number;
+  navDecimals?: number;
+  xirrDecimals?: number;
+  theme?: string;
+  staleDays?: number;
+}
+
+// ============================================================================
+// 标的相关
+// ============================================================================
+
+/** 证券标的 */
+export interface Security {
+  id: string;
+  portfolioId: string;
+  code: string;
+  name: string;
+  type: SecurityType;
+  note: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** 创建标的 DTO */
+export interface CreateSecurityDto {
+  code: string;
+  name: string;
+  type: SecurityType;
+  note?: string;
+}
+
+/** 更新标的 DTO */
+export interface UpdateSecurityDto {
+  code?: string;
+  name?: string;
+  type?: SecurityType;
+  note?: string | null;
+}
+
+// ============================================================================
+// 持仓相关（方案B: 由 SecurityTrade 推导）
+// ============================================================================
+
+/** 持仓响应（前端展示用，后端推导返回） */
+export interface HoldingResponse {
+  id: string;
+  securityId: string;
+  securityName: string;
+  securityCode: string;
+  securityType: string;
+  date: string;
+  quantity: string;
+  avgCost: string;
+  marketPrice: string;
+  marketValue: string;
+  costAmount: string;
+  profit: string;
+  profitRate: string;
+  weight: string;
+  note: string | null;
+}
+
+/** 持仓汇总 */
+export interface HoldingsAggregate {
+  totalMarketValue: string;
+  totalCost: string;
+  totalProfit: string;
+  totalProfitRate: string;
+  securityCount: number;
+}
+
+/** 更新持仓 DTO（前台提交现价等） */
+export interface UpsertHoldingDto {
+  securityId: string;
+  date: string;
+  quantity: string;
+  avgCost: string;
+  marketPrice: string;
+  note?: string;
+}
+
+/** Holding 基础实体（后端存储） */
+export interface Holding {
+  id: string;
+  portfolioId: string;
+  securityId: string;
+  date: string;
+  quantity: string;
+  avgCost: string;
+  marketPrice: string;
+  note: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// ============================================================================
+// 分红/费用相关
+// ============================================================================
+
+/** 分红记录 */
+export interface DividendRecord {
+  id: string;
+  portfolioId: string;
+  securityId: string;
+  date: string;
+  type: DividendType;
+  amount: string;
+  note: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** 创建分红 DTO */
+export interface CreateDividendRecordDto {
+  securityId: string;
+  date: string;
+  type: DividendType;
+  amount: string;
+  note?: string;
+}
+
+/** 费用记录 */
+export interface FeeRecord {
+  id: string;
+  portfolioId: string;
+  securityId: string;
+  date: string;
+  type: FeeType;
+  amount: string;
+  note: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** 创建费用 DTO */
+export interface CreateFeeRecordDto {
+  securityId: string;
+  date: string;
+  type: FeeType;
+  amount: string;
+  note?: string;
+}
+
+// ============================================================================
+// Auth API
+// ============================================================================
+
 export interface LoginRequest {
   email: string;
   password: string;
@@ -38,7 +256,7 @@ export type LoginResponse = AuthTokenResponse;
 
 export type UserProfile = UserPublic;
 
-/** 修改密码请求（confirmPassword 仅前端校验，不发送给后端） */
+/** 修改密码请求 */
 export interface UpdatePasswordRequest {
   currentPassword: string;
   newPassword: string;
@@ -50,7 +268,7 @@ export interface UpdateEmailRequest {
   newEmail: string;
 }
 
-/** 修改个人资料请求：字段缺省=不修改，null/'' =清空 */
+/** 修改个人资料请求 */
 export interface UpdateProfileRequest {
   name?: string | null;
   avatar?: string | null;
@@ -58,16 +276,19 @@ export interface UpdateProfileRequest {
   bio?: string | null;
 }
 
-// ===== Upload =====
-/** 头像上传响应：新地址 + 已写库的最新用户信息 */
+// ============================================================================
+// Upload API
+// ============================================================================
+
 export interface UploadAvatarResponse {
-  /** 站内相对路径，如 /api/uploads/avatar/<uuid>.png */
   url: string;
-  /** 更新后的用户公开信息（avatar 已指向 url） */
   user: UserPublic;
 }
 
-// ===== Portfolio =====
+// ============================================================================
+// Portfolio API
+// ============================================================================
+
 export interface CreatePortfolioRequest {
   name: string;
   description?: string;
@@ -81,73 +302,59 @@ export interface UpdatePortfolioRequest {
 
 export type PortfolioResponse = Portfolio;
 
-// ===== Transaction =====
-/** 创建交易请求（扩展：新增 securityId/quantity/price/fee 可选字段） */
+// ============================================================================
+// Transaction (CashFlow) API — 出入金
+// ============================================================================
+
 export interface CreateTransactionRequest {
   date: string;
   type: 'BUY' | 'SELL';
   amount: string;
-  /** 🆕 关联标的 ID（可选） */
   securityId?: string;
-  /** 🆕 交易数量（可选） */
   quantity?: string;
-  /** 🆕 成交单价（可选） */
   price?: string;
-  /** 🆕 手续费（可选） */
   fee?: string;
   note?: string;
 }
 
-/** 更新交易请求（扩展：新增 securityId/quantity/price/fee） */
 export interface UpdateTransactionRequest {
   date?: string;
   type?: 'BUY' | 'SELL';
   amount?: string;
-  /** 🆕 关联标的 ID（可选，传 null 清空） */
   securityId?: string | null;
-  /** 🆕 交易数量（可选，传 null 清空） */
   quantity?: string | null;
-  /** 🆕 成交单价（可选，传 null 清空） */
   price?: string | null;
-  /** 🆕 手续费（可选，传 null 清空） */
   fee?: string | null;
   note?: string | null;
 }
 
-/** 🆕 扩展交易响应（后端返回含 securityName） */
+/** 出入金响应（含扩展字段） */
 export interface TransactionResponse {
   id: string;
   portfolioId: string;
   date: string;
   type: 'BUY' | 'SELL';
   amount: string;
-  /** 🆕 关联标的 ID */
   securityId: string | null;
-  /** 🆕 标的名称（后端关联查询返回） */
   securityName: string | null;
-  /** 🆕 交易数量 */
   quantity: string | null;
-  /** 🆕 成交单价 */
   price: string | null;
-  /** 🆕 手续费 */
   fee: string | null;
   note: string | null;
   createdAt: string;
   updatedAt: string;
 }
 
-/** 🆕 扩展交易查询参数 */
 export interface TransactionQuery {
   startDate?: string;
   endDate?: string;
   page?: number;
   pageSize?: number;
-  /** 🆕 交易类型筛选 */
   type?: 'BUY' | 'SELL';
-  /** 🆕 标的 ID 筛选 */
   securityId?: string;
 }
 
+/** 通用分页响应 */
 export interface PaginatedResponse<T> {
   items: T[];
   total: number;
@@ -155,7 +362,10 @@ export interface PaginatedResponse<T> {
   pageSize: number;
 }
 
-// ===== Snapshot =====
+// ============================================================================
+// Snapshot API
+// ============================================================================
+
 export interface UpsertSnapshotRequest {
   date: string;
   totalAsset: string;
@@ -169,9 +379,13 @@ export interface SnapshotQuery {
   endDate?: string;
   page?: number;
   pageSize?: number;
+  source?: string;
 }
 
-// ===== Query (XIRR / Nav) =====
+// ============================================================================
+// Query API (XIRR / NAV)
+// ============================================================================
+
 export interface XirrQueryParams {
   granularity?: QueryGranularity;
   startDate?: string;
@@ -187,7 +401,10 @@ export interface NavQueryParams {
   metric?: NavMetric;
 }
 
-// ===== Overview =====
+// ============================================================================
+// Overview API
+// ============================================================================
+
 export interface OverviewResponse {
   totalAsset: string;
   cumulativeNav: number;
@@ -199,6 +416,7 @@ export interface OverviewResponse {
   latestDate: string;
 }
 
+/** 组合摘要（用于账户页资产全景、overview API） */
 export interface PortfolioSummary {
   id: string;
   name: string;
@@ -210,32 +428,10 @@ export interface PortfolioSummary {
   latestDate: string | null;
 }
 
-// ===== Holding =====
-import type { HoldingResponse, HoldingsAggregate, UpsertHoldingDto, Holding } from '@investment-tracker/shared';
-export type { HoldingResponse, HoldingsAggregate, UpsertHoldingDto, Holding };
+// ============================================================================
+// Account API
+// ============================================================================
 
-export interface HoldingsListResponse {
-  items: HoldingResponse[];
-  aggregate: HoldingsAggregate;
-}
-
-// ===== Securities =====
-import type { Security, CreateSecurityDto, UpdateSecurityDto } from '@investment-tracker/shared';
-export type { Security, CreateSecurityDto, UpdateSecurityDto };
-
-// ===== Dividend =====
-import type { DividendRecord, CreateDividendRecordDto, DividendType } from '@investment-tracker/shared';
-export type { DividendRecord, CreateDividendRecordDto, DividendType };
-
-// ===== Fee =====
-import type { FeeRecord, CreateFeeRecordDto, FeeType } from '@investment-tracker/shared';
-export type { FeeRecord, CreateFeeRecordDto, FeeType };
-
-// ===== Preference =====
-import type { UserPreference, UpdatePreferenceDto } from '@investment-tracker/shared';
-export type { UserPreference, UpdatePreferenceDto };
-
-// ===== Account =====
 export interface AccountStats {
   portfolioCount: number;
   transactionCount: number;

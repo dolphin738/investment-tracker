@@ -20,8 +20,8 @@ import type {
   UpdatePasswordRequest,
   UpdateProfileRequest,
   UserProfile,
+  UserPublic,
 } from './types';
-import type { UserPublic } from '@investment-tracker/shared';
 
 /** 用户注册 */
 export function register(payload: RegisterRequest): Promise<UserPublic> {

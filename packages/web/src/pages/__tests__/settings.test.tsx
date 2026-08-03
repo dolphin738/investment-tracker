@@ -30,7 +30,8 @@ import type { Mock, MockInstance } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import type { Portfolio, UserPreference } from '@investment-tracker/shared';
+import type { Portfolio } from '@investment-tracker/shared';
+import type { UserPreference } from '@/api/types';
 
 // ---------------------------------------------------------------------------
 // 测试夹具（vi.hoisted：vi.mock 工厂会被提升到 import 之前执行，

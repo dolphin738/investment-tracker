@@ -39,7 +39,7 @@ import { useTransactions, useDeleteTransaction } from '@/hooks/use-transactions'
 import { TransactionForm } from './transaction-form';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import type { TransactionQuery, TransactionResponse } from '@/api/types';
-import { TransactionType } from '@investment-tracker/shared';
+import { CashFlowType } from '@investment-tracker/shared';
 
 export interface TransactionListProps {
   portfolioId: string;
@@ -113,10 +113,15 @@ export function TransactionList({
                     <TableCell>
                       <Badge
                         variant={
-                          txResp.type === TransactionType.BUY ? 'success' : 'destructive'
+                          txResp.type === CashFlowType.BUY ? 'secondary' : 'outline'
+                        }
+                        className={
+                          txResp.type === CashFlowType.BUY
+                            ? 'bg-up-soft text-up'
+                            : 'bg-down-soft text-down'
                         }
                       >
-                        {txResp.type === TransactionType.BUY ? '存入' : '取出'}
+                        {txResp.type === CashFlowType.BUY ? '存入' : '取出'}
                       </Badge>
                     </TableCell>
                     <TableCell className="text-sm whitespace-nowrap">

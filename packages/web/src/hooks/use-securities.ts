@@ -10,7 +10,7 @@ import {
   updateSecurity,
   deleteSecurity,
 } from '@/api/security.api';
-import type { CreateSecurityDto, UpdateSecurityDto } from '@investment-tracker/shared';
+import type { CreateSecurityDto, UpdateSecurityDto } from '@/api/types';
 
 /** 标的列表 */
 export function useSecurities(portfolioId: string | null) {

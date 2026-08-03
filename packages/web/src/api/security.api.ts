@@ -13,7 +13,7 @@ import type {
   Security,
   CreateSecurityDto,
   UpdateSecurityDto,
-} from '@investment-tracker/shared';
+} from './types';
 
 /** 获取标的列表 */
 export function listSecurities(portfolioId: string): Promise<Security[]> {

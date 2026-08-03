@@ -7,7 +7,7 @@
  */
 
 import { http } from '@/lib/api-client';
-import type { UserPreference, UpdatePreferenceDto } from '@investment-tracker/shared';
+import type { UserPreference, UpdatePreferenceDto } from './types';
 
 /** 获取当前用户偏好 */
 export function getPreferences(): Promise<UserPreference> {

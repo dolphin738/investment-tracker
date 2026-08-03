@@ -28,7 +28,7 @@ import {
 import { useCreateTransaction, useUpdateTransaction } from '@/hooks/use-transactions';
 import { useSecurities } from '@/hooks/use-securities';
 import { toIsoDate } from '@/lib/constants';
-import { TransactionType } from '@investment-tracker/shared';
+import { CashFlowType } from '@investment-tracker/shared';
 import type { TransactionResponse } from '@/api/types';
 
 /** Zod 校验 schema */
@@ -40,7 +40,7 @@ const transactionSchema = z.object({
       const today = toIsoDate(new Date());
       return v <= today;
     }, '日期不能为未来'),
-  type: z.nativeEnum(TransactionType),
+  type: z.nativeEnum(CashFlowType),
   amount: z
     .string()
     .min(1, '请输入金额')
@@ -102,7 +102,7 @@ export function TransactionForm({
     resolver: zodResolver(transactionSchema),
     defaultValues: {
       date: today,
-      type: TransactionType.BUY,
+      type: CashFlowType.BUY,
       amount: '',
       securityId: '',
       quantity: '',
@@ -116,7 +116,7 @@ export function TransactionForm({
     if (transaction) {
       reset({
         date: transaction.date,
-        type: transaction.type as typeof TransactionType.BUY | typeof TransactionType.SELL,
+        type: transaction.type as typeof CashFlowType.BUY | typeof CashFlowType.SELL,
         amount: transaction.amount,
         securityId: transaction.securityId ?? '',
         quantity: transaction.quantity ?? '',
@@ -127,7 +127,7 @@ export function TransactionForm({
     } else {
       reset({
         date: today,
-        type: TransactionType.BUY,
+        type: CashFlowType.BUY,
         amount: '',
         securityId: '',
         quantity: '',
@@ -151,7 +151,7 @@ export function TransactionForm({
     if (!qtyValue || !priceValue || Number.isNaN(qty) || Number.isNaN(price)) return null;
     const base = qty * price;
     const feeNum = Number.isNaN(fee) ? 0 : fee;
-    const raw = typeValue === TransactionType.BUY ? base + feeNum : base - feeNum;
+    const raw = typeValue === CashFlowType.BUY ? base + feeNum : base - feeNum;
     if (raw <= 0) return null;
     return raw.toFixed(2);
   }, [qtyValue, priceValue, feeValue, typeValue]);
@@ -192,7 +192,7 @@ export function TransactionForm({
           onSuccess: () => {
             reset({
               date: today,
-              type: TransactionType.BUY,
+              type: CashFlowType.BUY,
               amount: '',
               securityId: '',
               quantity: '',
@@ -215,14 +215,14 @@ export function TransactionForm({
           <Label>交易类型</Label>
           <Select
             value={typeValue}
-            onValueChange={(v) => setValue('type', v as typeof TransactionType.BUY | typeof TransactionType.SELL)}
+            onValueChange={(v) => setValue('type', v as typeof CashFlowType.BUY | typeof CashFlowType.SELL)}
           >
             <SelectTrigger>
               <SelectValue placeholder="选择交易类型" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value={TransactionType.BUY}>存入</SelectItem>
-              <SelectItem value={TransactionType.SELL}>取出</SelectItem>
+              <SelectItem value={CashFlowType.BUY}>存入</SelectItem>
+              <SelectItem value={CashFlowType.SELL}>取出</SelectItem>
             </SelectContent>
           </Select>
           {errors.type && (
@@ -329,7 +329,7 @@ export function TransactionForm({
           {/* 🆕 自动推算提示 */}
           {suggestedAmount && suggestedAmount !== watch('amount') && (
             <p className="text-xs text-amber-600">
-              💡 按 数量×单价{typeValue === TransactionType.BUY ? '+' : '−'}费用 推算为{' '}
+              💡 按 数量×单价{typeValue === CashFlowType.BUY ? '+' : '−'}费用 推算为{' '}
               <button
                 type="button"
                 className="underline hover:no-underline"

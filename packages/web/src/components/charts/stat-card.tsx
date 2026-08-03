@@ -33,9 +33,9 @@ export function StatCard({
 }: StatCardProps): JSX.Element {
   const trendColor =
     trend === 'up'
-      ? 'text-emerald-600 dark:text-emerald-400'
+      ? 'text-red-600 dark:text-red-400'
       : trend === 'down'
-        ? 'text-red-600 dark:text-red-400'
+        ? 'text-emerald-600 dark:text-emerald-400'
         : 'text-muted-foreground';
   const TrendIcon = trend === 'up' ? ArrowUp : trend === 'down' ? ArrowDown : null;
 

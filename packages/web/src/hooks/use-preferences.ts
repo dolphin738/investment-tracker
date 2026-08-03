@@ -8,7 +8,7 @@ import {
   getPreferences,
   updatePreferences,
 } from '@/api/preference.api';
-import type { UpdatePreferenceDto } from '@investment-tracker/shared';
+import type { UpdatePreferenceDto } from '@/api/types';
 
 /** 偏好查询 key */
 export const PREFERENCE_KEY = ['users', 'preferences'] as const;

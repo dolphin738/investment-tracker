@@ -132,7 +132,8 @@ export function MonthlyHeatmap({
         bottom: 0,
         textStyle: { fontSize: 11 },
         inRange: {
-          color: ['#ef4444', '#f87171', '#fca5a5', '#fde68a', '#86efac', '#22c55e', '#15803d'],
+          // PRD §9.5: 正红负绿 — min(最负) → 绿色, max(最正) → 红色
+          color: ['#15803d', '#22c55e', '#86efac', '#fde68a', '#fca5a5', '#f87171', '#ef4444'],
         },
       },
       series: [

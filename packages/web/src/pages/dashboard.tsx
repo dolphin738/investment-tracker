@@ -36,7 +36,7 @@ import {
 import { useQuery } from '@tanstack/react-query';
 import { getOverview } from '@/api/overview.api';
 import { listTransactions } from '@/api/transaction.api';
-import { TransactionType } from '@investment-tracker/shared';
+import { CashFlowType } from '@investment-tracker/shared';
 import {
   formatPercent,
   formatDecimal,
@@ -93,7 +93,7 @@ function resolveDateRange(
   return { startDate: start.toISOString().slice(0, 10), endDate: endStr };
 }
 
-/** 交易类型中文映射 */
+/** 出入金类型中文映射（BUY=存入，SELL=取出） */
 const TYPE_LABEL: Record<string, string> = {
   BUY: '存入',
   SELL: '取出',
@@ -412,9 +412,9 @@ export default function DashboardPage(): JSX.Element {
                       <span
                         className={cn(
                           'text-xs font-medium',
-                          tx.type === TransactionType.BUY
-                            ? 'text-emerald-600'
-                            : 'text-red-600',
+                          tx.type === CashFlowType.BUY
+                            ? 'text-up'
+                            : 'text-down',
                         )}
                       >
                         {TYPE_LABEL[tx.type] || tx.type}

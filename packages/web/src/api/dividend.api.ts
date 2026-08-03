@@ -11,7 +11,7 @@ import { http } from '@/lib/api-client';
 import type {
   DividendRecord,
   CreateDividendRecordDto,
-} from '@investment-tracker/shared';
+} from './types';
 
 /** 获取分红记录列表 */
 export function listDividends(portfolioId: string): Promise<DividendRecord[]> {

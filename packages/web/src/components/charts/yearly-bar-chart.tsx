@@ -24,8 +24,8 @@ export interface YearlyBarChartProps {
  * 注意：必须使用「逗号分隔」的 hsl 语法 —— ECharts/zrender 的颜色解析器不支持
  * CSS Color Level 4 的空格语法 `hsl(142 71% 45%)`（静默解析失败返回 null）。
  */
-const POSITIVE_COLOR = 'hsl(142, 71%, 45%)'; // ≈ #22c55e，与迁移前数值一致
-const NEGATIVE_COLOR = 'hsl(0, 84%, 60%)'; // ≈ #ef4444，与迁移前数值一致
+const POSITIVE_COLOR = 'hsl(0, 84%, 48%)';   // 红色 - 正向收益（PRD §9.5: 正红负绿）
+const NEGATIVE_COLOR = 'hsl(142, 71%, 38%)'; // 绿色 - 负向收益
 /** 空值柱颜色：ECharts canvas 不解析 CSS 变量，故用硬编码值替代原 hsl(var(--muted-foreground)) */
 const MUTED_COLOR = '#94a3b8';
 /** 网格线色：与迁移前实际渲染色一致（class 未生效，实渲染为 #ccc） */

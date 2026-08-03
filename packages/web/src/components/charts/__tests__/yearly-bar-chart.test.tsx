@@ -54,9 +54,9 @@ const YEARLY_DATA: XirrSeriesPoint[] = [
   { date: '2024-12-31', label: '2024', xirrValue: -0.0567 },
 ];
 
-/** 与组件内常量保持一致（设计文档 §10 视觉等价清单锚点） */
-const POSITIVE_COLOR = 'hsl(142, 71%, 45%)';
-const NEGATIVE_COLOR = 'hsl(0, 84%, 60%)';
+/** 与组件内常量保持一致（PRD §9.5: 正红负绿） */
+const POSITIVE_COLOR = 'hsl(0, 84%, 48%)';
+const NEGATIVE_COLOR = 'hsl(142, 71%, 38%)';
 const MUTED_COLOR = '#94a3b8';
 
 describe('YearlyBarChart — 三态渲染冒烟（ECharts）', () => {
@@ -114,9 +114,9 @@ describe('YearlyBarChart — 三态渲染冒烟（ECharts）', () => {
     expect(typeof colorFn).toBe('function');
     if (typeof colorFn !== 'function') throw new Error('itemStyle.color 应为逐柱着色回调');
 
-    expect(colorFn({ dataIndex: 0 })).toBe(POSITIVE_COLOR); // 正收益 → 绿
+    expect(colorFn({ dataIndex: 0 })).toBe(POSITIVE_COLOR); // 正收益 → 红（PRD §9.5: 正红负绿）
     expect(colorFn({ dataIndex: 1 })).toBe(MUTED_COLOR); // null → 灰（不崩）
-    expect(colorFn({ dataIndex: 2 })).toBe(NEGATIVE_COLOR); // 负收益 → 红
+    expect(colorFn({ dataIndex: 2 })).toBe(NEGATIVE_COLOR); // 负收益 → 绿
     // 越界索引不应抛错（ECharts 内部可能在动画期传入过期 index）
     expect(() => colorFn({ dataIndex: 99 })).not.toThrow();
 

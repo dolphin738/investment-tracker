@@ -9,7 +9,7 @@
  */
 
 import { create } from 'zustand';
-import type { UserPublic } from '@investment-tracker/shared';
+import type { UserPublic } from '@/api/types';
 import { AUTH_TOKEN_KEY, AUTH_USER_KEY } from '@/lib/constants';
 
 interface AuthState {

@@ -12,7 +12,7 @@ import {
   syncHoldingToSnapshot,
   type HoldingQueryParams,
 } from '@/api/holding.api';
-import type { UpsertHoldingDto, HoldingResponse } from '@investment-tracker/shared';
+import type { UpsertHoldingDto, HoldingResponse } from '@/api/types';
 
 /** 持仓列表（含汇总） */
 export function useHoldings(

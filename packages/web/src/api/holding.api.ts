@@ -15,7 +15,7 @@ import type {
   HoldingsAggregate,
   UpsertHoldingDto,
   SecurityType,
-} from '@investment-tracker/shared';
+} from './types';
 
 export interface HoldingQueryParams {
   date?: string;
