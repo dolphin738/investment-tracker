@@ -3,7 +3,7 @@
 > **版本**: v1.0
 > **作者**: 架构师 高见远（Bob）
 > **日期**: 2026-08-01
-> **依据**: `docs/PRD.md` v1.2 + `docs/PRD-modules.md` v1.2
+> **依据**: `docs/PRD.md` v1.2 + `docs/archive/PRD-modules.md` v1.2
 > **状态**: 待评审
 
 ---
