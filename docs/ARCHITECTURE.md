@@ -672,6 +672,9 @@ User (1) ──< Portfolio (N)
 | GET | `/api/portfolios/:id` | 获取组合详情 | — | `Portfolio` |
 | PATCH | `/api/portfolios/:id` | 更新组合 | `{ name?, description? }` | `Portfolio` |
 | DELETE | `/api/portfolios/:id` | 删除组合（级联删除子数据） | — | `null` |
+| DELETE | `/api/portfolios/:id/data` | 清空组合所有数据（保留组合本身），含二次确认 | — | `{ deletedCount: { snapshots, cashflows, securityTrades, ... } }` |
+
+> 🔴 **副作用**：`/data` 清除在事务内逐层删（`asset_snapshots` → `cashflows` → `security_trades` → `security_prices`），删完后对整个组合触发一次 `recalculateNavRange`（起点=首笔事件日，终点=today），确保 daily_nav/daily_xirr 表清空至初始状态。对应 PRD `SNAP-P0-06`(4) 删除功能 + US-S5「清空组合重来」。
 
 #### 出入金管理（`/cashflows`）
 
@@ -816,6 +819,24 @@ User (1) ──< Portfolio (N)
   inceptionDate: string;              // 成立日
 }
 ```
+
+#### 最大回撤（`/metrics/drawdown` · P1）
+
+| Method | Path | 说明 | 请求参数 | 响应 data |
+|--------|------|------|---------|-----------|
+| GET | `/api/portfolios/:portfolioId/metrics/drawdown` | 最大回撤时间序列 | `?startDate&endDate` | `DrawdownPoint[]` |
+
+**DrawdownPoint 结构**:
+```typescript
+{
+  date: string;           // ISO 日期
+  drawdown: number | null;  // 当日回撤比例（如 -0.15 = -15%），null=无数据
+  peakDate: string | null;  // 回撤起算峰日
+  label: string;
+}
+```
+
+> `maxDrawdown` 在 `PortfolioSummary` 中仍保留为单值摘要字段（P1，v1 可返回 null），本端点提供时间序列视图。
 
 #### 账户与设置（`/account` 只读 · `/settings` 写）
 

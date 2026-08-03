@@ -1771,7 +1771,7 @@ price(s, date)   = SecurityPrice 中 asOf ≤ date 的最后一条（向前沿�
 | `GET /api/portfolios/summary` | P0/P1 | PRD-modules §3.5 |
 | `GET /api/portfolios/:id/metrics/drawdown` | P1 | PRD-modules §3.5 |
 | `GET/PATCH /api/users/preferences` | P0 | PRD-modules §7.6 |
-| `GET /api/portfolios/:id/export` `POST .../import` | P0 | PRD-modules §7.6 |
+| `GET /api/portfolios/:id/export` `POST .../import` | P1 | PRD-modules §7.6（对齐 FLOW-P1-01 / HOLD-B-P1-01） |
 | `DELETE /api/portfolios/:id/data` | P0 | PRD-modules §7.6 |
 | `GET /api/account/stats` | **P0** | PRD-modules §6.5 → `ACC-P0-06`（原 `ACC-P1-01` P1 已升级） |
 
