@@ -12,7 +12,7 @@ export {
   SnapshotValuation,
   QueryGranularity,
   AggregationMethod,
-} from './enums';
+} from './enums.ts';
 
 // ── 核心类型 ──
 export type {
@@ -27,14 +27,14 @@ export type {
   NavSeriesPoint,
   XirrSeriesPoint,
   PortfolioSummary,
-} from './types';
+} from './types.ts';
 
 // 用户公开信息定义于 types/user.ts（与 types.ts 文件分离），单独 re-export
-export type { UserPublic } from './types/user';
+export type { UserPublic } from './types/user.ts';
 
 // 查询指标枚举 / 交易类型同样定义于 types/ 目录，单独 re-export
-export { NavMetric } from './types/query';
-export { TransactionType } from './types/transaction';
+export { NavMetric } from './types/query.ts';
+export { TransactionType } from './types/transaction.ts';
 
 // ── API 契约 ──
 export type {
@@ -42,4 +42,4 @@ export type {
   PaginationQuery,
   Paginated,
   DateRangeQuery,
-} from './api-contracts';
+} from './api-contracts.ts';

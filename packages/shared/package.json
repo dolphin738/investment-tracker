@@ -2,6 +2,7 @@
   "name": "@investment-tracker/shared",
   "version": "1.0.0",
   "private": true,
+  "type": "module",
   "description": "Shared TypeScript types, enums, and API contracts for the investment tracker",
   "main": "./src/index.ts",
   "types": "./src/index.ts",

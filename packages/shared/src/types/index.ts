@@ -5,17 +5,17 @@
  * 或细粒度 `import { Portfolio } from '@investment-tracker/shared/types'`
  */
 
-export * from './user.js';
-export * from './portfolio.js';
-export * from './transaction.js';
-export * from './snapshot.js';
-export * from './nav.js';
-export * from './xirr.js';
-export * from './api.js';
-export * from './query.js';
+export * from './user.ts';
+export * from './portfolio.ts';
+export * from './transaction.ts';
+export * from './snapshot.ts';
+export * from './nav.ts';
+export * from './xirr.ts';
+export * from './api.ts';
+export * from './query.ts';
 
 // 🆕 五大模块增量类型
-export * from './security.js';
-export * from './dividend.js';
-export * from './fee.js';
-export * from './preference.js';
+export * from './security.ts';
+export * from './dividend.ts';
+export * from './fee.ts';
+export * from './preference.ts';

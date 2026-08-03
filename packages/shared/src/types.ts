@@ -11,7 +11,7 @@ import type {
   SecuritySide,
   SnapshotSource,
   SnapshotValuation,
-} from './enums';
+} from './enums.ts';
 
 // ==================== 出入金流水（XIRR 现金流唯一来源）====================
 

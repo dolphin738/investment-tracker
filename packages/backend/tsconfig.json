@@ -11,6 +11,7 @@
     },
     "emitDecoratorMetadata": true,
     "experimentalDecorators": true,
+    "rewriteRelativeImportExtensions": true,
     "target": "ES2021",
     "strictPropertyInitialization": false
   },
