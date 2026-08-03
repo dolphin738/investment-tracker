@@ -59,8 +59,8 @@ export class XirrService {
    * @returns XIRR 值（小数形式），无快照或数据不足返回 null
    */
   async calculateXirrForDate(portfolioId: string, date: Date): Promise<number | null> {
-    // 1. 查询从成立日到当日的所有交易
-    const transactions = await this.prisma.transaction.findMany({
+    // 1. 查询从成立日到当日的所有出入金（方案B：CashFlow 为 XIRR 现金流唯一来源）
+    const transactions = await this.prisma.cashFlow.findMany({
       where: { portfolioId, date: { lte: date } },
       orderBy: { date: 'asc' },
     });

@@ -65,8 +65,8 @@ export class NavService {
       orderBy: { date: 'desc' },
     });
 
-    // 3. 查询当日交易
-    const dayTransactions = await this.prisma.transaction.findMany({
+    // 3. 查询当日出入金（方案B：CashFlow 为现金流唯一来源）
+    const dayTransactions = await this.prisma.cashFlow.findMany({
       where: { portfolioId, date },
     });
     const buyAmount = dayTransactions

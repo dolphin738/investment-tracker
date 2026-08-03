@@ -10,6 +10,7 @@
 
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { HoldingDerivationService } from '../holding/holding-derivation.service';
 
 /** 概览响应 */
 export interface OverviewResponse {
@@ -48,7 +49,10 @@ export interface OverviewResponse {
 
 @Injectable()
 export class OverviewService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly holdingDerivationService: HoldingDerivationService,
+  ) {}
 
   /**
    * 验证组合归属权
@@ -74,13 +78,12 @@ export class OverviewService {
   ): Promise<OverviewResponse> {
     await this.validatePortfolioOwnership(portfolioId, userId);
 
-    // 并行查询：最新快照、最新净值、最新 XIRR、净投入、持仓、近期交易
+    // 并行查询：最新快照、最新净值、最新 XIRR、净投入现金流（持仓由推导服务按日期计算）
     const [
       latestSnapshot,
       latestNav,
       latestXirr,
       transactions,
-      holdings,
     ] = await Promise.all([
       // 最新资产快照
       this.prisma.assetSnapshot.findFirst({
@@ -100,17 +103,10 @@ export class OverviewService {
         orderBy: { date: 'desc' },
         select: { xirrValue: true, date: true },
       }),
-      // 全部 BUY/SELL 交易（用于计算净投入）
-      this.prisma.transaction.findMany({
+      // 全部 BUY/SELL 出入金（用于计算净投入）
+      this.prisma.cashFlow.findMany({
         where: { portfolioId },
         select: { type: true, amount: true },
-      }),
-      // 持仓数据（最新日期）
-      this.prisma.holding.findMany({
-        where: { portfolioId },
-        orderBy: { date: 'desc' },
-        take: 100,
-        select: { quantity: true, avgCost: true, marketPrice: true, date: true },
       }),
     ]);
 
@@ -135,7 +131,7 @@ export class OverviewService {
       latestNav?.date?.toISOString().split('T')[0] ??
       '';
 
-    // 持仓汇总（仅取最新日期）
+    // 持仓汇总（方案B：由 SecurityTrade 派生，取最新数据日期）
     let holdingsSummary = {
       totalMarketValue: '0',
       totalCost: '0',
@@ -143,21 +139,20 @@ export class OverviewService {
       securityCount: 0,
     };
 
-    if (holdings.length > 0) {
-      const latestDateStr = holdings[0].date.toISOString().split('T')[0];
-      const latestHoldings = holdings.filter(
-        (h) => h.date.toISOString().split('T')[0] === latestDateStr,
-      );
+    const holdings = await this.holdingDerivationService.derive(
+      portfolioId,
+      latestDate ? new Date(latestDate) : new Date(),
+    );
 
+    if (holdings.length > 0) {
       let totalMarketValue = 0;
       let totalCost = 0;
       let count = 0;
 
-      for (const h of latestHoldings) {
-        const qty = Number(h.quantity);
-        if (qty <= 0) continue;
-        totalMarketValue += qty * Number(h.marketPrice);
-        totalCost += qty * Number(h.avgCost);
+      for (const h of holdings) {
+        if (h.quantity <= 0) continue;
+        totalMarketValue += h.marketValue;
+        totalCost += h.costTotal;
         count++;
       }
 
@@ -169,8 +164,8 @@ export class OverviewService {
       };
     }
 
-    // 最近 5 笔交易
-    const recentTransactions = await this.prisma.transaction.findMany({
+    // 最近 5 笔出入金
+    const recentTransactions = await this.prisma.cashFlow.findMany({
       where: { portfolioId },
       orderBy: { date: 'desc' },
       take: 5,

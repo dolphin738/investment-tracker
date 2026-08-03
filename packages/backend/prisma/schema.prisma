@@ -12,42 +12,44 @@ datasource db {
 
 // ==================== 用户表 ====================
 model User {
-  id           String   @id @default(uuid())
-  email        String   @unique
-  passwordHash String   @map("password_hash")
+  id           String          @id @default(uuid())
+  email        String          @unique
+  passwordHash String          @map("password_hash")
   name         String?
-  avatar       String?  @db.VarChar(512)
-  phone        String?  @db.VarChar(20)
-  bio          String?  @db.VarChar(200)
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
+  avatar       String?         @db.VarChar(512)
+  phone        String?         @db.VarChar(20)
+  bio          String?         @db.VarChar(200)
+  createdAt    DateTime        @default(now()) @map("created_at")
+  updatedAt    DateTime        @updatedAt @map("updated_at")
   portfolios   Portfolio[]
   preferences  UserPreference?
+
   @@map("users")
 }
 
 // ==================== 投资组合表 ====================
 model Portfolio {
-  id          String    @id @default(uuid())
-  userId      String    @map("user_id")
-  name        String
-  description String?
-  baseDate    DateTime? @map("base_date") @db.Date
-  currency    String    @default("CNY")
-  archivedAt  DateTime? @map("archived_at")
-  createdAt   DateTime  @default(now()) @map("created_at")
-  updatedAt   DateTime  @updatedAt @map("updated_at")
-  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
-  cashflows        CashFlow[]
-  securities       Security[]
-  securityTrades   SecurityTrade[]
-  securityPrices   SecurityPrice[]
-  cashBalances     CashBalance[]
-  snapshots        AssetSnapshot[]
-  dailyNavs        DailyNav[]
-  dailyXirrs       DailyXirr[]
-  dividends        DividendRecord[]
-  fees             FeeRecord[]
+  id             String           @id @default(uuid())
+  userId         String           @map("user_id")
+  name           String
+  description    String?
+  baseDate       DateTime?        @map("base_date") @db.Date
+  currency       String           @default("CNY")
+  archivedAt     DateTime?        @map("archived_at")
+  createdAt      DateTime         @default(now()) @map("created_at")
+  updatedAt      DateTime         @updatedAt @map("updated_at")
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cashflows      CashFlow[]
+  securities     Security[]
+  securityTrades SecurityTrade[]
+  securityPrices SecurityPrice[]
+  cashBalances   CashBalance[]
+  snapshots      AssetSnapshot[]
+  dailyNavs      DailyNav[]
+  dailyXirrs     DailyXirr[]
+  dividends      DividendRecord[]
+  fees           FeeRecord[]
+
   @@index([userId])
   @@map("portfolios")
 }
@@ -63,6 +65,7 @@ model CashFlow {
   createdAt   DateTime     @default(now()) @map("created_at")
   updatedAt   DateTime     @updatedAt @map("updated_at")
   portfolio   Portfolio    @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+
   @@index([portfolioId, date])
   @@map("cashflows")
 }
@@ -74,19 +77,20 @@ enum CashFlowType {
 
 // ==================== 标的主数据表 ====================
 model Security {
-  id          String       @id @default(uuid())
-  portfolioId String       @map("portfolio_id")
+  id          String           @id @default(uuid())
+  portfolioId String           @map("portfolio_id")
   code        String
   name        String
-  type        SecurityType @default(STOCK)
-  currency    String       @default("CNY")
-  createdAt   DateTime     @default(now()) @map("created_at")
-  updatedAt   DateTime     @updatedAt @map("updated_at")
-  portfolio   Portfolio    @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  type        SecurityType     @default(STOCK)
+  currency    String           @default("CNY")
+  createdAt   DateTime         @default(now()) @map("created_at")
+  updatedAt   DateTime         @updatedAt @map("updated_at")
+  portfolio   Portfolio        @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
   trades      SecurityTrade[]
   prices      SecurityPrice[]
   dividends   DividendRecord[]
   fees        FeeRecord[]
+
   @@unique([portfolioId, code])
   @@map("securities")
 }
@@ -114,6 +118,7 @@ model SecurityTrade {
   updatedAt   DateTime     @updatedAt @map("updated_at")
   portfolio   Portfolio    @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
   security    Security     @relation(fields: [securityId], references: [id], onDelete: Cascade)
+
   @@index([portfolioId, date])
   @@index([securityId, date])
   @@map("security_trades")
@@ -126,46 +131,49 @@ enum SecuritySide {
 
 // ==================== 标的最新价表（向前沿用）====================
 model SecurityPrice {
-  id          String   @id @default(uuid())
-  portfolioId String   @map("portfolio_id")
-  securityId  String   @map("security_id")
-  price       Decimal  @db.Decimal(18, 6)
-  asOf        DateTime @db.Date
-  createdAt   DateTime @default(now()) @map("created_at")
+  id          String    @id @default(uuid())
+  portfolioId String    @map("portfolio_id")
+  securityId  String    @map("security_id")
+  price       Decimal   @db.Decimal(18, 6)
+  asOf        DateTime  @db.Date
+  createdAt   DateTime  @default(now()) @map("created_at")
   portfolio   Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
   security    Security  @relation(fields: [securityId], references: [id], onDelete: Cascade)
+
   @@index([portfolioId, securityId, asOf])
   @@map("security_prices")
 }
 
 // ==================== 现金余额表（独立 · 零联动）====================
 model CashBalance {
-  id          String   @id @default(uuid())
-  portfolioId String   @map("portfolio_id")
-  amount      Decimal  @db.Decimal(18, 2)
-  asOf        DateTime @db.Date
+  id          String    @id @default(uuid())
+  portfolioId String    @map("portfolio_id")
+  amount      Decimal   @db.Decimal(18, 2)
+  asOf        DateTime  @db.Date
   note        String?
-  createdAt   DateTime @default(now()) @map("created_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
   portfolio   Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+
   @@index([portfolioId, asOf])
   @@map("cash_balances")
 }
 
 // ==================== 总资产每日唯一记录表（派生层 + 手工）====================
 model AssetSnapshot {
-  id            String           @id @default(uuid())
-  portfolioId   String           @map("portfolio_id")
-  date          DateTime         @db.Date
-  totalAsset    Decimal          @db.Decimal(18, 2)
-  marketValue   Decimal?         @db.Decimal(18, 2)
-  cashBalance   Decimal?         @db.Decimal(18, 2)
+  id            String            @id @default(uuid())
+  portfolioId   String            @map("portfolio_id")
+  date          DateTime          @db.Date
+  totalAsset    Decimal           @db.Decimal(18, 2)
+  marketValue   Decimal?          @db.Decimal(18, 2)
+  cashBalance   Decimal?          @db.Decimal(18, 2)
   source        SnapshotSource
   valuationFlag SnapshotValuation
   note          String?
-  recordedAt    DateTime         @default(now()) @map("recorded_at")
-  createdAt     DateTime         @default(now()) @map("created_at")
-  updatedAt     DateTime         @updatedAt @map("updated_at")
-  portfolio     Portfolio        @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  recordedAt    DateTime          @default(now()) @map("recorded_at")
+  createdAt     DateTime          @default(now()) @map("created_at")
+  updatedAt     DateTime          @updatedAt @map("updated_at")
+  portfolio     Portfolio         @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+
   @@unique([portfolioId, date])
   @@index([portfolioId, date])
   @@map("asset_snapshots")
@@ -185,17 +193,18 @@ enum SnapshotValuation {
 
 // ==================== 每日净值表 ====================
 model DailyNav {
-  id               String    @id @default(uuid())
-  portfolioId      String    @map("portfolio_id")
-  date             DateTime  @db.Date
-  unitNav          Decimal   @db.Decimal(12, 6) @map("unit_nav")
-  cumulativeNav    Decimal   @db.Decimal(12, 6) @map("cumulative_nav")
-  yearNav          Decimal   @db.Decimal(12, 6) @map("year_nav")
-  shares           Decimal   @db.Decimal(18, 6)
-  baseCumulativeNav Decimal? @db.Decimal(12, 6) @map("base_cumulative_nav")
-  createdAt        DateTime  @default(now()) @map("created_at")
-  updatedAt        DateTime  @updatedAt @map("updated_at")
-  portfolio        Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  id                String    @id @default(uuid())
+  portfolioId       String    @map("portfolio_id")
+  date              DateTime  @db.Date
+  unitNav           Decimal   @map("unit_nav") @db.Decimal(12, 6)
+  cumulativeNav     Decimal   @map("cumulative_nav") @db.Decimal(12, 6)
+  yearNav           Decimal   @map("year_nav") @db.Decimal(12, 6)
+  shares            Decimal   @db.Decimal(18, 6)
+  baseCumulativeNav Decimal?  @map("base_cumulative_nav") @db.Decimal(12, 6)
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+  portfolio         Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+
   @@unique([portfolioId, date])
   @@index([portfolioId, date])
   @@map("daily_nav")
@@ -206,10 +215,11 @@ model DailyXirr {
   id          String    @id @default(uuid())
   portfolioId String    @map("portfolio_id")
   date        DateTime  @db.Date
-  xirrValue   Decimal?  @db.Decimal(20, 8) @map("xirr_value")
+  xirrValue   Decimal?  @map("xirr_value") @db.Decimal(20, 8)
   createdAt   DateTime  @default(now()) @map("created_at")
   updatedAt   DateTime  @updatedAt @map("updated_at")
   portfolio   Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+
   @@unique([portfolioId, date])
   @@index([portfolioId, date])
   @@map("daily_xirr")
@@ -227,46 +237,49 @@ model DividendRecord {
   createdAt   DateTime     @default(now()) @map("created_at")
   portfolio   Portfolio    @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
   security    Security     @relation(fields: [securityId], references: [id], onDelete: Cascade)
+
   @@index([portfolioId, date])
   @@index([securityId, date])
   @@map("dividend_records")
 }
 
 model FeeRecord {
-  id            String   @id @default(uuid())
-  portfolioId   String   @map("portfolio_id")
-  securityId    String   @map("security_id")
-  date          DateTime @db.Date
-  amount        Decimal  @db.Decimal(18, 2)
-  type          FeeType  @default(OTHER)
-  transactionId String?  @map("transaction_id")
+  id            String    @id @default(uuid())
+  portfolioId   String    @map("portfolio_id")
+  securityId    String    @map("security_id")
+  date          DateTime  @db.Date
+  amount        Decimal   @db.Decimal(18, 2)
+  type          FeeType   @default(OTHER)
+  transactionId String?   @map("transaction_id")
   note          String?
-  createdAt     DateTime @default(now()) @map("created_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
   portfolio     Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
   security      Security  @relation(fields: [securityId], references: [id], onDelete: Cascade)
+
   @@index([portfolioId, date])
   @@index([securityId, date])
   @@map("fee_records")
 }
 
 model UserPreference {
-  id                  String   @id @default(uuid())
-  userId              String   @unique @map("user_id")
-  defaultPortfolioId  String?  @map("default_portfolio_id")
-  defaultGranularity  String   @default("month") @map("default_granularity")
-  defaultDateRange    String   @default("1y") @map("default_date_range")
-  aggregation         String   @default("last")
-  weekStartsOn        Int      @default(1) @map("week_starts_on")
-  navDecimals         Int      @default(4) @map("nav_decimals")
-  xirrDecimals        Int      @default(2) @map("xirr_decimals")
-  theme               String   @default("system")
-  staleDays           Int      @default(3) @map("stale_days")
-  showLiquidated      Boolean  @default(false) @map("show_liquidated")
-  costBasisView       String   @default("avg") @map("cost_basis_view")
-  dashboardLayout     Json?    @map("dashboard_layout")
-  createdAt           DateTime @default(now()) @map("created_at")
-  updatedAt           DateTime @updatedAt @map("updated_at")
-  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                 String   @id @default(uuid())
+  userId             String   @unique @map("user_id")
+  defaultPortfolioId String?  @map("default_portfolio_id")
+  defaultGranularity String   @default("month") @map("default_granularity")
+  defaultDateRange   String   @default("1y") @map("default_date_range")
+  aggregation        String   @default("last")
+  weekStartsOn       Int      @default(1) @map("week_starts_on")
+  navDecimals        Int      @default(4) @map("nav_decimals")
+  xirrDecimals       Int      @default(2) @map("xirr_decimals")
+  theme              String   @default("system")
+  staleDays          Int      @default(3) @map("stale_days")
+  showLiquidated     Boolean  @default(false) @map("show_liquidated")
+  costBasisView      String   @default("avg") @map("cost_basis_view")
+  dashboardLayout    Json?    @map("dashboard_layout")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   @@map("user_preferences")
 }
 

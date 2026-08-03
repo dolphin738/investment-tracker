@@ -1,22 +1,18 @@
 /**
- * 持仓管理模块
+ * 持仓模块（方案B）
  *
- * 提供持仓快照 CRUD + upsert + 汇总聚合 + 同步至资产快照。
- * 🆕 提供 HoldingDerivationService（方案B 持仓推导引擎）。
+ * 方案B 持仓不落库，由 HoldingDerivationService 按 SecurityTrade 流水实时推导。
+ * 旧的方案A HoldingService（持仓快照 CRUD，基于已不存在的 Holding 模型）已删除。
+ *
+ * 仅提供 HoldingDerivationService，供 OverviewModule / ValuationModule 等消费。
  * 注意：不依赖 CalculationModule。
- * sync-snapshot 通过 SnapshotModule 间接触发计算（C-09 允许）。
  */
 
 import { Module } from '@nestjs/common';
-import { HoldingController } from './holding.controller';
-import { HoldingService } from './holding.service';
 import { HoldingDerivationService } from './holding-derivation.service';
-import { SnapshotModule } from '../snapshot/snapshot.module';
 
 @Module({
-  imports: [SnapshotModule],
-  controllers: [HoldingController],
-  providers: [HoldingService, HoldingDerivationService],
-  exports: [HoldingService, HoldingDerivationService],
+  providers: [HoldingDerivationService],
+  exports: [HoldingDerivationService],
 })
 export class HoldingModule {}

@@ -16,6 +16,9 @@ import { SecurityTradeModule } from './modules/security-trade/security-trade.mod
 import { SecurityPriceModule } from './modules/security-price/security-price.module';
 import { CashBalanceModule } from './modules/cash-balance/cash-balance.module';
 import { SnapshotModule } from './modules/snapshot/snapshot.module';
+import { AccountModule } from './modules/account/account.module';
+import { OverviewModule } from './modules/overview/overview.module';
+import { QueryModule } from './modules/query/query.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 
 @Module({
@@ -34,6 +37,10 @@ import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
     SecurityPriceModule,
     CashBalanceModule,
     SnapshotModule,
+    // 只读聚合 / 账户统计模块
+    AccountModule,
+    OverviewModule,
+    QueryModule,
   ],
   controllers: [],
   providers: [

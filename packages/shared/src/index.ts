@@ -29,6 +29,13 @@ export type {
   PortfolioSummary,
 } from './types';
 
+// 用户公开信息定义于 types/user.ts（与 types.ts 文件分离），单独 re-export
+export type { UserPublic } from './types/user';
+
+// 查询指标枚举 / 交易类型同样定义于 types/ 目录，单独 re-export
+export { NavMetric } from './types/query';
+export { TransactionType } from './types/transaction';
+
 // ── API 契约 ──
 export type {
   ApiResponse,

@@ -49,8 +49,8 @@ export class AccountService {
       // 组合数量
       this.prisma.portfolio.count({ where: { userId } }),
 
-      // 所有组合累计交易笔数
-      this.prisma.transaction.count({
+      // 所有组合累计出入金笔数（方案B：CashFlow 为现金流唯一来源）
+      this.prisma.cashFlow.count({
         where: { portfolio: { userId } },
       }),
 

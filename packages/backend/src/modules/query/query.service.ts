@@ -20,6 +20,7 @@
  */
 
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import {
   AggregationMethod,
   NavSeriesPoint,
@@ -357,8 +358,8 @@ export class QueryService {
     const page = Number(query.page) || 1;
     const pageSize = Number(query.pageSize) || 20;
 
-    // 构建 where 条件
-    const where: Record<string, unknown> = {
+    // 构建 where 条件（方案B：出入金 CashFlow 无 securityId 维度，标的筛选不适用）
+    const where: Prisma.CashFlowWhereInput = {
       portfolioId,
     };
 
@@ -370,18 +371,13 @@ export class QueryService {
       };
     }
 
-    // 类型筛选
+    // 类型筛选（BUY=存入 / SELL=取出）
     if (query.type) {
       where.type = query.type;
     }
 
-    // 标的筛选
-    if (query.securityId) {
-      where.securityId = query.securityId;
-    }
-
-    // 查询所有符合条件的交易
-    const records = await this.prisma.transaction.findMany({
+    // 查询所有符合条件的出入金记录
+    const records = await this.prisma.cashFlow.findMany({
       where,
       orderBy: { date: 'asc' },
     });

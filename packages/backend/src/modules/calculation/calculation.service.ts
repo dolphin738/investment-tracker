@@ -111,7 +111,7 @@ export class CalculationService {
     });
 
     if (portfolio && !portfolio.baseDate) {
-      const firstBuy = await this.prisma.transaction.findFirst({
+      const firstBuy = await this.prisma.cashFlow.findFirst({
         where: { portfolioId, type: 'BUY' },
         orderBy: { date: 'asc' },
       });
