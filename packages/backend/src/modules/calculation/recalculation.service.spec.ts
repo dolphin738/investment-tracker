@@ -26,7 +26,7 @@ function createMockPrisma() {
     assetSnapshot: {
       findMany: jest.fn(),
     },
-    transaction: {
+    cashFlow: {
       findFirst: jest.fn(),
     },
   };
@@ -136,7 +136,7 @@ describe('RecalculationService', () => {
   describe('recalculateAll', () => {
     it('should recalculate from the first BUY date to the latest snapshot', async () => {
       const inception = d('2024-07-01');
-      mockPrisma.transaction.findFirst.mockResolvedValue({ date: inception });
+      mockPrisma.cashFlow.findFirst.mockResolvedValue({ date: inception });
       mockPrisma.assetSnapshot.findMany.mockResolvedValue([
         { date: d('2024-07-01') },
         { date: d('2024-07-15') },
@@ -148,7 +148,7 @@ describe('RecalculationService', () => {
       expect(result.fromDate).toEqual(inception);
       expect(result.affectedDays).toBe(3);
       // 成立日取第一笔 BUY（升序第一条）
-      expect(mockPrisma.transaction.findFirst).toHaveBeenCalledWith(
+      expect(mockPrisma.cashFlow.findFirst).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { portfolioId: 'p-1', type: 'BUY' },
           orderBy: { date: 'asc' },
@@ -165,7 +165,7 @@ describe('RecalculationService', () => {
     });
 
     it('should throw BadRequestException when the portfolio has no BUY transaction', async () => {
-      mockPrisma.transaction.findFirst.mockResolvedValue(null);
+      mockPrisma.cashFlow.findFirst.mockResolvedValue(null);
 
       await expect(service.recalculateAll('p-1')).rejects.toThrow(BadRequestException);
       expect(mockCalculation.triggerCalculation).not.toHaveBeenCalled();
@@ -173,7 +173,7 @@ describe('RecalculationService', () => {
 
     it('should return affectedDays=0 when the portfolio has no snapshot yet', async () => {
       const inception = d('2024-07-01');
-      mockPrisma.transaction.findFirst.mockResolvedValue({ date: inception });
+      mockPrisma.cashFlow.findFirst.mockResolvedValue({ date: inception });
       mockPrisma.assetSnapshot.findMany.mockResolvedValue([]);
 
       const result = await service.recalculateAll('p-1');

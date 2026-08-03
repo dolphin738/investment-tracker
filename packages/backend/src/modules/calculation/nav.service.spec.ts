@@ -43,7 +43,7 @@ function createMockPrisma() {
     dailyNav: {
       findFirst: jest.fn(),
     },
-    transaction: {
+    cashFlow: {
       findMany: jest.fn(),
     },
   };
@@ -98,7 +98,7 @@ describe('NavService - calculateNavForDate', () => {
 
     mockPrisma.assetSnapshot.findUnique.mockResolvedValue(makeSnapshot(10000, date));
     mockPrisma.dailyNav.findFirst.mockResolvedValue(null); // 无前日净值 → 成立日
-    mockPrisma.transaction.findMany.mockResolvedValue([makeTx('BUY', 10000, date)]);
+    mockPrisma.cashFlow.findMany.mockResolvedValue([makeTx('BUY', 10000, date)]);
 
     const result = await service.calculateNavForDate('portfolio-1', date);
 
@@ -118,7 +118,7 @@ describe('NavService - calculateNavForDate', () => {
 
     mockPrisma.assetSnapshot.findUnique.mockResolvedValue(makeSnapshot(15000, date));
     mockPrisma.dailyNav.findFirst.mockResolvedValue(null);
-    mockPrisma.transaction.findMany.mockResolvedValue([
+    mockPrisma.cashFlow.findMany.mockResolvedValue([
       makeTx('BUY', 10000, date),
       makeTx('BUY', 5000, date),
     ]);
@@ -146,7 +146,7 @@ describe('NavService - calculateNavForDate', () => {
         baseCumulativeNav: 1.0,
       }),
     );
-    mockPrisma.transaction.findMany.mockResolvedValue([]);
+    mockPrisma.cashFlow.findMany.mockResolvedValue([]);
 
     const result = await service.calculateNavForDate('portfolio-1', date);
 
@@ -175,7 +175,7 @@ describe('NavService - calculateNavForDate', () => {
         baseCumulativeNav: 1.0,
       }),
     );
-    mockPrisma.transaction.findMany.mockResolvedValue([makeTx('BUY', 6000, date)]);
+    mockPrisma.cashFlow.findMany.mockResolvedValue([makeTx('BUY', 6000, date)]);
 
     const result = await service.calculateNavForDate('portfolio-1', date);
 
@@ -205,7 +205,7 @@ describe('NavService - calculateNavForDate', () => {
         baseCumulativeNav: 1.0,
       }),
     );
-    mockPrisma.transaction.findMany.mockResolvedValue([makeTx('SELL', 900, date)]);
+    mockPrisma.cashFlow.findMany.mockResolvedValue([makeTx('SELL', 900, date)]);
 
     const result = await service.calculateNavForDate('portfolio-1', date);
 
@@ -235,7 +235,7 @@ describe('NavService - calculateNavForDate', () => {
         baseCumulativeNav: 1.0,
       }),
     );
-    mockPrisma.transaction.findMany.mockResolvedValue([
+    mockPrisma.cashFlow.findMany.mockResolvedValue([
       makeTx('BUY', 6000, date),
       makeTx('SELL', 1200, date),
     ]);
@@ -265,7 +265,7 @@ describe('NavService - calculateNavForDate', () => {
         baseCumulativeNav: 1.2,
       }),
     );
-    mockPrisma.transaction.findMany.mockResolvedValue([]);
+    mockPrisma.cashFlow.findMany.mockResolvedValue([]);
 
     const result = await service.calculateNavForDate('portfolio-1', date);
 
@@ -293,7 +293,7 @@ describe('NavService - calculateNavForDate', () => {
         baseCumulativeNav: 1.5, // 当年基准
       }),
     );
-    mockPrisma.transaction.findMany.mockResolvedValue([]);
+    mockPrisma.cashFlow.findMany.mockResolvedValue([]);
 
     const result = await service.calculateNavForDate('portfolio-1', date);
 
@@ -319,7 +319,7 @@ describe('NavService - calculateNavForDate', () => {
     expect(result).toBeNull();
     // 无快照时不应查询 dailyNav 和 transactions
     expect(mockPrisma.dailyNav.findFirst).not.toHaveBeenCalled();
-    expect(mockPrisma.transaction.findMany).not.toHaveBeenCalled();
+    expect(mockPrisma.cashFlow.findMany).not.toHaveBeenCalled();
   });
 
   // ----------------------------------------------------------
@@ -330,7 +330,7 @@ describe('NavService - calculateNavForDate', () => {
 
     mockPrisma.assetSnapshot.findUnique.mockResolvedValue(makeSnapshot(5000, date));
     mockPrisma.dailyNav.findFirst.mockResolvedValue(null); // 无前日 → 成立日
-    mockPrisma.transaction.findMany.mockResolvedValue([
+    mockPrisma.cashFlow.findMany.mockResolvedValue([
       makeTx('SELL', 5000, date), // 只有卖出，无买入
     ]);
 
@@ -347,7 +347,7 @@ describe('NavService - calculateNavForDate', () => {
 
     mockPrisma.assetSnapshot.findUnique.mockResolvedValue(makeSnapshot(5000, date));
     mockPrisma.dailyNav.findFirst.mockResolvedValue(null);
-    mockPrisma.transaction.findMany.mockResolvedValue([]);
+    mockPrisma.cashFlow.findMany.mockResolvedValue([]);
 
     await expect(
       service.calculateNavForDate('portfolio-1', date),
@@ -369,7 +369,7 @@ describe('NavService - calculateNavForDate', () => {
         baseCumulativeNav: 1.0,
       }),
     );
-    mockPrisma.transaction.findMany.mockResolvedValue([]);
+    mockPrisma.cashFlow.findMany.mockResolvedValue([]);
 
     const result = await service.calculateNavForDate('portfolio-1', date);
     expect(result).toBeNull();
@@ -395,7 +395,7 @@ describe('NavService - calculateNavForDate', () => {
         baseCumulativeNav: 1.0, // 2024 年的基准
       }),
     );
-    mockPrisma.transaction.findMany.mockResolvedValue([]);
+    mockPrisma.cashFlow.findMany.mockResolvedValue([]);
 
     const result = await service.calculateNavForDate('portfolio-1', date);
 
@@ -417,7 +417,7 @@ describe('NavService - calculateNavForDate', () => {
         baseCumulativeNav: 1.5, // 继承年度基准
       }),
     );
-    mockPrisma.transaction.findMany.mockResolvedValue([]);
+    mockPrisma.cashFlow.findMany.mockResolvedValue([]);
 
     const result2 = await service.calculateNavForDate('portfolio-1', date2);
     expect(result2).not.toBeNull();
@@ -464,7 +464,7 @@ describe('NavService - calculateNavForDate', () => {
           baseCumulativeNav: 1.0,
         }),
       );
-      mockPrisma.transaction.findMany.mockResolvedValue(txs);
+      mockPrisma.cashFlow.findMany.mockResolvedValue(txs);
 
       return service.calculateNavForDate('portfolio-1', date);
     }
@@ -604,7 +604,7 @@ describe('NavService - calculateNavForDate', () => {
       const day1 = d('2024-07-01');
       mockPrisma.assetSnapshot.findUnique.mockResolvedValue(makeSnapshot(10000, day1));
       mockPrisma.dailyNav.findFirst.mockResolvedValue(null);
-      mockPrisma.transaction.findMany.mockResolvedValue([makeTx('BUY', 10000, day1)]);
+      mockPrisma.cashFlow.findMany.mockResolvedValue([makeTx('BUY', 10000, day1)]);
 
       const r1 = await service.calculateNavForDate('portfolio-1', day1);
       expect(r1).not.toBeNull();
@@ -622,7 +622,7 @@ describe('NavService - calculateNavForDate', () => {
           baseCumulativeNav: r1!.baseCumulativeNav,
         }),
       );
-      mockPrisma.transaction.findMany.mockResolvedValue([makeTx('BUY', 5000, day2)]);
+      mockPrisma.cashFlow.findMany.mockResolvedValue([makeTx('BUY', 5000, day2)]);
 
       const r2 = await service.calculateNavForDate('portfolio-1', day2);
       expect(r2).not.toBeNull();
@@ -657,7 +657,7 @@ describe('NavService - calculateNavForDate', () => {
           baseCumulativeNav: 1.2,
         }),
       );
-      mockPrisma.transaction.findMany.mockResolvedValue([makeTx('BUY', 8000, date)]);
+      mockPrisma.cashFlow.findMany.mockResolvedValue([makeTx('BUY', 8000, date)]);
 
       const result = await service.calculateNavForDate('portfolio-1', date);
 

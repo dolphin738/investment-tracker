@@ -52,7 +52,7 @@ describe('XirrService - calculateXirrForDate (with mocked Prisma)', () => {
   beforeEach(() => {
     // 创建 mock PrismaService
     mockPrisma = {
-      transaction: {
+      cashFlow: {
         findMany: jest.fn(),
       },
       assetSnapshot: {
@@ -68,7 +68,7 @@ describe('XirrService - calculateXirrForDate (with mocked Prisma)', () => {
   // ----------------------------------------------------------
   it('should merge same-day transactions into net cashflow', async () => {
     // 同日两笔买入 5000 + 5000 = 10000，终值 10500
-    mockPrisma.transaction.findMany.mockResolvedValue([
+    mockPrisma.cashFlow.findMany.mockResolvedValue([
       { date: d('2024-01-01'), type: 'BUY', amount: { toString: () => '5000' } },
       { date: d('2024-01-01'), type: 'BUY', amount: { toString: () => '5000' } },
     ]);
@@ -87,7 +87,7 @@ describe('XirrService - calculateXirrForDate (with mocked Prisma)', () => {
     expect(Math.abs(result! - expected)).toBeLessThan(1e-4);
 
     // 验证 findMany 被调用（确认查询了交易）
-    expect(mockPrisma.transaction.findMany).toHaveBeenCalledTimes(1);
+    expect(mockPrisma.cashFlow.findMany).toHaveBeenCalledTimes(1);
     expect(mockPrisma.assetSnapshot.findUnique).toHaveBeenCalledTimes(1);
   });
 
@@ -96,7 +96,7 @@ describe('XirrService - calculateXirrForDate (with mocked Prisma)', () => {
   // ----------------------------------------------------------
   it('should merge same-day buy and sell into net cashflow', async () => {
     // 同日买入 8000，卖出 3000 → 净投入 5000
-    mockPrisma.transaction.findMany.mockResolvedValue([
+    mockPrisma.cashFlow.findMany.mockResolvedValue([
       { date: d('2024-01-01'), type: 'BUY', amount: { toString: () => '8000' } },
       { date: d('2024-01-01'), type: 'SELL', amount: { toString: () => '3000' } },
     ]);
@@ -119,7 +119,7 @@ describe('XirrService - calculateXirrForDate (with mocked Prisma)', () => {
   // 测试: 无快照返回 null
   // ----------------------------------------------------------
   it('should return null when no snapshot exists for the date', async () => {
-    mockPrisma.transaction.findMany.mockResolvedValue([]);
+    mockPrisma.cashFlow.findMany.mockResolvedValue([]);
     mockPrisma.assetSnapshot.findUnique.mockResolvedValue(null);
 
     const result = await service.calculateXirrForDate('portfolio-1', d('2024-07-01'));
@@ -130,7 +130,7 @@ describe('XirrService - calculateXirrForDate (with mocked Prisma)', () => {
   // 测试: 多日交易 + 终值
   // ----------------------------------------------------------
   it('should build correct cashflows from multi-date transactions + terminal value', async () => {
-    mockPrisma.transaction.findMany.mockResolvedValue([
+    mockPrisma.cashFlow.findMany.mockResolvedValue([
       { date: d('2024-01-01'), type: 'BUY', amount: { toString: () => '5000' } },
       { date: d('2024-04-01'), type: 'BUY', amount: { toString: () => '3000' } },
       { date: d('2024-07-01'), type: 'SELL', amount: { toString: () => '2000' } },

@@ -14,7 +14,7 @@
  *   assetSnapshot.findUnique / findMany
  *   dailyNav.findFirst / upsert
  *   dailyXirr.upsert
- *   transaction.findMany / findFirst
+ *   cashFlow.findMany / findFirst
  *   portfolio.findUnique / update
  */
 
@@ -225,7 +225,7 @@ export class InMemoryPrisma {
     },
   };
 
-  transaction = {
+  cashFlow = {
     findMany: async ({
       where,
     }: {
