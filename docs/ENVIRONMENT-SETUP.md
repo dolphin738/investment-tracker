@@ -133,7 +133,7 @@ pnpm -v   # 应为 9.x 或更高
 - 框架：React 18 + TypeScript
 - UI 组件库：**shadcn/ui**（基于 Radix UI + Tailwind，零冲突，组件代码复制进项目可自由定制；弃用 MUI，因 MUI 的 CSS-in-JS 与 Tailwind 存在样式优先级冲突）
 - 样式：Tailwind CSS 3.x
-- **可视化库**：Recharts（基础图表，shadcn/ui chart 底层）+ ECharts 5.x（热力图等复杂图表，echarts-for-react 封装）
+- **可视化库**：ECharts 5.x（统一图表库，`echarts-for-react` 封装，覆盖折线/柱状/热力图）
 - 状态管理：Zustand（轻量）或 Redux Toolkit（重型可选项）
 - 路由：React Router 6
 - HTTP 客户端：Axios 或 TanStack Query（推荐后者，自带缓存与状态管理）

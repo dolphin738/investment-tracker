@@ -18,7 +18,7 @@
 ┌─────────────────────────────────────────────────────────────────┐
 │                        Web Frontend                              │
 │  Vite + React 18 + TS + Tailwind + shadcn/ui                     │
-│  Zustand (状态) + TanStack Query (缓存) + Recharts/ECharts (图表) │
+│  Zustand (状态) + TanStack Query (缓存) + ECharts (图表)          │
 │  react-hook-form + zod (表单校验) + sonner (Toast)               │
 ├─────────────────────────────────────────────────────────────────┤
 │                      REST API (HTTP)                             │
@@ -745,7 +745,6 @@ sequenceDiagram
 - zustand                    — 已有
 - react-hook-form            — 已有
 - zod                        — 已有
-- recharts                   — 已有
 - echarts                    — 已有
 - echarts-for-react          — 🆕 ECharts React 封装（热力图）
 - sonner                     — 已有
@@ -849,7 +848,7 @@ DividendRecord/FeeRecord 五关键词，搜索结果必须为 0:
 | U-02 | **现金余额字段归属**：D-04 决定"在持仓模块手工录入现金余额"，但未明确是 Holding 表的字段还是独立存储 | Holding 模型设计 | **建议在 HoldingsAggregate 响应中体现**，不单独建表。前端在持仓汇总条旁提供输入框，其值仅用于前端合计展示和 sync-snapshot 时传参 |
 | U-03 | **导入重算策略**：导入大量交易后是否一次性触发全量重算 | 用户体验与性能 | **建议导入完成后一次性调用 recalculateAll**（而非逐笔），与 TXN-P1-01 验收标准一致 |
 | U-04 | **CSV 导出 zip 打包**：是否需要 archiver 依赖 | 包体积 | `archiver` + 内置 `zlib` 可满足需求，约增加 50KB |
-| U-05 | **ECharts 热力图**：PRD-modules 提到月度收益热力图，是否需要 ECharts | 依赖引入 | Recharts 不自带热力图，建议引入 `echarts-for-react`（按需加载，不增加首屏体积） |
+| U-05 | **ECharts 热力图**：PRD-modules 提到月度收益热力图，是否需要 ECharts | 依赖引入 | Recharts 不自带热力图，建议引入 `echarts-for-react`（按需加载，不增加首屏体积）。**【INC-CHART-01 更新】已收敛为 ECharts 单库，Recharts 已移除。** |
 | U-06 | **date-range-picker 组件选型**：shadcn/ui 无内置 DateRangePicker | 开发工作量 | 建议基于 `date-fns` + shadcn/ui `Popover` + `Calendar` 自行组装，或引入 `react-day-picker`（shadcn/ui 官方推荐） |
 | U-07 | **snapshot.upsert 已做级联重算**：PRD-modules §8.2 声称的缺陷不存在 | 设计文档准确性 | 已在本架构文档中标注确认，sync-snapshot 直接复用 |
 | U-08 | **技术风险：Prisma 迁移向后兼容** | 迁移失败会导致存量数据不可用 | 所有新增字段全部 nullable，`prisma migrate dev` 在测试环境先跑一遍确认无报错 |

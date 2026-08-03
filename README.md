@@ -29,7 +29,7 @@
 |----|------|
 | 后端 | NestJS 10 + Prisma 5 + PostgreSQL 16 |
 | Web 前端 | Vite 5 + React 18 + TypeScript + Tailwind CSS 3 + shadcn/ui |
-| 图表 | Recharts 2（基础）+ ECharts 5（热力图等复杂图） |
+| 图表 | ECharts 5（统一图表库，echarts-for-react 封装） |
 | HarmonyOS | ArkTS + ArkUI（DevEco Studio） |
 | 共享层 | `shared` 包（TypeScript 类型 / API 契约） |
 | 认证 | JWT + bcrypt |

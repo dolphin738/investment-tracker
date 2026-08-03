@@ -63,7 +63,7 @@
 | 目标用户 | 个人投资者、小型机构投资者 |
 | 核心价值 | 精确计算真实年化收益率（XIRR），每日记录累计净值与当年净值，提供年/月/周/日多维度可视化分析 |
 | 后端技术栈 | NestJS + Prisma + PostgreSQL 16 |
-| Web 技术栈 | Vite + React 18 + TypeScript + Tailwind CSS + shadcn/ui + Zustand + TanStack Query + Axios + react-hook-form + zod + sonner；图表 Recharts / ECharts |
+| Web 技术栈 | Vite + React 18 + TypeScript + Tailwind CSS + shadcn/ui + Zustand + TanStack Query + Axios + react-hook-form + zod + sonner；图表 ECharts（echarts + echarts-for-react，统一图表库） |
 | APP 技术栈 | HarmonyOS 最新版（ArkTS + ArkUI）—— **本阶段不交付** |
 | 仓库结构 | pnpm monorepo（`packages/backend` / `web` / `shared` / `harmonyos`） |
 | 本阶段交付范围 | **仅 `backend` + `web` + `shared`**，不涉及 `packages/harmonyos` |

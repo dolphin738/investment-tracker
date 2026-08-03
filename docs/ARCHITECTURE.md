@@ -64,7 +64,7 @@ graph TB
 
 | 层级 | 职责 | 技术实现 |
 |------|------|---------|
-| **表现层** | 用户交互、数据展示、表单录入、图表渲染 | Web: React + shadcn/ui + Recharts/ECharts；APP: ArkUI |
+| **表现层** | 用户交互、数据展示、表单录入、图表渲染 | Web: React + shadcn/ui + ECharts；APP: ArkUI |
 | **API 层** | 请求路由、JWT 认证、参数校验、数据隔离（user_id 过滤）、Swagger 文档 | NestJS Controllers + Guards + Pipes |
 | **业务逻辑层** | XIRR 计算、净值计算、计算触发与批量重算、多维度查询聚合 | NestJS Services（纯 TypeScript，可独立测试） |
 | **数据层** | 数据持久化、迁移管理、ORM 映射 | Prisma ORM + PostgreSQL 16 |
@@ -233,8 +233,8 @@ graph TB
 │   │       │   │   └── register-form.tsx
 │   │       │   ├── dashboard/
 │   │       │   │   ├── stat-cards.tsx       # 关键指标卡片
-│   │       │   │   ├── nav-trend-chart.tsx  # 净值趋势（Recharts）
-│   │       │   │   └── xirr-trend-chart.tsx # XIRR 趋势（Recharts）
+│   │       │   │   ├── nav-trend-chart.tsx  # 净值趋势（ECharts）
+│   │       │   │   └── xirr-trend-chart.tsx # XIRR 趋势（ECharts）
 │   │       │   ├── transaction/
 │   │       │   │   ├── transaction-form.tsx
 │   │       │   │   └── transaction-table.tsx
@@ -329,7 +329,7 @@ graph TB
 | **Web 构建** | Vite | ^5.0 | ✅ 确认 | 极速 HMR，React 生态成熟 |
 | **Web 框架** | React | ^18.2 | ✅ 确认 | 生态最丰富，shadcn/ui 原生支持 |
 | **Web UI** | shadcn/ui + Tailwind CSS | shadcn latest + Tailwind ^3.4 | ✅ 确认 | Radix+Tailwind 零冲突，组件代码进项目可自由定制，弃用 MUI 避免样式冲突 |
-| **Web 图表** | Recharts + ECharts | Recharts ^2.12 + ECharts ^5.5 | ✅ 确认 | Recharts 用于折线/柱状（shadcn/ui chart 底层），ECharts 用于月度热力图等复杂图表 |
+| **Web 图表** | ECharts | echarts ^5.5 + echarts-for-react ^3.0 | ✅ 确认（INC-CHART-01 收敛） | 单库覆盖折线/柱状/热力图，移除 Recharts 避免双库冗余；大数据量时序性能更优 |
 | **Web 状态** | Zustand + TanStack Query | Zustand ^4.5 + TanStack Query ^5.0 | ✅ 确认 | Zustand 管理客户端状态（auth/portfolio 选择），TanStack Query 管理服务端状态（缓存/重试/失效） |
 | **Web 表单** | React Hook Form + Zod | RHF ^7.51 + Zod ^3.23 | ✅ 确认 | RHF 性能优秀，Zod schema 可前后端共享校验 |
 | **Web 路由** | React Router | ^6.22 | ✅ 确认 | React 生态标准路由 |
@@ -1431,15 +1431,14 @@ export class CalculationService {
 | Badge | 标签（买入/卖出标记） |
 | Toast (Sonner) | 消息提示 |
 | Calendar + Popover | 日期选择器 |
-| Chart | shadcn/ui 图表封装（底层 Recharts） |
 
 #### 图表组件设计
 
 | 图表 | 库 | 组件 | 用途 |
 |------|---|------|------|
-| 净值趋势折线图 | Recharts | `NavTrendChart` | 累计净值 + 当年净值双线对比 |
-| XIRR 趋势折线图 | Recharts | `XirrTrendChart` | XIRR 时间序列 |
-| 年度收益柱状图 | Recharts | `YearlyBarChart` | 年度收益率对比 |
+| 净值趋势折线图 | ECharts | `NavTrendChart` | 累计净值 + 当年净值双线对比 |
+| XIRR 趋势折线图 | ECharts | `XirrTrendChart` | XIRR 时间序列 |
+| 年度收益柱状图 | ECharts | `YearlyBarChart` | 年度收益率对比 |
 | 月度收益热力图 | ECharts | `MonthlyHeatmap` | 年份×月份收益热力图 |
 
 ### 8.2 HarmonyOS APP 端
@@ -1693,15 +1692,15 @@ struct LineChart {
 | `packages/web/src/features/auth/login-form.tsx` | 登录表单 |
 | `packages/web/src/features/auth/register-form.tsx` | 注册表单 |
 | `packages/web/src/features/dashboard/stat-cards.tsx` | 指标卡片组 |
-| `packages/web/src/features/dashboard/nav-trend-chart.tsx` | 净值趋势图（Recharts） |
-| `packages/web/src/features/dashboard/xirr-trend-chart.tsx` | XIRR 趋势图（Recharts） |
+| `packages/web/src/components/charts/nav-trend-chart.tsx` | 净值趋势图（ECharts） |
+| `packages/web/src/components/charts/xirr-trend-chart.tsx` | XIRR 趋势图（ECharts） |
 | `packages/web/src/features/transaction/transaction-form.tsx` | 交易录入表单 |
 | `packages/web/src/features/transaction/transaction-table.tsx` | 交易列表表格 |
 | `packages/web/src/features/snapshot/snapshot-form.tsx` | 快照录入表单 |
 | `packages/web/src/features/analysis/xirr-analysis.tsx` | XIRR 分析页内容 |
 | `packages/web/src/features/analysis/nav-analysis.tsx` | 净值分析页内容 |
-| `packages/web/src/features/analysis/yearly-bar-chart.tsx` | 年度柱状图（Recharts） |
-| `packages/web/src/features/analysis/monthly-heatmap.tsx` | 月度热力图（ECharts） |
+| `packages/web/src/components/charts/yearly-bar-chart.tsx` | 年度柱状图（ECharts） |
+| `packages/web/src/components/charts/monthly-heatmap.tsx` | 月度热力图（ECharts） |
 | `packages/web/src/features/portfolio/portfolio-selector.tsx` | 组合选择器 |
 | `packages/web/src/features/portfolio/portfolio-manager.tsx` | 组合管理弹窗 |
 | `packages/web/src/features/settings/settings-page.tsx` | 设置页内容 |
@@ -1896,7 +1895,6 @@ graph LR
   "react-hook-form": "^7.50.0",
   "@hookform/resolvers": "^3.3.4",
   "zod": "^3.23.0",
-  "recharts": "^2.12.0",
   "echarts": "^5.5.0",
   "echarts-for-react": "^3.0.2",
   "date-fns": "^3.3.0",
