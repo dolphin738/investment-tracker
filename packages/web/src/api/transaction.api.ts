@@ -1,12 +1,12 @@
 /**
  * api/transaction.api.ts — 交易管理 API
  *
- * 对应后端 /api/portfolios/:portfolioId/transactions：
- * - GET    /transactions          — 列表（分页 + 日期范围）
- * - POST   /transactions          — 录入
- * - GET    /transactions/:id      — 单笔
- * - PATCH  /transactions/:id      — 编辑
- * - DELETE /transactions/:id      — 删除
+ * 对应后端 /api/portfolios/:portfolioId/cashflows：
+ * - GET    /cashflows          — 列表（分页 + 日期范围）
+ * - POST   /cashflows          — 录入
+ * - GET    /cashflows/:id      — 单笔
+ * - PATCH  /cashflows/:id      — 编辑
+ * - DELETE /cashflows/:id      — 删除
  */
 
 import { http } from '@/lib/api-client';
@@ -24,7 +24,7 @@ export function listTransactions(
   query: TransactionQuery = {},
 ): Promise<PaginatedResponse<TransactionResponse>> {
   return http.get<PaginatedResponse<TransactionResponse>>(
-    `/portfolios/${portfolioId}/transactions`,
+    `/portfolios/${portfolioId}/cashflows`,
     { params: query },
   );
 }
@@ -35,7 +35,7 @@ export function createTransaction(
   payload: CreateTransactionRequest,
 ): Promise<TransactionResponse> {
   return http.post<TransactionResponse>(
-    `/portfolios/${portfolioId}/transactions`,
+    `/portfolios/${portfolioId}/cashflows`,
     payload,
   );
 }
@@ -47,7 +47,7 @@ export function updateTransaction(
   payload: UpdateTransactionRequest,
 ): Promise<TransactionResponse> {
   return http.patch<TransactionResponse>(
-    `/portfolios/${portfolioId}/transactions/${id}`,
+    `/portfolios/${portfolioId}/cashflows/${id}`,
     payload,
   );
 }
@@ -57,5 +57,5 @@ export function deleteTransaction(
   portfolioId: string,
   id: string,
 ): Promise<null> {
-  return http.delete<null>(`/portfolios/${portfolioId}/transactions/${id}`);
+  return http.delete<null>(`/portfolios/${portfolioId}/cashflows/${id}`);
 }

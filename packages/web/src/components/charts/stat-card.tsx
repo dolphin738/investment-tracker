@@ -13,7 +13,7 @@ export interface StatCardProps {
   value: string;
   /** 较前值变化（已格式化字符串，如 "+2.1pp"），可选 */
   change?: string;
-  /** 变化方向，决定图标颜色（正绿负红） */
+  /** 变化方向，决定图标颜色（PRD §9.5: 正红负绿） */
   trend?: 'up' | 'down' | 'neutral';
   /** 数值颜色覆盖（用于负值显示红色等） */
   valueClassName?: string;

@@ -1,5 +1,5 @@
 /**
- * pages/transactions.tsx — 交易管理页
+ * pages/transactions.tsx — 出入金管理页（方案B cashflow）
  *
  * 🆕 T05：新增标的筛选下拉框、交易类型筛选
  */

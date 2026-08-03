@@ -2,9 +2,11 @@
  * api/snapshot.api.ts — 资产快照 API
  *
  * 对应后端 /api/portfolios/:portfolioId/snapshots：
- * - PUT    /snapshots        — upsert（每日唯一，重复则覆盖）
- * - GET    /snapshots        — 列表（分页 + 日期范围）
- * - DELETE /snapshots/:id    — 删除
+ * - POST   /snapshots              — upsert（每日唯一，重复则覆盖）
+ * - GET    /snapshots              — 列表（分页 + 日期范围）
+ * - PATCH  /snapshots/:id          — 更新手工记录
+ * - DELETE /snapshots/:id          — 删除
+ * - POST   /snapshots/:date/reset  — 重置为 DERIVED
  */
 
 import { http } from '@/lib/api-client';
@@ -20,7 +22,7 @@ export function upsertSnapshot(
   portfolioId: string,
   payload: UpsertSnapshotRequest,
 ): Promise<SnapshotResponse> {
-  return http.put<SnapshotResponse>(
+  return http.post<SnapshotResponse>(
     `/portfolios/${portfolioId}/snapshots`,
     payload,
   );
@@ -43,4 +45,26 @@ export function deleteSnapshot(
   id: string,
 ): Promise<null> {
   return http.delete<null>(`/portfolios/${portfolioId}/snapshots/${id}`);
+}
+
+/** 更新手工快照记录 */
+export function updateSnapshot(
+  portfolioId: string,
+  id: string,
+  payload: UpsertSnapshotRequest,
+): Promise<SnapshotResponse> {
+  return http.patch<SnapshotResponse>(
+    `/portfolios/${portfolioId}/snapshots/${id}`,
+    payload,
+  );
+}
+
+/** 重置指定日期快照为 DERIVED */
+export function resetToDerived(
+  portfolioId: string,
+  date: string,
+): Promise<SnapshotResponse> {
+  return http.post<SnapshotResponse>(
+    `/portfolios/${portfolioId}/snapshots/${date}/reset`,
+  );
 }

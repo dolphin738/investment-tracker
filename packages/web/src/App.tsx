@@ -7,7 +7,7 @@
  *   /register       → 注册页（公开）
  *   /               → Dashboard 概览（受保护）
  *   /holdings       → 持仓页（受保护）
- *   /transactions   → 出入金管理页（受保护）
+ *   /cashflows      → 出入金管理页（受保护）
  *   /snapshots      → 历史总资产记录页（受保护）
  *   /analysis/xirr  → XIRR 分析页（受保护）
  *   /analysis/nav   → 净值分析页（受保护）
@@ -107,7 +107,7 @@ const router = createBrowserRouter([
         ),
       },
       {
-        path: 'transactions',
+        path: 'cashflows',
         element: (
           <Suspense fallback={<PageLoading />}>
             <TransactionsPage />

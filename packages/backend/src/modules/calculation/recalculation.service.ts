@@ -135,7 +135,7 @@ export class RecalculationService {
    */
   async recalculateAll(portfolioId: string): Promise<FullRecalculationResult> {
     // 成立日 = 第一笔买入交易日（与 CalculationService.ensureBaseDate 口径一致）
-    const firstBuy = await this.prisma.transaction.findFirst({
+    const firstBuy = await this.prisma.cashFlow.findFirst({
       where: { portfolioId, type: 'BUY' },
       orderBy: { date: 'asc' },
       select: { date: true },

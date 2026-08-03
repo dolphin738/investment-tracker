@@ -21,7 +21,7 @@ export const ROUTE_PATH = {
   REGISTER: '/register',
   DASHBOARD: '/',
   HOLDINGS: '/holdings',
-  TRANSACTIONS: '/transactions',
+  TRANSACTIONS: '/cashflows',
   SNAPSHOTS: '/snapshots',
   XIRR_ANALYSIS: '/analysis/xirr',
   NAV_ANALYSIS: '/analysis/nav',

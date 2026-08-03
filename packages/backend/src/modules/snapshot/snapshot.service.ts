@@ -19,7 +19,7 @@ import {
 } from '@nestjs/common';
 import type { AssetSnapshot as PrismaAssetSnapshot, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { RecalculationService } from '../calculation/recalculation.service';
+import { RecalculationService } from '../recalculation/recalculation.service';
 import type { UpsertSnapshotDto, SnapshotQueryDto } from './dto/upsert-snapshot.dto';
 
 /** API 响应中的快照结构（方案B） */

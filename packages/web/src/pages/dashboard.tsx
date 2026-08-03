@@ -10,7 +10,7 @@
  * 数据来源：
  * - GET /api/portfolios/:id/overview — 6 卡片数据
  * - 现有 query API — 净值/XIRR 序列
- * - GET /api/portfolios/:id/transactions — 近期交易
+ * - GET /api/portfolios/:id/cashflows — 近期交易
  */
 
 import { useState, useMemo } from 'react';
