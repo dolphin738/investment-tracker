@@ -16,6 +16,11 @@ export interface NavTrendChartProps {
   loading?: boolean;
   title?: string;
   className?: string;
+  /**
+   * null 数据点是否连线。
+   * 默认 true（历史行为，保持测试契约）；PRD §7.5 要求断线时传 false。
+   */
+  connectNulls?: boolean;
 }
 
 /**
@@ -44,6 +49,7 @@ export function NavTrendChart({
   loading,
   title = '净值趋势',
   className,
+  connectNulls = true,
 }: NavTrendChartProps): JSX.Element {
   const option = useMemo(() => {
     // useMemo 无条件先于 JSX 执行，须在此处兜底 undefined/null，
@@ -52,6 +58,7 @@ export function NavTrendChart({
     const labels: string[] = points.map((d) => d.label);
     const cumulativeSeries: (number | null)[] = points.map((d) => d.cumulativeNav);
     const yearSeries: (number | null)[] = points.map((d) => d.yearNav);
+    const connect = connectNulls;
 
     return {
       tooltip: {
@@ -108,7 +115,7 @@ export function NavTrendChart({
           name: '累计净值',
           type: 'line',
           smooth: true,
-          connectNulls: true,
+          connectNulls: connect,
           showSymbol: false,
           symbolSize: 8, // 直径 8 = 半径 4，对应迁移前 activeDot={{ r: 4 }}
           emphasis: { scale: false }, // 关闭 hover 额外放大，锁死 r=4
@@ -120,7 +127,7 @@ export function NavTrendChart({
           name: '当年净值',
           type: 'line',
           smooth: true,
-          connectNulls: true,
+          connectNulls: connect,
           showSymbol: false,
           symbolSize: 8,
           emphasis: { scale: false },
@@ -130,7 +137,7 @@ export function NavTrendChart({
         },
       ],
     };
-  }, [data]);
+  }, [data, connectNulls]);
 
   return (
     <Card className={className}>

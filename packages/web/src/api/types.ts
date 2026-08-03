@@ -14,6 +14,7 @@ import type {
   SnapshotValuation,
   AggregationMethod,
   QueryGranularity,
+  SecuritySide,
 } from '@investment-tracker/shared';
 
 // ============================================================================
@@ -360,6 +361,10 @@ export interface PaginatedResponse<T> {
 export interface UpsertSnapshotRequest {
   date: string;
   totalAsset: string;
+  /** 拆解：持仓市值合计（可选） */
+  marketValue?: string;
+  /** 拆解：当日现金余额（可选） */
+  cashBalance?: string;
   note?: string;
 }
 
@@ -405,6 +410,21 @@ export interface OverviewResponse {
   totalReturnRate: number;
   yearReturnRate: number;
   latestDate: string;
+  /** 持仓汇总（后端 OverviewService 返回） */
+  holdingsSummary: {
+    totalMarketValue: string;
+    totalCost: string;
+    totalProfit: string;
+    securityCount: number;
+  };
+  /** 最近 5 笔出入金 */
+  recentTransactions: Array<{
+    id: string;
+    date: string;
+    type: string;
+    amount: string;
+    note: string | null;
+  }>;
 }
 
 /** 组合摘要（用于账户页资产全景、overview API） */
@@ -430,4 +450,116 @@ export interface AccountStats {
   recordDays: number;
   firstDate: string | null;
   lastDate: string | null;
+}
+
+// ============================================================================
+// Security Trade API — 证券买卖流水（方案B · 持仓推导唯一来源）
+// ============================================================================
+
+/**
+ * 证券买卖流水响应（后端 Decimal 以 string 传输，与 shared SecurityTrade 一致）
+ */
+export interface SecurityTradeResponse {
+  id: string;
+  portfolioId: string;
+  securityId: string;
+  date: string;
+  /** BUY_SEC=买入 / SELL_SEC=卖出 */
+  side: SecuritySide;
+  quantity: string;
+  price: string;
+  fee: string;
+  note: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** 创建证券买卖流水 DTO（数量/单价/费用为 number，后端 DTO 要求 IsNumber） */
+export interface CreateSecurityTradeRequest {
+  securityId: string;
+  date: string;
+  side: SecuritySide;
+  quantity: number;
+  price: number;
+  fee: number;
+  note?: string;
+}
+
+/** 更新证券买卖流水 DTO（全部可选） */
+export interface UpdateSecurityTradeRequest {
+  securityId?: string;
+  date?: string;
+  side?: SecuritySide;
+  quantity?: number;
+  price?: number;
+  fee?: number;
+  note?: string | null;
+}
+
+/** 证券买卖流水查询参数 */
+export interface SecurityTradeQuery {
+  startDate?: string;
+  endDate?: string;
+  securityId?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+// ============================================================================
+// Security Price API — 标的最新价（向前沿用）
+// ============================================================================
+
+/** 标的最新价响应 */
+export interface SecurityPriceResponse {
+  id: string;
+  portfolioId: string;
+  securityId: string;
+  price: string;
+  asOf: string;
+  createdAt: string;
+}
+
+/** 录入/覆盖标的最新价 DTO */
+export interface UpsertSecurityPriceRequest {
+  securityId: string;
+  asOf: string;
+  price: number;
+}
+
+/** 价格查询参数 */
+export interface SecurityPriceQuery {
+  securityId?: string;
+  startDate?: string;
+  endDate?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+// ============================================================================
+// Cash Balance API — 现金余额（手工维护 · 前向沿用）
+// ============================================================================
+
+/** 现金余额响应 */
+export interface CashBalanceResponse {
+  id: string;
+  portfolioId: string;
+  amount: string;
+  asOf: string;
+  note: string | null;
+  createdAt: string;
+}
+
+/** 录入/覆盖现金余额 DTO */
+export interface UpsertCashBalanceRequest {
+  asOf: string;
+  amount: number;
+  note?: string;
+}
+
+/** 现金余额查询参数 */
+export interface CashBalanceQuery {
+  startDate?: string;
+  endDate?: string;
+  page?: number;
+  pageSize?: number;
 }

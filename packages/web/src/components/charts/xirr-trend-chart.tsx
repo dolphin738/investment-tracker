@@ -17,6 +17,12 @@ export interface XirrTrendChartProps {
   loading?: boolean;
   title?: string;
   className?: string;
+  /**
+   * null 数据点是否连线。
+   * 默认 true（历史行为，保持测试契约）；
+   * PRD §7.5 要求「null 断线不画 0」时传 false。
+   */
+  connectNulls?: boolean;
 }
 
 /**
@@ -44,6 +50,7 @@ export function XirrTrendChart({
   loading,
   title = 'XIRR 趋势',
   className,
+  connectNulls = true,
 }: XirrTrendChartProps): JSX.Element {
   const option = useMemo(() => {
     // useMemo 无条件先于 JSX 执行，须在此处兜底 undefined/null，
@@ -51,6 +58,7 @@ export function XirrTrendChart({
     const points: XirrSeriesPoint[] = data ?? [];
     const labels: string[] = points.map((d) => d.label);
     const values: (number | null)[] = points.map((d) => d.xirrValue);
+    const connect = connectNulls;
 
     return {
       tooltip: {
@@ -100,7 +108,7 @@ export function XirrTrendChart({
           name: 'XIRR',
           type: 'line',
           smooth: true,
-          connectNulls: true,
+          connectNulls: connect,
           showSymbol: false,
           symbolSize: 8, // 直径 8 = 半径 4，对应迁移前 activeDot={{ r: 4 }}
           emphasis: { scale: false }, // 关闭 hover 额外放大，锁死 r=4
@@ -110,7 +118,7 @@ export function XirrTrendChart({
         },
       ],
     };
-  }, [data]);
+  }, [data, connectNulls]);
 
   return (
     <Card className={className}>

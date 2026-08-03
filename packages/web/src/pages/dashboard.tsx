@@ -1,30 +1,44 @@
 /**
- * pages/dashboard.tsx — 概览页（Dashboard 增强 v2）
+ * pages/dashboard.tsx — 概览页（PRD §7.4）
  *
- * 布局：
- * - 6 个指标卡片：当前总资产 / 累计收益率 / 当年收益率 / 年化 XIRR / 累计净值 / 净投入本金
- * - 时间维度切换器（日/周/月/年 + 日期范围）
- * - 净值趋势图 + XIRR 趋势图（接入维度参数）
- * - 近期交易列表（最新 5 条）
- *
- * 数据来源：
- * - GET /api/portfolios/:id/overview — 6 卡片数据
- * - 现有 query API — 净值/XIRR 序列
- * - GET /api/portfolios/:id/cashflows — 近期交易
+ * - 6 指标卡片：当前总资产 / 累计收益率 / 当年收益率 / 年化XIRR / 累计净值 / 净投入
+ * - 维度切换 [日][周][月][年] + 范围下拉（近1月/3月/1年/全部）
+ * - 四宫格：净值趋势（累计+当年双线）/ XIRR 趋势 / 近期出入金最近5笔 / 组合表现对比
+ * - 按钮「+录入出入金」「+录入买卖」→ 分别打开出入金/买卖弹窗
  */
 
-import { useState, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Plus, ArrowLeftRight, Camera } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import {
+  ArrowDownToLine,
+  ArrowUpFromLine,
+  ArrowLeftRight,
+  Plus,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { StatCard } from '@/components/charts/stat-card';
 import { XirrTrendChart } from '@/components/charts/xirr-trend-chart';
 import { NavTrendChart } from '@/components/charts/nav-trend-chart';
-import { LoadingSpinner, PageSkeleton, TableSkeleton } from '@/components/LoadingSpinner';
+import { TableSkeleton } from '@/components/LoadingSpinner';
 import { EmptyState } from '@/components/EmptyState';
 import { PageHeader } from '@/components/PageHeader';
+import { CashflowForm } from '@/features/cashflow/cashflow-form';
+import { SecurityTradeForm } from '@/features/security-trade/security-trade-form';
 import { usePortfolioStore } from '@/stores/portfolio.store';
 import { usePortfolios } from '@/hooks/use-portfolios';
 import {
@@ -34,7 +48,7 @@ import {
   useNavSeries,
 } from '@/hooks/use-query-data';
 import { useQuery } from '@tanstack/react-query';
-import { getOverview } from '@/api/overview.api';
+import { getOverview, getPortfoliosSummary } from '@/api/overview.api';
 import { listTransactions } from '@/api/transaction.api';
 import { CashFlowType } from '@investment-tracker/shared';
 import {
@@ -42,13 +56,13 @@ import {
   formatDecimal,
   formatCurrency,
   formatDate,
+  cn,
 } from '@/lib/utils';
-import { getDefaultDateRange, ROUTE_PATH } from '@/lib/constants';
+import { toIsoDate } from '@/lib/constants';
 import {
   QueryGranularity,
   AggregationMethod,
 } from '@investment-tracker/shared';
-import { cn } from '@/lib/utils';
 
 /** 维度选项 */
 const GRANULARITY_TABS = [
@@ -58,31 +72,28 @@ const GRANULARITY_TABS = [
   { value: 'year', label: '年' },
 ] as const;
 
-/** 快捷日期范围 */
+/** 快捷日期范围（PRD §7.4：近1月/3月/1年/全部） */
 const DATE_RANGE_OPTIONS = [
-  { value: '3m', label: '近 3 月' },
-  { value: '1y', label: '近 1 年' },
-  { value: 'ytd', label: '今年' },
+  { value: '1m', label: '近1月' },
+  { value: '3m', label: '近3月' },
+  { value: '1y', label: '近1年' },
   { value: 'all', label: '全部' },
 ] as const;
 
 /** 根据快捷项计算起止日期 */
-function resolveDateRange(
-  range: string,
-): { startDate: string; endDate: string } {
+function resolveDateRange(range: string): { startDate: string; endDate: string } {
   const end = new Date();
-  const endStr = end.toISOString().slice(0, 10);
+  const endStr = toIsoDate(end);
   const start = new Date();
-
   switch (range) {
+    case '1m':
+      start.setMonth(start.getMonth() - 1);
+      break;
     case '3m':
       start.setMonth(start.getMonth() - 3);
       break;
     case '1y':
       start.setFullYear(start.getFullYear() - 1);
-      break;
-    case 'ytd':
-      start.setMonth(0, 1);
       break;
     case 'all':
       start.setFullYear(2000, 0, 1);
@@ -90,7 +101,7 @@ function resolveDateRange(
     default:
       start.setFullYear(start.getFullYear() - 1);
   }
-  return { startDate: start.toISOString().slice(0, 10), endDate: endStr };
+  return { startDate: toIsoDate(start), endDate: endStr };
 }
 
 /** 出入金类型中文映射（BUY=存入，SELL=取出） */
@@ -100,9 +111,12 @@ const TYPE_LABEL: Record<string, string> = {
 };
 
 export default function DashboardPage(): JSX.Element {
-  const navigate = useNavigate();
   const currentPortfolioId = usePortfolioStore((s) => s.currentPortfolioId);
   const { data: portfolios = [], isLoading: portfoliosLoading } = usePortfolios();
+
+  // 录入弹窗状态
+  const [cashflowOpen, setCashflowOpen] = useState(false);
+  const [tradeOpen, setTradeOpen] = useState(false);
 
   // 维度状态
   const [granularity, setGranularity] = useState<string>('month');
@@ -134,11 +148,11 @@ export default function DashboardPage(): JSX.Element {
     aggregation: AggregationMethod.LAST,
   });
 
-  // 最新净值/XIRR（保留兼容）
+  // 最新净值/XIRR
   const latestXirr = useLatestXirr(currentPortfolioId);
   const latestNav = useLatestNav(currentPortfolioId);
 
-  // 近期交易（最新 5 条）
+  // 近期出入金（最新 5 笔）
   const recentTransactions = useQuery({
     queryKey: ['transactions', 'recent', currentPortfolioId],
     queryFn: () =>
@@ -147,9 +161,21 @@ export default function DashboardPage(): JSX.Element {
     staleTime: 30 * 1000,
   });
 
+  // 组合表现对比（全部组合摘要）
+  const portfolioSummary = useQuery({
+    queryKey: ['portfolios', 'summary'],
+    queryFn: () => getPortfoliosSummary(),
+    staleTime: 60 * 1000,
+  });
+
   // ===== 加载态 =====
   if (portfoliosLoading) {
-    return <PageSkeleton />;
+    return (
+      <div className="space-y-6">
+        <PageHeader title="概览" description="加载中…" />
+        <Skeleton className="h-40 w-full" />
+      </div>
+    );
   }
 
   // ===== 无组合 =====
@@ -157,12 +183,7 @@ export default function DashboardPage(): JSX.Element {
     return (
       <EmptyState
         title="欢迎，先创建您的第一个投资组合"
-        description="创建组合后即可开始录入交易和快照数据。"
-        action={
-          <Button onClick={() => navigate(ROUTE_PATH.SETTINGS)}>
-            前往设置管理组合
-          </Button>
-        }
+        description="创建组合后即可开始录入出入金和买卖数据。"
       />
     );
   }
@@ -178,10 +199,6 @@ export default function DashboardPage(): JSX.Element {
     );
   }
 
-  // ===== 有组合无数据 =====
-  const hasData = overview.data && overview.data.latestDate;
-
-  // 概览数据
   const ov = overview.data;
   const cumulativeXirr = ov?.xirr ?? latestXirr.data?.xirrValue ?? null;
   const totalAsset = ov?.totalAsset ?? null;
@@ -195,38 +212,28 @@ export default function DashboardPage(): JSX.Element {
     yearNav !== null ? yearNav - 1 : null
   );
 
-  // 概览加载中
   if (overview.isLoading && latestNav.isLoading) {
     return (
       <div className="space-y-6">
         <PageHeader title="概览" description="加载中…" />
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <Card key={i} className="space-y-3 p-6">
-              <div className="h-4 w-24 animate-pulse rounded bg-muted" />
-              <div className="h-8 w-32 animate-pulse rounded bg-muted" />
-              <div className="h-3 w-20 animate-pulse rounded bg-muted" />
-            </Card>
-          ))}
-        </div>
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <div className="h-80 animate-pulse rounded-lg bg-muted" />
-          <div className="h-80 animate-pulse rounded-lg bg-muted" />
-        </div>
+        <Card>
+          <CardContent className="space-y-3">
+            <Skeleton className="h-7 w-40" />
+            <Skeleton className="h-24 w-full" />
+            <Skeleton className="h-24 w-full" />
+          </CardContent>
+        </Card>
       </div>
     );
   }
 
-  // 概览错误态
   if (overview.isError && latestNav.isError) {
     return (
       <div className="space-y-6">
         <PageHeader title="概览" />
         <Card>
           <CardContent className="flex flex-col items-center gap-4 py-12">
-            <p className="text-sm text-destructive">
-              数据加载失败，请稍后重试
-            </p>
+            <p className="text-sm text-destructive">数据加载失败，请稍后重试</p>
             <Button
               variant="outline"
               onClick={() => {
@@ -247,32 +254,27 @@ export default function DashboardPage(): JSX.Element {
       <PageHeader
         title="概览"
         description={
-          ov?.latestDate
-            ? `数据截止 ${ov.latestDate}`
-            : '最近 12 个月收益概览'
+          ov?.latestDate ? `数据截止 ${ov.latestDate}` : '最近 12 个月收益概览'
         }
         actions={
           <div className="flex gap-2">
             <Button
-              onClick={() => navigate(ROUTE_PATH.TRANSACTIONS)}
+              onClick={() => setCashflowOpen(true)}
               variant="outline"
               size="sm"
             >
-              <ArrowLeftRight className="mr-2 h-4 w-4" />
-              录入交易
+              <Plus className="mr-2 h-4 w-4" />
+              录入出入金
             </Button>
-            <Button
-              onClick={() => navigate(ROUTE_PATH.SNAPSHOTS)}
-              size="sm"
-            >
-              <Camera className="mr-2 h-4 w-4" />
-              录入快照
+            <Button onClick={() => setTradeOpen(true)} size="sm">
+              <Plus className="mr-2 h-4 w-4" />
+              录入买卖
             </Button>
           </div>
         }
       />
 
-      {/* ===== 6 卡片 ===== */}
+      {/* ===== 6 指标卡片 ===== */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <StatCard
           title="当前总资产"
@@ -329,20 +331,16 @@ export default function DashboardPage(): JSX.Element {
           }
         />
         <StatCard
-          title="净投入本金"
+          title="净投入"
           value={netInvested ? `¥${formatCurrency(netInvested)}` : '暂无数据'}
           description="存入 - 取出"
           trend="neutral"
         />
       </div>
 
-      {/* ===== 维度切换 ===== */}
+      {/* ===== 维度切换 + 范围下拉 ===== */}
       <div className="flex flex-wrap items-center gap-3">
-        <Tabs
-          value={granularity}
-          onValueChange={setGranularity}
-          className="w-auto"
-        >
+        <Tabs value={granularity} onValueChange={setGranularity} className="w-auto">
           <TabsList>
             {GRANULARITY_TABS.map((tab) => (
               <TabsTrigger key={tab.value} value={tab.value}>
@@ -351,22 +349,21 @@ export default function DashboardPage(): JSX.Element {
             ))}
           </TabsList>
         </Tabs>
-        <Tabs
-          value={dateRange}
-          onValueChange={setDateRange}
-          className="w-auto"
-        >
-          <TabsList className="border bg-transparent">
+        <Select value={dateRange} onValueChange={setDateRange}>
+          <SelectTrigger className="w-[120px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
             {DATE_RANGE_OPTIONS.map((opt) => (
-              <TabsTrigger key={opt.value} value={opt.value} className="data-[state=active]:bg-muted">
+              <SelectItem key={opt.value} value={opt.value}>
                 {opt.label}
-              </TabsTrigger>
+              </SelectItem>
             ))}
-          </TabsList>
-        </Tabs>
+          </SelectContent>
+        </Select>
       </div>
 
-      {/* ===== 趋势图 ===== */}
+      {/* ===== 四宫格 ===== */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <NavTrendChart
           data={navSeries.data ?? []}
@@ -377,26 +374,18 @@ export default function DashboardPage(): JSX.Element {
           data={xirrSeries.data ?? []}
           loading={xirrSeries.isLoading}
           title="XIRR 趋势"
+          connectNulls={false}
         />
-      </div>
 
-      {/* ===== 近期交易 + 快捷操作 ===== */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        {/* 近期交易 */}
+        {/* 近期出入金（最近5笔） */}
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle className="text-base">近期交易</CardTitle>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => navigate(ROUTE_PATH.TRANSACTIONS)}
-            >
-              查看全部
-            </Button>
+            <CardTitle className="text-base">近期出入金</CardTitle>
+            <ArrowLeftRight className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             {recentTransactions.isLoading ? (
-              <TableSkeleton rows={3} cols={4} />
+              <TableSkeleton rows={3} cols={3} />
             ) : recentTransactions.data &&
               recentTransactions.data.items.length > 0 ? (
               <div className="space-y-3">
@@ -420,9 +409,10 @@ export default function DashboardPage(): JSX.Element {
                         {TYPE_LABEL[tx.type] || tx.type}
                       </span>
                     </div>
-                    <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-3">
                       <span className="text-sm font-medium tabular-nums">
-                        ¥{formatCurrency(tx.amount)}
+                        {tx.type === CashFlowType.BUY ? '+' : '-'}¥
+                        {formatCurrency(tx.amount)}
                       </span>
                       {tx.note && (
                         <span className="max-w-[120px] truncate text-xs text-muted-foreground">
@@ -435,15 +425,12 @@ export default function DashboardPage(): JSX.Element {
               </div>
             ) : (
               <EmptyState
-                title="还没有交易记录"
-                description="录入第一笔交易开始跟踪收益"
+                title="还没有出入金记录"
+                description="录入第一笔出入金开始跟踪收益"
                 action={
-                  <Button
-                    size="sm"
-                    onClick={() => navigate(ROUTE_PATH.TRANSACTIONS)}
-                  >
-                    <Plus className="mr-2 h-4 w-4" />
-                    录入交易
+                  <Button size="sm" onClick={() => setCashflowOpen(true)}>
+                    <ArrowDownToLine className="mr-2 h-4 w-4" />
+                    录入出入金
                   </Button>
                 }
               />
@@ -451,41 +438,82 @@ export default function DashboardPage(): JSX.Element {
           </CardContent>
         </Card>
 
-        {/* 快捷操作 */}
+        {/* 组合表现对比 */}
         <Card>
-          <CardHeader>
-            <CardTitle className="text-base">快捷操作</CardTitle>
+          <CardHeader className="flex flex-row items-center justify-between">
+            <CardTitle className="text-base">组合表现对比</CardTitle>
+            <ArrowUpFromLine className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
-          <CardContent className="flex flex-wrap gap-2">
-            <Button
-              onClick={() => navigate(ROUTE_PATH.TRANSACTIONS)}
-              variant="outline"
-            >
-              <Plus className="mr-2 h-4 w-4" />
-              录入交易
-            </Button>
-            <Button
-              onClick={() => navigate(ROUTE_PATH.SNAPSHOTS)}
-              variant="outline"
-            >
-              <Plus className="mr-2 h-4 w-4" />
-              录入资产快照
-            </Button>
-            <Button
-              onClick={() => navigate(ROUTE_PATH.XIRR_ANALYSIS)}
-              variant="outline"
-            >
-              查看 XIRR 分析
-            </Button>
-            <Button
-              onClick={() => navigate(ROUTE_PATH.NAV_ANALYSIS)}
-              variant="outline"
-            >
-              查看净值分析
-            </Button>
+          <CardContent>
+            {portfolioSummary.isLoading ? (
+              <TableSkeleton rows={3} cols={4} />
+            ) : portfolioSummary.data && portfolioSummary.data.length > 0 ? (
+              <div className="space-y-2">
+                {portfolioSummary.data.map((p) => (
+                  <div
+                    key={p.id}
+                    className="flex items-center justify-between rounded-lg bg-muted/40 px-3 py-2 text-sm"
+                  >
+                    <span className="font-medium">{p.name}</span>
+                    <div className="flex items-center gap-4">
+                      <span className="tabular-nums">
+                        ¥{formatCurrency(p.totalAsset)}
+                      </span>
+                      {p.cumulativeReturnRate !== null && (
+                        <span
+                          className={cn(
+                            'tabular-nums',
+                            p.cumulativeReturnRate >= 0
+                              ? 'text-up'
+                              : 'text-down',
+                          )}
+                        >
+                          {formatPercent(p.cumulativeReturnRate)}
+                        </span>
+                      )}
+                      {p.xirr !== null && (
+                        <span className="text-xs text-muted-foreground">
+                          XIRR {formatPercent(p.xirr)}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="py-10 text-center text-sm text-muted-foreground">
+                暂无组合数据
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
+
+      {/* 录入出入金弹窗 */}
+      <Dialog open={cashflowOpen} onOpenChange={setCashflowOpen}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>录入出入金</DialogTitle>
+          </DialogHeader>
+          <CashflowForm
+            portfolioId={currentPortfolioId}
+            onSuccess={() => setCashflowOpen(false)}
+          />
+        </DialogContent>
+      </Dialog>
+
+      {/* 录入买卖弹窗 */}
+      <Dialog open={tradeOpen} onOpenChange={setTradeOpen}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>录入买卖</DialogTitle>
+          </DialogHeader>
+          <SecurityTradeForm
+            portfolioId={currentPortfolioId}
+            onSuccess={() => setTradeOpen(false)}
+          />
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

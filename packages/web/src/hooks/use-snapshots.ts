@@ -3,6 +3,8 @@
  *
  * - useSnapshots：列表 query（分页 + 日期范围）
  * - useUpsertSnapshot：mutation（upsert 语义，每日唯一）
+ * - useUpdateSnapshot：mutation（更新手工记录，source=MANUAL）
+ * - useResetSnapshot：mutation（重置指定日期为 DERIVED）
  * - useDeleteSnapshot：mutation
  */
 
@@ -11,6 +13,8 @@ import { toast } from 'sonner';
 import {
   deleteSnapshot as deleteApi,
   listSnapshots as listApi,
+  resetToDerived as resetApi,
+  updateSnapshot as updateApi,
   upsertSnapshot as upsertApi,
 } from '@/api/snapshot.api';
 import type { SnapshotQuery, UpsertSnapshotRequest } from '@/api/types';
@@ -63,6 +67,48 @@ export function useDeleteSnapshot() {
     }) => deleteApi(portfolioId, id),
     onSuccess: () => {
       toast.success('快照已删除');
+      queryClient.invalidateQueries({ queryKey: ['snapshots'] });
+      queryClient.invalidateQueries({ queryKey: ['xirr'] });
+      queryClient.invalidateQueries({ queryKey: ['nav'] });
+    },
+  });
+}
+
+/** 更新手工快照记录（source=MANUAL，PATCH） */
+export function useUpdateSnapshot() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      portfolioId,
+      id,
+      payload,
+    }: {
+      portfolioId: string;
+      id: string;
+      payload: UpsertSnapshotRequest;
+    }) => updateApi(portfolioId, id, payload),
+    onSuccess: () => {
+      toast.success('快照已更新');
+      queryClient.invalidateQueries({ queryKey: ['snapshots'] });
+      queryClient.invalidateQueries({ queryKey: ['xirr'] });
+      queryClient.invalidateQueries({ queryKey: ['nav'] });
+    },
+  });
+}
+
+/** 重置指定日期快照为 DERIVED（仅手工记录） */
+export function useResetSnapshot() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      portfolioId,
+      date,
+    }: {
+      portfolioId: string;
+      date: string;
+    }) => resetApi(portfolioId, date),
+    onSuccess: () => {
+      toast.success('已恢复系统自动计算值');
       queryClient.invalidateQueries({ queryKey: ['snapshots'] });
       queryClient.invalidateQueries({ queryKey: ['xirr'] });
       queryClient.invalidateQueries({ queryKey: ['nav'] });

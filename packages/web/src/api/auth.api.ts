@@ -52,3 +52,13 @@ export function updateEmail(payload: UpdateEmailRequest): Promise<AuthTokenRespo
 export function updateProfile(payload: UpdateProfileRequest): Promise<UserPublic> {
   return http.patch<UserPublic>('/auth/profile', payload);
 }
+
+/**
+ * 注销当前账户（SET-P1-06）。
+ *
+ * 注：后端 DELETE /api/auth/account 为 P1 预留接口；前端契约先行，
+ * 若后端暂未开放将返回 404（api-client 拦截器统一 Toast 提示）。
+ */
+export function deleteAccount(): Promise<null> {
+  return http.delete<null>('/auth/account');
+}

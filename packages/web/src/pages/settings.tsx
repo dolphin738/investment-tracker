@@ -70,6 +70,7 @@ import { ChangePasswordDialog } from '@/features/account/change-password-dialog'
 import { EditProfileDialog } from '@/features/account/edit-profile-dialog';
 import { UserAvatar } from '@/components/user-avatar';
 import { useAuthStore } from '@/stores/auth.store';
+import { useDeleteAccount } from '@/hooks/use-account';
 import {
   useDeletePortfolio,
   usePortfolios,
@@ -143,6 +144,10 @@ export default function SettingsPage(): JSX.Element {
   const [emailDialogOpen, setEmailDialogOpen] = useState<boolean>(false);
   const [passwordDialogOpen, setPasswordDialogOpen] = useState<boolean>(false);
   const [profileDialogOpen, setProfileDialogOpen] = useState<boolean>(false);
+
+  // 注销账户（危险操作）
+  const [deleteAccountOpen, setDeleteAccountOpen] = useState<boolean>(false);
+  const deleteAccountMutation = useDeleteAccount();
 
   // 🆕 偏好本地编辑状态（乐观更新）
   const [prefForm, setPrefForm] = useState({
@@ -305,12 +310,38 @@ export default function SettingsPage(): JSX.Element {
         </CardContent>
       </Card>
 
+      {/* 危险操作区 */}
+      <Card className="border-destructive/40">
+        <CardHeader>
+          <CardTitle className="text-base text-destructive">危险操作区</CardTitle>
+          <CardDescription>以下操作不可恢复，请谨慎执行</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium">注销账户</p>
+              <p className="text-xs text-muted-foreground">
+                永久删除账户及其全部组合、交易与快照数据（SET-P1-06）
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-destructive hover:text-destructive"
+              onClick={() => setDeleteAccountOpen(true)}
+            >
+              注销账户
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* 组合管理 */}
       <Card>
         <CardHeader className="flex-row items-center justify-between">
           <div>
             <CardTitle className="text-base">组合管理</CardTitle>
-            <CardDescription>创建、编辑或删除投资组合</CardDescription>
+            <CardDescription>创建、编辑或删除投资组合（归档待后端开放）</CardDescription>
           </div>
           <Button onClick={() => setCreating(true)} size="sm">
             <Plus className="mr-2 h-4 w-4" />
@@ -683,6 +714,37 @@ export default function SettingsPage(): JSX.Element {
         open={profileDialogOpen}
         onOpenChange={setProfileDialogOpen}
       />
+
+      {/* 注销账户确认 */}
+      <AlertDialog
+        open={deleteAccountOpen}
+        onOpenChange={setDeleteAccountOpen}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认注销账户？</AlertDialogTitle>
+            <AlertDialogDescription>
+              注销后将永久删除您的账户及全部组合、交易、快照、净值与 XIRR 数据，
+              此操作不可撤销。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteAccountMutation.isPending}>
+              取消
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => deleteAccountMutation.mutate()}
+              disabled={deleteAccountMutation.isPending}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleteAccountMutation.isPending && (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              )}
+              确认注销
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* 创建/编辑组合对话框 */}
       <PortfolioDialog

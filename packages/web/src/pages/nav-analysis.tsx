@@ -1,12 +1,12 @@
 /**
- * pages/nav-analysis.tsx — 净值分析页
+ * pages/nav-analysis.tsx — 净值分析页（PRD §7.6）
  *
- * 布局：
- * - 维度切换（日/周/月/年 + 日期范围 + 聚合方式）
- * - 当前净值卡片（累计净值 + 当年净值）
- * - 净值趋势双线对比图
- * - 月度收益热力图（基于日维度数据）
- * - 明细表
+ * - 维度切换 + 指标单选（累计净值/当年净值/对比）
+ * - 当前累计净值/当年净值/累计收益/当年收益
+ * - 净值趋势双线图（按指标筛选）
+ * - 月度收益热力图（正红负绿色阶）
+ * - 每日净值明细表：日期/累计净值/当年净值/每日收益/收益百分比/份额
+ *   （每日收益 =（当日累计净值 − 前日累计净值）× 前日份额；正红负绿）
  */
 
 import { useMemo, useState } from 'react';
@@ -26,6 +26,8 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Skeleton } from '@/components/ui/skeleton';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { Label } from '@/components/ui/label';
 import { DimensionSwitcher } from '@/features/query/dimension-switcher';
 import type { DimensionSwitcherValue } from '@/features/query/dimension-switcher';
 import { NavTrendChart } from '@/components/charts/nav-trend-chart';
@@ -34,10 +36,67 @@ import { usePortfolioStore } from '@/stores/portfolio.store';
 import { useNavSeries, useLatestNav } from '@/hooks/use-query-data';
 import { formatDecimal, formatPercent, formatDate } from '@/lib/utils';
 import { getDefaultDateRange } from '@/lib/constants';
+import { NavMetric as NavMetricEnum, type NavMetric } from '@/api/types';
 import {
   AggregationMethod,
   QueryGranularity,
+  type NavSeriesPoint,
 } from '@investment-tracker/shared';
+
+/** 指标单选选项 */
+const METRIC_OPTIONS = [
+  { value: NavMetricEnum.CUMULATIVE, label: '累计净值' },
+  { value: NavMetricEnum.YEAR, label: '当年净值' },
+  { value: NavMetricEnum.BOTH, label: '对比' },
+] as const;
+
+/** 每日明细行（含每日收益/收益百分比） */
+interface DailyDetailRow {
+  date: string;
+  label: string;
+  cumulativeNav: number | null;
+  yearNav: number | null;
+  shares: number | null;
+  /** 每日收益 =（当日累计净值 − 前日累计净值）× 前日份额 */
+  dailyReturn: number | null;
+  /** 收益百分比 =（当日累计净值 − 前日累计净值）/ 前日累计净值 */
+  returnRate: number | null;
+}
+
+/** 由日维度净值序列计算每日明细（按日期升序计算收益，展示倒序） */
+function computeDailyDetails(data: NavSeriesPoint[]): DailyDetailRow[] {
+  const sorted = [...data].sort((a, b) => a.date.localeCompare(b.date));
+  const rows: DailyDetailRow[] = [];
+  let prev: NavSeriesPoint | null = null;
+  for (const p of sorted) {
+    let dailyReturn: number | null = null;
+    let returnRate: number | null = null;
+    if (
+      prev &&
+      p.cumulativeNav !== null &&
+      prev.cumulativeNav !== null &&
+      prev.shares !== null &&
+      Number.isFinite(prev.shares)
+    ) {
+      const diff = p.cumulativeNav - prev.cumulativeNav;
+      dailyReturn = diff * prev.shares;
+      if (prev.cumulativeNav !== 0) {
+        returnRate = diff / prev.cumulativeNav;
+      }
+    }
+    rows.push({
+      date: p.date,
+      label: p.label,
+      cumulativeNav: p.cumulativeNav,
+      yearNav: p.yearNav,
+      shares: p.shares,
+      dailyReturn,
+      returnRate,
+    });
+    prev = p;
+  }
+  return rows.reverse();
+}
 
 export default function NavAnalysisPage(): JSX.Element {
   const currentPortfolioId = usePortfolioStore((s) => s.currentPortfolioId);
@@ -49,18 +108,22 @@ export default function NavAnalysisPage(): JSX.Element {
     endDate,
     aggregation: AggregationMethod.LAST,
   });
+  const [metric, setMetric] = useState<NavMetric>(NavMetricEnum.BOTH);
 
-  const series = useNavSeries(currentPortfolioId, dimension);
+  const series = useNavSeries(currentPortfolioId, {
+    ...dimension,
+    metric,
+  });
   const latest = useLatestNav(currentPortfolioId);
 
-  // 热力图使用日维度数据（独立查询）
-  const heatmapParams: typeof dimension = {
+  // 热力图 + 每日明细表使用日维度数据（独立查询）
+  const dayParams: typeof dimension = {
     ...dimension,
     granularity: QueryGranularity.DAY,
   };
-  const heatmapSeries = useNavSeries(
+  const daySeries = useNavSeries(
     currentPortfolioId,
-    dimension.granularity === QueryGranularity.DAY ? dimension : heatmapParams,
+    dimension.granularity === QueryGranularity.DAY ? { ...dimension, metric } : { ...dayParams, metric },
   );
 
   if (!currentPortfolioId) {
@@ -74,16 +137,24 @@ export default function NavAnalysisPage(): JSX.Element {
   }
 
   const seriesData = series.data ?? [];
-  const heatmapData = useMemo(
-    () => heatmapSeries.data ?? [],
-    [heatmapSeries.data],
-  );
+  const dayData = daySeries.data ?? [];
+
+  // 按指标过滤趋势图数据
+  const chartData = useMemo(() => {
+    if (metric === NavMetricEnum.CUMULATIVE) {
+      return seriesData.map((p) => ({ ...p, yearNav: null }));
+    }
+    if (metric === NavMetricEnum.YEAR) {
+      return seriesData.map((p) => ({ ...p, cumulativeNav: null }));
+    }
+    return seriesData;
+  }, [seriesData, metric]);
+
+  const dailyDetails = useMemo(() => computeDailyDetails(dayData), [dayData]);
 
   const latestCumulativeNav = latest.data?.cumulativeNav ?? null;
   const latestYearNav = latest.data?.yearNav ?? null;
-  const latestShares = latest.data?.shares ?? null;
-  const totalReturn =
-    latestCumulativeNav !== null ? latestCumulativeNav - 1 : null;
+  const totalReturn = latestCumulativeNav !== null ? latestCumulativeNav - 1 : null;
   const yearReturn = latestYearNav !== null ? latestYearNav - 1 : null;
 
   return (
@@ -95,42 +166,29 @@ export default function NavAnalysisPage(): JSX.Element {
         </p>
       </div>
 
-      <DimensionSwitcher value={dimension} onChange={setDimension} />
+      <div className="flex flex-wrap items-end gap-4">
+        <DimensionSwitcher value={dimension} onChange={setDimension} />
+        <div className="space-y-1.5">
+          <Label className="text-xs text-muted-foreground">指标</Label>
+          <RadioGroup
+            value={metric}
+            onValueChange={(v) => setMetric(v as NavMetric)}
+            orientation="horizontal"
+          >
+            {METRIC_OPTIONS.map((opt) => (
+              <RadioGroupItem key={opt.value} value={opt.value} label={opt.label} />
+            ))}
+          </RadioGroup>
+        </div>
+      </div>
 
-      {/* 当前净值摘要 */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
+      {/* 当前净值摘要（4 卡） */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>当前累计净值</CardDescription>
             <CardTitle className="text-2xl">
               {formatDecimal(latestCumulativeNav)}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-xs text-muted-foreground">累计收益 {formatPercent(totalReturn)}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>当年净值</CardDescription>
-            <CardTitle className="text-2xl">
-              {formatDecimal(latestYearNav)}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-xs text-muted-foreground">当年收益 {formatPercent(yearReturn)}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>当前份额</CardDescription>
-            <CardTitle className="text-2xl">
-              {latestShares !== null
-                ? Number(latestShares).toLocaleString('zh-CN', {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  })
-                : '-'}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -141,74 +199,136 @@ export default function NavAnalysisPage(): JSX.Element {
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>最大回撤</CardDescription>
-            <CardTitle className="text-2xl">-</CardTitle>
+            <CardDescription>当年净值</CardDescription>
+            <CardTitle className="text-2xl">
+              {formatDecimal(latestYearNav)}
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-xs text-muted-foreground">P1 阶段开放</p>
+            <p className="text-xs text-muted-foreground">单位净值口径</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription>累计收益</CardDescription>
+            <CardTitle className="text-2xl">
+              {formatPercent(totalReturn)}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-xs text-muted-foreground">自成立以来</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription>当年收益</CardDescription>
+            <CardTitle className="text-2xl">
+              {formatPercent(yearReturn)}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-xs text-muted-foreground">今年以来</p>
           </CardContent>
         </Card>
       </div>
 
-      {/* 净值趋势双线对比 */}
+      {/* 净值趋势双线图（按指标） */}
       <NavTrendChart
-        data={seriesData}
+        data={chartData}
         loading={series.isLoading}
-        title="净值趋势（累计 + 当年双线对比）"
+        title={
+          metric === NavMetricEnum.CUMULATIVE
+            ? '净值趋势（累计净值）'
+            : metric === NavMetricEnum.YEAR
+              ? '净值趋势（当年净值）'
+              : '净值趋势（累计 + 当年双线对比）'
+        }
       />
 
       {/* 月度收益热力图 */}
       <MonthlyHeatmap
-        data={heatmapData}
-        loading={heatmapSeries.isLoading}
+        data={dayData}
+        loading={daySeries.isLoading}
         title="月度收益热力图"
       />
 
-      {/* 明细表 */}
+      {/* 每日净值明细表 */}
       <Card>
         <CardHeader>
           <CardTitle className="text-base">每日净值明细</CardTitle>
-          <CardDescription>当前维度下的明细数据</CardDescription>
+          <CardDescription>
+            每日收益 =（当日累计净值 − 前日累计净值）× 前日份额；正红负绿
+          </CardDescription>
         </CardHeader>
         <CardContent>
-          {series.isLoading ? (
+          {daySeries.isLoading ? (
             <Skeleton className="h-40 w-full" />
-          ) : seriesData.length === 0 ? (
+          ) : dailyDetails.length === 0 ? (
             <div className="py-10 text-center text-sm text-muted-foreground">
               暂无数据
             </div>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>日期</TableHead>
-                  <TableHead className="text-right">累计净值</TableHead>
-                  <TableHead className="text-right">当年净值</TableHead>
-                  <TableHead className="text-right">份额</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {[...seriesData].reverse().map((p, idx) => (
-                  <TableRow key={`${p.date}-${idx}`}>
-                    <TableCell className="font-mono text-sm">{p.label}</TableCell>
-                    <TableCell className="text-right font-mono">
-                      {formatDecimal(p.cumulativeNav)}
-                    </TableCell>
-                    <TableCell className="text-right font-mono">
-                      {formatDecimal(p.yearNav)}
-                    </TableCell>
-                    <TableCell className="text-right font-mono">
-                      {p.shares !== null
-                        ? Number(p.shares).toLocaleString('zh-CN', {
-                            minimumFractionDigits: 2,
-                            maximumFractionDigits: 2,
-                          })
-                        : '-'}
-                    </TableCell>
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>日期</TableHead>
+                    <TableHead className="text-right">累计净值</TableHead>
+                    <TableHead className="text-right">当年净值</TableHead>
+                    <TableHead className="text-right">每日收益</TableHead>
+                    <TableHead className="text-right">收益%</TableHead>
+                    <TableHead className="text-right">份额</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {dailyDetails.map((row, idx) => (
+                    <TableRow key={`${row.date}-${idx}`}>
+                      <TableCell className="font-mono text-sm whitespace-nowrap">
+                        {row.label}
+                      </TableCell>
+                      <TableCell className="text-right font-mono">
+                        {formatDecimal(row.cumulativeNav)}
+                      </TableCell>
+                      <TableCell className="text-right font-mono">
+                        {formatDecimal(row.yearNav)}
+                      </TableCell>
+                      <TableCell
+                        className={
+                          row.dailyReturn !== null && row.dailyReturn >= 0
+                            ? 'text-right font-mono text-up'
+                            : row.dailyReturn !== null && row.dailyReturn < 0
+                              ? 'text-right font-mono text-down'
+                              : 'text-right font-mono'
+                        }
+                      >
+                        {row.dailyReturn !== null
+                          ? `${row.dailyReturn >= 0 ? '+' : ''}¥${formatDecimal(row.dailyReturn, 2)}`
+                          : '-'}
+                      </TableCell>
+                      <TableCell
+                        className={
+                          row.returnRate !== null && row.returnRate >= 0
+                            ? 'text-right font-mono text-up'
+                            : row.returnRate !== null && row.returnRate < 0
+                              ? 'text-right font-mono text-down'
+                              : 'text-right font-mono'
+                        }
+                      >
+                        {formatPercent(row.returnRate)}
+                      </TableCell>
+                      <TableCell className="text-right font-mono">
+                        {row.shares !== null
+                          ? Number(row.shares).toLocaleString('zh-CN', {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })
+                          : '-'}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
           )}
         </CardContent>
       </Card>

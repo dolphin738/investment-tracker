@@ -9,14 +9,17 @@
  */
 
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
+  deleteAccount as deleteAccountApi,
   updateEmail as updateEmailApi,
   updatePassword as updatePasswordApi,
   updateProfile as updateProfileApi,
 } from '@/api/auth.api';
 import { uploadAvatar as uploadAvatarApi } from '@/api/upload.api';
 import { useAuthStore } from '@/stores/auth.store';
+import { ROUTE_PATH } from '@/lib/constants';
 import type {
   UpdateEmailRequest,
   UpdatePasswordRequest,
@@ -83,6 +86,27 @@ export function useUploadAvatar() {
       setUser(data.user);
       toast.success('头像上传成功');
       queryClient.invalidateQueries({ queryKey: AUTH_PROFILE_KEY });
+    },
+  });
+}
+
+/**
+ * 注销账户（SET-P1-06 · 设置页危险操作区）
+ *
+ * 成功后清除本地登录态并回到登录页。后端接口为 P1 预留，
+ * 若暂未开放由 api-client 拦截器统一 Toast 提示错误。
+ */
+export function useDeleteAccount() {
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const logout = useAuthStore((s) => s.logout);
+  return useMutation({
+    mutationFn: () => deleteAccountApi(),
+    onSuccess: () => {
+      toast.success('账户已注销');
+      logout();
+      queryClient.clear();
+      navigate(ROUTE_PATH.LOGIN);
     },
   });
 }

@@ -1,15 +1,14 @@
 /**
- * pages/xirr-analysis.tsx — XIRR 分析页
+ * pages/xirr-analysis.tsx — 收益分析页（PRD §7.5）
  *
- * 布局：
- * - 维度切换（日/周/月/年 + 日期范围 + 聚合方式）
- * - 当前 XIRR 卡片 + 较年初变化
- * - XIRR 折线图
+ * - 维度切换 [日][周][月][年] + 范围
+ * - 当前累计 XIRR + 较年初
+ * - XIRR 趋势折线图（null 断线不画 0 → connectNulls=false）
  * - 年度 XIRR 柱状图
- * - 明细数据表（含环比变化）
+ * - 明细表（日期/XIRR/环比变化）
  */
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   Card,
   CardContent,
@@ -65,11 +64,16 @@ export default function XirrAnalysisPage(): JSX.Element {
   }
 
   const seriesData: XirrSeriesPoint[] = series.data ?? [];
-  // 取最新一个非空值与年初第一个非空值对比
   const validPoints = seriesData.filter((p) => p.xirrValue !== null);
-  const yearStartValue =
-    validPoints.length > 0 ? validPoints[0].xirrValue : null;
   const currentValue = latest.data?.xirrValue ?? null;
+
+  // 较年初：取当前年份第一条非空 XIRR 作为年初基准
+  const yearStartValue = useMemo(() => {
+    if (validPoints.length === 0) return null;
+    const currentYear = String(new Date().getFullYear());
+    const yearPoint = validPoints.find((p) => p.date.startsWith(currentYear));
+    return (yearPoint ?? validPoints[0]).xirrValue;
+  }, [validPoints]);
   const changeFromYearStart = formatChange(currentValue, yearStartValue);
 
   // 年度聚合数据（用于柱状图）
@@ -88,7 +92,7 @@ export default function XirrAnalysisPage(): JSX.Element {
 
       <DimensionSwitcher value={dimension} onChange={setDimension} />
 
-      {/* 当前 XIRR 摘要 */}
+      {/* 当前累计 XIRR + 较年初 */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <Card>
           <CardHeader className="pb-2">
@@ -105,7 +109,7 @@ export default function XirrAnalysisPage(): JSX.Element {
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>较所选区间起点变化</CardDescription>
+            <CardDescription>较年初变化</CardDescription>
             <CardTitle className="text-3xl">
               {changeFromYearStart}
             </CardTitle>
@@ -116,14 +120,15 @@ export default function XirrAnalysisPage(): JSX.Element {
         </Card>
       </div>
 
-      {/* XIRR 折线图 */}
+      {/* XIRR 折线图（null 断线） */}
       <XirrTrendChart
         data={seriesData}
         loading={series.isLoading}
         title={`XIRR 趋势 — ${labelOf(dimension.granularity)}`}
+        connectNulls={false}
       />
 
-      {/* 年度柱状图（仅当当前维度不是 year 时展示额外聚合） */}
+      {/* 年度柱状图 */}
       {dimension.granularity !== QueryGranularity.YEAR && yearlyData.length > 0 && (
         <YearlyBarChart
           data={aggregateByYear(seriesData)}
@@ -135,7 +140,7 @@ export default function XirrAnalysisPage(): JSX.Element {
       <Card>
         <CardHeader>
           <CardTitle className="text-base">明细数据</CardTitle>
-          <CardDescription>双线数值与环比变化</CardDescription>
+          <CardDescription>XIRR 与环比变化</CardDescription>
         </CardHeader>
         <CardContent>
           {series.isLoading ? (

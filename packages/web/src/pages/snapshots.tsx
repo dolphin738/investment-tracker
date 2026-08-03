@@ -1,11 +1,14 @@
 /**
- * pages/snapshots.tsx — 资产快照页
+ * pages/snapshots.tsx — 资产记录页（PRD §7.3）
  *
- * 左侧：快照录入表单（含覆盖确认）
- * 右侧：快照记录列表
+ * - 列表：日期/总资产/持仓/现金/来源（🤖自动/✋手工）/系统自动值+差异%/备注/操作
+ * - 操作：✎编辑（变手工）、🗑删除（事件日会重新生成自动值）、↺重置（仅手工记录）
+ * - 新建/编辑弹窗：日期（不可未来）/总资产（必填）/持仓/现金/备注 + 系统自动值覆盖提示
+ * - 支持 /snapshots?manage=1 进入历史记录管理模式（来自出入金页「管理历史记录」）
  */
 
 import { useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Plus } from 'lucide-react';
 import {
   Card,
@@ -18,16 +21,22 @@ import { Button } from '@/components/ui/button';
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
 import { SnapshotForm } from '@/features/snapshot/snapshot-form';
 import { SnapshotList } from '@/features/snapshot/snapshot-list';
 import { usePortfolioStore } from '@/stores/portfolio.store';
+import type { AssetSnapshot } from '@investment-tracker/shared';
 
 export default function SnapshotsPage(): JSX.Element {
   const currentPortfolioId = usePortfolioStore((s) => s.currentPortfolioId);
-  const [open, setOpen] = useState(false);
+  const [searchParams] = useSearchParams();
+  const manageMode = searchParams.get('manage') === '1';
+
+  const [createOpen, setCreateOpen] = useState(false);
+  const [editing, setEditing] = useState<AssetSnapshot | null>(null);
 
   if (!currentPortfolioId) {
     return (
@@ -39,52 +48,74 @@ export default function SnapshotsPage(): JSX.Element {
     );
   }
 
+  const handleEdit = (item: AssetSnapshot) => {
+    setEditing(item);
+  };
+
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">资产快照</h1>
+          <h1 className="text-2xl font-bold tracking-tight">资产记录</h1>
           <p className="text-sm text-muted-foreground">
-            录入当日资产总额，系统将自动计算当日净值与 XIRR
+            记录当日总资产，系统据此计算净值与 XIRR；手工记录可重置回系统值
           </p>
         </div>
-        <Button onClick={() => setOpen(true)}>
+        <Button onClick={() => setCreateOpen(true)}>
           <Plus className="mr-2 h-4 w-4" />
-          录入快照
+          录入资产记录
         </Button>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <Card className="lg:col-span-1">
-          <CardHeader>
-            <CardTitle className="text-base">录入快照</CardTitle>
-            <CardDescription>每日唯一，重复录入将提示覆盖</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <SnapshotForm portfolioId={currentPortfolioId} />
-          </CardContent>
-        </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">历史记录</CardTitle>
+          <CardDescription>
+            来源 🤖自动 = 系统按交易/余额推导；✋手工 = 用户录入（可重置）
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <SnapshotList
+            portfolioId={currentPortfolioId}
+            query={{ pageSize: 20 }}
+            onEdit={handleEdit}
+            manageMode={manageMode}
+          />
+        </CardContent>
+      </Card>
 
-        <Card className="lg:col-span-2">
-          <CardHeader>
-            <CardTitle className="text-base">快照记录</CardTitle>
-            <CardDescription>支持删除（删除将触发重算）</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <SnapshotList portfolioId={currentPortfolioId} query={{ pageSize: 50 }} />
-          </CardContent>
-        </Card>
-      </div>
-
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent>
+      {/* 新建弹窗 */}
+      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>录入资产快照</DialogTitle>
+            <DialogTitle>录入资产记录</DialogTitle>
+            <DialogDescription>
+              保存后将成为手工记录并触发净值/XIRR 重算
+            </DialogDescription>
           </DialogHeader>
           <SnapshotForm
             portfolioId={currentPortfolioId}
-            onSuccess={() => setOpen(false)}
+            onSuccess={() => setCreateOpen(false)}
           />
+        </DialogContent>
+      </Dialog>
+
+      {/* 编辑弹窗（自动行保存后变手工） */}
+      <Dialog open={Boolean(editing)} onOpenChange={(o) => !o && setEditing(null)}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>编辑资产记录</DialogTitle>
+            <DialogDescription>
+              保存后将变为手工记录（✎编辑 = 变手工）
+            </DialogDescription>
+          </DialogHeader>
+          {editing && (
+            <SnapshotForm
+              portfolioId={currentPortfolioId}
+              snapshot={editing}
+              onSuccess={() => setEditing(null)}
+            />
+          )}
         </DialogContent>
       </Dialog>
     </div>

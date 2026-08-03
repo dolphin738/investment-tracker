@@ -1,7 +1,7 @@
 /**
  * components/layout/sidebar.tsx — 侧边导航
  *
- * 导航项：概览 / 持仓 / 交易 / 快照 / 收益分析 / 净值分析 / 账户 / 设置
+ * 导航项（顺序固定，PRD §7）：概览 / 持仓 / 出入金 / 资产记录 / 收益分析 / 净值分析 / 账户 / 设置
  */
 
 import { NavLink } from 'react-router-dom';
@@ -21,8 +21,8 @@ import { cn } from '@/lib/utils';
 const NAV_ITEMS = [
   { to: ROUTE_PATH.DASHBOARD, label: '概览', icon: LayoutDashboard },
   { to: ROUTE_PATH.HOLDINGS, label: '持仓', icon: Briefcase },
-  { to: ROUTE_PATH.TRANSACTIONS, label: '交易', icon: ArrowLeftRight },
-  { to: ROUTE_PATH.SNAPSHOTS, label: '快照', icon: Camera },
+  { to: ROUTE_PATH.TRANSACTIONS, label: '出入金', icon: ArrowLeftRight },
+  { to: ROUTE_PATH.SNAPSHOTS, label: '资产记录', icon: Camera },
   { to: ROUTE_PATH.XIRR_ANALYSIS, label: '收益分析', icon: TrendingUp },
   { to: ROUTE_PATH.NAV_ANALYSIS, label: '净值分析', icon: LineChart },
   { to: ROUTE_PATH.ACCOUNT, label: '账户', icon: User },
