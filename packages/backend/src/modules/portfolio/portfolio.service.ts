@@ -135,10 +135,11 @@ export class PortfolioService {
   }
 
   /**
-   * 获取全部组合摘要（name/id/总资产/持仓数/最近更新时间）
+   * 获取全部组合摘要（name/id/总资产/持仓数/最近更新时间）— 方案B
    *
    * 供概览页对比（DASH-P1-01）+ 账户页列表（ACC-P0-04）共用。
-   * 一次查询返回全部组合摘要，避免 N+1 问题。
+   * 方案B：持仓数从 security_trades 推导（当前有正持仓的去重标的数）。
+   * 最近更新时间取 snapshots 与 security_trades 的最晚日期。
    */
   async getSummary(userId: string): Promise<PortfolioSummaryDto[]> {
     const portfolios = await this.prisma.portfolio.findMany({
@@ -149,7 +150,7 @@ export class PortfolioService {
           take: 1,
           select: { totalAsset: true, date: true },
         },
-        holdings: {
+        securityTrades: {
           orderBy: { date: 'desc' },
           take: 1,
           select: { date: true },
@@ -158,24 +159,33 @@ export class PortfolioService {
       orderBy: { createdAt: 'desc' },
     });
 
-    // 批量获取各组合的持仓数量（最新日期的去重标的数）
+    // 批量获取各组合的持仓标的数（方案B：从 security_trades 推导）
     const portfolioIds = portfolios.map((p) => p.id);
     const holdingsCounts = portfolioIds.length > 0
       ? await Promise.all(
           portfolioIds.map(async (pid) => {
-            const latestHolding = await this.prisma.holding.findFirst({
+            // 获取该组合所有标的的买入/卖出汇总
+            const trades = await this.prisma.securityTrade.findMany({
               where: { portfolioId: pid },
-              orderBy: { date: 'desc' },
-              select: { date: true },
+              select: { securityId: true, side: true, quantity: true },
             });
-            if (!latestHolding) return { pid, count: 0 };
-            const count = await this.prisma.holding.count({
-              where: {
-                portfolioId: pid,
-                date: latestHolding.date,
-                quantity: { gt: 0 },
-              },
-            });
+
+            // 按标的汇总净持仓
+            const qtyMap = new Map<string, number>();
+            for (const t of trades) {
+              const qty = Number(t.quantity);
+              const current = qtyMap.get(t.securityId) ?? 0;
+              qtyMap.set(
+                t.securityId,
+                t.side === 'BUY_SEC' ? current + qty : current - qty,
+              );
+            }
+
+            // 正持仓标的数
+            let count = 0;
+            for (const qty of qtyMap.values()) {
+              if (qty > 0) count++;
+            }
             return { pid, count };
           }),
         )
@@ -185,19 +195,19 @@ export class PortfolioService {
 
     return portfolios.map((p) => {
       const latestSnapshot = p.snapshots[0] ?? null;
-      const latestHolding = p.holdings[0] ?? null;
+      const latestTrade = p.securityTrades[0] ?? null;
 
       // 计算最近更新时间
       let lastUpdatedAt: string | null = null;
-      if (latestSnapshot && latestHolding) {
+      if (latestSnapshot && latestTrade) {
         lastUpdatedAt =
-          latestSnapshot.date > latestHolding.date
+          latestSnapshot.date > latestTrade.date
             ? latestSnapshot.date.toISOString().split('T')[0]
-            : latestHolding.date.toISOString().split('T')[0];
+            : latestTrade.date.toISOString().split('T')[0];
       } else if (latestSnapshot) {
         lastUpdatedAt = latestSnapshot.date.toISOString().split('T')[0];
-      } else if (latestHolding) {
-        lastUpdatedAt = latestHolding.date.toISOString().split('T')[0];
+      } else if (latestTrade) {
+        lastUpdatedAt = latestTrade.date.toISOString().split('T')[0];
       }
 
       return {

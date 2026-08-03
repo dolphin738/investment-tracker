@@ -89,6 +89,38 @@ export class RecalculationService {
   }
 
   /**
+   * 🔴 T02→T03 契约：从指定日期起级联重算净值 + XIRR
+   *
+   * 与 recalculateFromDate 等效，但使用更简洁的 (portfolioId, date) 签名，
+   * 供 CashFlow / SecurityTrade / SecurityPrice / CashBalance 等 CRUD 模块调用。
+   *
+   * @param portfolioId 组合 ID
+   * @param date 起始日期
+   */
+  async recalculateRange(
+    portfolioId: string,
+    date: Date,
+  ): Promise<RecalculationResult> {
+    return this.recalculateFromDate(portfolioId, date);
+  }
+
+  /**
+   * 🔴 T02→T03 契约：从指定日期起重算 NAV（净值链）
+   *
+   * 供 Snapshot 模块 T5 手工三路径（upsert/delete/reset）调用。
+   * 当前实现等效于 recalculateRange，T03 可细化为仅重算 NAV 不重算 XIRR。
+   *
+   * @param portfolioId 组合 ID
+   * @param date 起始日期
+   */
+  async recalculateNavRange(
+    portfolioId: string,
+    date: Date,
+  ): Promise<RecalculationResult> {
+    return this.recalculateFromDate(portfolioId, date);
+  }
+
+  /**
    * 全量重算：从组合成立日（第一笔买入日）重算到最后一个有快照的日期
    *
    * 使用场景：计算口径变更（如 D-06 资产快照口径调整）后，

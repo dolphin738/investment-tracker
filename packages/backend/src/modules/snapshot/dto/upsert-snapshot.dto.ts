@@ -1,14 +1,14 @@
 /**
- * 资产快照 upsert DTO
+ * 资产快照 DTO（方案B）
  *
- * 每个组合每日仅一条快照（portfolioId + date 唯一约束）。
- * 重复录入时 upsert 覆盖（重复则更新 totalAsset）。
+ * 支持 source=MANUAL/DERIVED、marketValue/cashBalance 拆解、valuationFlag 估值标识。
  */
 
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
   IsDateString,
+  IsEnum,
   IsNumber,
   IsOptional,
   IsString,
@@ -16,29 +16,78 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
+import { SnapshotValuation } from '@prisma/client';
+
+// ==================== 手工录入 / 更新 ====================
 
 export class UpsertSnapshotDto {
-  @ApiProperty({
-    description: '快照日期 YYYY-MM-DD（不可为未来日期）',
-    example: '2025-07-29',
-  })
+  @ApiProperty({ description: '快照日期 YYYY-MM-DD', example: '2025-07-29' })
   @IsDateString()
   date!: string;
 
-  @ApiProperty({
-    description: '当日持仓总市值（> 0）',
-    example: 12000.0,
-    minimum: 0.01,
-  })
+  @ApiProperty({ description: '当日总资产（> 0）', example: 120000.0, minimum: 0.01 })
   @Type(() => Number)
   @IsNumber()
   @Min(0.01)
   @Max(1e15)
   totalAsset!: number;
 
-  @ApiPropertyOptional({ description: '备注', example: '月末估值' })
+  @ApiPropertyOptional({ description: '持仓市值合计' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @Max(1e15)
+  marketValue?: number;
+
+  @ApiPropertyOptional({ description: '当日现金余额' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @Max(1e15)
+  cashBalance?: number;
+
+  @ApiPropertyOptional({
+    description: '估值标识',
+    enum: SnapshotValuation,
+    default: SnapshotValuation.MANUAL_INPUT,
+  })
+  @IsOptional()
+  @IsEnum(SnapshotValuation)
+  valuationFlag?: SnapshotValuation;
+
+  @ApiPropertyOptional({ description: '备注' })
   @IsOptional()
   @IsString()
   @MaxLength(500)
   note?: string;
+}
+
+// ==================== 查询 ====================
+
+export class SnapshotQueryDto {
+  @ApiPropertyOptional({ description: '起始日期 YYYY-MM-DD（含）' })
+  @IsOptional()
+  @IsDateString()
+  startDate?: string;
+
+  @ApiPropertyOptional({ description: '结束日期 YYYY-MM-DD（含）' })
+  @IsOptional()
+  @IsDateString()
+  endDate?: string;
+
+  @ApiPropertyOptional({ description: '页码，从 1 开始', default: 1 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(1)
+  page?: number = 1;
+
+  @ApiPropertyOptional({ description: '每页条数', default: 20 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(1)
+  pageSize?: number = 20;
 }

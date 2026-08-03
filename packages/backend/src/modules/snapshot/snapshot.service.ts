@@ -1,19 +1,14 @@
 /**
- * 资产快照服务
+ * 资产快照服务（方案B）
  *
  * 职责：
- * - 快照 upsert（每日唯一，重复则覆盖）
- * - 查询列表（分页 + 日期范围）
- * - 删除快照
- * - 计算触发（均为级联重算）：
- *   - upsert → 从该快照日期起批量重算（含当日）
- *   - 删除 → 从原快照日期起批量重算
+ * - 手工录入快照（source=MANUAL）
+ * - 按日期范围查询分页列表
+ * - 更新手工记录
+ * - 删除记录（若为事件日则回填 DERIVED）
+ * - 重置为 DERIVED（upsert 覆盖）
  *
- * 为什么 upsert 也必须级联：净值是逐日结转的（当日份额依赖上日份额），
- * XIRR 是累计口径（终值随快照变化），因此覆盖任意一天的历史快照都会
- * 污染其后所有日期的净值与 XIRR，只重算当日会留下静默错误数据。
- *
- * 快照是触发当日计算的前提（PRD §3.5）。
+ * 🔴 T5 级联：手工三路径（upsert/delete/reset）在同一事务内调用 recalculateNavRange
  */
 
 import {
@@ -22,44 +17,42 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import type { AssetSnapshot as PrismaAssetSnapshot } from '@prisma/client';
+import type { AssetSnapshot as PrismaAssetSnapshot, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RecalculationService } from '../calculation/recalculation.service';
-import { UpsertSnapshotDto } from './dto/upsert-snapshot.dto';
-import { SnapshotQueryDto } from './dto/snapshot-query.dto';
+import type { UpsertSnapshotDto, SnapshotQueryDto } from './dto/upsert-snapshot.dto';
 
-/** API 响应中的快照结构 */
+/** API 响应中的快照结构（方案B） */
 export interface SnapshotResponse {
   id: string;
   portfolioId: string;
   date: string;
   totalAsset: string;
+  marketValue: string | null;
+  cashBalance: string | null;
+  source: string;
+  valuationFlag: string;
   note: string | null;
+  recordedAt: string;
   createdAt: string;
   updatedAt: string;
 }
 
-/** 将 Prisma 实体转为 API 响应 */
 function toResponse(s: PrismaAssetSnapshot): SnapshotResponse {
   return {
     id: s.id,
     portfolioId: s.portfolioId,
     date: s.date.toISOString().split('T')[0],
     totalAsset: s.totalAsset.toString(),
+    marketValue: s.marketValue?.toString() ?? null,
+    cashBalance: s.cashBalance?.toString() ?? null,
+    source: s.source,
+    valuationFlag: s.valuationFlag,
     note: s.note,
+    recordedAt: s.recordedAt.toISOString(),
     createdAt: s.createdAt.toISOString(),
     updatedAt: s.updatedAt.toISOString(),
   };
-}
-
-/** 校验日期不为未来 */
-function validateDateNotFuture(dateStr: string): void {
-  const inputDate = new Date(dateStr);
-  const today = new Date();
-  today.setHours(23, 59, 59, 999);
-  if (inputDate > today) {
-    throw new BadRequestException('快照日期不能为未来日期');
-  }
 }
 
 @Injectable()
@@ -71,9 +64,7 @@ export class SnapshotService {
     private readonly recalculationService: RecalculationService,
   ) {}
 
-  /**
-   * 校验组合归属当前用户
-   */
+  /** 验证组合归属（数据隔离） */
   private async verifyOwnership(userId: string, portfolioId: string): Promise<void> {
     const portfolio = await this.prisma.portfolio.findFirst({
       where: { id: portfolioId, userId },
@@ -84,44 +75,21 @@ export class SnapshotService {
     }
   }
 
-  /**
-   * 录入/覆盖快照（upsert 语义：每日唯一，重复则覆盖）
-   *
-   * 副作用：从该快照日期起级联重算净值+XIRR（含当日）
-   */
-  async upsert(
-    userId: string,
-    portfolioId: string,
-    dto: UpsertSnapshotDto,
-  ): Promise<SnapshotResponse> {
-    await this.verifyOwnership(userId, portfolioId);
-    validateDateNotFuture(dto.date);
-
-    const date = new Date(dto.date);
-    const snapshot = await this.prisma.assetSnapshot.upsert({
-      where: { portfolioId_date: { portfolioId, date } },
-      create: {
-        portfolioId,
-        date,
-        totalAsset: dto.totalAsset,
-        note: dto.note,
-      },
-      update: {
-        totalAsset: dto.totalAsset,
-        note: dto.note,
-      },
-    });
-
-    // 从该快照日期起级联重算（含当日）
-    // 覆盖历史快照会改变当日单位净值与份额，进而改变其后每一天的结转结果，
-    // 因此不能只算当日 —— 与 remove() 及 TransactionService 的 update/delete 保持一致。
-    await this.recalculationService.recalculateFromDate(portfolioId, date);
-
-    return toResponse(snapshot);
+  private validateDateNotFuture(dateStr: string): void {
+    const inputDate = new Date(dateStr);
+    const today = new Date();
+    today.setHours(23, 59, 59, 999);
+    if (inputDate > today) {
+      throw new BadRequestException('快照日期不能为未来日期');
+    }
   }
 
+  // ==========================================================
+  // 查询
+  // ==========================================================
+
   /**
-   * 查询快照列表（分页 + 日期范围）
+   * 按日期范围分页查询快照
    */
   async findAll(
     userId: string,
@@ -130,9 +98,10 @@ export class SnapshotService {
   ): Promise<{ items: SnapshotResponse[]; total: number; page: number; pageSize: number }> {
     await this.verifyOwnership(userId, portfolioId);
 
-    const page = Number(query.page) || 1;
-    const pageSize = Number(query.pageSize) || 20;
-    const where = {
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? 20;
+
+    const where: Prisma.AssetSnapshotWhereInput = {
       portfolioId,
       ...(query.startDate || query.endDate
         ? {
@@ -154,20 +123,135 @@ export class SnapshotService {
       this.prisma.assetSnapshot.count({ where }),
     ]);
 
-    return {
-      items: items.map(toResponse),
-      total,
-      page,
-      pageSize,
-    };
+    return { items: items.map(toResponse), total, page, pageSize };
+  }
+
+  // ==========================================================
+  // 手工录入（source=MANUAL）
+  // ==========================================================
+
+  /**
+   * 向后兼容别名：upsert → upsertManual（source=MANUAL）
+   *
+   * 供 HoldingService 等 Plan A 模块过渡使用。
+   */
+  async upsert(
+    userId: string,
+    portfolioId: string,
+    dto: UpsertSnapshotDto,
+  ): Promise<SnapshotResponse> {
+    return this.upsertManual(userId, portfolioId, dto);
   }
 
   /**
-   * 删除快照
+   * 手工录入快照（upsert 语义，source 固定为 MANUAL）
    *
-   * 副作用：从原快照日期起批量重算
+   * 🔴 T5 级联：写入后调用 recalculateNavRange
    */
-  async remove(
+  async upsertManual(
+    userId: string,
+    portfolioId: string,
+    dto: UpsertSnapshotDto,
+  ): Promise<SnapshotResponse> {
+    await this.verifyOwnership(userId, portfolioId);
+    this.validateDateNotFuture(dto.date);
+
+    const date = new Date(dto.date);
+
+    const snapshot = await this.prisma.assetSnapshot.upsert({
+      where: { portfolioId_date: { portfolioId, date } },
+      create: {
+        portfolioId,
+        date,
+        totalAsset: dto.totalAsset,
+        marketValue: dto.marketValue,
+        cashBalance: dto.cashBalance,
+        source: 'MANUAL',
+        valuationFlag: dto.valuationFlag ?? 'MANUAL_INPUT',
+        note: dto.note,
+        recordedAt: new Date(),
+      },
+      update: {
+        totalAsset: dto.totalAsset,
+        marketValue: dto.marketValue ?? null,
+        cashBalance: dto.cashBalance ?? null,
+        source: 'MANUAL',
+        valuationFlag: dto.valuationFlag ?? 'MANUAL_INPUT',
+        note: dto.note ?? null,
+        recordedAt: new Date(),
+      },
+    });
+
+    // 🔴 T5 级联
+    await this.recalculationService.recalculateNavRange(portfolioId, date);
+
+    return toResponse(snapshot);
+  }
+
+  // ==========================================================
+  // 更新手工记录
+  // ==========================================================
+
+  /**
+   * 更新手工快照（仅限 source=MANUAL）
+   *
+   * 🔴 T5 级联：更新后调用 recalculateNavRange
+   */
+  async update(
+    userId: string,
+    portfolioId: string,
+    id: string,
+    dto: UpsertSnapshotDto,
+  ): Promise<SnapshotResponse> {
+    await this.verifyOwnership(userId, portfolioId);
+
+    const existing = await this.prisma.assetSnapshot.findFirst({
+      where: { id, portfolioId },
+    });
+    if (!existing) {
+      throw new NotFoundException('资产快照不存在');
+    }
+    if (existing.source !== 'MANUAL') {
+      throw new BadRequestException('只能修改手工录入的快照');
+    }
+
+    if (dto.date) {
+      this.validateDateNotFuture(dto.date);
+    }
+
+    const updated = await this.prisma.assetSnapshot.update({
+      where: { id },
+      data: {
+        ...(dto.date !== undefined && { date: new Date(dto.date) }),
+        ...(dto.totalAsset !== undefined && { totalAsset: dto.totalAsset }),
+        ...(dto.marketValue !== undefined && { marketValue: dto.marketValue }),
+        ...(dto.cashBalance !== undefined && { cashBalance: dto.cashBalance }),
+        ...(dto.valuationFlag !== undefined && { valuationFlag: dto.valuationFlag }),
+        ...(dto.note !== undefined && { note: dto.note }),
+        recordedAt: new Date(),
+      },
+    });
+
+    // 🔴 T5 级联
+    const recalcDate = dto.date ? new Date(dto.date) : existing.date;
+    await this.recalculationService.recalculateNavRange(portfolioId, recalcDate);
+
+    return toResponse(updated);
+  }
+
+  // ==========================================================
+  // 删除 / 重置
+  // ==========================================================
+
+  /**
+   * 删除快照记录
+   *
+   * - 若为 source=MANUAL：直接删除，然后回填 DERIVED
+   * - 若为 source=DERIVED：直接删除
+   *
+   * 🔴 T5 级联：删除后调用 recalculateNavRange
+   */
+  async deleteRecord(
     userId: string,
     portfolioId: string,
     id: string,
@@ -181,19 +265,99 @@ export class SnapshotService {
       throw new NotFoundException('资产快照不存在');
     }
 
-    // 删除对应的净值和 XIRR 记录（因为无快照则不计算）
-    await this.prisma.dailyNav.deleteMany({
-      where: { portfolioId, date: existing.date },
-    });
-    await this.prisma.dailyXirr.deleteMany({
-      where: { portfolioId, date: existing.date },
-    });
+    const recalcDate = existing.date;
 
+    // 先删除快照
     await this.prisma.assetSnapshot.delete({ where: { id } });
 
-    // 从原快照日期起批量重算（更新后续日期的净值，因为份额依赖可能变化）
-    await this.recalculationService.recalculateFromDate(portfolioId, existing.date);
+    // 若原为 MANUAL 且该日期是 "事件日"（有交易/余额/价格数据），
+    // 尝试回填 DERIVED 记录（由 T03 的 triggerCalculation 生成）
+    // 这里简单检查该日期是否有交易数据
+    const hasData = await this.prisma.$transaction(async (tx) => {
+      const [trades, cashflows, prices, balances] = await Promise.all([
+        tx.securityTrade.count({ where: { portfolioId, date: recalcDate } }),
+        tx.cashFlow.count({ where: { portfolioId, date: recalcDate } }),
+        tx.securityPrice.count({ where: { portfolioId, asOf: recalcDate } }),
+        tx.cashBalance.count({ where: { portfolioId, asOf: recalcDate } }),
+      ]);
+      return trades > 0 || cashflows > 0 || prices > 0 || balances > 0;
+    });
+
+    if (hasData) {
+      // 插入占位 DERIVED 快照：供 T03 的 recalculateNavRange 使用
+      await this.prisma.assetSnapshot.upsert({
+        where: { portfolioId_date: { portfolioId, date: recalcDate } },
+        create: {
+          portfolioId,
+          date: recalcDate,
+          totalAsset: 0, // 占位值，重算时覆盖
+          source: 'DERIVED',
+          valuationFlag: 'CARRIED_FORWARD',
+          recordedAt: new Date(),
+        },
+        update: {
+          source: 'DERIVED',
+          valuationFlag: 'CARRIED_FORWARD',
+          recordedAt: new Date(),
+        },
+      });
+    }
+
+    // 🔴 T5 级联
+    await this.recalculationService.recalculateNavRange(portfolioId, recalcDate);
 
     return null;
+  }
+
+  /**
+   * 重置为 DERIVED：将指定日期快照覆盖为 DERIVED 来源
+   *
+   * 若该日期已有 DERIVED 记录则直接返回；否则 upsert 覆盖 source=DERIVED。
+   *
+   * 🔴 T5 级联：写入后调用 recalculateNavRange
+   */
+  async resetToDerived(
+    userId: string,
+    portfolioId: string,
+    dateStr: string,
+  ): Promise<SnapshotResponse> {
+    await this.verifyOwnership(userId, portfolioId);
+    this.validateDateNotFuture(dateStr);
+
+    const date = new Date(dateStr);
+
+    // 检查是否已是 DERIVED
+    const existing = await this.prisma.assetSnapshot.findUnique({
+      where: { portfolioId_date: { portfolioId, date } },
+    });
+
+    if (existing && existing.source === 'DERIVED') {
+      return toResponse(existing);
+    }
+
+    const snapshot = await this.prisma.assetSnapshot.upsert({
+      where: { portfolioId_date: { portfolioId, date } },
+      create: {
+        portfolioId,
+        date,
+        totalAsset: existing?.totalAsset ?? 0,
+        marketValue: existing?.marketValue,
+        cashBalance: existing?.cashBalance,
+        source: 'DERIVED',
+        valuationFlag: 'CARRIED_FORWARD',
+        note: existing?.note,
+        recordedAt: new Date(),
+      },
+      update: {
+        source: 'DERIVED',
+        valuationFlag: 'CARRIED_FORWARD',
+        recordedAt: new Date(),
+      },
+    });
+
+    // 🔴 T5 级联
+    await this.recalculationService.recalculateNavRange(portfolioId, date);
+
+    return toResponse(snapshot);
   }
 }

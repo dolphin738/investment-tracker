@@ -1,8 +1,7 @@
 /**
- * 资产快照模块
+ * 资产快照模块（方案B）
  *
- * 依赖 CalculationModule（用于触发单日计算和批量重算）。
- * 依赖方向：SnapshotModule → CalculationModule（单向，无循环依赖）。
+ * 依赖 CalculationModule（用于 T5 recalculateNavRange 触发）。
  */
 
 import { Module } from '@nestjs/common';

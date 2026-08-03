@@ -1,14 +1,14 @@
 /**
- * 资产快照控制器
+ * 资产快照控制器（方案B）
  *
  * 路由前缀：/api/portfolios/:portfolioId/snapshots
  *
  * 接口：
- * - PUT    /api/portfolios/:portfolioId/snapshots          — 录入/覆盖快照（upsert）
- * - GET    /api/portfolios/:portfolioId/snapshots          — 获取快照列表（分页 + 日期范围）
- * - DELETE /api/portfolios/:portfolioId/snapshots/:id      — 删除快照
- *
- * 使用 PUT 实现 upsert 语义：每日唯一快照，重复录入则覆盖。
+ * - POST   /api/portfolios/:portfolioId/snapshots              — 手工录入快照（source=MANUAL）
+ * - GET    /api/portfolios/:portfolioId/snapshots              — 分页查询
+ * - PATCH  /api/portfolios/:portfolioId/snapshots/:id          — 更新手工记录
+ * - DELETE /api/portfolios/:portfolioId/snapshots/:id          — 删除记录（事件日回填 DERIVED）
+ * - POST   /api/portfolios/:portfolioId/snapshots/:date/reset  — 重置为 DERIVED
  */
 
 import {
@@ -19,13 +19,13 @@ import {
   HttpCode,
   HttpStatus,
   Param,
-  Put,
+  Patch,
+  Post,
   Query,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { SnapshotService } from './snapshot.service';
-import { UpsertSnapshotDto } from './dto/upsert-snapshot.dto';
-import { SnapshotQueryDto } from './dto/snapshot-query.dto';
+import { UpsertSnapshotDto, SnapshotQueryDto } from './dto/upsert-snapshot.dto';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../../common/decorators/current-user.decorator';
 
@@ -35,18 +35,18 @@ import type { AuthenticatedUser } from '../../common/decorators/current-user.dec
 export class SnapshotController {
   constructor(private readonly snapshotService: SnapshotService) {}
 
-  @Put()
-  @ApiOperation({ summary: '录入/覆盖资产快照（upsert，每日唯一）' })
-  async upsert(
+  @Post()
+  @ApiOperation({ summary: '手工录入资产快照（source=MANUAL）' })
+  async upsertManual(
     @CurrentUser() user: AuthenticatedUser,
     @Param('portfolioId') portfolioId: string,
     @Body() dto: UpsertSnapshotDto,
   ) {
-    return this.snapshotService.upsert(user.userId, portfolioId, dto);
+    return this.snapshotService.upsertManual(user.userId, portfolioId, dto);
   }
 
   @Get()
-  @ApiOperation({ summary: '获取快照列表（分页 + 日期范围）' })
+  @ApiOperation({ summary: '查询快照列表（分页 + 日期范围）' })
   async findAll(
     @CurrentUser() user: AuthenticatedUser,
     @Param('portfolioId') portfolioId: string,
@@ -55,14 +55,36 @@ export class SnapshotController {
     return this.snapshotService.findAll(user.userId, portfolioId, query);
   }
 
+  @Patch(':id')
+  @ApiOperation({ summary: '更新手工快照记录' })
+  async update(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('portfolioId') portfolioId: string,
+    @Param('id') id: string,
+    @Body() dto: UpsertSnapshotDto,
+  ) {
+    return this.snapshotService.update(user.userId, portfolioId, id, dto);
+  }
+
   @Delete(':id')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: '删除快照' })
-  async remove(
+  @ApiOperation({ summary: '删除快照记录（事件日自动回填 DERIVED）' })
+  async deleteRecord(
     @CurrentUser() user: AuthenticatedUser,
     @Param('portfolioId') portfolioId: string,
     @Param('id') id: string,
   ) {
-    return this.snapshotService.remove(user.userId, portfolioId, id);
+    return this.snapshotService.deleteRecord(user.userId, portfolioId, id);
+  }
+
+  @Post(':date/reset')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: '重置指定日期快照为 DERIVED' })
+  async resetToDerived(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('portfolioId') portfolioId: string,
+    @Param('date') date: string,
+  ) {
+    return this.snapshotService.resetToDerived(user.userId, portfolioId, date);
   }
 }
