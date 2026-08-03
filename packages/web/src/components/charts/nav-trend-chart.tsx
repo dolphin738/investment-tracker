@@ -46,9 +46,12 @@ export function NavTrendChart({
   className,
 }: NavTrendChartProps): JSX.Element {
   const option = useMemo(() => {
-    const labels: string[] = data.map((d) => d.label);
-    const cumulativeSeries: (number | null)[] = data.map((d) => d.cumulativeNav);
-    const yearSeries: (number | null)[] = data.map((d) => d.yearNav);
+    // useMemo 无条件先于 JSX 执行，须在此处兜底 undefined/null，
+    // 否则下方 `!data ||` 空态分支永不可达，且组件在 data 缺省时抛错。
+    const points: NavSeriesPoint[] = data ?? [];
+    const labels: string[] = points.map((d) => d.label);
+    const cumulativeSeries: (number | null)[] = points.map((d) => d.cumulativeNav);
+    const yearSeries: (number | null)[] = points.map((d) => d.yearNav);
 
     return {
       tooltip: {
