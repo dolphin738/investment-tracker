@@ -49,30 +49,53 @@ sequenceDiagram
     RS-->>C: {affectedDates:1}
     C-->>U: 200 {code:0, data: securityTrade}
 
-    Note over U,DB: ═══ 流程 B：手工覆盖 / 重置 双路径（source 仲裁） ═══
+    Note over U,DB: ═══ 流程 B（T5）：手工覆盖 / 重置 双路径 —— 快照层仅当日 + 计算层级联至今日 ═══
 
     U->>C: POST /snapshots {date, totalAsset, marketValue?, cashBalance?, note?}
     C->>AVS: upsertManual(portfolioId, date, dto)
     AVS->>DB: INSERT asset_snapshots ... ON CONFLICT(portfolioId,date) DO UPDATE (source=MANUAL)
-    Note right of DB: 无条件覆盖，含原 DERIVED 行（REG-03 手工优先）
+    Note right of DB: 无条件覆盖，含原 DERIVED 行（REG-03 手工优先）<br/>快照层：仅当日一行，不做 DERIVED 区间重建
     DB-->>AVS: AssetSnapshot(MANUAL, valuationFlag=MANUAL_INPUT)
     AVS-->>C: snapshot(MANUAL)
-    C-->>U: 200 {data: snapshot(MANUAL)}
+    C->>RS: recalculateNavRange(portfolioId, date)  %% 🔴 同事务，不可省（REG-06）
+    RS->>DB: SELECT DISTINCT date FROM asset_snapshots WHERE date BETWEEN date AND today
+    loop 快照日期集合升序逐日（份额链条依赖前日）
+        RS->>NS: calculateNavForDate → UPSERT daily_nav
+        RS->>XS: calculateXirrForDate → UPSERT daily_xirr
+    end
+    RS-->>C: {recalculatedDays: N}
+    C-->>U: 200 {data: snapshot(MANUAL), meta:{recalculatedDays:N}}
 
     U->>C: POST /snapshots/:date/reset  %% 撤销手工 → 回退 DERIVED
     C->>AVS: resetToDerived(portfolioId, date)
-    AVS->>AVS: 删除 MANUAL 行 → 重跑 persistDerived(date)
-    AVS->>DB: DELETE ... WHERE portfolioId,date,source='MANUAL'
-    AVS->>AVS: persistDerived(portfolioId, date)  %% 重新派生
+    AVS->>AVS: computeDerived(portfolioId, date)  %% 纯计算，不落库
+    AVS->>DB: UPSERT asset_snapshots (原地覆盖该行, source=DERIVED, valuationFlag=计算结果, note=NULL)
+    Note right of DB: 🔴 不是 DELETE + persistDerived —— 若该日非事件日，<br/>先删再派生会导致该行彻底消失（PRD SNAP-P0-07 验收 1）
     AVS-->>C: snapshot(DERIVED)
-    C-->>U: 200 {data: snapshot(DERIVED)}
+    C->>RS: recalculateNavRange(portfolioId, date)  %% 🔴 同事务，不可省（REG-06）
+    RS-->>C: {recalculatedDays: N}
+    C-->>U: 200 {data: snapshot(DERIVED), meta:{recalculatedDays:N}}
+
+    U->>C: DELETE /snapshots/:id  %% 删除某日记录
+    C->>AVS: deleteRecord(portfolioId, date)
+    AVS->>DB: DELETE FROM asset_snapshots WHERE portfolioId, date
+    alt date ∈ 事件日集合
+        AVS->>AVS: persistDerived(portfolioId, date)  %% 立即回填 DERIVED（Q-B17）
+    else 非事件日
+        AVS-->>AVS: 该日留空，读取时前值填充
+    end
+    C->>RS: recalculateNavRange(portfolioId, date)  %% 🔴 同事务，不可省（REG-06）
+    RS-->>C: {recalculatedDays: N}
+    C-->>U: 200 {data: null, meta:{recalculatedDays:N}}
 
     Note over U,DB: ═══ 区间重建（批量）：DELETE ... AND source='DERIVED' + INSERT ... ON CONFLICT DO NOTHING ═══
     U->>C: POST /recalculate {startDate, endDate?}
     C->>RS: recalculateRange(portfolioId, start, end?)
-    RS->>RS: getEventDates() = 出入金/买卖/现价/余额 事件日 ∪ 区间端点
-    RS->>DB: DELETE FROM asset_snapshots WHERE portfolioId AND date IN(区间) AND source='DERIVED'
+    RS->>RS: end ?? today；getEventDates() = 出入金/买卖/现价/余额 事件日 ∪ 区间端点
+    RS->>DB: DELETE FROM asset_snapshots WHERE portfolioId AND date IN(事件日) AND source='DERIVED'
     RS->>AVS: persistDerived(date) 逐事件日（事件日稀疏落库 + 读前值填充）
-    RS->>NS: 逐日计算 NAV（顺序依赖前日份额）
+    RS->>RS: recalculateNavRange(portfolioId, start, today)
+    Note right of RS: 🔴 第 ③ 步用「快照日期集合」而非「事件日集合」<br/>= SELECT DISTINCT date FROM asset_snapshots<br/>（含手工记录日，否则漏算并中断份额链条）
+    RS->>NS: 逐日计算 NAV（升序，依赖前日份额）
     RS->>XS: 逐日计算 XIRR
     RS-->>C: {affectedDates: N}

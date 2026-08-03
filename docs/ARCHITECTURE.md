@@ -1,9 +1,9 @@
 # 投资收益统计系统 — 架构设计文档（Canonical）
 
-> **版本**: v2.0
+> **版本**: v2.1
 > **架构师**: 高见远（Gao）
-> **日期**: 2026-08-02
-> **状态**: 重写发布（基于评审结论落地）
+> **日期**: 2026-08-03
+> **状态**: 重写发布（基于评审结论落地）+ **v2.1 修订：T5 手工总资产记录的计算层级联口径修正**（§6 / §7.3.1 / §7.3.2 / §8.1 / §13 REG-06；修复「快照层仅当日」被误写为「计算层也仅当日」导致的静默数据错误风险）
 > **依据**: PRD v3.1.3（Consolidated，单一权威）+ ENVIRONMENT-SETUP + 用户拍板决策（含 v2.3 方案B 数据架构）
 >
 > **⚠️ 本档为唯一架构真相源（Canonical）**：取代并吸收 `ARCHITECTURE-modules.md`（已归档至 `docs/archive/`）。任何工程实现以本档 + PRD v3.1.3 为准；二者冲突时以 PRD 金融口径（① 级）与数据架构口径（② 级）裁决优先级为最高依据（见 PRD §2.1–§2.3）。
@@ -24,7 +24,7 @@
 10. [前端架构设计](#10-前端架构设计)
 11. [架构裁决（Q-B 系列正式裁决）](#11-架构裁决q-b-系列正式裁决)
 12. [Migration 策略（决策 A′）](#12-migration-策略决策-a)
-13. [REG-01~05 架构支撑与验收点（P0 强制门禁）](#13-reg-01~05-架构支撑与验收点p0-强制门禁)
+13. [REG-01~06 架构支撑与验收点（P0 强制门禁）](#13-reg-01~06-架构支撑与验收点p0-强制门禁)
 14. [任务列表](#14-任务列表)
 15. [依赖包列表](#15-依赖包列表)
 16. [共享知识（跨文件约定）](#16-共享知识跨文件约定)
@@ -700,6 +700,7 @@ User (1) ──< Portfolio (N)
 
 > **读取语义**：无记录的自然日按**前值填充**（取前一个有记录日的 `totalAsset`，无需判断来源）；`GET` 响应中 `marketValue`/`cashBalance` 为拆解项，`null` 表示未拆解（Q-B15 选填）。
 > **手工记录校验**：`totalAsset ≥ 0`；`marketValue`/`cashBalance` 选填；`note` 强提示；不允许未来日期。
+> 🔴 **写操作的级联义务（T5，见 §7.3.1 / §8.1 / REG-06）**：`POST` / `PATCH` / `DELETE` / `reset` 四个写接口**均须**在同一事务内调用 `recalculateNavRange(portfolioId, date)`，重算 `[date, today]` 的 `daily_nav` / `daily_xirr`。**快照层只动当日那一行，计算层必须级联至今日** —— 漏做即产生「改了历史总资产但其后净值/XIRR 不变」的静默数据错误。四个接口的响应体统一附加 `meta.recalculatedDays: number`，供前端 toast 反馈「已重算 N 天」（`SNAP-P0-06` 验收 4 / `SNAP-P0-07` 验收 5）。
 
 #### 标的管理（`/securities`）
 
@@ -1019,8 +1020,8 @@ export interface PortfolioSummary {
 > 🔴 **时序图已外移至独立文件**：完整方案B 时序图（方案B 全量主链路）见 **[`docs/diagrams/sequence-diagram.mermaid`](./diagrams/sequence-diagram.mermaid)**，包含两条主链路：
 
 - **流程 A — 录入证券买卖 → 持仓推导 → 派生落库 → NAV/XIRR 级联**：`RecalculationService.recalculateRange` → `AssetValuationService.persistDerived`（调用 `HoldingDerivationService` 回放 `SecurityTrade` 推导持仓市值 + 读 `CashBalance` 独立余额）→ 写 `asset_snapshots`（`ON CONFLICT(portfolioId,date) WHERE source='DERIVED'`，不覆盖 MANUAL）→ 同事务顺序算 `DailyNav` → `DailyXirr`（`xirrValue DECIMAL(20,8)`）。
-- **流程 B — 手工覆盖 / 重置 双路径**：`upsertManual` 无条件覆盖（含原 DERIVED 行，手工优先 REG-03）；`reset` 删除 MANUAL 行并重跑 `persistDerived` 回退 DERIVED（REG-04）。
-- **区间重建**：`DELETE ... AND source='DERIVED'` + `INSERT ... ON CONFLICT DO NOTHING` 双保险；事件日集合（出入金/买卖/现价/余额 ∪ 区间端点）+ 读前值填充 + 惰性补齐。
+- **流程 B — 手工覆盖 / 重置 双路径（T5）**：`upsertManual` 无条件覆盖（含原 DERIVED 行，手工优先 REG-03）；`resetToDerived` = `computeDerived(date)` → **原地 upsert 覆盖**该行、`source` 置回 DERIVED（REG-04，🔴 **不是** DELETE + `persistDerived`，见 §8.1）。🔴 **两者及删除路径写完快照后，必须在同一事务内调用 `recalculateNavRange(portfolioId, date)` 完成 `[date, today]` 的 NAV/XIRR 级联**（快照层仅当日、计算层级联至今日，见 §7.3.1 T5 / REG-06）。
+- **区间重建**：`DELETE ... AND source='DERIVED'` + `INSERT ... ON CONFLICT DO NOTHING` 双保险；**快照重派生**用「事件日集合」（出入金/买卖/现价/余额 ∪ 区间端点），**NAV/XIRR 级联**用「快照日期集合」（`SELECT DISTINCT date FROM asset_snapshots`，含手工记录日）+ 读前值填充 + 惰性补齐（§7.3.2）。
 
 > 旧四流程（快照触发 / 交易触发 / 查询聚合 / 历史修改重算）的语义已吸收进上述主链路与 §7.3 五类触发，不再单列。
 
@@ -1217,7 +1218,7 @@ export class NavService {
     const cumulativeNav = unitNav;
 
     // 处理当日申赎
-    const newShares = buyAmount / unitNumit - sellAmount / unitNav;
+    const newShares = buyAmount / unitNav - sellAmount / unitNav;
     const shares = prevShares + newShares;
 
     // 当年净值计算
@@ -1225,9 +1226,8 @@ export class NavService {
     let baseCumulativeNav: number | null;
 
     if (this.isYearFirstTradingDay(date, prevNav.date)) {
-      // 当年首个有快照的交易日 → 重置
-      baseCumulativeNav = cumulativeNav; // wait... 应该用上年末累计净值
-      // 修正：base = 上年末（prevNav）的累计净值
+      // 当年首个有记录的交易日 → 重置年度基准
+      // base = 上年末（prevNav）的累计净值，不是当日累计净值
       baseCumulativeNav = Number(prevNav.cumulativeNav);
       yearNav = 1.0;
     } else {
@@ -1258,26 +1258,52 @@ export class NavService {
 | **当年非首日** | yearNav = cumNav / base（base 从当年首日继承） |
 | **无快照** | 不生成净值记录（周末/节假日沿用前值，不产生新记录） |
 
+> 🔴 **份额链条的传导性（T5 级联的根因，见 §7.3.1）**：`unitNav_t = totalAsset_t / shares_{t-1}`、`shares_t = shares_{t-1} + 申赎/unitNav_t`。**任意一天的 `totalAsset` 被改写（无论来源是 DERIVED 还是 MANUAL），该日及其后每一天的 `unitNav` / `cumulativeNav` / `yearNav` / `shares` 全部失效**，必须按日期升序逐日重算至今日。这是「快照层可以只动一行、计算层绝不能只算一天」的数学依据。
+
 ### 7.3 计算触发器（五类触发 → `RecalculationService` 统一入口）
 
-> **统一入口**：所有写操作（出入金 / 证券买卖 / 现价 / 现金余额 / 手工快照）的副作用**一律**经 `RecalculationService.recalculateRange(portfolioId, start, end?)` 编排，不再各自调 `triggerCalculation`。`CalculationService.triggerCalculation`（单日 快照→NAV→XIRR 级联）仅作为被编排的叶子单元。
+> **统一入口**：所有写操作（出入金 / 证券买卖 / 现价 / 现金余额 / 手工快照）的副作用**一律**经 `RecalculationService` 编排，不再各自调 `triggerCalculation`。`CalculationService.triggerCalculation`（单日 NAV→XIRR）仅作为被编排的叶子单元。
+> `RecalculationService` 对外暴露**两个**入口（§7.3.2）：
+> - `recalculateRange(portfolioId, start, end?)` —— **T1~T4** 用：快照层区间重建 **+** 计算层级联；
+> - `recalculateNavRange(portfolioId, start, end?)` —— **T5** 用：**只做计算层级联，不碰快照层**（手工记录不重建自动记录）。
+>
+> 🔴 两个入口的 `end` 缺省值均为 **today**，绝非 `start`。
 
 #### 7.3.1 五类触发事件
 
 | # | 触发事件 | 入口 | 影响范围 |
 |---|---------|------|---------|
-| T1 | 录入/修改/删除 **出入金**（`/cashflows`） | `recalculateRange(portfolioId, date)` | 当日（现金流变动） |
-| T2 | 录入/修改/删除 **证券买卖**（`/security-trades`） | `recalculateRange(portfolioId, date)` | 当日（持仓推导 + 总资产） |
-| T3 | 录入/修改/删除 **标的最新价**（`/security-prices`） | `recalculateRange(portfolioId, asOf)` | 当日（市值重估） |
-| T4 | 录入/修改/删除 **现金余额**（`/cash-balances`，零联动） | `recalculateRange(portfolioId, asOf)` | 自 `asOf` 起（覆盖 DERIVED，手工跳过） |
-| T5 | 手工 **总资产记录**（`/snapshots`：`upsertManual` / `reset`） | `upsertManual` / `recalculateRange` | 仅当日（手工优先，不参与区间重建） |
+| T1 | 录入/修改/删除 **出入金**（`/cashflows`） | `recalculateRange(portfolioId, date)` | 快照层 + 计算层均**自 `date` 起至今日**（现金流变动 → 申赎项 + XIRR 序列） |
+| T2 | 录入/修改/删除 **证券买卖**（`/security-trades`） | `recalculateRange(portfolioId, date)` | 快照层 + 计算层均**自 `date` 起至今日**（持仓推导 → 总资产 → 净值） |
+| T3 | 录入/修改/删除 **标的最新价**（`/security-prices`） | `recalculateRange(portfolioId, asOf)` | 快照层 + 计算层均**自 `asOf` 起至今日**（价格向前沿用 → 后续每日市值重估） |
+| T4 | 录入/修改/删除 **现金余额**（`/cash-balances`，零联动） | `recalculateRange(portfolioId, asOf)` | 快照层 + 计算层均**自 `asOf` 起至今日**（覆盖 DERIVED，手工跳过） |
+| T5 | 手工 **总资产记录**（`/snapshots`：新建 / 编辑 / 删除 / `reset`） | `upsertManual` / `deleteRecord` / `resetToDerived` → **`recalculateNavRange(portfolioId, date)`** | 🔴 **必须分两层看**：<br/>· **快照层 `asset_snapshots`＝仅当日** —— 只写/删当日那一行，不被区间重建覆盖、也不改写其他日期，**不触发 DERIVED 区间重建**（`SNAP-P0-03` 验收 5「但不重建自动记录」）<br/>· **计算层 `daily_nav`/`daily_xirr`＝自该日级联至今日 `[date, today]`** —— 依据 `SNAP-P0-06` 验收 4 / `SNAP-P0-07` 验收 5 |
+
+> 🔴 **T5 最易踩的坑（存量缺陷，PRD §2.4 已列为必修项）**：手工总资产是**单位份额法的输入**（§7.2：`unitNav_t = totalAsset_t / shares_{t-1}`，`shares_t = shares_{t-1} + 申赎/unitNav_t`）。改 D 日 `totalAsset` → D 日 `unitNav`/`cumulativeNav`/`shares` 变 → D+1 日净值依赖 D 日份额 → **误差一路传导至今日**。因此 T5 在快照层「仅当日」，在计算层**绝不是**「仅当日」。
+> 若工程师照「仅当日」实现，用户修改一笔历史手工总资产后，其后所有日期的累计净值 / 当年净值 / XIRR 都不会更新，构成**静默数据错误**（对应 PRD §2.4「`snapshot.upsert()` 覆盖历史快照时只重算当日、未做级联重算」→ ✅ 继承为必修项）。
+> **T5 与 T1~T4 的唯一区别**：T5 跳过区间重建的第 ①② 步（`DELETE DERIVED` + `persistDerived`），只执行第 ③ 步（NAV → XIRR 级联）。**「不参与区间重建」≠「不参与级联」**，两者不可混为一谈。
+>
+> 🔵 **T1~T4 的区间起点补充**（PRD `SNAP-P0-04a`）：**修改**类操作若同时改动了日期，起点取 `min(新日期, 原日期)`；**删除**类操作起点取原记录日期。终点一律为 today。
+
+**五类触发的层面对照（工程师速查）**
+
+| 触发 | 快照层 `asset_snapshots` | 计算层 `daily_nav` / `daily_xirr` | 调用入口 |
+|------|------------------------|----------------------------------|---------|
+| T1~T4 | `DELETE … source='DERIVED'` + 逐事件日 `persistDerived`，范围 `[min(D,原D), today]` | 按**快照日期集合**逐日重算，范围 `[min(D,原D), today]` | `recalculateRange` |
+| **T5** | **仅当日一行**（写 / 删 / 重置），**不做区间重建** | 按**快照日期集合**逐日重算，范围 **`[date, today]`** | `upsertManual`/`deleteRecord`/`resetToDerived` → `recalculateNavRange` |
 
 #### 7.3.2 区间重建（核心算法）
 
 ```typescript
 // packages/backend/src/modules/calculation/recalculation.service.ts
+
+/**
+ * T1~T4 入口：快照区间重建 + NAV/XIRR 级联
+ * end 缺省 = today（PRD §5.4.4「任一事件发生在日期 D → 重建 [D, today]」）
+ */
 async recalculateRange(portfolioId: string, start: Date, end?: Date): Promise<number> {
-  const eventDates = await this.getEventDates(portfolioId, start, end); // T1~T4 事件日 ∪ 区间端点
+  const until = end ?? todayInAppTz();                                   // 🔴 缺省至今日，不是仅当日
+  const eventDates = await this.getEventDates(portfolioId, start, until); // T1~T4 事件日 ∪ 区间端点
   // 1) 删除区间内所有 DERIVED 记录（双保险①：不误删 MANUAL）
   await this.prisma.$executeRaw`
     DELETE FROM asset_snapshots
@@ -1288,11 +1314,29 @@ async recalculateRange(portfolioId: string, start: Date, end?: Date): Promise<nu
   for (const d of eventDates) {
     await this.assetValuation.persistDerived(portfolioId, d); // 遇 MANUAL 跳过
   }
-  // 3) 同事务、同顺序：快照重建 → NAV → XIRR（NAV 顺序依赖前日份额）
-  for (const d of eventDates) {
+  // 3) 快照重建完成后，按「快照日期集合」而非「事件日集合」做 NAV/XIRR 级联
+  return this.recalculateNavRange(portfolioId, start, until);
+}
+
+/**
+ * T5 入口：**只做计算层级联，不碰快照层**
+ * 用于手工总资产记录的 新建 / 编辑 / 删除 / 重置（SNAP-P0-03 验收 5：不重建自动记录）
+ * 也被 recalculateRange 的第 ③ 步复用
+ */
+async recalculateNavRange(portfolioId: string, start: Date, end?: Date): Promise<number> {
+  const until = end ?? todayInAppTz();
+  // 🔴 日期集合 = 总资产记录表中实际存在的日期（SNAP-P0-03 验收 4），
+  //    不能用 eventDates —— 手工记录日可能不是事件日，用 eventDates 会漏算并中断级联
+  const navDates: Date[] = await this.prisma.$queryRaw`
+    SELECT DISTINCT date FROM asset_snapshots
+     WHERE portfolio_id = ${portfolioId}
+       AND date BETWEEN ${start} AND ${until}
+     ORDER BY date ASC`;                                   // 升序，不可乱序、不可并行
+  // 同事务、同顺序：NAV → XIRR（当日份额依赖前日份额，§7.2）
+  for (const d of navDates) {
     await this.calculation.triggerCalculation(portfolioId, d); // nav → xirr
   }
-  return eventDates.length;
+  return navDates.length;
 }
 ```
 
@@ -1300,10 +1344,18 @@ async recalculateRange(portfolioId: string, start: Date, end?: Date): Promise<nu
 - **同事务同顺序**：快照重建、净值、XIRR 必须按日期升序逐日计算，净值当日份额依赖前日份额（§7.2），不可并行。
 - **事件日集合**：仅对「真实发生写操作的日期」落库/重算（稀疏落库），其余自然日读路径做**前值填充**（取前一个有记录日的 `totalAsset`），无需判断 `source`（C-12）。
 - **惰性补齐**：读路径发现缺口时按需补齐 DERIVED；写路径以事件日为最小重算单元。
+- 🔴 **两个日期集合不可混用**（本次修正的关键）：
+  | 集合 | 定义 | 用途 |
+  |------|------|------|
+  | **事件日集合** | 出入金 ∪ 证券买卖 ∪ 现价 asOf ∪ 现金余额 asOf ∪ 今日 | 步骤 ①② —— 决定**哪些天需要重派生 DERIVED 快照** |
+  | **快照日期集合** | `SELECT DISTINCT date FROM asset_snapshots`（= 事件日集合 ∪ **手工记录日期集合**） | 步骤 ③ —— 决定**哪些天需要重算 NAV/XIRR**（PRD `SNAP-P0-03` 验收 4） |
+  手工记录日期**可能不属于事件日集合**（用户给一个没有任何上游写操作的历史日补录了总资产）。若步骤 ③ 沿用 `eventDates`，该日的 `DailyNav` 永远不会生成，且其后的份额链条从此断裂。
+- **`end` 缺省语义**：`recalculateRange` / `recalculateNavRange` 的 `end` 缺省一律为 **today**，不是 `start`。调用方写 `recalculateRange(P, D)` 即表示重建 `[D, today]`（PRD §5.4.4 重算策略）。
 
 #### 7.3.3 约束（C-11 / C-12）
 
-- **C-11**：任何业务代码**严禁绕过 `AssetValuationService` 直写 `asset_snapshots`**；所有 DERIVED 写入走 `persistDerived`，所有 MANUAL 写入走 `upsertManual`。
+- **C-11**：任何业务代码**严禁绕过 `AssetValuationService` 直写 `asset_snapshots`**；所有 DERIVED 写入走 `persistDerived`，所有手工路径走 `upsertManual` / `deleteRecord` / `resetToDerived`（§8.1）。
+- **C-13**（🆕 v2.1）：`asset_snapshots` 的**任何**写操作（含手工三路径）**必须**在同一事务内触发计算层级联 —— T1~T4 经 `recalculateRange`、T5 经 `recalculateNavRange`，范围终点一律为 today。**严禁只写快照不重算净值**（REG-06 门禁）。
 - **C-12**：读路径（`getSnapshot` / 查询 API）**严禁依赖 `source` 字段做分支**；每日唯一一行即权威值，前值填充只看 `date`。
 
 ---
@@ -1312,13 +1364,26 @@ async recalculateRange(portfolioId: string, start: Date, end?: Date): Promise<nu
 
 > **定位**：`asset-valuation.service` 是 `AssetSnapshot`（`source='DERIVED'`）记录的**唯一写入方**。它把「持仓市值（方案B 流水回放）+ 现金余额」聚合为每日总资产并落库。计算引擎（`nav`/`xirr`）**只读** `AssetSnapshot`，不直接碰持仓 / 现价 / 现金（C-08′）。
 
-### 8.1 三个核心函数
+### 8.1 核心函数（2 读写分离 + 3 手工路径）
 
-| 函数 | 是否落库 | 语义 |
-|------|---------|------|
-| `computeDerived(portfolioId, date)` | ❌ 纯计算 | 返回 `{ totalAsset, marketValue, cashBalance, valuationFlag }`，**不写库**。是「系统本应算出多少」的唯一来源（差异提示、`↺ 重置`、汇总统计均依赖它） |
-| `persistDerived(portfolioId, dateRange)` | ✅ 落库 | 逐事件日 upsert `DERIVED` 记录；遇当日 `MANUAL` **跳过、不覆盖、不新增** |
-| `upsertManual(portfolioId, date, payload)` | ✅ 落库 | **无条件覆盖**当日行，`source` 改写为 `MANUAL`、`valuationFlag='MANUAL_INPUT'` |
+| 函数 | 是否落库 | 语义 | 计算层级联 |
+|------|---------|------|-----------|
+| `computeDerived(portfolioId, date)` | ❌ 纯计算 | 返回 `{ totalAsset, marketValue, cashBalance, valuationFlag }`，**不写库**。是「系统本应算出多少」的唯一来源（差异提示、`↺ 重置`、汇总统计均依赖它） | 无（无副作用） |
+| `persistDerived(portfolioId, dateRange)` | ✅ 落库 | 逐事件日 upsert `DERIVED` 记录；遇当日 `MANUAL` **跳过、不覆盖、不新增** | 由 `recalculateRange` 统一编排（§7.3.2） |
+| `upsertManual(portfolioId, date, payload)` | ✅ 落库 | **无条件覆盖**当日行，`source` 改写为 `MANUAL`、`valuationFlag='MANUAL_INPUT'` | 🔴 **必须** `recalculateNavRange(portfolioId, date)` → `[date, today]` |
+| `deleteRecord(portfolioId, date)` | ✅ 落库 | 物理删除当日行。删除后若 `date` ∈ 事件日集合 → 立即 `persistDerived(date)` 回填 DERIVED；否则该日留空、读取时前值填充（`Q-B17`） | 🔴 **必须** `recalculateNavRange(portfolioId, date)` → `[date, today]` |
+| `resetToDerived(portfolioId, date)` | ✅ 落库 | 「↺ 重置为自动值」：`computeDerived(date)` → **upsert 原地覆盖该行**，`source` 置回 `DERIVED`、`valuationFlag` 置回计算结果、清空手工 `note`。🔴 **不是 DELETE + persistDerived**（PRD `SNAP-P0-07` 验收 1 明示「不是删除操作」；若该日非事件日，先删再派生会导致该行彻底消失） | 🔴 **必须** `recalculateNavRange(portfolioId, date)` → `[date, today]` |
+
+> 🔴 **手工三路径（`upsertManual` / `deleteRecord` / `resetToDerived`）的级联义务（T5，见 §7.3.1）**
+>
+> | 层面 | 行为 | 范围 |
+> |------|------|------|
+> | 快照层 `asset_snapshots` | 只写/删**当日那一行**，不做 `DELETE … source='DERIVED'` 区间重建 | **仅当日** |
+> | 计算层 `daily_nav` / `daily_xirr` | 逐日重算（升序、同事务） | **`[date, today]`，即自该日级联至今日** |
+>
+> 三个函数**必须在同一事务内**先完成快照层写入、再调用 `recalculateNavRange(portfolioId, date)`；任一路径漏调 = REG-06 失败 = 交付阻塞（§13）。
+> Controller 层不得自行拼装级联逻辑，级联入口唯一收敛在 `RecalculationService`（与 §7.3 统一入口约定一致）。
+> API 契约对应：`POST /snapshots`（`SNAP-P0-06` 验收 4）、`DELETE /snapshots/:id`（验收 5）、`POST /snapshots/:date/reset`（`SNAP-P0-07` 验收 5）三者均要求「触发 `[date, today]` 重算并 toast 反馈已重算 N 天」。
 
 ### 8.2 写入 SQL 模板（双保险）
 
@@ -1425,8 +1490,7 @@ ON CONFLICT (portfolio_id, date) DO UPDATE
 
 > **账户 / 设置职责重划（SET-P0-02）**：`/account` 仅展示（个人信息 + 头像），所有「写」操作（偏好、重置重算、头像上传入口）统一收口到 `/settings`，避免双入口不一致。头像上传实现见 §19。
 
-> ⚠️ **ANL-P0-06 待 PM 澄清（不擅自决定）**：PRD §824 规定「每日收益明细表」**正收益绿色、负收益红色**；但 A 股惯例为**涨红跌绿（正红负绿）**。两套配色在「收益正负」语义上冲突。本档**暂不拍板**，标注待 PM 确认后落库 `UserPreference.theme` / 前端常量；当前默认沿用 PRD §824（正绿负红），与全局 A 股涨跌色（正红负绿）并存，需在设置页明确提示。
-```
+> ✅ **ANL-P0-06 配色已裁决（PRD v3.1.4 闭环）**：每日收益明细表采用 **正收益红色、负收益绿色**（A 股涨跌色），统一口径见 **PRD §9.5 全局涨跌配色约定**。前端常量与 `UserPreference.theme` 以 PRD §9.5 为唯一权威，不再保留任何反向表述（原「待 PM 澄清」标注已随 v3.1.4 裁决关闭）。
 
 #### 组件分层
 
@@ -1489,7 +1553,8 @@ ON CONFLICT (portfolio_id, date) DO UPDATE
 | **Q-B14** | 快照表与 `daily_nav` 关系 | **保持两张表**，通过 `date` 关联（非外键强约束）。`AssetSnapshot` 是 NAV/XIRR 的唯一取数来源 | §8 |
 | **Q-B15** | 手工记录拆解字段必填性 | **选填**（`marketValue`/`cashBalance` 缺省留空/0），UI 标注「不可信」；`totalAsset ≥ 0` 为唯一硬校验 | §4 / §8 |
 | **Q-B16** | 手工记录是否参与一致性校验 | **不参与**。持仓汇总条 / 总资产卡的一致性断言**仅 `source='DERIVED'` 时生效**；`MANUAL` 时 UI 提示「今日使用了您的手工记录」 | §9.4 / HOLD-B-P0-06 |
-| **Q-B17** | 删除后是否立即回填 | **事件日回填，非事件日留空前值填充**。删除某日记录后，若该日属事件日集合则由派生层立即回填 `DERIVED`，否则该日无记录、读取时前值填充 | §8 |
+| **Q-B17** | 删除后是否立即回填 | **事件日回填，非事件日留空前值填充**。删除某日记录后，若该日属事件日集合则由派生层立即回填 `DERIVED`，否则该日无记录、读取时前值填充。🔴 **两种情况都必须紧接 `recalculateNavRange(portfolioId, date)`** —— 删除会改变该日的有效总资产（回填值 ≠ 原手工值；或转为前值填充），份额链条同样断裂，需级联至今日（REG-06） | §8 / §7.3.1 T5 |
+| **Q-B18**<br/>🆕 | 手工记录的写操作是否触发级联 | **触发，但只触发计算层**。快照层仅动当日一行（不做 DERIVED 区间重建，`SNAP-P0-03` 验收 5「不重建自动记录」）；计算层 `daily_nav`/`daily_xirr` **必须自该日级联至今日**。裁决依据：单位份额法 `unitNav_t = totalAsset_t / shares_{t-1}` 具有前向传导性（§7.2）+ PRD §2.4 已将「覆盖历史快照只重算当日」列为必修项 | §7.3.1 T5 / §8.1 / §13 REG-06 |
 
 ## 12. Migration 策略（决策 A′）
 
@@ -1513,9 +1578,10 @@ ON CONFLICT (portfolio_id, date) DO UPDATE
 - `SecurityType.CASH` 枚举保留但标 `@deprecated`，不建立 CASH 类标的记录（§3）；
 - 因清库式 migration，C-05「新增字段可空」约束仅适用于 A′ 之后的后续迭代。
 
-## 13. REG-01~05 架构支撑与验收点（P0 强制门禁）
+## 13. REG-01~06 架构支撑与验收点（P0 强制门禁）
 
 > 🔴 **P0 强制门禁**：以下逐条映射 PRD §10 `REG-01`~`REG-05` 到本架构的**服务 / SQL 约束 / 单测位置**。任一失败 = 交付阻塞（W-5 唯一验收闸门）。
+> 🆕 **REG-06 为本架构新增**（v2.1）：PRD §10.3 现有五条全部围绕「快照层每日唯一 / 手工不被覆盖」，**无一条覆盖计算层级联**，而 PRD §2.4 已把「`snapshot.upsert()` 覆盖历史快照只重算当日、未做级联重算」列为**必修项**（`SNAP-P0-03` 验收 3/5、`SNAP-P0-06` 验收 4/5、`SNAP-P0-07` 验收 5）。该必修项缺少回归门禁，故在此补齐。**已提请 PM 将 REG-06 同步收编进 PRD §10.3**（见团队修订建议）。
 
 | REG | 防护点 | 架构落位（service / SQL / 单测） |
 |-----|--------|-------------------------------|
@@ -1524,6 +1590,24 @@ ON CONFLICT (portfolio_id, date) DO UPDATE
 | **REG-03** | 手工覆盖自动且仍只有一条 | `upsertManual()` 走 `ON CONFLICT` 原地覆盖，`source` 改 `MANUAL`，记录数恒为 1（§8.1 / §8） |
 | **REG-04** | 重置可完整回退到派生值 | `computeDerived(date)` 纯计算不落库 → `resetToDerived()` upsert 覆盖，`source` 置回 `DERIVED`（§8.1 / SNAP-P0-07） |
 | **REG-05** | 每日唯一全局不变量 | `UNIQUE(portfolio_id, date)` 不含 `source`；每条用例结束执行 `INV-1`（`SELECT … HAVING COUNT(*)>1` 返回 0 行）。并发场景手工/重建交叉 ≥50 次仍 `COUNT(*)≤1` |
+| 🆕 **REG-06** | **手工修改历史日期后，其后所有日期的净值 / XIRR 已更新**（计算层级联，防静默数据错误） | `upsertManual()` / `deleteRecord()` / `resetToDerived()` 三条手工路径**均须**在同一事务内调用 `RecalculationService.recalculateNavRange(portfolioId, date)`（§8.1 / §7.3.2）。**代码级断言：三条路径任一未调用即判失败**。单测：`snapshot.service` × 3 路径 + `recalculation.service.recalculateNavRange` |
+
+**REG-06 回归步骤与断言**
+
+1. 构造组合 `P`，在 `D0 < D1 < D2 = today` 三日均有总资产记录（`D0` 首笔买入建仓，`D1`、`D2` 为 DERIVED）。记录 `navBefore = SELECT date, unit_nav, cumulative_nav, year_nav, shares FROM daily_nav WHERE portfolio_id=P AND date >= D1 ORDER BY date`。
+2. 对 `(P, D1)` 调用 `upsertManual(totalAsset = 原值 × 1.5, note='REG-06')`。
+3. 断言：
+   ```sql
+   -- A. 快照层：仅 D1 变化，D0/D2 的 total_asset 与 source 均未被改写
+   -- B. 计算层：D1 及其后每一天的 daily_nav 均已刷新
+   SELECT COUNT(*) FROM daily_nav
+    WHERE portfolio_id = :P AND date >= :D1
+      AND updated_at < :opStartedAt;
+   -- ✅ 期望：0 行（区间内无一条净值记录是"陈旧未更新"的）
+   -- C. 数值断言：D1 的 unit_nav = 手工 totalAsset / D0 的 shares（误差 ≤ 1e-8）
+   -- D. 传导断言：D2 的 cumulative_nav ≠ navBefore[D2].cumulative_nav
+   ```
+4. 对 `deleteRecord(P, D1)`、`resetToDerived(P, D1)` 重复步骤 1~3（断言 D 反向：值回到基线）。
 
 > **双保险代码断言（缺一不可，构成 W-5 防护）**：区间重建删除语句**必须**形如 `DELETE ... WHERE source='DERIVED' AND date BETWEEN ...`；插入语句**必须**形如 `INSERT ... ON CONFLICT (portfolio_id, date) DO NOTHING`。建议以 SQL 日志断言或 service 层单测覆盖，不得仅靠数据结果推断。
 
@@ -1570,11 +1654,11 @@ graph LR
 
 | 项 | 内容 |
 |----|------|
-| **任务名称** | 实现 XIRR + 净值（金融算法冻结）+ `asset-valuation.service`（computeDerived/persistDerived/upsertManual）+ `recalculation.service`（五类触发统一入口、区间重建双保险）+ 四维度查询聚合 API |
+| **任务名称** | 实现 XIRR + 净值（金融算法冻结）+ `asset-valuation.service`（computeDerived / persistDerived / upsertManual / deleteRecord / resetToDerived）+ `recalculation.service`（五类触发统一入口、区间重建双保险、`recalculateRange` + `recalculateNavRange` 两个入口）+ 四维度查询聚合 API |
 | **优先级** | P0 |
 | **依赖** | T01 |
 | **涉及文件** | `packages/backend/src/modules/calculation/{calculation.service,xirr.service,nav.service,recalculation.service}.ts`、`modules/valuation/asset-valuation.service.ts`、`modules/query/{query.controller,query.service,query.dto}.ts`、对应 `.module.ts` |
-| **交付标准** | ① XIRR Newton-Raphson 正确收敛（r₀=0.1/maxIter=100/tol=1e-7/rate≤-0.999 钳制/全同号返回 null）② 净值份额法（成立日=1.0，当年首日重置）③ `computeDerived` 纯计算不落库、`persistDerived` 遇 MANUAL 跳过 ④ 五类事件经 `recalculation.service` 统一入口触发区间重建（`DELETE … AND source='DERIVED'` + `INSERT … ON CONFLICT DO NOTHING`）⑤ 四维度查询聚合正确 ⑥ 单测覆盖核心计算 + REG-01~05 |
+| **交付标准** | ① XIRR Newton-Raphson 正确收敛（r₀=0.1/maxIter=100/tol=1e-7/rate≤-0.999 钳制/全同号返回 null）② 净值份额法（成立日=1.0，当年首日重置）③ `computeDerived` 纯计算不落库、`persistDerived` 遇 MANUAL 跳过 ④ T1~T4 经 `recalculateRange` 触发区间重建（`DELETE … AND source='DERIVED'` + `INSERT … ON CONFLICT DO NOTHING`）；🔴 **T5 手工三路径经 `recalculateNavRange` 只做计算层 `[date, today]` 级联、不重建 DERIVED**（§7.3.1 / §8.1）⑤ NAV/XIRR 级联的日期集合取自「快照日期集合」而非「事件日集合」⑥ 四维度查询聚合正确 ⑦ 单测覆盖核心计算 + **REG-01~06**（REG-06 为计算层级联门禁） |
 
 ### T04: Web 前端完整实现
 
