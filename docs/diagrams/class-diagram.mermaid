@@ -1,0 +1,240 @@
+classDiagram
+    %% ============ 数据模型（方案B 全量） ============
+    class User {
+        +String id
+        +String email
+        +String passwordHash
+        +String? name
+        +String? avatar
+        +String? phone
+        +String? bio
+        +Date createdAt
+        +Date updatedAt
+    }
+
+    class Portfolio {
+        +String id
+        +String userId
+        +String name
+        +String? description
+        +Date? baseDate
+        +String currency
+        +Date? archivedAt
+        +Date createdAt
+        +Date updatedAt
+    }
+
+    class CashFlow {
+        +String id
+        +String portfolioId
+        +Date date
+        +CashFlowType type
+        +Decimal amount
+        +String? note
+    }
+    %% 出入金：XIRR 现金流与 NAV 申赎唯一来源（C-02），不含证券明细
+
+    class Security {
+        +String id
+        +String portfolioId
+        +String code
+        +String name
+        +SecurityType type
+        +String currency
+    }
+
+    class SecurityTrade {
+        +String id
+        +String portfolioId
+        +String securityId
+        +Date date
+        +SecuritySide side
+        +Decimal quantity
+        +Decimal price
+        +Decimal fee
+        +String? note
+    }
+    %% 方案B：持仓推导唯一来源（不落库持仓）
+
+    class SecurityPrice {
+        +String id
+        +String portfolioId
+        +String securityId
+        +Decimal price
+        +Date asOf
+    }
+    %% 向前沿用：当前值 = asOf ≤ date 的最后一条
+
+    class CashBalance {
+        +String id
+        +String portfolioId
+        +Decimal amount
+        +Date asOf
+        +String? note
+    }
+    %% 独立表、零联动
+
+    class AssetSnapshot {
+        +String id
+        +String portfolioId
+        +Date date
+        +Decimal totalAsset
+        +Decimal? marketValue
+        +Decimal? cashBalance
+        +SnapshotSource source
+        +SnapshotValuation valuationFlag
+        +String? note
+        +Date recordedAt
+    }
+    %% UNIQUE(portfolioId, date) 不含 source（REG-05）
+
+    class DailyNav {
+        +String id
+        +String portfolioId
+        +Date date
+        +Decimal unitNav
+        +Decimal cumulativeNav
+        +Decimal yearNav
+        +Decimal shares
+        +Decimal? baseCumulativeNav
+    }
+
+    class DailyXirr {
+        +String id
+        +String portfolioId
+        +Date date
+        +Decimal? xirrValue
+    }
+    %% xirrValue Decimal(20,8)
+
+    class DividendRecord {
+        +String id
+        +String portfolioId
+        +String securityId
+        +Date date
+        +Decimal amount
+        +DividendType type
+    }
+
+    class FeeRecord {
+        +String id
+        +String portfolioId
+        +String securityId
+        +Date date
+        +Decimal amount
+        +FeeType type
+    }
+
+    class UserPreference {
+        +String id
+        +String userId
+        +String? defaultPortfolioId
+        +String defaultGranularity
+        +String defaultDateRange
+        +String aggregation
+        +Int weekStartsOn
+        +Int navDecimals
+        +Int xirrDecimals
+        +String theme
+        +Int staleDays
+        +Boolean showLiquidated
+        +String costBasisView
+        +Json? dashboardLayout
+    }
+
+    %% ============ 枚举 ============
+    class CashFlowType {
+        <<enum>>
+        BUY
+        SELL
+    }
+    class SecurityType {
+        <<enum>>
+        STOCK
+        FUND
+        BOND
+        OTHER
+        CASH @deprecated
+    }
+    class SecuritySide {
+        <<enum>>
+        BUY_SEC
+        SELL_SEC
+    }
+    class SnapshotSource {
+        <<enum>>
+        DERIVED
+        MANUAL
+    }
+    class SnapshotValuation {
+        <<enum>>
+        EXACT
+        CARRIED_FORWARD
+        COST_BASED
+        MANUAL_INPUT
+    }
+    class DividendType {
+        <<enum>>
+        CASH
+        STOCK_DIVIDEND
+    }
+    class FeeType {
+        <<enum>>
+        COMMISSION
+        STAMP_TAX
+        OTHER
+    }
+
+    %% ============ 服务类 ============
+    class AssetValuationService {
+        -computeDerived(portfolioId, date) DerivedResult
+        -persistDerived(portfolioId, date) void
+        -upsertManual(portfolioId, date, dto) AssetSnapshot
+    }
+    class HoldingDerivationService {
+        -replayTrades(portfolioId, securityId, date) Position
+        -deriveAll(portfolioId, date) Position[]
+    }
+    class RecalculationService {
+        -recalculateRange(portfolioId, start, end?) number
+        -getEventDates(portfolioId, start, end?) Date[]
+    }
+    class XirrService {
+        -calculateXirr(cashflows) number?
+        -calculateXirrForDate(portfolioId, date) number?
+    }
+    class NavService {
+        -calculateNavForDate(portfolioId, date) NavResult?
+    }
+
+    %% ============ 关系 ============
+    User "1" --> "N" Portfolio : owns
+    Portfolio "1" --> "N" CashFlow : has
+    Portfolio "1" --> "N" Security : has
+    Portfolio "1" --> "N" SecurityTrade : has
+    Portfolio "1" --> "N" SecurityPrice : has
+    Portfolio "1" --> "N" CashBalance : has
+    Portfolio "1" --> "N" AssetSnapshot : has
+    Portfolio "1" --> "N" DailyNav : has
+    Portfolio "1" --> "N" DailyXirr : has
+    Portfolio "1" --> "N" DividendRecord : has
+    Portfolio "1" --> "N" FeeRecord : has
+    User "1" --> "1" UserPreference : has
+
+    Security "1" --> "N" SecurityTrade : has
+    Security "1" --> "N" SecurityPrice : has
+    Security "1" --> "N" DividendRecord : has
+    Security "1" --> "N" FeeRecord : has
+
+    %% 服务依赖（禁直写 C-11 / 禁依赖 source C-12）
+    AssetValuationService ..> AssetSnapshot : 写(DERIVED 跳过 MANUAL)
+    AssetValuationService ..> HoldingDerivationService : 调用
+    AssetValuationService ..> CashBalance : 读(独立)
+    HoldingDerivationService ..> SecurityTrade : 读(回放)
+    HoldingDerivationService ..> SecurityPrice : 读(向前沿用)
+    RecalculationService ..> AssetValuationService : 调用
+    RecalculationService ..> NavService : 调用
+    RecalculationService ..> XirrService : 调用
+    NavService ..> AssetSnapshot : 读(终值)
+    XirrService ..> AssetSnapshot : 读(终值)
+    XirrService ..> CashFlow : 读(现金流)

@@ -1,10 +1,12 @@
-# 投资收益统计系统 — 架构设计文档
+# 投资收益统计系统 — 架构设计文档（Canonical）
 
-> **版本**: v1.0
+> **版本**: v2.0
 > **架构师**: 高见远（Gao）
-> **日期**: 2025-07-29
-> **状态**: 评审就绪
-> **依据**: PRD v1.0 + ENVIRONMENT-SETUP v1.0 + 用户拍板决策
+> **日期**: 2026-08-02
+> **状态**: 重写发布（基于评审结论落地）
+> **依据**: PRD v3.1.3（Consolidated，单一权威）+ ENVIRONMENT-SETUP + 用户拍板决策（含 v2.3 方案B 数据架构）
+>
+> **⚠️ 本档为唯一架构真相源（Canonical）**：取代并吸收 `ARCHITECTURE-modules.md`（已归档至 `docs/archive/`）。任何工程实现以本档 + PRD v3.1.3 为准；二者冲突时以 PRD 金融口径（① 级）与数据架构口径（② 级）裁决优先级为最高依据（见 PRD §2.1–§2.3）。
 
 ---
 
@@ -12,17 +14,23 @@
 
 1. [架构总览](#1-架构总览)
 2. [技术栈最终确认表](#2-技术栈最终确认表)
-3. [数据库设计](#3-数据库设计critical)
+3. [数据库设计（CRITICAL · 方案B）](#3-数据库设计critical-方案b)
 4. [API 接口设计](#4-api-接口设计)
 5. [核心数据结构](#5-核心数据结构)
 6. [核心流程时序图](#6-核心流程时序图)
 7. [XIRR 与净值计算模块设计](#7-xirr-与净值计算模块设计)
-8. [前端架构设计](#8-前端架构设计)
-9. [文件列表及相对路径](#9-文件列表及相对路径)
-10. [任务列表](#10-任务列表critical)
-11. [依赖包列表](#11-依赖包列表)
-12. [共享知识（跨文件约定）](#12-共享知识跨文件约定)
-13. [待明确事项](#13-待明确事项)
+8. [总资产派生层（方案B 核心）](#8-总资产派生层方案b-核心)
+9. [持仓推导引擎（方案B · 交易明细法）](#9-持仓推导引擎方案b--交易明细法)
+10. [前端架构设计](#10-前端架构设计)
+11. [架构裁决（Q-B 系列正式裁决）](#11-架构裁决q-b-系列正式裁决)
+12. [Migration 策略（决策 A′）](#12-migration-策略决策-a)
+13. [REG-01~05 架构支撑与验收点（P0 强制门禁）](#13-reg-01~05-架构支撑与验收点p0-强制门禁)
+14. [任务列表](#14-任务列表)
+15. [依赖包列表](#15-依赖包列表)
+16. [共享知识（跨文件约定）](#16-共享知识跨文件约定)
+17. [待明确事项（已裁决）](#17-待明确事项已裁决)
+18. [附录 A：HarmonyOS APP 端（P2 交互基线）](#18-附录-aHarmonyos-app-端p2-交互基线)
+19. [附录 B：头像上传模块（增量交付）](#19-附录-b头像上传模块增量交付)
 
 ---
 
@@ -347,21 +355,17 @@ graph TB
 
 ---
 
-## 3. 数据库设计（CRITICAL）
+## 3. 数据库设计（CRITICAL · 方案B）
 
-### 3.1 Prisma Schema 完整定义
+> **数据架构范式（决策 A′ / 方案B）**：以**交易明细法**为唯一真相源。持仓**不落库**、由 `SecurityTrade` 流水回放推导；现金余额独立表 `CashBalance`、零联动；总资产 `AssetSnapshot` 由系统自动派生并**每日唯一一条**（`UNIQUE(portfolioId, date)`，不含 `source`）。本档取代旧 `Holding` 快照法（已废止，见 PRD §2.4 HOLD-P0-02）。
+
+### 3.1 Prisma Schema 完整定义（目标态 · 文档记载，代码迁移见 §12）
 
 ```prisma
-// packages/backend/prisma/schema.prisma
+// packages/backend/prisma/schema.prisma（方案B 目标态）
 
-generator client {
-  provider = "prisma-client-js"
-}
-
-datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
-}
+generator client { provider = "prisma-client-js" }
+datasource db { provider = "postgresql"; url = env("DATABASE_URL") }
 
 // ==================== 用户表 ====================
 model User {
@@ -369,11 +373,13 @@ model User {
   email        String   @unique
   passwordHash String   @map("password_hash")
   name         String?
+  avatar       String?  @db.VarChar(512)   // 头像（设置页账户区维护，见 §19）
+  phone        String?  @db.VarChar(20)
+  bio          String?  @db.VarChar(200)
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
-
-  portfolios Portfolio[]
-
+  portfolios   Portfolio[]
+  preferences  UserPreference?
   @@map("users")
 }
 
@@ -383,87 +389,151 @@ model Portfolio {
   userId      String    @map("user_id")
   name        String
   description String?
-  // 成立日：首笔买入日，首次录入买入交易时自动设置，设置后不可更改
-  baseDate    DateTime? @map("base_date") @db.Date
+  baseDate    DateTime? @map("base_date") @db.Date  // 成立日=首笔出入金日，设后不可改
   currency    String    @default("CNY")
+  archivedAt  DateTime? @map("archived_at")          // 非 null = 已归档（P1）
   createdAt   DateTime  @default(now()) @map("created_at")
   updatedAt   DateTime  @updatedAt @map("updated_at")
-
-  user         User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  transactions Transaction[]
+  user         User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cashflows    CashFlow[]                         // 出入金（原 Transaction 改名）
+  securities   Security[]
+  securityTrades SecurityTrade[]
+  securityPrices SecurityPrice[]
+  cashBalances CashBalance[]
   snapshots    AssetSnapshot[]
   dailyNavs    DailyNav[]
   dailyXirrs   DailyXirr[]
-
+  dividends    DividendRecord[]
+  fees         FeeRecord[]
   @@index([userId])
   @@map("portfolios")
 }
 
-// ==================== 交易记录表 ====================
-model Transaction {
-  id          String      @id @default(uuid())
-  portfolioId String      @map("portfolio_id")
-  date        DateTime    @db.Date
-  // BUY = 买入（现金流为负），SELL = 卖出（现金流为正）
-  type        TransactionType
-  amount      Decimal     @db.Decimal(18, 2)   // 交易金额，始终 > 0
-  note        String?
-  createdAt   DateTime    @default(now()) @map("created_at")
-  updatedAt   DateTime    @updatedAt @map("updated_at")
-
-  portfolio Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
-
-  // 查询索引：按组合 + 日期查询交易序列（XIRR/净值计算核心查询）
-  @@index([portfolioId, date])
-  @@map("transactions")
-}
-
-enum TransactionType {
-  BUY
-  SELL
-}
-
-// ==================== 资产快照表 ====================
-model AssetSnapshot {
+// ==================== 出入金流水表（XIRR 现金流唯一来源）====================
+model CashFlow {
   id          String   @id @default(uuid())
   portfolioId String   @map("portfolio_id")
   date        DateTime @db.Date
-  totalAsset  Decimal  @db.Decimal(18, 2)   // 当日持仓总市值，始终 > 0
+  // BUY = 存入（现金流为负），SELL = 取出（现金流为正）
+  type        CashFlowType
+  amount      Decimal  @db.Decimal(18, 2)   // 始终 > 0；是 XIRR 与份额申赎唯一输入（C-02）
   note        String?
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
+  portfolio   Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  @@index([portfolioId, date])
+  @@map("cashflows")
+}
+enum CashFlowType { BUY SELL }   // 严禁复用 SecuritySide（C-10）
 
+// ==================== 标的主数据表 ====================
+model Security {
+  id          String       @id @default(uuid())
+  portfolioId String       @map("portfolio_id")
+  code        String
+  name        String       // ≤ 50 字，必填
+  type        SecurityType @default(STOCK)
+  currency    String       @default("CNY")
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+  portfolio      Portfolio       @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  trades         SecurityTrade[]
+  prices         SecurityPrice[]
+  dividends      DividendRecord[]
+  fees           FeeRecord[]
+  @@unique([portfolioId, code])
+  @@map("securities")
+}
+enum SecurityType {
+  STOCK FUND BOND OTHER
+  CASH @deprecated("方案B 弃用：现金余额独立为 CashBalance，避免总资产双计")
+}
+
+// ==================== 证券买卖流水表（方案B · 持仓推导唯一来源）====================
+model SecurityTrade {
+  id          String       @id @default(uuid())
+  portfolioId String       @map("portfolio_id")
+  securityId  String       @map("security_id")
+  date        DateTime     @db.Date
+  side        SecuritySide              // 独立枚举，严禁复用 CashFlowType（C-10）
+  quantity    Decimal      @db.Decimal(18, 6)  // 交易数量（始终 > 0）
+  price       Decimal      @db.Decimal(18, 6)  // 成交单价
+  fee         Decimal      @db.Decimal(18, 2)  // 费用（信息记录，计入成本，不回冲）
+  note        String?
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+  portfolio   Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  security    Security  @relation(fields: [securityId], references: [id], onDelete: Cascade)
+  @@index([portfolioId, date])
+  @@index([securityId, date])
+  @@map("security_trades")
+}
+enum SecuritySide { BUY_SEC SELL_SEC }
+
+// ==================== 标的最新价表（向前沿用）====================
+model SecurityPrice {
+  id          String   @id @default(uuid())
+  portfolioId String   @map("portfolio_id")
+  securityId  String   @map("security_id")
+  price       Decimal  @db.Decimal(18, 6)
+  asOf        DateTime @db.Date     // 语义：当前值 = asOf ≤ date 的最后一条
+  createdAt   DateTime @default(now()) @map("created_at")
+  portfolio   Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  security    Security  @relation(fields: [securityId], references: [id], onDelete: Cascade)
+  @@index([portfolioId, securityId, asOf])
+  @@map("security_prices")
+}
+
+// ==================== 现金余额表（独立 · 零联动）====================
+model CashBalance {
+  id          String   @id @default(uuid())
+  portfolioId String   @map("portfolio_id")
+  amount      Decimal  @db.Decimal(18, 2)
+  asOf        DateTime @db.Date     // 语义：当前值 = asOf ≤ date 的最后一条；首条之前 = 0
+  note        String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  portfolio   Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  @@index([portfolioId, asOf])
+  @@map("cash_balances")
+}
+
+// ==================== 总资产每日唯一记录表（派生层 + 手工）====================
+model AssetSnapshot {
+  id            String        @id @default(uuid())
+  portfolioId   String        @map("portfolio_id")
+  date          DateTime      @db.Date
+  totalAsset    Decimal       @db.Decimal(18, 2)   // 当日总资产（加项1+加项2）
+  marketValue   Decimal?      @db.Decimal(18, 2)   // 拆解：持仓市值合计
+  cashBalance   Decimal?      @db.Decimal(18, 2)   // 拆解：当日现金余额
+  source        SnapshotSource                 // DERIVED（自动）/ MANUAL（手工）
+  valuationFlag SnapshotValuation              // EXACT/ CARRIED_FORWARD/ COST_BASED/ MANUAL_INPUT
+  note          String?
+  recordedAt    DateTime      @default(now()) @map("recorded_at")
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
   portfolio Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
-
-  // 唯一约束：每个组合每日仅一条快照（重复录入时 upsert 覆盖）
+  // 🔴 唯一约束：每组合每自然日至多一条，不含 source（见 §8.2）
   @@unique([portfolioId, date])
   @@index([portfolioId, date])
   @@map("asset_snapshots")
 }
+enum SnapshotSource { DERIVED MANUAL }
+enum SnapshotValuation { EXACT CARRIED_FORWARD COST_BASED MANUAL_INPUT }
 
 // ==================== 每日净值表 ====================
 model DailyNav {
   id               String   @id @default(uuid())
   portfolioId      String   @map("portfolio_id")
   date             DateTime @db.Date
-  // 当日单位净值 = 当日资产快照 / 上日末份额（成立日 = 1.0000）
   unitNav          Decimal  @db.Decimal(12, 6) @map("unit_nav")
-  // 累计净值 = 单位净值（v1 无分红，累计净值即单位净值）
   cumulativeNav    Decimal  @db.Decimal(12, 6) @map("cumulative_nav")
-  // 当年净值 = 当日累计净值 / base_cumulative_nav（当年首日 = 1.0000）
   yearNav          Decimal  @db.Decimal(12, 6) @map("year_nav")
-  // 当日末总份额
   shares           Decimal  @db.Decimal(18, 6)
-  // 当年基准累计净值（上年末最后一个有快照交易日的累计净值，当年首日设置后年内不变）
   baseCumulativeNav Decimal? @db.Decimal(12, 6) @map("base_cumulative_nav")
   createdAt        DateTime @default(now()) @map("created_at")
   updatedAt        DateTime @updatedAt @map("updated_at")
-
   portfolio Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
-
-  // 唯一约束：每个组合每日仅一条净值记录
   @@unique([portfolioId, date])
-  // 核心查询索引：按组合 + 日期范围查询净值序列
   @@index([portfolioId, date])
   @@map("daily_nav")
 }
@@ -473,19 +543,58 @@ model DailyXirr {
   id          String    @id @default(uuid())
   portfolioId String    @map("portfolio_id")
   date        DateTime  @db.Date
-  // 累计 XIRR 年化收益率（小数形式，如 0.1234 表示 12.34%），null 表示数据不足
-  xirrValue   Decimal?  @db.Decimal(10, 8) @map("xirr_value")
+  // 累计 XIRR 年化收益率（小数形式），null = 数据不足
+  xirrValue   Decimal?  @db.Decimal(20, 8) @map("xirr_value")  // 🔴 精度 (20,8) 与代码/migration 对齐
   createdAt   DateTime  @default(now()) @map("created_at")
   updatedAt   DateTime  @updatedAt @map("updated_at")
-
   portfolio Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
-
-  // 唯一约束：每个组合每日仅一条 XIRR 记录
   @@unique([portfolioId, date])
-  // 核心查询索引：按组合 + 日期范围查询 XIRR 序列
   @@index([portfolioId, date])
   @@map("daily_xirr")
 }
+
+// ==================== 分红 / 费用 / 偏好（不参与收益计算，C-08/C-09）====================
+model DividendRecord {
+  id String @id @default(uuid()); portfolioId String @map("portfolio_id")
+  securityId String @map("security_id"); date DateTime @db.Date
+  amount Decimal @db.Decimal(18,2); type DividendType @default(CASH)
+  note String?; createdAt DateTime @default(now()) @map("created_at")
+  portfolio Portfolio @relation(fields:[portfolioId],references:[id],onDelete:Cascade)
+  security Security @relation(fields:[securityId],references:[id],onDelete:Cascade)
+  @@index([portfolioId, date]); @@index([securityId, date]); @@map("dividend_records")
+}
+model FeeRecord {
+  id String @id @default(uuid()); portfolioId String @map("portfolio_id")
+  securityId String @map("security_id"); date DateTime @db.Date
+  amount Decimal @db.Decimal(18,2); type FeeType @default(OTHER)
+  transactionId String? @map("transaction_id"); note String?
+  createdAt DateTime @default(now()) @map("created_at")
+  portfolio Portfolio @relation(fields:[portfolioId],references:[id],onDelete:Cascade)
+  security Security @relation(fields:[securityId],references:[id],onDelete:Cascade)
+  @@index([portfolioId, date]); @@index([securityId, date]); @@map("fee_records")
+}
+model UserPreference {
+  id String @id @default(uuid()); userId String @unique @map("user_id")
+  defaultPortfolioId String? @map("default_portfolio_id")
+  defaultGranularity String @default("month") @map("default_granularity")
+  defaultDateRange String @default("1y") @map("default_date_range")
+  aggregation String @default("last")
+  weekStartsOn Int @default(1) @map("week_starts_on")
+  navDecimals Int @default(4) @map("nav_decimals")
+  xirrDecimals Int @default(2) @map("xirr_decimals")
+  // 🆕 v2.0 新增偏好字段（SET-P0-02 服务端化扩展）
+  theme String @default("system")
+  staleDays Int @default(3) @map("stale_days")
+  showLiquidated Boolean @default(false) @map("show_liquidated")  // 持仓列表显示已清仓
+  costBasisView String @default("avg") @map("cost_basis_view")    // avg | fifo（P2）
+  dashboardLayout Json? @map("dashboard_layout")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  user User @relation(fields:[userId],references:[id],onDelete:Cascade)
+  @@map("user_preferences")
+}
+enum DividendType { CASH STOCK_DIVIDEND }
+enum FeeType { COMMISSION STAMP_TAX OTHER }
 ```
 
 ### 3.2 设计要点说明
@@ -494,54 +603,42 @@ model DailyXirr {
 
 ```
 User (1) ──< Portfolio (N)
-                ├──< Transaction (N)
-                ├──< AssetSnapshot (N)
-                ├──< DailyNav (N)
-                └──< DailyXirr (N)
+   ├──< CashFlow (N)         出入金（XIRR 现金流唯一来源）
+   ├──< Security (N)
+   │     ├──< SecurityTrade (N)   证券买卖流水（持仓推导唯一来源）
+   │     └──< SecurityPrice (N)   最新价（向前沿用）
+   ├──< CashBalance (N)      现金余额（独立、零联动）
+   ├──< AssetSnapshot (N)    总资产每日唯一记录（派生+手工）
+   ├──< DailyNav (N)
+   ├──< DailyXirr (N)
+   ├──< DividendRecord (N)   不参与计算
+   └──< FeeRecord (N)        不参与计算
 ```
 
-- 所有业务表均通过 `portfolio_id` 外键关联到 `Portfolio`
-- `Portfolio.userId` 实现用户级数据隔离
-- 级联删除：删除 Portfolio 时级联删除其下所有子记录（`onDelete: Cascade`）
-- 删除 User 时级联删除其所有 Portfolio 及子记录
+- 所有业务表均通过 `portfolio_id` 外键关联 `Portfolio`；`Portfolio.userId` 实现用户级数据隔离。
+- 级联删除：`onDelete: Cascade` 贯穿；删除 User 级联其所有 Portfolio 及子记录。
+- **🔴 `Holding` 表已废除**（方案B：持仓不落库，由 `SecurityTrade` 回放推导，见 §9）。
 
-#### daily_nav 表字段说明
+#### 数据精度（C-04，统一为 (20,8)）
 
-| 字段 | 含义 | 计算方式 |
-|------|------|---------|
-| `unit_nav` | 当日单位净值 | 成立日=1.0；其他日=当日资产快照/上日末份额 |
-| `cumulative_nav` | 累计净值 | = unit_nav（v1 无分红） |
-| `year_nav` | 当年净值 | 当年首日=1.0；其他日=累计净值/base_cumulative_nav |
-| `shares` | 当日末总份额 | 上日末份额 + 买入份额 - 卖出份额 |
-| `base_cumulative_nav` | 当年基准净值 | 当年首个有快照交易日设置=上年末累计净值，年内不变 |
+| 数据项 | Prisma / PostgreSQL | 精度 |
+|--------|---------------------|------|
+| 交易金额 / 资产快照金额 / 现金余额 | `DECIMAL(18,2)` | 2 位小数（分） |
+| 单位/累计/当年净值 | `DECIMAL(12,6)` | 6 位小数（计算精度，展示 4 位） |
+| 份额 / 持仓数量 / 均价 / 现价 | `DECIMAL(18,6)` | 6 位小数 |
+| **XIRR** | **`DECIMAL(20,8)`** | **8 位小数（存储），展示百分比 2 位** |
 
-#### daily_xirr 表字段说明
+> **XIRR 精度裁定（E2 决策）**：以代码实际 `Decimal(20,8)` 为准，反向统一 PRD §9.1 与 MEMORY.md（原 (10,8)/(10,6) 整条订正为 (20,8)）。展示仍为百分比 2 位小数，无变化。
 
-| 字段 | 含义 | 计算方式 |
-|------|------|---------|
-| `xirr_value` | 累计 XIRR | Newton-Raphson 求解，全同号现金流时为 null |
+#### AssetSnapshot 每日唯一不变量（数据库层）
 
-#### 索引设计
+- `UNIQUE(portfolioId, date)` **不含 `source`** → 每组合每自然日至多一行，是全局硬约束（REG-05）。
+- 两写方写同一行：`persistDerived()`（自动，遇 `MANUAL` 跳过）与 `upsertManual()`（手工，无条件覆盖）。读取直接读当日那一行，无需优先级判断（C-12）。
+- 详细写入/冲突规范与 `source`/`valuationFlag` 语义见 **§8 总资产派生层**。
 
-| 表 | 索引 | 用途 |
-|----|------|------|
-| portfolios | `@@index([userId])` | 用户查询自己的组合列表 |
-| transactions | `@@index([portfolioId, date])` | XIRR/净值计算时按日期范围拉取交易序列 |
-| asset_snapshots | `@@unique([portfolioId, date])` + `@@index([portfolioId, date])` | 每日唯一快照 + 日期范围查询 |
-| daily_nav | `@@unique([portfolioId, date])` + `@@index([portfolioId, date])` | 每日唯一净值 + 四维度查询 |
-| daily_xirr | `@@unique([portfolioId, date])` + `@@index([portfolioId, date])` | 每日唯一 XIRR + 四维度查询 |
+#### SecurityType.CASH 口径裁决
 
-#### 数据精度
-
-| 数据项 | Prisma 类型 | PostgreSQL 类型 | 精度 |
-|--------|------------|----------------|------|
-| 交易金额 | `Decimal` | `DECIMAL(18,2)` | 2 位小数（分） |
-| 资产快照金额 | `Decimal` | `DECIMAL(18,2)` | 2 位小数（分） |
-| 单位/累计/当年净值 | `Decimal` | `DECIMAL(12,6)` | 6 位小数（计算精度，展示取 4 位） |
-| 份额 | `Decimal` | `DECIMAL(18,6)` | 6 位小数 |
-| XIRR | `Decimal` | `DECIMAL(10,8)` | 8 位小数（小数形式，如 0.12345678，展示取 2 位百分比） |
-
-> **注意**：净值存储 6 位小数确保计算精度，前端展示时四舍五入到 4 位。XIRR 存储 8 位小数（小数形式），前端展示为百分比 2 位小数。
+- 枚举值保留（避免破坏性迁移），标注 `@deprecated`；新建标的时**隐藏 CASH 选项**，CASH 类记录不予建立，避免与 `CashBalance` 在 `totalAsset` 中双计（PRD §5.3 决策 A′）。
 
 ---
 
@@ -549,7 +646,7 @@ User (1) ──< Portfolio (N)
 
 ### 4.1 通用约定
 
-- **Base URL**: `/api/v1`
+- **Base URL**: `/api`（🔴 统一前缀，**无 `/v1`**，与 PRD §附录E 一致；前端/APP `baseURL` 同步去除 `/v1`）
 - **认证**: 除注册/登录外所有接口需 `Authorization: Bearer <JWT>` 头
 - **响应信封**: 所有响应统一为 `{ code: number, data: T, message: string }`
 - **日期格式**: 请求/响应中日期统一为 `YYYY-MM-DD`（ISO 8601 date-only）
@@ -561,48 +658,112 @@ User (1) ──< Portfolio (N)
 
 | Method | Path | 说明 | 请求体 | 响应 data |
 |--------|------|------|--------|-----------|
-| POST | `/api/v1/auth/register` | 用户注册 | `{ email, password, name }` | `{ id, email, name }` |
-| POST | `/api/v1/auth/login` | 用户登录 | `{ email, password }` | `{ accessToken, user: { id, email, name } }` |
-| GET | `/api/v1/auth/me` | 获取当前用户 | — | `{ id, email, name }` |
+| POST | `/api/auth/register` | 用户注册 | `{ email, password, name }` | `{ id, email, name }` |
+| POST | `/api/auth/login` | 用户登录 | `{ email, password }` | `{ accessToken, user: { id, email, name } }` |
+| GET | `/api/auth/me` | 获取当前用户 | — | `{ id, email, name }` |
+| PATCH | `/api/auth/profile` | 更新个人资料（写入口，**仅 `/settings` 调用**）| `{ name?, avatar? }` | `{ id, email, name, avatar }` |
 
 #### 组合管理
 
 | Method | Path | 说明 | 请求体/参数 | 响应 data |
 |--------|------|------|------------|-----------|
-| GET | `/api/v1/portfolios` | 获取当前用户组合列表 | — | `Portfolio[]` |
-| POST | `/api/v1/portfolios` | 创建组合 | `{ name, description?, currency? }` | `Portfolio` |
-| GET | `/api/v1/portfolios/:id` | 获取组合详情 | — | `Portfolio` |
-| PATCH | `/api/v1/portfolios/:id` | 更新组合 | `{ name?, description? }` | `Portfolio` |
-| DELETE | `/api/v1/portfolios/:id` | 删除组合（级联删除子数据） | — | `null` |
+| GET | `/api/portfolios` | 获取当前用户组合列表 | — | `Portfolio[]` |
+| POST | `/api/portfolios` | 创建组合 | `{ name, description?, currency? }` | `Portfolio` |
+| GET | `/api/portfolios/:id` | 获取组合详情 | — | `Portfolio` |
+| PATCH | `/api/portfolios/:id` | 更新组合 | `{ name?, description? }` | `Portfolio` |
+| DELETE | `/api/portfolios/:id` | 删除组合（级联删除子数据） | — | `null` |
 
-#### 交易管理
+#### 出入金管理（`/cashflows`）
 
-| Method | Path | 说明 | 请求体/参数 | 响应 data |
-|--------|------|------|------------|-----------|
-| GET | `/api/v1/portfolios/:portfolioId/transactions` | 获取交易列表 | `?startDate&endDate&page&pageSize` | `Paginated<Transaction>` |
-| POST | `/api/v1/portfolios/:portfolioId/transactions` | 录入交易 | `{ date, type: BUY\|SELL, amount, note? }` | `Transaction` |
-| PATCH | `/api/v1/portfolios/:portfolioId/transactions/:id` | 编辑交易 | `{ date?, type?, amount?, note? }` | `Transaction` |
-| DELETE | `/api/v1/portfolios/:portfolioId/transactions/:id` | 删除交易 | — | `null` |
-
-> **副作用**: 创建/编辑/删除交易后，若当日已有资产快照，后端自动触发当日净值+XIRR 重算。若修改的是历史交易，触发从该日期起的批量重算。
-
-#### 资产快照管理
+> **命名变更（v2.0）**：原 `transactions` 端点**重命名为 `cashflows`**。旧路径 `/api/portfolios/:portfolioId/transactions` 保留 **301 重定向**至 `/api/portfolios/:portfolioId/cashflows`，至少保留 2 个大版本（避免前端/APP 断链）。出入金是 XIRR 现金流与 NAV 申赎项的**唯一来源**，**不含** `securityId/quantity/price/fee`（证券明细归属 `security-trades`，见 §9）。
 
 | Method | Path | 说明 | 请求体/参数 | 响应 data |
 |--------|------|------|------------|-----------|
-| GET | `/api/v1/portfolios/:portfolioId/snapshots` | 获取快照列表 | `?startDate&endDate&page&pageSize` | `Paginated<AssetSnapshot>` |
-| POST | `/api/v1/portfolios/:portfolioId/snapshots` | 录入/覆盖快照 | `{ date, totalAsset, note? }` | `AssetSnapshot` |
-| PATCH | `/api/v1/portfolios/:portfolioId/snapshots/:id` | 编辑快照 | `{ totalAsset?, note? }` | `AssetSnapshot` |
-| DELETE | `/api/v1/portfolios/:portfolioId/snapshots/:id` | 删除快照 | — | `null` |
+| GET | `/api/portfolios/:portfolioId/cashflows` | 获取出入金列表 | `?startDate&endDate&page&pageSize` | `Paginated<CashFlow>` |
+| POST | `/api/portfolios/:portfolioId/cashflows` | 录入出入金 | `{ date, type: BUY\|SELL, amount, note? }` | `CashFlow` |
+| PATCH | `/api/portfolios/:portfolioId/cashflows/:id` | 编辑出入金 | `{ date?, type?, amount?, note? }` | `CashFlow` |
+| DELETE | `/api/portfolios/:portfolioId/cashflows/:id` | 删除出入金 | — | `null` |
 
-> **副作用**: 创建/编辑/删除快照后，后端自动触发当日净值+XIRR 计算。编辑/删除历史快照触发从该日期起的批量重算。
+> **副作用**：经 `recalculation.service` 统一入口触发区间重建(见 §7.3 / §12)。出入金不含证券明细，现金流口径以 `amount` 唯一（C-02）。
+
+#### 总资产记录管理（`/snapshots` · 每日唯一）
+
+> 🔴 **每日唯一一条**（`UNIQUE(portfolioId, date)`，不含 `source`）。读取直接读当日那一行，无需优先级判断（C-12）。两写方：派生层 `persistDerived()`（遇 `MANUAL` 跳过）与手工 `upsertManual()`（无条件覆盖）。详见 §8。
+
+| Method | Path | 说明 | 请求体/参数 | 响应 data |
+|--------|------|------|------------|-----------|
+| GET | `/api/portfolios/:portfolioId/snapshots` | 获取记录列表（含 `source`/`valuationFlag`/拆解） | `?startDate&endDate&page&pageSize` | `Paginated<AssetSnapshot>`（含 `marketValue`/`cashBalance`/`source`/`valuationFlag`/`recordedAt`） |
+| POST | `/api/portfolios/:portfolioId/snapshots` | 手工录入/覆盖（→`source=MANUAL`） | `{ date, totalAsset, marketValue?, cashBalance?, note? }` | `AssetSnapshot`（source=MANUAL） |
+| PATCH | `/api/portfolios/:portfolioId/snapshots/:id` | 编辑手工记录 | `{ totalAsset?, marketValue?, cashBalance?, note? }` | `AssetSnapshot` |
+| DELETE | `/api/portfolios/:portfolioId/snapshots/:id` | 删除记录（若属事件日立即回填 DERIVED） | — | `null` |
+| POST | `/api/portfolios/:portfolioId/snapshots/:date/reset` | 「重置为自动值」→ `source=DERIVED`（等价于撤销手工） | — | `AssetSnapshot`（source=DERIVED） |
+
+> **读取语义**：无记录的自然日按**前值填充**（取前一个有记录日的 `totalAsset`，无需判断来源）；`GET` 响应中 `marketValue`/`cashBalance` 为拆解项，`null` 表示未拆解（Q-B15 选填）。
+> **手工记录校验**：`totalAsset ≥ 0`；`marketValue`/`cashBalance` 选填；`note` 强提示；不允许未来日期。
+
+#### 标的管理（`/securities`）
+
+| Method | Path | 说明 | 请求体/参数 | 响应 data |
+|--------|------|------|------------|-----------|
+| GET | `/api/portfolios/:portfolioId/securities` | 标的列表 | `?page&pageSize` | `Paginated<Security>` |
+| POST | `/api/portfolios/:portfolioId/securities` | 新建标的（`type` 隐藏 `CASH` 选项） | `{ code, name, type?, currency? }` | `Security` |
+| PATCH | `/api/portfolios/:portfolioId/securities/:id` | 编辑标的 | `{ name?, type? }` | `Security` |
+| DELETE | `/api/portfolios/:portfolioId/securities/:id` | 删除标的（级联删其 trades/prices） | — | `null` |
+
+#### 证券买卖流水（`/security-trades` · 方案B 持仓推导来源）
+
+| Method | Path | 说明 | 请求体/参数 | 响应 data |
+|--------|------|------|------------|-----------|
+| GET | `/api/portfolios/:portfolioId/security-trades` | 流水列表 | `?securityId&startDate&endDate&page&pageSize` | `Paginated<SecurityTrade>` |
+| POST | `/api/portfolios/:portfolioId/security-trades` | 录入买卖 | `{ date, securityId, side: BUY_SEC\|SELL_SEC, quantity, price, fee?, note? }` | `SecurityTrade` |
+| PATCH | `/api/portfolios/:portfolioId/security-trades/:id` | 编辑流水 | `{ date?, quantity?, price?, fee? }` | `SecurityTrade` |
+| DELETE | `/api/portfolios/:portfolioId/security-trades/:id` | 删除流水 | — | `null` |
+
+> **硬校验（卖出）**：卖出数量不得超过当前持仓；若会导致负持仓（含未来日期）→ 拒绝（400）。`avgCost` 由回放推导，用户不手填（Q-04 改判）。
+
+#### 标的最新价（`/security-prices`）
+
+| Method | Path | 说明 | 请求体/参数 | 响应 data |
+|--------|------|------|------------|-----------|
+| GET | `/api/portfolios/:portfolioId/security-prices` | 最新价列表（按 asOf 向前沿用） | `?securityId&page&pageSize` | `Paginated<SecurityPrice>` |
+| POST | `/api/portfolios/:portfolioId/security-prices` | 录入/更新现价 | `{ securityId, price, asOf }` | `SecurityPrice` |
+| PATCH | `/api/portfolios/:portfolioId/security-prices/:id` | 编辑 | `{ price?, asOf? }` | `SecurityPrice` |
+| DELETE | `/api/portfolios/:portfolioId/security-prices/:id` | 删除 | — | `null` |
+
+> 更新现价触发受影响日期自动记录重建（手工记录日期跳过）。批量保存合并为单次区间重建（Q-B8）。
+
+#### 现金余额（`/cash-balances` · 独立 · 零联动）
+
+| Method | Path | 说明 | 请求体/参数 | 响应 data |
+|--------|------|------|------------|-----------|
+| GET | `/api/portfolios/:portfolioId/cash-balances` | 余额变更历史（多行） | `?asOf&page&pageSize` | `Paginated<CashBalance>` |
+| POST | `/api/portfolios/:portfolioId/cash-balances` | 录入/更新某日余额 | `{ amount, asOf, note? }` | `CashBalance` |
+| PATCH | `/api/portfolios/:portfolioId/cash-balances/:id` | 编辑 | `{ amount?, note? }` | `CashBalance` |
+| DELETE | `/api/portfolios/:portfolioId/cash-balances/:id` | 删除 | — | `null` |
+
+> 🔴 **零联动（决策 B）**：存入/取出、证券买卖**不改**它；仅在保存后给软提示。修改任一条 → 从该 `asOf` 起级联重算、覆盖 `DERIVED` 记录，手工记录跳过（CASH-P0-03）。单一录入入口 = 出入金管理页「现金余额」区块（CASH-P0-02）。
+
+#### 持仓查询（`/holdings` · 方案B 派生，只读）
+
+> 🔴 方案B 持仓**不入库**，由 `SecurityTrade` 流水按 `(date, createdAt)` 升序回放推导（见 §9）。本端点为只读查询，**无 CRUD**；卖出硬校验口径见 §9.2。
+
+| Method | Path | 说明 | 请求参数 | 响应 data |
+|--------|------|------|---------|-----------|
+| GET | `/api/portfolios/:portfolioId/holdings` | 持仓列表（实时推导）| `?date&securityId&includeClosed` | `HoldingView[]`（含 `quantity`/`costTotal`/`avgCost`/`marketValue`/`pnl`/`ratio`）|
+
+#### 组合概览（`/overview` · Dashboard 落地页）
+
+| Method | Path | 说明 | 请求参数 | 响应 data |
+|--------|------|------|---------|-----------|
+| GET | `/api/portfolios/:portfolioId/overview` | 核心指标 + 趋势（一屏） | `?range` | `OverviewDTO`（当前总资产/累计XIRR/当年XIRR/净值序列片段/近期出入金） |
+| GET | `/api/portfolios/summary` | 多组合对比摘要（一次查询） | — | `PortfolioSummary[]` |
 
 #### XIRR 查询（四维度）
 
 | Method | Path | 说明 | 请求参数 | 响应 data |
 |--------|------|------|---------|-----------|
-| GET | `/api/v1/portfolios/:portfolioId/xirr` | 查询 XIRR 时间序列 | `?granularity=day\|week\|month\|year&startDate&endDate&aggregation=last\|avg` | `XirrSeriesPoint[]` |
-| GET | `/api/v1/portfolios/:portfolioId/xirr/latest` | 获取最新 XIRR | — | `{ date, xirrValue }` |
+| GET | `/api/portfolios/:portfolioId/xirr` | 查询 XIRR 时间序列 | `?granularity=day\|week\|month\|year&startDate&endDate&aggregation=last\|avg` | `XirrSeriesPoint[]` |
+| GET | `/api/portfolios/:portfolioId/xirr/latest` | 获取最新 XIRR | — | `{ date, xirrValue }` |
 
 **XirrSeriesPoint 结构**:
 ```typescript
@@ -617,8 +778,8 @@ User (1) ──< Portfolio (N)
 
 | Method | Path | 说明 | 请求参数 | 响应 data |
 |--------|------|------|---------|-----------|
-| GET | `/api/v1/portfolios/:portfolioId/nav` | 查询净值时间序列 | `?granularity=day\|week\|month\|year&startDate&endDate&aggregation=last\|avg&metric=cumulative\|year\|both` | `NavSeriesPoint[]` |
-| GET | `/api/v1/portfolios/:portfolioId/nav/latest` | 获取最新净值 | — | `{ date, cumulativeNav, yearNav, shares }` |
+| GET | `/api/portfolios/:portfolioId/nav` | 查询净值时间序列 | `?granularity=day\|week\|month\|year&startDate&endDate&aggregation=last\|avg&metric=cumulative\|year\|both` | `NavSeriesPoint[]` |
+| GET | `/api/portfolios/:portfolioId/nav/latest` | 获取最新净值 | — | `{ date, cumulativeNav, yearNav, shares }` |
 
 **NavSeriesPoint 结构**:
 ```typescript
@@ -635,13 +796,13 @@ User (1) ──< Portfolio (N)
 
 | Method | Path | 说明 | 请求体 | 响应 data |
 |--------|------|------|--------|-----------|
-| POST | `/api/v1/portfolios/:portfolioId/recalculate` | 手动触发批量重算 | `{ startDate, endDate? }` | `{ affectedDates: number, duration: number }` |
+| POST | `/api/portfolios/:portfolioId/recalculate` | 手动触发批量重算 | `{ startDate, endDate? }` | `{ affectedDates: number, duration: number }` |
 
 #### 统计摘要（Dashboard 卡片）
 
 | Method | Path | 说明 | 请求参数 | 响应 data |
 |--------|------|------|---------|-----------|
-| GET | `/api/v1/portfolios/:portfolioId/summary` | 获取关键指标摘要 | — | `PortfolioSummary` |
+| GET | `/api/portfolios/:portfolioId/summary` | 获取关键指标摘要 | — | `PortfolioSummary` |
 
 **PortfolioSummary 结构**:
 ```typescript
@@ -655,112 +816,31 @@ User (1) ──< Portfolio (N)
 }
 ```
 
+#### 账户与设置（`/account` 只读 · `/settings` 写）
+
+> **职责重划（SET-P0-02）**：`/account` 为纯只读聚合视图，数据来自 `GET /api/auth/me` + `GET /api/account/stats`；所有「写」动作（资料、头像、偏好、重置重算）统一收口 `/settings`，经 `PATCH /api/auth/profile` + `GET/PATCH /api/users/preferences`（与 §10.1 前端职责一致）。
+
+| Method | Path | 说明 | 请求参数 | 响应 data |
+|--------|------|------|---------|-----------|
+| GET | `/api/account/stats` | 账户统计（ACC-P0-06）| — | `AccountStats`（组合数 / 总资产 / 累计XIRR / 当年XIRR）|
+| GET | `/api/users/preferences` | 获取用户偏好（SET-P0-02）| — | `UserPreference` |
+| PATCH | `/api/users/preferences` | 更新用户偏好（全站唯一写入口）| `{ theme?, defaultPortfolioId?, ... }` | `UserPreference` |
+
 ---
 
 ## 5. 核心数据结构
 
 ### 5.1 类图
 
-```mermaid
-classDiagram
-    class User {
-        +string id
-        +string email
-        +string passwordHash
-        +string? name
-        +Date createdAt
-        +Date updatedAt
-    }
+> 🔴 **类图已外移至独立文件**：完整方案B 数据模型 + 服务类 + 关系图见 **[`docs/diagrams/class-diagram.mermaid`](./diagrams/class-diagram.mermaid)**（含 `CashFlow`/`SecurityTrade`/`SecurityPrice`/`CashBalance`/`AssetSnapshot`/`DailyNav`/`DailyXirr` 全量模型，以及 `AssetValuationService`/`HoldingDerivationService`/`RecalculationService` 服务依赖，标注 C-11/C-12 约束）。
 
-    class Portfolio {
-        +string id
-        +string userId
-        +string name
-        +string? description
-        +Date? baseDate
-        +string currency
-        +Date createdAt
-        +Date updatedAt
-    }
+<details><summary>核心类速览（点击展开）</summary>
 
-    class Transaction {
-        +string id
-        +string portfolioId
-        +Date date
-        +TransactionType type
-        +Decimal amount
-        +string? note
-        +Date createdAt
-        +Date updatedAt
-    }
+- **数据模型**：`User` 1—N `Portfolio`；`Portfolio` 聚合 `CashFlow`(出入金) / `Security`—`SecurityTrade`(买卖流水) / `SecurityPrice`(现价) / `CashBalance`(独立) / `AssetSnapshot`(每日唯一) / `DailyNav` / `DailyXirr` / `DividendRecord` / `FeeRecord` / `UserPreference`。
+- **服务类**：`AssetValuationService`(派生层入口：computeDerived/persistDerived/upsertManual)、`HoldingDerivationService`(持仓回放)、`RecalculationService`(区间重建编排)、`XirrService`、`NavService`。
+- **关键不变量**：`AssetSnapshot` 的 `UNIQUE(portfolioId, date)` 不含 `source`；服务写 `asset_snapshots` 必须走 `AssetValuationService`（C-11），读路径不得依赖 `source`（C-12）。
 
-    class AssetSnapshot {
-        +string id
-        +string portfolioId
-        +Date date
-        +Decimal totalAsset
-        +string? note
-        +Date createdAt
-        +Date updatedAt
-    }
-
-    class DailyNav {
-        +string id
-        +string portfolioId
-        +Date date
-        +Decimal unitNav
-        +Decimal cumulativeNav
-        +Decimal yearNav
-        +Decimal shares
-        +Decimal? baseCumulativeNav
-        +Date createdAt
-        +Date updatedAt
-    }
-
-    class DailyXirr {
-        +string id
-        +string portfolioId
-        +Date date
-        +Decimal? xirrValue
-        +Date createdAt
-        +Date updatedAt
-    }
-
-    class XirrService {
-        -calculateXirr(cashflows: Cashflow[]) number?
-        -buildNpv(rate: number, cashflows: Cashflow[]) number
-        -buildDerivative(rate: number, cashflows: Cashflow[]) number
-    }
-
-    class NavService {
-        -calculateNavForDate(portfolioId: string, date: Date) NavResult
-        -isYearFirstTradingDay(date: Date, portfolioId: string) boolean
-        -getPrevTradingDayNav(portfolioId: string, date: Date) DailyNav?
-    }
-
-    class CalculationService {
-        -triggerCalculation(portfolioId: string, date: Date) void
-        -batchRecalculate(portfolioId: string, startDate: Date, endDate: Date) void
-    }
-
-    class RecalculationService {
-        -recalculateFromDate(portfolioId: string, startDate: Date) number
-        -getAffectedDates(portfolioId: string, startDate: Date) Date[]
-    }
-
-    User "1" --> "N" Portfolio : owns
-    Portfolio "1" --> "N" Transaction : has
-    Portfolio "1" --> "N" AssetSnapshot : has
-    Portfolio "1" --> "N" DailyNav : has
-    Portfolio "1" --> "N" DailyXirr : has
-    XirrService ..> Transaction : reads
-    XirrService ..> AssetSnapshot : reads terminal value
-    NavService ..> AssetSnapshot : reads
-    NavService ..> Transaction : reads buy/sell
-    CalculationService --> XirrService : delegates
-    CalculationService --> NavService : delegates
-    RecalculationService --> CalculationService : calls per date
-```
+</details>
 
 ### 5.2 Shared 包 TypeScript 类型定义
 
@@ -784,35 +864,76 @@ export interface DateRangeQuery {
   endDate?: string;
 }
 
-// packages/shared/src/enums/transaction-type.ts
-export enum TransactionType {
-  BUY = 'BUY',
-  SELL = 'SELL',
+// packages/shared/src/enums/cashflow-type.ts
+export enum CashFlowType {
+  BUY = 'BUY',   // 存入（现金流为负）
+  SELL = 'SELL', // 取出（现金流为正）
+}
+
+// packages/shared/src/enums/security-side.ts（严禁复用 CashFlowType，C-10）
+export enum SecuritySide {
+  BUY_SEC = 'BUY_SEC',
+  SELL_SEC = 'SELL_SEC',
+}
+
+// packages/shared/src/enums/snapshot-source.ts
+export enum SnapshotSource { DERIVED = 'DERIVED', MANUAL = 'MANUAL' }
+export enum SnapshotValuation {
+  EXACT = 'EXACT', CARRIED_FORWARD = 'CARRIED_FORWARD',
+  COST_BASED = 'COST_BASED', MANUAL_INPUT = 'MANUAL_INPUT',
 }
 
 // packages/shared/src/enums/query-granularity.ts
 export enum QueryGranularity {
-  DAY = 'day',
-  WEEK = 'week',
-  MONTH = 'month',
-  YEAR = 'year',
+  DAY = 'day', WEEK = 'week', MONTH = 'month', YEAR = 'year',
 }
+export enum AggregationMethod { LAST = 'last', AVG = 'avg' }
 
-export enum AggregationMethod {
-  LAST = 'last',
-  AVG = 'avg',
-}
-
-// packages/shared/src/types/transaction.ts
-export interface Transaction {
+// packages/shared/src/types/cashflow.ts（XIRR 现金流唯一来源）
+export interface CashFlow {
   id: string;
   portfolioId: string;
   date: string;            // YYYY-MM-DD
-  type: TransactionType;
-  amount: string;          // Decimal as string (避免前端精度丢失)
+  type: CashFlowType;
+  amount: string;          // Decimal 字符串（始终 > 0）
   note: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+// packages/shared/src/types/security-trade.ts（方案B 持仓推导唯一来源）
+export interface SecurityTrade {
+  id: string;
+  portfolioId: string;
+  securityId: string;
+  date: string;
+  side: SecuritySide;
+  quantity: string;        // Decimal 字符串（> 0）
+  price: string;           // Decimal 字符串
+  fee: string;             // Decimal 字符串
+  note: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// packages/shared/src/types/security-price.ts（向前沿用）
+export interface SecurityPrice {
+  id: string;
+  portfolioId: string;
+  securityId: string;
+  price: string;           // Decimal 字符串
+  asOf: string;            // YYYY-MM-DD
+  createdAt: string;
+}
+
+// packages/shared/src/types/cash-balance.ts（独立 · 零联动）
+export interface CashBalance {
+  id: string;
+  portfolioId: string;
+  amount: string;          // Decimal 字符串
+  asOf: string;            // YYYY-MM-DD
+  note: string | null;
+  createdAt: string;
 }
 
 // packages/shared/src/types/portfolio.ts
@@ -827,13 +948,18 @@ export interface Portfolio {
   updatedAt: string;
 }
 
-// packages/shared/src/types/snapshot.ts
+// packages/shared/src/types/snapshot.ts（每日唯一，含 source/valuationFlag）
 export interface AssetSnapshot {
   id: string;
   portfolioId: string;
   date: string;
-  totalAsset: string;      // Decimal as string
+  totalAsset: string;      // Decimal 字符串
+  marketValue: string | null;   // 拆解：持仓市值合计
+  cashBalance: string | null;   // 拆解：当日现金余额
+  source: SnapshotSource;       // DERIVED | MANUAL
+  valuationFlag: SnapshotValuation;
   note: string | null;
+  recordedAt: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -890,178 +1016,13 @@ export interface PortfolioSummary {
 
 ## 6. 核心流程时序图
 
-### 流程 A：录入资产快照 → 触发净值计算 → 触发 XIRR 计算
+> 🔴 **时序图已外移至独立文件**：完整方案B 时序图（方案B 全量主链路）见 **[`docs/diagrams/sequence-diagram.mermaid`](./diagrams/sequence-diagram.mermaid)**，包含两条主链路：
 
-```mermaid
-sequenceDiagram
-    participant U as 用户 (Web/APP)
-    participant C as SnapshotController
-    participant SS as SnapshotService
-    participant CS as CalculationService
-    participant NS as NavService
-    participant XS as XirrService
-    participant PS as PrismaService
-    participant DB as PostgreSQL
+- **流程 A — 录入证券买卖 → 持仓推导 → 派生落库 → NAV/XIRR 级联**：`RecalculationService.recalculateRange` → `AssetValuationService.persistDerived`（调用 `HoldingDerivationService` 回放 `SecurityTrade` 推导持仓市值 + 读 `CashBalance` 独立余额）→ 写 `asset_snapshots`（`ON CONFLICT(portfolioId,date) WHERE source='DERIVED'`，不覆盖 MANUAL）→ 同事务顺序算 `DailyNav` → `DailyXirr`（`xirrValue DECIMAL(20,8)`）。
+- **流程 B — 手工覆盖 / 重置 双路径**：`upsertManual` 无条件覆盖（含原 DERIVED 行，手工优先 REG-03）；`reset` 删除 MANUAL 行并重跑 `persistDerived` 回退 DERIVED（REG-04）。
+- **区间重建**：`DELETE ... AND source='DERIVED'` + `INSERT ... ON CONFLICT DO NOTHING` 双保险；事件日集合（出入金/买卖/现价/余额 ∪ 区间端点）+ 读前值填充 + 惰性补齐。
 
-    U->>C: POST /portfolios/:id/snapshots { date, totalAsset }
-    C->>SS: createOrUpdate(portfolioId, dto)
-    SS->>PS: upsert asset_snapshots (portfolioId, date, totalAsset)
-    PS->>DB: INSERT ... ON CONFLICT UPDATE
-    DB-->>PS: AssetSnapshot
-    PS-->>SS: snapshot
-
-    SS->>CS: triggerCalculation(portfolioId, date)
-    CS->>NS: calculateNavForDate(portfolioId, date)
-
-    NS->>PS: findPrevNav(portfolioId, date)
-    PS->>DB: SELECT * FROM daily_nav WHERE portfolio_id=? AND date < ? ORDER BY date DESC LIMIT 1
-    DB-->>PS: prevNav (or null)
-    PS-->>NS: prevNav
-
-    alt 成立日 (prevNav is null)
-        NS->>PS: findFirstBuyTransactions(portfolioId, date)
-        PS->>DB: SELECT * FROM transactions WHERE portfolio_id=? AND date=? AND type='BUY'
-        DB-->>PS: transactions
-        NS->>NS: shares = sum(buyAmount), nav = 1.0, cumNav = 1.0, yearNav = 1.0
-    else 非成立日
-        NS->>PS: findSnapshot(portfolioId, date)
-        PS->>DB: SELECT total_asset FROM asset_snapshots WHERE portfolio_id=? AND date=?
-        DB-->>PS: snapshot
-        NS->>NS: unitNav = snapshot.totalAsset / prevNav.shares
-        NS->>NS: cumNav = unitNav
-        NS->>NS: 处理当日买卖 → 更新 shares
-        NS->>NS: 判断当年首日 → yearNav = 1.0 或 cumNav / base
-    end
-
-    NS->>PS: upsert daily_nav
-    PS->>DB: INSERT ... ON CONFLICT UPDATE
-    DB-->>PS: dailyNav
-    PS-->>NS: navRecord
-    NS-->>CS: navResult
-
-    CS->>XS: calculateXirrForDate(portfolioId, date)
-    XS->>PS: findAllTransactions(portfolioId, <= date)
-    PS->>DB: SELECT * FROM transactions WHERE portfolio_id=? AND date <= ? ORDER BY date
-    DB-->>PS: transactions
-    PS-->>XS: transactions
-
-    XS->>PS: findSnapshot(portfolioId, date)
-    PS-->>XS: snapshot (terminal value)
-
-    XS->>XS: buildCashflows = transactions(BUY=-amt, SELL=+amt) + [{date, +totalAsset}]
-    XS->>XS: newtonRaphson(cashflows, rate=0.1, maxIter=100, tol=1e-7)
-    XS-->>CS: xirrValue (or null if all same sign)
-
-    CS->>PS: upsert daily_xirr
-    PS->>DB: INSERT ... ON CONFLICT UPDATE
-    DB-->>PS: dailyXirr
-    PS-->>CS: xirrRecord
-
-    CS-->>SS: done
-    SS-->>C: snapshot
-    C-->>U: 200 { code:0, data: snapshot }
-```
-
-### 流程 B：录入交易 → 若当日有快照则触发重算
-
-```mermaid
-sequenceDiagram
-    participant U as 用户
-    participant C as TransactionController
-    participant TS as TransactionService
-    participant PS as PrismaService
-    participant CS as CalculationService
-    participant DB as PostgreSQL
-
-    U->>C: POST /portfolios/:id/transactions { date, type, amount }
-    C->>TS: create(portfolioId, dto)
-    TS->>PS: create transaction
-    PS->>DB: INSERT INTO transactions ...
-    DB-->>PS: transaction
-    PS-->>TS: transaction
-
-    TS->>PS: findSnapshot(portfolioId, date)
-    PS->>DB: SELECT * FROM asset_snapshots WHERE portfolio_id=? AND date=?
-    DB-->>PS: snapshot?
-
-    alt 当日有快照
-        TS->>CS: triggerCalculation(portfolioId, date)
-        Note over CS: 同流程 A：净值计算 + XIRR 计算
-        CS-->>TS: done
-    else 当日无快照
-        Note over TS: 不触发计算，等待快照录入
-    end
-
-    TS-->>C: transaction
-    C-->>U: 200 { code:0, data: transaction }
-```
-
-### 流程 C：按月查询 XIRR/净值 → 后端聚合 → 返回时间序列
-
-```mermaid
-sequenceDiagram
-    participant U as 用户
-    participant C as QueryController
-    participant QS as QueryService
-    participant PS as PrismaService
-    participant DB as PostgreSQL
-
-    U->>C: GET /portfolios/:id/xirr?granularity=month&startDate=2025-01-01&endDate=2025-06-30&aggregation=last
-    C->>QS: queryXirrSeries(portfolioId, { granularity, startDate, endDate, aggregation })
-    QS->>PS: findDailyXirrs(portfolioId, startDate, endDate)
-    PS->>DB: SELECT * FROM daily_xirr WHERE portfolio_id=? AND date BETWEEN ? AND ? ORDER BY date
-    DB-->>PS: dailyXirrRecords[]
-    PS-->>QS: records[]
-
-    QS->>QS: 按月分组 (group by year-month)
-    QS->>QS: 每组取 aggregation=last → 最后一条记录的 xirrValue
-    QS->>QS: 构建 XirrSeriesPoint[] (date, xirrValue, label="2025-01" 等)
-    QS-->>C: seriesPoint[]
-    C-->>U: 200 { code:0, data: seriesPoint[] }
-```
-
-### 流程 D：历史数据修改 → 批量重算受影响日期
-
-```mermaid
-sequenceDiagram
-    participant U as 用户
-    participant C as TransactionController
-    participant TS as TransactionService
-    participant RS as RecalculationService
-    participant CS as CalculationService
-    participant PS as PrismaService
-    participant DB as PostgreSQL
-
-    U->>C: PATCH /portfolios/:id/transactions/:tid { amount: newAmount }
-    C->>TS: update(portfolioId, transactionId, dto)
-    TS->>PS: findTransaction(transactionId)
-    PS->>DB: SELECT * FROM transactions WHERE id=?
-    DB-->>PS: oldTransaction (含 oldDate)
-    PS-->>TS: oldTransaction
-
-    TS->>PS: update transaction
-    PS->>DB: UPDATE transactions SET ... WHERE id=?
-    DB-->>PS: updatedTransaction
-    PS-->>TS: transaction
-
-    TS->>RS: recalculateFromDate(portfolioId, oldTransaction.date)
-    RS->>PS: findSnapshotDates(portfolioId, >= oldDate)
-    PS->>DB: SELECT DISTINCT date FROM asset_snapshots WHERE portfolio_id=? AND date >= ? ORDER BY date
-    DB-->>PS: affectedDates[]
-    PS-->>RS: dates[]
-
-    loop 对每个受影响日期
-        RS->>CS: triggerCalculation(portfolioId, date)
-        Note over CS: 重算净值（依赖前一日净值，需顺序计算）
-        CS->>PS: upsert daily_nav
-        Note over CS: 重算 XIRR
-        CS->>PS: upsert daily_xirr
-    end
-
-    RS-->>TS: { affectedDates: count }
-    TS-->>C: transaction
-    C-->>U: 200 { code:0, data: transaction }
-```
+> 旧四流程（快照触发 / 交易触发 / 查询聚合 / 历史修改重算）的语义已吸收进上述主链路与 §7.3 五类触发，不再单列。
 
 ---
 
@@ -1148,30 +1109,36 @@ export class XirrService {
    * 现金流 = [成立日 ~ 当日的所有交易] + [当日资产快照作为正终值]
    */
   async calculateXirrForDate(portfolioId: string, date: Date): Promise<number | null> {
-    // 1. 查询成立日到当日的所有交易
-    const transactions = await this.prisma.transaction.findMany({
+    // 1. 查询成立日到当日的所有出入金（方案B：XIRR 现金流唯一来源 = CashFlow）
+    const cashflowsDb = await this.prisma.cashflow.findMany({
       where: { portfolioId, date: { lte: date } },
       orderBy: { date: 'asc' },
     });
 
-    // 2. 查询当日资产快照（终值）
+    // 2. 查询当日总资产记录（终值，正）
     const snapshot = await this.prisma.assetSnapshot.findUnique({
       where: { portfolioId_date: { portfolioId, date } },
     });
     if (!snapshot) return null;
 
-    // 3. 构建现金流
-    const cashflows: Cashflow[] = transactions.map(t => ({
-      date: t.date,
-      amount: t.type === 'BUY' ? -Number(t.amount) : Number(t.amount),
+    // 3. 构建现金流：BUY(存入)=负，SELL(取出)=正，终值=当日总资产(正)
+    const cashflows: Cashflow[] = cashflowsDb.map(c => ({
+      date: c.date,
+      amount: c.type === 'BUY' ? -Number(c.amount) : Number(c.amount),
     }));
     cashflows.push({ date, amount: Number(snapshot.totalAsset) });
 
-    // 4. 计算
+    // 4. 计算（含 A1-5 钳制：rate ≤ -0.999 时钳制为 -0.999，防止 (1+r) ≤ 0 溢出）
     return this.calculateXirr(cashflows);
   }
 }
 ```
+
+#### 数据精度（E2 决策 · XIRR = `DECIMAL(20,8)`）
+
+- **存储精度**：`DailyXirr.xirrValue DECIMAL(20,8)`（8 位小数）。以代码实际 `Decimal(20,8)` 为准，反向统一 PRD §9.1 与 MEMORY.md（原 `(10,8)`/`(10,6)` 整条订正为 `(20,8)`）。
+- **展示精度**：百分比 2 位小数（`xirrDecimals = 2`，见 `UserPreference`），无变化。
+- **计算中间值**：Newton-Raphson 在 JS `number` 双精度下迭代，落库时四舍五入至 8 位（`prisma Decimal` 序列化为字符串传输，避免前端精度丢失）。
 
 #### 边界处理
 
@@ -1291,97 +1258,154 @@ export class NavService {
 | **当年非首日** | yearNav = cumNav / base（base 从当年首日继承） |
 | **无快照** | 不生成净值记录（周末/节假日沿用前值，不产生新记录） |
 
-### 7.3 计算触发器
+### 7.3 计算触发器（五类触发 → `RecalculationService` 统一入口）
+
+> **统一入口**：所有写操作（出入金 / 证券买卖 / 现价 / 现金余额 / 手工快照）的副作用**一律**经 `RecalculationService.recalculateRange(portfolioId, start, end?)` 编排，不再各自调 `triggerCalculation`。`CalculationService.triggerCalculation`（单日 快照→NAV→XIRR 级联）仅作为被编排的叶子单元。
+
+#### 7.3.1 五类触发事件
+
+| # | 触发事件 | 入口 | 影响范围 |
+|---|---------|------|---------|
+| T1 | 录入/修改/删除 **出入金**（`/cashflows`） | `recalculateRange(portfolioId, date)` | 当日（现金流变动） |
+| T2 | 录入/修改/删除 **证券买卖**（`/security-trades`） | `recalculateRange(portfolioId, date)` | 当日（持仓推导 + 总资产） |
+| T3 | 录入/修改/删除 **标的最新价**（`/security-prices`） | `recalculateRange(portfolioId, asOf)` | 当日（市值重估） |
+| T4 | 录入/修改/删除 **现金余额**（`/cash-balances`，零联动） | `recalculateRange(portfolioId, asOf)` | 自 `asOf` 起（覆盖 DERIVED，手工跳过） |
+| T5 | 手工 **总资产记录**（`/snapshots`：`upsertManual` / `reset`） | `upsertManual` / `recalculateRange` | 仅当日（手工优先，不参与区间重建） |
+
+#### 7.3.2 区间重建（核心算法）
 
 ```typescript
-// packages/backend/src/modules/calculation/calculation.service.ts
-
-@Injectable()
-export class CalculationService {
-  /**
-   * 触发单日计算：净值 → XIRR
-   * 快照录入/修改时调用
-   */
-  async triggerCalculation(portfolioId: string, date: Date): Promise<void> {
-    // 1. 设置组合成立日（如果尚未设置）
-    await this.ensureBaseDate(portfolioId, date);
-
-    // 2. 计算净值
-    const navResult = await this.navService.calculateNavForDate(portfolioId, date);
-    if (navResult) {
-      await this.prisma.dailyNav.upsert({
-        where: { portfolioId_date: { portfolioId, date } },
-        create: { portfolioId, date, ...navResult },
-        update: { ...navResult },
-      });
-    }
-
-    // 3. 计算 XIRR
-    const xirrValue = await this.xirrService.calculateXirrForDate(portfolioId, date);
-    await this.prisma.dailyXirr.upsert({
-      where: { portfolioId_date: { portfolioId, date } },
-      create: { portfolioId, date, xirrValue: xirrValue ?? null },
-      update: { xirrValue: xirrValue ?? null },
-    });
+// packages/backend/src/modules/calculation/recalculation.service.ts
+async recalculateRange(portfolioId: string, start: Date, end?: Date): Promise<number> {
+  const eventDates = await this.getEventDates(portfolioId, start, end); // T1~T4 事件日 ∪ 区间端点
+  // 1) 删除区间内所有 DERIVED 记录（双保险①：不误删 MANUAL）
+  await this.prisma.$executeRaw`
+    DELETE FROM asset_snapshots
+     WHERE portfolio_id = ${portfolioId}
+       AND date IN (${eventDates})
+       AND source = 'DERIVED'`;
+  // 2) 逐事件日重派生（双保险②：persistDerived 内部 ON CONFLICT DO NOTHING 不覆盖 MANUAL）
+  for (const d of eventDates) {
+    await this.assetValuation.persistDerived(portfolioId, d); // 遇 MANUAL 跳过
   }
-
-  /**
-   * 批量重算：从指定日期开始，按时间顺序逐日重算
-   * 历史数据修改时调用
-   */
-  async batchRecalculate(portfolioId: string, startDate: Date, endDate?: Date): Promise<number> {
-    const snapshots = await this.prisma.assetSnapshot.findMany({
-      where: {
-        portfolioId,
-        date: { gte: startDate, ...(endDate ? { lte: endDate } : {}) },
-      },
-      orderBy: { date: 'asc' },
-    });
-
-    for (const snapshot of snapshots) {
-      await this.triggerCalculation(portfolioId, snapshot.date);
-    }
-
-    return snapshots.length;
+  // 3) 同事务、同顺序：快照重建 → NAV → XIRR（NAV 顺序依赖前日份额）
+  for (const d of eventDates) {
+    await this.calculation.triggerCalculation(portfolioId, d); // nav → xirr
   }
-
-  private async ensureBaseDate(portfolioId: string, date: Date): Promise<void> {
-    const portfolio = await this.prisma.portfolio.findUnique({ where: { id: portfolioId } });
-    if (!portfolio.baseDate) {
-      // 查询第一笔交易日期
-      const firstTx = await this.prisma.transaction.findFirst({
-        where: { portfolioId, type: 'BUY' },
-        orderBy: { date: 'asc' },
-      });
-      if (firstTx) {
-        await this.prisma.portfolio.update({
-          where: { id: portfolioId },
-          data: { baseDate: firstTx.date },
-        });
-      }
-    }
-  }
+  return eventDates.length;
 }
 ```
 
-#### 触发策略
+- **双保险（REG-02 / REG-04）**：`DELETE … AND source='DERIVED'` 保证手工记录不被区间重建抹掉；`INSERT … ON CONFLICT DO NOTHING`（见 §8.2）保证 `persistDerived` 不覆盖 `MANUAL`。
+- **同事务同顺序**：快照重建、净值、XIRR 必须按日期升序逐日计算，净值当日份额依赖前日份额（§7.2），不可并行。
+- **事件日集合**：仅对「真实发生写操作的日期」落库/重算（稀疏落库），其余自然日读路径做**前值填充**（取前一个有记录日的 `totalAsset`），无需判断 `source`（C-12）。
+- **惰性补齐**：读路径发现缺口时按需补齐 DERIVED；写路径以事件日为最小重算单元。
 
-| 触发时机 | 调用方法 | 说明 |
-|---------|---------|------|
-| 录入/修改资产快照 | `triggerCalculation(portfolioId, date)` | 实时计算当日净值+XIRR |
-| 录入/修改交易（当日有快照） | `triggerCalculation(portfolioId, date)` | 实时重算当日 |
-| 录入/修改交易（当日无快照） | 不触发 | 等待快照录入后计算 |
-| 修改/删除历史交易 | `batchRecalculate(portfolioId, affectedDate)` | 从受影响日期起逐日重算 |
-| 修改/删除历史快照 | `batchRecalculate(portfolioId, affectedDate)` | 从受影响日期起逐日重算 |
-| 手动触发 | `batchRecalculate(portfolioId, startDate, endDate)` | 用户在设置页手动重算 |
+#### 7.3.3 约束（C-11 / C-12）
 
-> **批量重算注意事项**：净值计算是顺序依赖的（当日份额依赖前日份额），必须按日期升序逐日计算，不能并行。
+- **C-11**：任何业务代码**严禁绕过 `AssetValuationService` 直写 `asset_snapshots`**；所有 DERIVED 写入走 `persistDerived`，所有 MANUAL 写入走 `upsertManual`。
+- **C-12**：读路径（`getSnapshot` / 查询 API）**严禁依赖 `source` 字段做分支**；每日唯一一行即权威值，前值填充只看 `date`。
 
 ---
 
-## 8. 前端架构设计
+## 8. 总资产派生层（方案B 核心）
 
-### 8.1 Web 端
+> **定位**：`asset-valuation.service` 是 `AssetSnapshot`（`source='DERIVED'`）记录的**唯一写入方**。它把「持仓市值（方案B 流水回放）+ 现金余额」聚合为每日总资产并落库。计算引擎（`nav`/`xirr`）**只读** `AssetSnapshot`，不直接碰持仓 / 现价 / 现金（C-08′）。
+
+### 8.1 三个核心函数
+
+| 函数 | 是否落库 | 语义 |
+|------|---------|------|
+| `computeDerived(portfolioId, date)` | ❌ 纯计算 | 返回 `{ totalAsset, marketValue, cashBalance, valuationFlag }`，**不写库**。是「系统本应算出多少」的唯一来源（差异提示、`↺ 重置`、汇总统计均依赖它） |
+| `persistDerived(portfolioId, dateRange)` | ✅ 落库 | 逐事件日 upsert `DERIVED` 记录；遇当日 `MANUAL` **跳过、不覆盖、不新增** |
+| `upsertManual(portfolioId, date, payload)` | ✅ 落库 | **无条件覆盖**当日行，`source` 改写为 `MANUAL`、`valuationFlag='MANUAL_INPUT'` |
+
+### 8.2 写入 SQL 模板（双保险）
+
+```sql
+-- 自动派生写入（手工优先：仅当当日仍为 DERIVED 时覆盖）
+INSERT INTO asset_snapshots
+  (portfolio_id, date, total_asset, market_value, cash_balance,
+   source, valuation_flag, note, recorded_at)
+VALUES (:P, :D, :total, :mv, :cb, 'DERIVED', :flag, NULL, now())
+ON CONFLICT (portfolio_id, date) DO UPDATE
+  SET total_asset = EXCLUDED.total_asset,
+      market_value = EXCLUDED.market_value,
+      cash_balance = EXCLUDED.cash_balance,
+      valuation_flag = EXCLUDED.valuation_flag,
+      recorded_at = now()
+  WHERE asset_snapshots.source = 'DERIVED';   -- 当日为 MANUAL 则不更新
+
+-- 手工写入（无条件覆盖）
+INSERT INTO asset_snapshots (...) VALUES (..., 'MANUAL', 'MANUAL_INPUT', :note, now())
+ON CONFLICT (portfolio_id, date) DO UPDATE
+  SET total_asset=EXCLUDED.total_asset, ..., source='MANUAL',
+      valuation_flag='MANUAL_INPUT', note=EXCLUDED.note, recorded_at=now();
+```
+
+> 🔴 `UNIQUE (portfolio_id, date)` **不含 `source`**；区间重建的 `DELETE` 必须带 `AND source='DERIVED'`，`INSERT` 必须带 `ON CONFLICT DO NOTHING`（见 §12 / REG-02）。
+
+### 8.3 `valuationFlag` 四值
+
+| 值 | 含义 | 赋值时机 |
+|----|------|---------|
+| `EXACT` | 市值与现金均为当日真实最新值 | 当日有现价 + 现金余额记录 |
+| `CARRIED_FORWARD` | 现价或现金「向前沿用」了历史值 | 缺当日现价 / 缺当日现金记录 |
+| `COST_BASED` | 无现价，回退 `avgCost` 估值 | `SecurityPrice` 无 asOf ≤ date 记录 |
+| `MANUAL_INPUT` | 用户手工记录 | `upsertManual()` 写入 |
+
+### 8.4 读取（唯一权威口径）
+
+`getSnapshot(portfolioId, date)`：直接读当日那一行；无记录则取**前一个有记录日**的 `totalAsset`（前值填充，无需判断 `source`）；首条之前返回 0。🔴 **读路径严禁出现 `source` 条件（C-12）**。
+
+## 9. 持仓推导引擎（方案B · 交易明细法）
+
+> **定位**：持仓**不落库、不手工录入**，一律由 `SecurityTrade` 流水按 `(date, createdAt)` 升序回放推导。`Holding` 模型已废弃（决策 A′ 删除重建）。
+
+### 9.1 推导算法（P0 必须实现，口径不得自由发挥）
+
+按 `(date, createdAt)` 升序回放该标的全部流水：
+
+```
+买入 (q, p, fee):
+    cost_total = cost_total + q × p + fee        // 费用计入成本
+    qty        = qty + q
+    avgCost    = cost_total / qty                // 移动加权平均
+
+卖出 (q, p, fee):
+    qty        = qty − q
+    avgCost    = 不变                             // ← 单位成本价不变
+    cost_total = qty × avgCost                   // ← 成本额随数量等比减少
+    // v1 不记录卖出已实现盈亏；卖出 fee 仅作信息记录，不回冲成本
+
+清仓 (qty == 0):
+    avgCost = 0, cost_total = 0                  // 归零重置，下次买入重新起算
+    该标的默认从持仓列表隐藏（可切换"显示已清仓"）
+```
+
+> ⚠️ **歧义澄清**：「卖出不减成本」指 **`avgCost`（单位成本价）不变**，**不是**成本总额不变。若成本总额不变，清仓后会残留幽灵成本。以上伪代码为准。
+
+**估值规则**：
+- `持仓数量(s, date)` = 该标的 ≤ date 全部流水回放结果
+- `现价(s, date)` = `SecurityPrice` 中 asOf ≤ date 的最后一条（向前沿用）；**若无任何价格记录 → 回退 `avgCost` 估值**，UI 标注「按成本估值」
+- `持仓市值(date)` = `Σ 数量(s,date) × 现价(s,date)`，是总资产**第一个加项**
+
+### 9.2 卖出硬校验（HOLD-B-P0-08）
+
+- 卖出数量 > 该日持仓数量 → 拒绝保存（400），提示「当前持有 X，最多可卖 X」
+- 插入**历史日期**流水时，需校验后续日期不出现**负持仓**（含未来日期的负持仓一并拒绝）
+
+### 9.3 行级派生值不落库
+
+持仓列表每行 `市值 / 盈亏 / 占比` 等由 service 计算返回，不入库。仅**组合级每日总资产**必须落库（`AssetSnapshot`，§8）。
+
+### 9.4 验收映射
+
+`HOLD-B-P0-03` 单测覆盖：多次买入均价、部分卖出、全部清仓后再买入、同日多笔、跨日回放；修改 / 删除历史流水后推导结果与全量重放一致；数量 6 位、金额 2 位、均价 6 位。
+
+## 10. 前端架构设计
+
+### 10.1 Web 端
 
 #### 页面路由结构
 
@@ -1389,12 +1413,19 @@ export class CalculationService {
 /login                          → 登录页
 /register                       → 注册页
 /                               → Dashboard 首页（受保护）
-/transactions                   → 交易管理页
-/snapshots                      → 资产快照页
+/holdings                       → 持仓推导展示页（方案B：由 SecurityTrade 回放，只读，含买卖流水 / 现价）
+/transactions                   → 出入金管理页（映射后端 /cashflows）
+/snapshots                      → 历史总资产记录页（手工 CRUD + 重置 /reset）
 /analysis/xirr                  → XIRR 分析页
 /analysis/nav                   → 净值分析页
-/settings                       → 设置页
+/account                        → 账户页（只读：个人信息 / 头像展示）
+/settings                       → 设置页（全站唯一修改入口：偏好 / 触发重置重算 / 登出）
 *                               → 404
+```
+
+> **账户 / 设置职责重划（SET-P0-02）**：`/account` 仅展示（个人信息 + 头像），所有「写」操作（偏好、重置重算、头像上传入口）统一收口到 `/settings`，避免双入口不一致。头像上传实现见 §19。
+
+> ⚠️ **ANL-P0-06 待 PM 澄清（不擅自决定）**：PRD §824 规定「每日收益明细表」**正收益绿色、负收益红色**；但 A 股惯例为**涨红跌绿（正红负绿）**。两套配色在「收益正负」语义上冲突。本档**暂不拍板**，标注待 PM 确认后落库 `UserPreference.theme` / 前端常量；当前默认沿用 PRD §824（正绿负红），与全局 A 股涨跌色（正红负绿）并存，需在设置页明确提示。
 ```
 
 #### 组件分层
@@ -1441,9 +1472,363 @@ export class CalculationService {
 | 年度收益柱状图 | ECharts | `YearlyBarChart` | 年度收益率对比 |
 | 月度收益热力图 | ECharts | `MonthlyHeatmap` | 年份×月份收益热力图 |
 
-### 8.2 HarmonyOS APP 端
+---
 
-#### 工程结构
+
+## 11. 架构裁决（Q-B 系列正式裁决）
+
+> 本节对 PRD §12.2 所列「⏳ 待架构师裁决」的技术侧问题给出**正式裁决**（v2.3 提供产品建议，此处拍板）。裁决与 §2.3 数据架构口径（② 级）一致。
+
+| 编号 | 议题 | 🏛️ 正式裁决 | 落地章节 |
+|------|------|------------|---------|
+| **Q-B6** | 计算日历口径 | **事件日 + 前值填充**（与 Q-B10 合并）。仅对事件日（含今日）落库，读取时按前值填充补齐 | §8 |
+| **Q-B7** | 无价格回退估值 | **`avgCost` 回退 + 持久化 `valuationFlag='COST_BASED'`**。回退值在 `AssetSnapshot.valuationFlag` 上落地，UI 标「按成本估值」 | §8.3 / §9.1 |
+| **Q-B8** | 批量更新重算合并 | **合并为单次区间重建**。多次现价 / 现金余额变更合并为一次 `DELETE … AND source='DERIVED'` + `INSERT … ON CONFLICT DO NOTHING` | §12 / recalculation.service |
+| **Q-B10** | 空日期是否物化 | **不物化**。稀疏落库 + 读取前值填充；不强行生成全自然日记录 | §8 |
+| **Q-B11** | 今日记录生成时机 | **写时同步生成 + 查询惰性补齐**。写操作即时 `persistDerived(today)`；查询发现今日无记录则惰性补齐（遇手工记录跳过） | §8 / recalculation.service |
+| **Q-B14** | 快照表与 `daily_nav` 关系 | **保持两张表**，通过 `date` 关联（非外键强约束）。`AssetSnapshot` 是 NAV/XIRR 的唯一取数来源 | §8 |
+| **Q-B15** | 手工记录拆解字段必填性 | **选填**（`marketValue`/`cashBalance` 缺省留空/0），UI 标注「不可信」；`totalAsset ≥ 0` 为唯一硬校验 | §4 / §8 |
+| **Q-B16** | 手工记录是否参与一致性校验 | **不参与**。持仓汇总条 / 总资产卡的一致性断言**仅 `source='DERIVED'` 时生效**；`MANUAL` 时 UI 提示「今日使用了您的手工记录」 | §9.4 / HOLD-B-P0-06 |
+| **Q-B17** | 删除后是否立即回填 | **事件日回填，非事件日留空前值填充**。删除某日记录后，若该日属事件日集合则由派生层立即回填 `DERIVED`，否则该日无记录、读取时前值填充 | §8 |
+
+## 12. Migration 策略（决策 A′）
+
+> 依据 PRD §2.3 决策 **A′**（存量数据直接清空）+ §2.4 已废止旧决策。**本次仅改文档，不实际删代码**（代码侧删除重建属工程阶段，见团队任务 #2/#3 范围说明）。
+
+### 12.1 总体策略：清库式纯 DDL
+
+本项目库为**开发 / 测试库**，migration 只做两件事：
+1. **清空 / 删除旧表**：`transactions`、`holdings`、`asset_snapshots`（旧结构）、`CASH` 类 `securities` 记录一律清空；
+2. **建立新表结构**：`security_trades`、`security_prices`、`cash_balances`、`asset_snapshots`（新结构，含 `source`/`valuation_flag`/`market_value`/`cash_balance`/`recorded_at`）。
+
+**无任何数据转换逻辑** —— 方案B 所需持仓必须由用户重新录入买卖流水产生，旧快照无法转写为流水。
+
+### 12.2 废除旧策略
+
+原 `ARCHITECTURE-modules.md` 的 **U-08「删除重建 Holding 快照」** 策略**正式废除**，由本决策 A′ 取代。`Holding` 模型在方案B 下**不存在**（§3 已删除该实体）。
+
+### 12.3 关键约束
+
+- `UNIQUE (portfolio_id, date)` **不含 `source`**（每日唯一一条）；
+- `SecurityType.CASH` 枚举保留但标 `@deprecated`，不建立 CASH 类标的记录（§3）；
+- 因清库式 migration，C-05「新增字段可空」约束仅适用于 A′ 之后的后续迭代。
+
+## 13. REG-01~05 架构支撑与验收点（P0 强制门禁）
+
+> 🔴 **P0 强制门禁**：以下逐条映射 PRD §10 `REG-01`~`REG-05` 到本架构的**服务 / SQL 约束 / 单测位置**。任一失败 = 交付阻塞（W-5 唯一验收闸门）。
+
+| REG | 防护点 | 架构落位（service / SQL / 单测） |
+|-----|--------|-------------------------------|
+| **REG-01** | 同日先手工后触发派生 → 手工值不被覆盖 | `upsertManual()` 写入 `MANUAL`；`persistDerived()` 遇 `MANUAL` 跳过（§8.1 / §8.2 `WHERE source='DERIVED'`）。单测：`snapshot.service` upsert + recalculation 触发 |
+| **REG-02** | 区间重建不误删手工记录 | 区间重建 `DELETE … AND source='DERIVED'` + `INSERT … ON CONFLICT DO NOTHING`（§8.2 / §12）。**代码级断言缺失任一条件即判失败** |
+| **REG-03** | 手工覆盖自动且仍只有一条 | `upsertManual()` 走 `ON CONFLICT` 原地覆盖，`source` 改 `MANUAL`，记录数恒为 1（§8.1 / §8） |
+| **REG-04** | 重置可完整回退到派生值 | `computeDerived(date)` 纯计算不落库 → `resetToDerived()` upsert 覆盖，`source` 置回 `DERIVED`（§8.1 / SNAP-P0-07） |
+| **REG-05** | 每日唯一全局不变量 | `UNIQUE(portfolio_id, date)` 不含 `source`；每条用例结束执行 `INV-1`（`SELECT … HAVING COUNT(*)>1` 返回 0 行）。并发场景手工/重建交叉 ≥50 次仍 `COUNT(*)≤1` |
+
+> **双保险代码断言（缺一不可，构成 W-5 防护）**：区间重建删除语句**必须**形如 `DELETE ... WHERE source='DERIVED' AND date BETWEEN ...`；插入语句**必须**形如 `INSERT ... ON CONFLICT (portfolio_id, date) DO NOTHING`。建议以 SQL 日志断言或 service 层单测覆盖，不得仅靠数据结果推断。
+
+## 14. 任务列表（CRITICAL）
+
+> 工程师将基于此任务列表实现。遵循硬性约束：最多 5 个任务，每个任务 ≥3 文件，按模块分组，T01 为项目基础设施。**HarmonyOS 降级为 P2 附录（§18 附录A），不在 P0 交付任务内**（P0-9）。
+
+### 任务依赖图
+
+```mermaid
+graph LR
+    T01[T01: 项目基础设施<br/>+ 数据层] --> T02[T02: 后端 CRUD<br/>+ 认证]
+    T01 --> T03[T03: 计算引擎 + 派生层<br/>+ 查询 API]
+    T02 --> T04[T04: Web 前端]
+    T03 --> T04
+
+    style T01 fill:#3b82f6,color:#fff
+    style T02 fill:#10b981,color:#fff
+    style T03 fill:#10b981,color:#fff
+    style T04 fill:#f59e0b,color:#fff
+```
+
+### T01: 项目基础设施 + 数据层
+
+| 项 | 内容 |
+|----|------|
+| **任务名称** | 搭建 monorepo 骨架 + shared 类型包 + Prisma Schema（方案B）+ 各端入口 |
+| **优先级** | P0 |
+| **依赖** | 无 |
+| **涉及文件** | 根 workspace 配置（`package.json`/`pnpm-workspace.yaml`/`tsconfig.base.json`/`turbo.json`）、`packages/shared/**`（类型 + 枚举 + api-contracts）、`packages/backend`（main/app.module/prisma module+service/`prisma/schema.prisma` 方案B 实体/`prisma/seed.ts`）、`packages/web`（vite/tailwind/postcss/components.json/`index.html`/`src/main.tsx`/`src/App.tsx`/`src/index.css`） |
+| **交付标准** | ① `pnpm install` 成功 ② `prisma migrate dev` 能建表（含 `security_trades`/`security_prices`/`cash_balances`/`asset_snapshots` 新结构，`UNIQUE(portfolio_id,date)` 不含 source）③ 后端能启动（Swagger 可访问）④ 前端能启动 Vite |
+
+### T02: 后端 CRUD 与认证模块
+
+| 项 | 内容 |
+|----|------|
+| **任务名称** | 实现 Auth + Portfolio + CashFlow（/cashflows）+ Security + SecurityTrade + SecurityPrice + CashBalance + Snapshot 完整 CRUD（含数据隔离与触发重算钩子） |
+| **优先级** | P0 |
+| **依赖** | T01 |
+| **涉及文件** | `packages/backend/src/common/**`（decorators/guards/filters/interceptors/dto）、`packages/backend/src/modules/auth/**`、`portfolio/**`、`cashflow/**`（原 transaction）、`security/**`、`security-trade/**`、`security-price/**`、`cash-balance/**`、`snapshot/**` |
+| **交付标准** | ① 注册/登录返回 JWT ② JWT 守卫生效 ③ 数据隔离（user_id 过滤）④ 组合 CRUD ⑤ 七类资源 CRUD 完整，snapshot 走 `upsertManual`/`persistDerived` 语义 ⑥ 全局异常过滤器 + 响应信封 ⑦ Swagger 可访问 |
+
+### T03: 计算引擎 + 派生层 + 查询 API
+
+| 项 | 内容 |
+|----|------|
+| **任务名称** | 实现 XIRR + 净值（金融算法冻结）+ `asset-valuation.service`（computeDerived/persistDerived/upsertManual）+ `recalculation.service`（五类触发统一入口、区间重建双保险）+ 四维度查询聚合 API |
+| **优先级** | P0 |
+| **依赖** | T01 |
+| **涉及文件** | `packages/backend/src/modules/calculation/{calculation.service,xirr.service,nav.service,recalculation.service}.ts`、`modules/valuation/asset-valuation.service.ts`、`modules/query/{query.controller,query.service,query.dto}.ts`、对应 `.module.ts` |
+| **交付标准** | ① XIRR Newton-Raphson 正确收敛（r₀=0.1/maxIter=100/tol=1e-7/rate≤-0.999 钳制/全同号返回 null）② 净值份额法（成立日=1.0，当年首日重置）③ `computeDerived` 纯计算不落库、`persistDerived` 遇 MANUAL 跳过 ④ 五类事件经 `recalculation.service` 统一入口触发区间重建（`DELETE … AND source='DERIVED'` + `INSERT … ON CONFLICT DO NOTHING`）⑤ 四维度查询聚合正确 ⑥ 单测覆盖核心计算 + REG-01~05 |
+
+### T04: Web 前端完整实现
+
+| 项 | 内容 |
+|----|------|
+| **任务名称** | 实现全部 Web 页面 + 组件 + 图表 + 状态管理 + API 集成（含 /cashflows /holdings /account /settings 路由） |
+| **优先级** | P0 |
+| **依赖** | T01, T02, T03 |
+| **涉及文件** | `packages/web/src/{lib,api,stores,hooks,components/ui,features,pages}/**` |
+| **交付标准** | ① 登录/注册 ② Dashboard 指标卡片 + 净值/XIRR 趋势 ③ 出入金（/cashflows）录入/编辑/删除 ④ 持仓（/holdings）列表 + 买卖流水 ⑤ 历史总资产记录（/snapshots）手工 CRUD + 重置 ⑥ 分析页四维度切换 + 图表 ⑦ 账户页（/account 只读）+ 设置页（/settings 全站唯一修改入口）⑧ 响应式 ⑨ Axios 拦截器注入 JWT |
+
+> **不在 P0 交付**：HarmonyOS APP（§18 附录A，P2 交互基线，按需独立排期）。
+
+---
+
+## 15. 依赖包列表
+
+### 15.1 后端 dependencies
+
+```json
+{
+  "@nestjs/common": "^10.3.0",
+  "@nestjs/core": "^10.3.0",
+  "@nestjs/platform-express": "^10.3.0",
+  "@nestjs/config": "^3.1.0",
+  "@nestjs/swagger": "^7.2.0",
+  "@nestjs/jwt": "^10.2.0",
+  "@nestjs/passport": "^10.0.3",
+  "passport": "^0.7.0",
+  "passport-jwt": "^4.0.1",
+  "@prisma/client": "^5.10.0",
+  "bcrypt": "^5.1.1",
+  "class-validator": "^0.14.1",
+  "class-transformer": "^0.5.1",
+  "reflect-metadata": "^0.2.1",
+  "rxjs": "^7.8.1"
+}
+```
+
+### 15.2 后端 devDependencies
+
+```json
+{
+  "@nestjs/cli": "^10.3.0",
+  "@nestjs/schematics": "^10.1.0",
+  "@nestjs/testing": "^10.3.0",
+  "@types/bcrypt": "^5.0.2",
+  "@types/express": "^4.17.21",
+  "@types/node": "^20.11.0",
+  "@types/passport-jwt": "^4.0.1",
+  "prisma": "^5.10.0",
+  "ts-node": "^10.9.2",
+  "tsconfig-paths": "^4.2.0",
+  "typescript": "^5.3.3",
+  "jest": "^29.7.0",
+  "ts-jest": "^29.1.2",
+  "@types/jest": "^29.5.12",
+  "source-map-support": "^0.5.21"
+}
+```
+
+### 15.3 Web dependencies
+
+```json
+{
+  "react": "^18.2.0",
+  "react-dom": "^18.2.0",
+  "react-router-dom": "^6.22.0",
+  "axios": "^1.6.7",
+  "@tanstack/react-query": "^5.20.0",
+  "zustand": "^4.5.0",
+  "react-hook-form": "^7.50.0",
+  "@hookform/resolvers": "^3.3.4",
+  "zod": "^3.23.0",
+  "echarts": "^5.5.0",
+  "echarts-for-react": "^3.0.2",
+  "date-fns": "^3.3.0",
+  "clsx": "^2.1.0",
+  "tailwind-merge": "^2.2.0",
+  "class-variance-authority": "^0.7.0",
+  "lucide-react": "^0.330.0",
+  "@radix-ui/react-dialog": "^1.0.5",
+  "@radix-ui/react-select": "^2.0.0",
+  "@radix-ui/react-tabs": "^1.0.4",
+  "@radix-ui/react-label": "^2.0.2",
+  "@radix-ui/react-popover": "^1.0.7",
+  "@radix-ui/react-toast": "^1.1.5",
+  "sonner": "^1.4.0"
+}
+```
+
+### 15.4 Web devDependencies
+
+```json
+{
+  "@types/react": "^18.2.55",
+  "@types/react-dom": "^18.2.18",
+  "@vitejs/plugin-react": "^4.2.1",
+  "vite": "^5.1.0",
+  "typescript": "^5.3.3",
+  "tailwindcss": "^3.4.1",
+  "postcss": "^8.4.35",
+  "autoprefixer": "^10.4.17",
+  "vitest": "^1.2.2",
+  "@testing-library/react": "^14.2.1",
+  "@testing-library/jest-dom": "^6.4.2",
+  "jsdom": "^24.0.0"
+}
+```
+
+### 15.5 Shared 包依赖
+
+```json
+{
+  "dependencies": {},
+  "devDependencies": {
+    "typescript": "^5.3.3"
+  }
+}
+```
+
+### 15.6 HarmonyOS oh-package.json5
+
+```json5
+{
+  "name": "investment_tracker_app",
+  "version": "1.0.0",
+  "description": "投资收益统计 HarmonyOS APP",
+  "main": "",
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    // 鸿蒙系统模块通过 import 引入，无需在 oh-package 中声明
+  },
+  "devDependencies": {
+    "@ohos/hypium": "1.0.6"
+  }
+}
+```
+
+---
+
+## 16. 共享知识（跨文件约定）
+
+### 16.1 命名规范
+
+| 范围 | 规范 | 示例 |
+|------|------|------|
+| API 路径 | kebab-case，RESTful 资源名复数 | `/api/portfolios/:portfolioId/transactions` |
+| 数据库表名 | snake_case 复数 | `asset_snapshots`, `daily_nav`, `daily_xirr` |
+| 数据库字段名 | snake_case | `portfolio_id`, `total_asset`, `cumulative_nav` |
+| Prisma model 名 | PascalCase 单数 | `AssetSnapshot`, `DailyNav` |
+| TypeScript 类型/接口 | PascalCase | `Transaction`, `NavSeriesPoint` |
+| TypeScript 变量/函数 | camelCase | `calculateXirr`, `portfolioId` |
+| TypeScript 常量 | UPPER_SNAKE_CASE | `MAX_ITERATIONS`, `TOLERANCE` |
+| React 组件 | PascalCase | `NavTrendChart`, `TransactionForm` |
+| 文件名（TS/TSX） | kebab-case | `xirr.service.ts`, `nav-trend-chart.tsx` |
+| HarmonyOS 文件名 | PascalCase | `IndexPage.ets`, `LineChart.ets` |
+
+### 16.2 日期处理约定
+
+| 约定 | 说明 |
+|------|------|
+| **存储格式** | 数据库中 `@db.Date` 类型，无时区信息，仅存日期 |
+| **传输格式** | API 请求/响应统一用 `YYYY-MM-DD` 字符串 |
+| **时区策略** | 日期按"业务日期"处理，不涉及时区转换。用户录入的日期即业务日期，前后端不做时区偏移 |
+| **JavaScript Date** | 后端用 `Date` 对象操作，Prisma 自动映射为 PostgreSQL `DATE` |
+| **前端日期** | Web 用 `date-fns` 格式化，APP 用 `DateUtils.ets` 手动格式化 |
+| **年份判断** | 当年净值跨年判断用 `date.getFullYear()` 比较 |
+
+### 16.3 金额精度处理
+
+| 场景 | 处理方式 |
+|------|---------|
+| **后端计算** | Prisma 返回 `Decimal` 对象，用 `Number()` 转换后参与 JS 计算（金额在 Number 安全范围内） |
+| **后端存储** | Prisma `@db.Decimal(18,2)` 自动映射 |
+| **API 传输** | Decimal 序列化为 **字符串**（如 `"10000.00"`），避免 JSON 精度丢失 |
+| **前端接收** | 金额字段为 string，展示时用 `formatCurrency()` 转换 |
+| **前端计算** | 需要计算时用 `Number()` 转换，计算后展示时格式化 |
+| **净值/XIRR** | 同上，传输为字符串，前端格式化展示（净值 4 位小数，XIRR 百分比 2 位） |
+
+### 16.4 错误处理约定
+
+**统一错误响应格式**：
+
+```json
+{
+  "code": 4001,
+  "data": null,
+  "message": "金额必须大于 0"
+}
+```
+
+**错误码规划**：
+
+| 错误码范围 | 含义 |
+|-----------|------|
+| 0 | 成功 |
+| 1000-1999 | 认证错误（1001=未认证, 1002=Token过期, 1003=邮箱已注册） |
+| 2000-2999 | 参数校验错误（2001=金额无效, 2002=日期无效, 2003=首笔必须买入） |
+| 3000-3999 | 业务逻辑错误（3001=组合不存在, 3002=快照已存在, 3003=计算数据不足） |
+| 4000-4999 | 计算错误（4001=XIRR不收敛, 4002=净值计算异常） |
+| 5000 | 服务器内部错误 |
+
+### 16.5 API 响应格式约定
+
+**统一信封**：
+
+```json
+{
+  "code": 0,
+  "data": <T | null>,
+  "message": "success"
+}
+```
+
+- `code: 0` 表示成功
+- `code: 非0` 表示错误，`data` 为 null，`message` 为错误描述
+- 后端通过 `TransformInterceptor` 自动包装成功响应
+- 后端通过 `HttpExceptionFilter` 自动包装错误响应
+
+### 16.6 前端 API 调用约定
+
+```typescript
+// 所有 API 请求经过 Axios 拦截器处理
+// 请求拦截器：自动注入 Authorization header
+// 响应拦截器：
+//   - code === 0 → 返回 data
+//   - code === 1001/1002 → 跳转登录页
+//   - code !== 0 → Toast 提示 message，抛出错误
+```
+
+---
+
+## 17. 待明确事项（已裁决）
+
+| 编号 | 问题 | 影响 | 最终决策 |
+|------|------|------|---------|
+| Q-A01 | **HarmonyOS APP 分发方式**：仅自用模拟器调试，还是需上架华为应用市场？ | 影响签名配置、权限申请、审核流程 | ✅ **用户决策：v1 仅模拟器/真机调试，不上架**。使用调试证书，无需审核流程 |
+| Q-A02 | **后端部署环境**：本地内网开发，还是需部署到云服务器？ | 影响 CORS 配置、HTTPS 证书、环境变量管理 | ✅ **用户决策：部署到自建服务器**。开发阶段 localhost:3000，部署阶段通过 .env 配置服务器地址/CORS/HTTPS；架构需支持环境变量切换，部署文档单独提供 |
+| Q-A03 | **APP 端是否需要离线缓存**：纯走后端 API，还是需要本地 SQLite 缓存？ | 影响 APP 数据层架构（是否引入 @ohos.data.relationalStore） | ✅ **用户决策：v1 纯走后端 API，不引入本地数据库**。离线缓存列入 P2 |
+| Q-A04 | **多币种**：v1 是否确认仅 CNY？后续是否需要预留多币种字段？ | 影响 schema 设计（是否加 currency 到 transaction/snapshot 级别） | ✅ **用户决策：v1 仅 CNY，后期可升级多币种**。currency 在 Portfolio 级别记录，transaction/snapshot 不带币种；后期升级时再扩展到交易级别 |
+| Q-A05 | **数据导入导出**：P1 的 CSV/Excel 导入导出是否需要在 v1 预留 API？ | 影响后端是否提前设计 import/export 接口 | ✅ 采用默认：v1 不实现，P1 再加 |
+| Q-A06 | **当年净值跨年场景**：如果某组合在年中（如 6 月）才创建第一笔交易，当年净值如何处理？ | 影响 base_cumulative_nav 的初始化 | ✅ 采用默认：成立日即为当年首日，yearNav = 1.0，base = 1.0；后续年度才需要真正的跨年重置 |
+| Q-A07 | **同日多笔交易 XIRR 处理**：同一天多笔买入/卖出，是合并为净现金流还是按时间顺序逐笔？ | 影响 XIRR 现金流构建逻辑 | ✅ 采用默认：同日合并为净现金流（买入总额-卖出总额为净买入），与 PRD Q-08 一致 |
+| Q-A08 | **热力图在 APP 端是否必须**：v1 APP 是否需要月度热力图？ | 影响 APP 图表复杂度 | ✅ 采用默认：v1 APP 不做热力图，仅 Web 端有；APP 端热力图列入 P1 |
+
+---
+
+## 18. 附录 A：HarmonyOS APP 端（P2 交互基线）
+
+> **P2 降级（P0-9）**：HarmonyOS APP **不在 P0 交付任务内**（§14 任务列表 T01–T04 不含 APP；T05 已移出）。本附录仅固化 P2 交互基线，待 Web 端稳定后独立排期。
+
+### 工程结构
 
 ```
 entry/src/main/ets/
@@ -1457,7 +1842,7 @@ entry/src/main/ets/
 └── utils/                        # 工具函数
 ```
 
-#### 页面路由
+### 页面路由
 
 采用 **Navigation 组件**（HarmonyOS API 12+ 推荐）管理页面栈：
 
@@ -1487,7 +1872,7 @@ struct EntryAbility {
 }
 ```
 
-#### 状态管理
+### 状态管理
 
 | 装饰器 | 用途 |
 |--------|------|
@@ -1499,7 +1884,7 @@ struct EntryAbility {
 
 全局状态（认证 token、当前组合）使用 `@Observed` class + `AppStorage` 管理。
 
-#### 网络请求封装
+### 网络请求封装
 
 ```typescript
 // network/HttpClient.ets
@@ -1530,7 +1915,7 @@ export class HttpClient {
 }
 ```
 
-#### 图表方案（推荐）
+### 图表方案（推荐）
 
 | 图表类型 | 方案 | 理由 |
 |---------|------|------|
@@ -1565,7 +1950,7 @@ struct LineChart {
 }
 ```
 
-#### 与 Web 端共用 API 契约
+### 与 Web 端共用 API 契约
 
 - HarmonyOS APP 无法直接引用 npm `shared` 包
 - 通过 `packages/shared/src/` 中的 TypeScript 类型定义作为**契约文档**
@@ -1575,504 +1960,9 @@ struct LineChart {
 
 ---
 
-## 9. 文件列表及相对路径
+## 19. 附录 B：头像上传模块（增量交付）
 
-### 9.1 根目录 + Shared 包
-
-| 文件路径 | 职责 |
-|---------|------|
-| `package.json` | 根 workspace 配置 + 通用脚本（dev/build/lint） |
-| `pnpm-workspace.yaml` | pnpm 工作区声明（packages/*） |
-| `tsconfig.base.json` | TypeScript 共享基础配置 |
-| `turbo.json` | Turborepo 构建编排 |
-| `.gitignore` | Git 忽略规则 |
-| `README.md` | 项目说明 |
-| `packages/shared/package.json` | shared 包配置 |
-| `packages/shared/tsconfig.json` | shared TS 配置 |
-| `packages/shared/src/index.ts` | 统一导出 |
-| `packages/shared/src/types/common.ts` | 通用类型（ApiResponse, Paginated, DateRangeQuery） |
-| `packages/shared/src/types/user.ts` | User 类型 |
-| `packages/shared/src/types/portfolio.ts` | Portfolio 类型 |
-| `packages/shared/src/types/transaction.ts` | Transaction 类型 |
-| `packages/shared/src/types/snapshot.ts` | AssetSnapshot 类型 |
-| `packages/shared/src/types/nav.ts` | DailyNav, NavSeriesPoint 类型 |
-| `packages/shared/src/types/xirr.ts` | DailyXirr, XirrSeriesPoint, PortfolioSummary 类型 |
-| `packages/shared/src/enums/transaction-type.ts` | TransactionType 枚举 |
-| `packages/shared/src/enums/query-granularity.ts` | QueryGranularity, AggregationMethod 枚举 |
-| `packages/shared/src/api-contracts/auth.contract.ts` | 认证 API 契约 |
-| `packages/shared/src/api-contracts/portfolio.contract.ts` | 组合 API 契约 |
-| `packages/shared/src/api-contracts/transaction.contract.ts` | 交易 API 契约 |
-| `packages/shared/src/api-contracts/snapshot.contract.ts` | 快照 API 契约 |
-| `packages/shared/src/api-contracts/nav.contract.ts` | 净值 API 契约 |
-| `packages/shared/src/api-contracts/xirr.contract.ts` | XIRR API 契约 |
-
-### 9.2 后端（packages/backend）
-
-| 文件路径 | 职责 |
-|---------|------|
-| `packages/backend/package.json` | 后端依赖配置 |
-| `packages/backend/tsconfig.json` | 后端 TS 配置 |
-| `packages/backend/nest-cli.json` | NestJS CLI 配置 |
-| `packages/backend/.env.example` | 环境变量模板 |
-| `packages/backend/prisma/schema.prisma` | Prisma 数据模型定义 |
-| `packages/backend/prisma/seed.ts` | 种子数据 |
-| `packages/backend/src/main.ts` | 应用入口（Swagger, 全局管道, CORS） |
-| `packages/backend/src/app.module.ts` | 根模块（导入所有子模块） |
-| `packages/backend/src/prisma/prisma.module.ts` | Prisma 模块 |
-| `packages/backend/src/prisma/prisma.service.ts` | PrismaClient 封装（onModuleInit/onModuleDestroy） |
-| `packages/backend/src/common/decorators/current-user.decorator.ts` | @CurrentUser() 装饰器 |
-| `packages/backend/src/common/guards/jwt-auth.guard.ts` | JWT 认证守卫 |
-| `packages/backend/src/common/filters/http-exception.filter.ts` | 全局异常过滤器（统一错误响应） |
-| `packages/backend/src/common/interceptors/transform.interceptor.ts` | 响应转换拦截器（统一信封） |
-| `packages/backend/src/common/dto/pagination.dto.ts` | 分页 DTO |
-| `packages/backend/src/common/dto/date-range.dto.ts` | 日期范围 DTO |
-| `packages/backend/src/modules/auth/auth.module.ts` | 认证模块 |
-| `packages/backend/src/modules/auth/auth.controller.ts` | 认证控制器（register/login/me） |
-| `packages/backend/src/modules/auth/auth.service.ts` | 认证服务（bcrypt 哈希, JWT 签发） |
-| `packages/backend/src/modules/auth/jwt.strategy.ts` | JWT 策略（Passport） |
-| `packages/backend/src/modules/auth/dto/register.dto.ts` | 注册 DTO |
-| `packages/backend/src/modules/auth/dto/login.dto.ts` | 登录 DTO |
-| `packages/backend/src/modules/portfolio/portfolio.module.ts` | 组合模块 |
-| `packages/backend/src/modules/portfolio/portfolio.controller.ts` | 组合 CRUD 控制器 |
-| `packages/backend/src/modules/portfolio/portfolio.service.ts` | 组合服务 |
-| `packages/backend/src/modules/portfolio/dto/create-portfolio.dto.ts` | 创建组合 DTO |
-| `packages/backend/src/modules/portfolio/dto/update-portfolio.dto.ts` | 更新组合 DTO |
-| `packages/backend/src/modules/transaction/transaction.module.ts` | 交易模块 |
-| `packages/backend/src/modules/transaction/transaction.controller.ts` | 交易 CRUD 控制器 |
-| `packages/backend/src/modules/transaction/transaction.service.ts` | 交易服务（含触发重算逻辑） |
-| `packages/backend/src/modules/transaction/dto/create-transaction.dto.ts` | 创建交易 DTO |
-| `packages/backend/src/modules/transaction/dto/update-transaction.dto.ts` | 更新交易 DTO |
-| `packages/backend/src/modules/snapshot/snapshot.module.ts` | 快照模块 |
-| `packages/backend/src/modules/snapshot/snapshot.controller.ts` | 快照 CRUD 控制器 |
-| `packages/backend/src/modules/snapshot/snapshot.service.ts` | 快照服务（含触发计算逻辑） |
-| `packages/backend/src/modules/snapshot/dto/create-snapshot.dto.ts` | 创建快照 DTO |
-| `packages/backend/src/modules/snapshot/dto/update-snapshot.dto.ts` | 更新快照 DTO |
-| `packages/backend/src/modules/calculation/calculation.module.ts` | 计算引擎模块 |
-| `packages/backend/src/modules/calculation/calculation.service.ts` | 计算编排服务（触发+批量重算） |
-| `packages/backend/src/modules/calculation/xirr.service.ts` | XIRR Newton-Raphson 实现 |
-| `packages/backend/src/modules/calculation/nav.service.ts` | 净值份额法实现 |
-| `packages/backend/src/modules/calculation/recalculation.service.ts` | 批量重算服务 |
-| `packages/backend/src/modules/query/query.module.ts` | 查询模块 |
-| `packages/backend/src/modules/query/query.controller.ts` | 查询控制器（XIRR/净值四维度） |
-| `packages/backend/src/modules/query/query.service.ts` | 聚合查询服务（期末值/均值） |
-| `packages/backend/src/modules/query/dto/query.dto.ts` | 查询参数 DTO |
-
-### 9.3 Web 前端（packages/web）
-
-| 文件路径 | 职责 |
-|---------|------|
-| `packages/web/package.json` | Web 依赖配置 |
-| `packages/web/tsconfig.json` | Web TS 配置 |
-| `packages/web/tsconfig.node.json` | Node 环境 TS 配置 |
-| `packages/web/vite.config.ts` | Vite 构建配置（proxy, alias） |
-| `packages/web/tailwind.config.ts` | Tailwind 配置 |
-| `packages/web/postcss.config.js` | PostCSS 配置 |
-| `packages/web/components.json` | shadcn/ui 配置 |
-| `packages/web/index.html` | HTML 入口 |
-| `packages/web/src/main.tsx` | React 入口 |
-| `packages/web/src/App.tsx` | 根组件 + 路由配置 |
-| `packages/web/src/index.css` | Tailwind 指令 + 全局样式 |
-| `packages/web/src/lib/utils.ts` | cn() 等工具 |
-| `packages/web/src/lib/api-client.ts` | Axios 实例 + 拦截器 |
-| `packages/web/src/lib/format.ts` | 格式化函数（金额/百分比/日期） |
-| `packages/web/src/api/auth.api.ts` | 认证 API |
-| `packages/web/src/api/portfolio.api.ts` | 组合 API |
-| `packages/web/src/api/transaction.api.ts` | 交易 API |
-| `packages/web/src/api/snapshot.api.ts` | 快照 API |
-| `packages/web/src/api/nav.api.ts` | 净值 API |
-| `packages/web/src/api/xirr.api.ts` | XIRR API |
-| `packages/web/src/stores/auth.store.ts` | 认证状态（token, user） |
-| `packages/web/src/stores/portfolio.store.ts` | 当前选中组合状态 |
-| `packages/web/src/hooks/use-portfolios.hook.ts` | 组合列表 TanStack Query |
-| `packages/web/src/hooks/use-transactions.hook.ts` | 交易 CRUD TanStack Query |
-| `packages/web/src/hooks/use-snapshots.hook.ts` | 快照 CRUD TanStack Query |
-| `packages/web/src/hooks/use-nav.hook.ts` | 净值查询 TanStack Query |
-| `packages/web/src/hooks/use-xirr.hook.ts` | XIRR 查询 TanStack Query |
-| `packages/web/src/components/ui/*.tsx` | shadcn/ui 基础组件（~12 个） |
-| `packages/web/src/features/auth/login-form.tsx` | 登录表单 |
-| `packages/web/src/features/auth/register-form.tsx` | 注册表单 |
-| `packages/web/src/features/dashboard/stat-cards.tsx` | 指标卡片组 |
-| `packages/web/src/components/charts/nav-trend-chart.tsx` | 净值趋势图（ECharts） |
-| `packages/web/src/components/charts/xirr-trend-chart.tsx` | XIRR 趋势图（ECharts） |
-| `packages/web/src/features/transaction/transaction-form.tsx` | 交易录入表单 |
-| `packages/web/src/features/transaction/transaction-table.tsx` | 交易列表表格 |
-| `packages/web/src/features/snapshot/snapshot-form.tsx` | 快照录入表单 |
-| `packages/web/src/features/analysis/xirr-analysis.tsx` | XIRR 分析页内容 |
-| `packages/web/src/features/analysis/nav-analysis.tsx` | 净值分析页内容 |
-| `packages/web/src/components/charts/yearly-bar-chart.tsx` | 年度柱状图（ECharts） |
-| `packages/web/src/components/charts/monthly-heatmap.tsx` | 月度热力图（ECharts） |
-| `packages/web/src/features/portfolio/portfolio-selector.tsx` | 组合选择器 |
-| `packages/web/src/features/portfolio/portfolio-manager.tsx` | 组合管理弹窗 |
-| `packages/web/src/features/settings/settings-page.tsx` | 设置页内容 |
-| `packages/web/src/pages/login.page.tsx` | 登录页 |
-| `packages/web/src/pages/register.page.tsx` | 注册页 |
-| `packages/web/src/pages/dashboard.page.tsx` | Dashboard 页 |
-| `packages/web/src/pages/transactions.page.tsx` | 交易管理页 |
-| `packages/web/src/pages/snapshots.page.tsx` | 快照管理页 |
-| `packages/web/src/pages/analysis-xirr.page.tsx` | XIRR 分析页 |
-| `packages/web/src/pages/analysis-nav.page.tsx` | 净值分析页 |
-| `packages/web/src/pages/settings.page.tsx` | 设置页 |
-| `packages/web/src/pages/not-found.page.tsx` | 404 页 |
-
-### 9.4 HarmonyOS APP（packages/harmonyos）
-
-| 文件路径 | 职责 |
-|---------|------|
-| `packages/harmonyos/build-profile.json5` | DevEco 构建配置 |
-| `packages/harmonyos/oh-package.json5` | 鸿蒙依赖管理 |
-| `packages/harmonyos/entry/build-profile.json5` | entry 模块构建配置 |
-| `packages/harmonyos/entry/src/main/module.json5` | 模块配置 |
-| `packages/harmonyos/entry/src/main/ets/entryability/EntryAbility.ets` | 入口 Ability + Navigation |
-| `packages/harmonyos/entry/src/main/ets/pages/LoginPage.ets` | 登录页 |
-| `packages/harmonyos/entry/src/main/ets/pages/IndexPage.ets` | Dashboard 首页 |
-| `packages/harmonyos/entry/src/main/ets/pages/TransactionPage.ets` | 交易录入页 |
-| `packages/harmonyos/entry/src/main/ets/pages/SnapshotPage.ets` | 快照录入页 |
-| `packages/harmonyos/entry/src/main/ets/pages/XirrAnalysisPage.ets` | XIRR 分析页 |
-| `packages/harmonyos/entry/src/main/ets/pages/NavAnalysisPage.ets` | 净值分析页 |
-| `packages/harmonyos/entry/src/main/ets/pages/PortfolioPage.ets` | 组合管理页 |
-| `packages/harmonyos/entry/src/main/ets/pages/SettingsPage.ets` | 设置页 |
-| `packages/harmonyos/entry/src/main/ets/components/StatCard.ets` | 指标卡片 |
-| `packages/harmonyos/entry/src/main/ets/components/LineChart.ets` | 折线图（Canvas 自绘） |
-| `packages/harmonyos/entry/src/main/ets/components/BarChart.ets` | 柱状图（Canvas 自绘） |
-| `packages/harmonyos/entry/src/main/ets/components/TransactionList.ets` | 交易列表 |
-| `packages/harmonyos/entry/src/main/ets/components/TransactionForm.ets` | 交易表单 |
-| `packages/harmonyos/entry/src/main/ets/components/SnapshotForm.ets` | 快照表单 |
-| `packages/harmonyos/entry/src/main/ets/components/DatePicker.ets` | 日期选择器 |
-| `packages/harmonyos/entry/src/main/ets/components/NavRouter.ets` | 底部导航栏 |
-| `packages/harmonyos/entry/src/main/ets/model/Transaction.ets` | 交易模型 |
-| `packages/harmonyos/entry/src/main/ets/model/Portfolio.ets` | 组合模型 |
-| `packages/harmonyos/entry/src/main/ets/model/Snapshot.ets` | 快照模型 |
-| `packages/harmonyos/entry/src/main/ets/model/NavRecord.ets` | 净值模型 |
-| `packages/harmonyos/entry/src/main/ets/model/XirrRecord.ets` | XIRR 模型 |
-| `packages/harmonyos/entry/src/main/ets/model/ApiResponse.ets` | API 响应模型 |
-| `packages/harmonyos/entry/src/main/ets/network/HttpClient.ets` | HTTP 客户端封装 |
-| `packages/harmonyos/entry/src/main/ets/network/ApiConfig.ets` | API 基址配置 |
-| `packages/harmonyos/entry/src/main/ets/network/AuthApi.ets` | 认证接口 |
-| `packages/harmonyos/entry/src/main/ets/network/PortfolioApi.ets` | 组合接口 |
-| `packages/harmonyos/entry/src/main/ets/network/TransactionApi.ets` | 交易接口 |
-| `packages/harmonyos/entry/src/main/ets/network/SnapshotApi.ets` | 快照接口 |
-| `packages/harmonyos/entry/src/main/ets/network/NavApi.ets` | 净值接口 |
-| `packages/harmonyos/entry/src/main/ets/network/XirrApi.ets` | XIRR 接口 |
-| `packages/harmonyos/entry/src/main/ets/store/AppStore.ets` | 全局状态 |
-| `packages/harmonyos/entry/src/main/ets/store/AuthStore.ets` | 认证状态 |
-| `packages/harmonyos/entry/src/main/ets/store/PortfolioStore.ets` | 组合状态 |
-| `packages/harmonyos/entry/src/main/ets/utils/DateUtils.ets` | 日期工具 |
-| `packages/harmonyos/entry/src/main/ets/utils/FormatUtils.ets` | 格式化工具 |
-| `packages/harmonyos/entry/src/main/ets/utils/ChartUtils.ets` | Canvas 图表绘制工具 |
-
----
-
-## 10. 任务列表（CRITICAL）
-
-> 工程师将基于此任务列表实现。遵循硬性约束：最多 5 个任务，每个任务 ≥3 文件，按模块分组，T01 为项目基础设施。
-
-### 任务依赖图
-
-```mermaid
-graph LR
-    T01[T01: 项目基础设施<br/>+ 数据层] --> T02[T02: 后端 CRUD<br/>+ 认证]
-    T01 --> T03[T03: 后端计算引擎<br/>+ 查询 API]
-    T02 --> T04[T04: Web 前端]
-    T03 --> T04
-    T03 --> T05[T05: HarmonyOS APP]
-    T02 --> T05
-
-    style T01 fill:#3b82f6,color:#fff
-    style T02 fill:#10b981,color:#fff
-    style T03 fill:#10b981,color:#fff
-    style T04 fill:#f59e0b,color:#fff
-    style T05 fill:#f59e0b,color:#fff
-```
-
-### T01: 项目基础设施 + 数据层
-
-| 项 | 内容 |
-|----|------|
-| **任务名称** | 搭建 monorepo 骨架 + shared 类型包 + Prisma Schema + 各端入口 |
-| **优先级** | P0 |
-| **依赖** | 无 |
-| **涉及文件** | `package.json`, `pnpm-workspace.yaml`, `tsconfig.base.json`, `turbo.json`, `.gitignore`, `packages/shared/**` (全部), `packages/backend/package.json`, `packages/backend/tsconfig.json`, `packages/backend/nest-cli.json`, `packages/backend/.env.example`, `packages/backend/prisma/schema.prisma`, `packages/backend/prisma/seed.ts`, `packages/backend/src/main.ts`, `packages/backend/src/app.module.ts`, `packages/backend/src/prisma/prisma.module.ts`, `packages/backend/src/prisma/prisma.service.ts`, `packages/web/package.json`, `packages/web/tsconfig.json`, `packages/web/tsconfig.node.json`, `packages/web/vite.config.ts`, `packages/web/tailwind.config.ts`, `packages/web/postcss.config.js`, `packages/web/components.json`, `packages/web/index.html`, `packages/web/src/main.tsx`, `packages/web/src/App.tsx`, `packages/web/src/index.css`, `packages/harmonyos/build-profile.json5`, `packages/harmonyos/oh-package.json5`, `packages/harmonyos/entry/build-profile.json5`, `packages/harmonyos/entry/src/main/module.json5`, `packages/harmonyos/entry/src/main/ets/entryability/EntryAbility.ets` |
-| **交付标准** | ① `pnpm install` 成功 ② `pnpm --filter backend prisma migrate dev` 能建表 ③ `pnpm --filter backend start:dev` 能启动 NestJS（Swagger 可访问） ④ `pnpm --filter web dev` 能启动 Vite ⑤ DevEco Studio 能打开 harmonyos 工程并预览空白页 ⑥ shared 包可被 backend 和 web 正确 import |
-
-### T02: 后端 CRUD 与认证模块
-
-| 项 | 内容 |
-|----|------|
-| **任务名称** | 实现 Auth + Portfolio + Transaction + Snapshot 完整 CRUD（含数据隔离与触发重算钩子） |
-| **优先级** | P0 |
-| **依赖** | T01 |
-| **涉及文件** | `packages/backend/src/common/decorators/current-user.decorator.ts`, `packages/backend/src/common/guards/jwt-auth.guard.ts`, `packages/backend/src/common/filters/http-exception.filter.ts`, `packages/backend/src/common/interceptors/transform.interceptor.ts`, `packages/backend/src/common/dto/pagination.dto.ts`, `packages/backend/src/common/dto/date-range.dto.ts`, `packages/backend/src/modules/auth/**` (全部 6 文件), `packages/backend/src/modules/portfolio/**` (全部 5 文件), `packages/backend/src/modules/transaction/**` (全部 5 文件), `packages/backend/src/modules/snapshot/**` (全部 5 文件) |
-| **交付标准** | ① 注册/登录返回 JWT ② JWT 守卫生效，未认证返回 401 ③ 用户只能操作自己的组合（数据隔离） ④ 组合 CRUD 完整 ⑤ 交易 CRUD 完整，录入交易时若当日有快照调用 CalculationService（T03 提供，先留接口） ⑥ 快照 CRUD 完整，upsert 语义正确 ⑦ 全局异常过滤器 + 响应信封生效 ⑧ Swagger 文档可访问 |
-
-### T03: 后端计算引擎与查询 API
-
-| 项 | 内容 |
-|----|------|
-| **任务名称** | 实现 XIRR 计算 + 净值计算 + 批量重算 + 四维度查询聚合 API |
-| **优先级** | P0 |
-| **依赖** | T01 |
-| **涉及文件** | `packages/backend/src/modules/calculation/calculation.module.ts`, `packages/backend/src/modules/calculation/calculation.service.ts`, `packages/backend/src/modules/calculation/xirr.service.ts`, `packages/backend/src/modules/calculation/nav.service.ts`, `packages/backend/src/modules/calculation/recalculation.service.ts`, `packages/backend/src/modules/query/query.module.ts`, `packages/backend/src/modules/query/query.controller.ts`, `packages/backend/src/modules/query/query.service.ts`, `packages/backend/src/modules/query/dto/query.dto.ts` |
-| **交付标准** | ① XIRR Newton-Raphson 正确收敛，全同号返回 null ② 净值份额法：成立日=1.0，当日资产/上日份额，当年首日重置 ③ 批量重算按日期升序逐日计算 ④ 四维度查询（日/周/月/年）聚合正确（期末值/均值） ⑤ 快照录入后自动触发净值+XIRR 计算 ⑥ 历史修改触发批量重算 ⑦ 单元测试覆盖核心计算逻辑 |
-
-### T04: Web 前端完整实现
-
-| 项 | 内容 |
-|----|------|
-| **任务名称** | 实现全部 Web 页面 + 组件 + 图表 + 状态管理 + API 集成 |
-| **优先级** | P0 |
-| **依赖** | T01, T02, T03 |
-| **涉及文件** | `packages/web/src/lib/**` (3 文件), `packages/web/src/api/**` (6 文件), `packages/web/src/stores/**` (2 文件), `packages/web/src/hooks/**` (5 文件), `packages/web/src/components/ui/**` (~12 文件), `packages/web/src/features/**` (全部), `packages/web/src/pages/**` (全部 9 文件) |
-| **交付标准** | ① 登录/注册流程完整 ② Dashboard 展示指标卡片 + 净值趋势 + XIRR 趋势 ③ 交易录入/编辑/删除 ④ 快照录入/覆盖确认 ⑤ XIRR 分析页四维度切换 + 折线图 + 柱状图 ⑥ 净值分析页四维度切换 + 双线对比 + 月度热力图 ⑦ 组合切换/创建/删除 ⑧ 设置页 ⑨ 响应式布局 ⑩ Axios 拦截器自动注入 JWT |
-
-### T05: HarmonyOS APP 完整实现
-
-| 项 | 内容 |
-|----|------|
-| **任务名称** | 实现全部 HarmonyOS 页面 + 组件 + Canvas 图表 + 网络层 + 状态管理 |
-| **优先级** | P0 |
-| **依赖** | T01, T02, T03 |
-| **涉及文件** | `packages/harmonyos/entry/src/main/ets/pages/**` (8 文件), `packages/harmonyos/entry/src/main/ets/components/**` (8 文件), `packages/harmonyos/entry/src/main/ets/model/**` (6 文件), `packages/harmonyos/entry/src/main/ets/network/**` (8 文件), `packages/harmonyos/entry/src/main/ets/store/**` (3 文件), `packages/harmonyos/entry/src/main/ets/utils/**` (3 文件) |
-| **交付标准** | ① 登录页 → JWT 存储 ② Dashboard 指标卡片 + Canvas 折线图 ③ 交易录入/列表 ④ 快照录入 ⑤ XIRR/净值分析页（四维度切换） ⑥ 组合切换 ⑦ 底部导航栏 ⑧ HTTP 封装自动注入 JWT ⑨ DevEco Studio Previewer 可预览 ⑩ 与后端 API 联调通过 |
-
----
-
-## 11. 依赖包列表
-
-### 11.1 后端 dependencies
-
-```json
-{
-  "@nestjs/common": "^10.3.0",
-  "@nestjs/core": "^10.3.0",
-  "@nestjs/platform-express": "^10.3.0",
-  "@nestjs/config": "^3.1.0",
-  "@nestjs/swagger": "^7.2.0",
-  "@nestjs/jwt": "^10.2.0",
-  "@nestjs/passport": "^10.0.3",
-  "passport": "^0.7.0",
-  "passport-jwt": "^4.0.1",
-  "@prisma/client": "^5.10.0",
-  "bcrypt": "^5.1.1",
-  "class-validator": "^0.14.1",
-  "class-transformer": "^0.5.1",
-  "reflect-metadata": "^0.2.1",
-  "rxjs": "^7.8.1"
-}
-```
-
-### 11.2 后端 devDependencies
-
-```json
-{
-  "@nestjs/cli": "^10.3.0",
-  "@nestjs/schematics": "^10.1.0",
-  "@nestjs/testing": "^10.3.0",
-  "@types/bcrypt": "^5.0.2",
-  "@types/express": "^4.17.21",
-  "@types/node": "^20.11.0",
-  "@types/passport-jwt": "^4.0.1",
-  "prisma": "^5.10.0",
-  "ts-node": "^10.9.2",
-  "tsconfig-paths": "^4.2.0",
-  "typescript": "^5.3.3",
-  "jest": "^29.7.0",
-  "ts-jest": "^29.1.2",
-  "@types/jest": "^29.5.12",
-  "source-map-support": "^0.5.21"
-}
-```
-
-### 11.3 Web dependencies
-
-```json
-{
-  "react": "^18.2.0",
-  "react-dom": "^18.2.0",
-  "react-router-dom": "^6.22.0",
-  "axios": "^1.6.7",
-  "@tanstack/react-query": "^5.20.0",
-  "zustand": "^4.5.0",
-  "react-hook-form": "^7.50.0",
-  "@hookform/resolvers": "^3.3.4",
-  "zod": "^3.23.0",
-  "echarts": "^5.5.0",
-  "echarts-for-react": "^3.0.2",
-  "date-fns": "^3.3.0",
-  "clsx": "^2.1.0",
-  "tailwind-merge": "^2.2.0",
-  "class-variance-authority": "^0.7.0",
-  "lucide-react": "^0.330.0",
-  "@radix-ui/react-dialog": "^1.0.5",
-  "@radix-ui/react-select": "^2.0.0",
-  "@radix-ui/react-tabs": "^1.0.4",
-  "@radix-ui/react-label": "^2.0.2",
-  "@radix-ui/react-popover": "^1.0.7",
-  "@radix-ui/react-toast": "^1.1.5",
-  "sonner": "^1.4.0"
-}
-```
-
-### 11.4 Web devDependencies
-
-```json
-{
-  "@types/react": "^18.2.55",
-  "@types/react-dom": "^18.2.18",
-  "@vitejs/plugin-react": "^4.2.1",
-  "vite": "^5.1.0",
-  "typescript": "^5.3.3",
-  "tailwindcss": "^3.4.1",
-  "postcss": "^8.4.35",
-  "autoprefixer": "^10.4.17",
-  "vitest": "^1.2.2",
-  "@testing-library/react": "^14.2.1",
-  "@testing-library/jest-dom": "^6.4.2",
-  "jsdom": "^24.0.0"
-}
-```
-
-### 11.5 Shared 包依赖
-
-```json
-{
-  "dependencies": {},
-  "devDependencies": {
-    "typescript": "^5.3.3"
-  }
-}
-```
-
-### 11.6 HarmonyOS oh-package.json5
-
-```json5
-{
-  "name": "investment_tracker_app",
-  "version": "1.0.0",
-  "description": "投资收益统计 HarmonyOS APP",
-  "main": "",
-  "author": "",
-  "license": "ISC",
-  "dependencies": {
-    // 鸿蒙系统模块通过 import 引入，无需在 oh-package 中声明
-  },
-  "devDependencies": {
-    "@ohos/hypium": "1.0.6"
-  }
-}
-```
-
----
-
-## 12. 共享知识（跨文件约定）
-
-### 12.1 命名规范
-
-| 范围 | 规范 | 示例 |
-|------|------|------|
-| API 路径 | kebab-case，RESTful 资源名复数 | `/api/v1/portfolios/:portfolioId/transactions` |
-| 数据库表名 | snake_case 复数 | `asset_snapshots`, `daily_nav`, `daily_xirr` |
-| 数据库字段名 | snake_case | `portfolio_id`, `total_asset`, `cumulative_nav` |
-| Prisma model 名 | PascalCase 单数 | `AssetSnapshot`, `DailyNav` |
-| TypeScript 类型/接口 | PascalCase | `Transaction`, `NavSeriesPoint` |
-| TypeScript 变量/函数 | camelCase | `calculateXirr`, `portfolioId` |
-| TypeScript 常量 | UPPER_SNAKE_CASE | `MAX_ITERATIONS`, `TOLERANCE` |
-| React 组件 | PascalCase | `NavTrendChart`, `TransactionForm` |
-| 文件名（TS/TSX） | kebab-case | `xirr.service.ts`, `nav-trend-chart.tsx` |
-| HarmonyOS 文件名 | PascalCase | `IndexPage.ets`, `LineChart.ets` |
-
-### 12.2 日期处理约定
-
-| 约定 | 说明 |
-|------|------|
-| **存储格式** | 数据库中 `@db.Date` 类型，无时区信息，仅存日期 |
-| **传输格式** | API 请求/响应统一用 `YYYY-MM-DD` 字符串 |
-| **时区策略** | 日期按"业务日期"处理，不涉及时区转换。用户录入的日期即业务日期，前后端不做时区偏移 |
-| **JavaScript Date** | 后端用 `Date` 对象操作，Prisma 自动映射为 PostgreSQL `DATE` |
-| **前端日期** | Web 用 `date-fns` 格式化，APP 用 `DateUtils.ets` 手动格式化 |
-| **年份判断** | 当年净值跨年判断用 `date.getFullYear()` 比较 |
-
-### 12.3 金额精度处理
-
-| 场景 | 处理方式 |
-|------|---------|
-| **后端计算** | Prisma 返回 `Decimal` 对象，用 `Number()` 转换后参与 JS 计算（金额在 Number 安全范围内） |
-| **后端存储** | Prisma `@db.Decimal(18,2)` 自动映射 |
-| **API 传输** | Decimal 序列化为 **字符串**（如 `"10000.00"`），避免 JSON 精度丢失 |
-| **前端接收** | 金额字段为 string，展示时用 `formatCurrency()` 转换 |
-| **前端计算** | 需要计算时用 `Number()` 转换，计算后展示时格式化 |
-| **净值/XIRR** | 同上，传输为字符串，前端格式化展示（净值 4 位小数，XIRR 百分比 2 位） |
-
-### 12.4 错误处理约定
-
-**统一错误响应格式**：
-
-```json
-{
-  "code": 4001,
-  "data": null,
-  "message": "金额必须大于 0"
-}
-```
-
-**错误码规划**：
-
-| 错误码范围 | 含义 |
-|-----------|------|
-| 0 | 成功 |
-| 1000-1999 | 认证错误（1001=未认证, 1002=Token过期, 1003=邮箱已注册） |
-| 2000-2999 | 参数校验错误（2001=金额无效, 2002=日期无效, 2003=首笔必须买入） |
-| 3000-3999 | 业务逻辑错误（3001=组合不存在, 3002=快照已存在, 3003=计算数据不足） |
-| 4000-4999 | 计算错误（4001=XIRR不收敛, 4002=净值计算异常） |
-| 5000 | 服务器内部错误 |
-
-### 12.5 API 响应格式约定
-
-**统一信封**：
-
-```json
-{
-  "code": 0,
-  "data": <T | null>,
-  "message": "success"
-}
-```
-
-- `code: 0` 表示成功
-- `code: 非0` 表示错误，`data` 为 null，`message` 为错误描述
-- 后端通过 `TransformInterceptor` 自动包装成功响应
-- 后端通过 `HttpExceptionFilter` 自动包装错误响应
-
-### 12.6 前端 API 调用约定
-
-```typescript
-// 所有 API 请求经过 Axios 拦截器处理
-// 请求拦截器：自动注入 Authorization header
-// 响应拦截器：
-//   - code === 0 → 返回 data
-//   - code === 1001/1002 → 跳转登录页
-//   - code !== 0 → Toast 提示 message，抛出错误
-```
-
----
-
-## 13. 待明确事项
-
-| 编号 | 问题 | 影响 | 最终决策 |
-|------|------|------|---------|
-| Q-A01 | **HarmonyOS APP 分发方式**：仅自用模拟器调试，还是需上架华为应用市场？ | 影响签名配置、权限申请、审核流程 | ✅ **用户决策：v1 仅模拟器/真机调试，不上架**。使用调试证书，无需审核流程 |
-| Q-A02 | **后端部署环境**：本地内网开发，还是需部署到云服务器？ | 影响 CORS 配置、HTTPS 证书、环境变量管理 | ✅ **用户决策：部署到自建服务器**。开发阶段 localhost:3000，部署阶段通过 .env 配置服务器地址/CORS/HTTPS；架构需支持环境变量切换，部署文档单独提供 |
-| Q-A03 | **APP 端是否需要离线缓存**：纯走后端 API，还是需要本地 SQLite 缓存？ | 影响 APP 数据层架构（是否引入 @ohos.data.relationalStore） | ✅ **用户决策：v1 纯走后端 API，不引入本地数据库**。离线缓存列入 P2 |
-| Q-A04 | **多币种**：v1 是否确认仅 CNY？后续是否需要预留多币种字段？ | 影响 schema 设计（是否加 currency 到 transaction/snapshot 级别） | ✅ **用户决策：v1 仅 CNY，后期可升级多币种**。currency 在 Portfolio 级别记录，transaction/snapshot 不带币种；后期升级时再扩展到交易级别 |
-| Q-A05 | **数据导入导出**：P1 的 CSV/Excel 导入导出是否需要在 v1 预留 API？ | 影响后端是否提前设计 import/export 接口 | ✅ 采用默认：v1 不实现，P1 再加 |
-| Q-A06 | **当年净值跨年场景**：如果某组合在年中（如 6 月）才创建第一笔交易，当年净值如何处理？ | 影响 base_cumulative_nav 的初始化 | ✅ 采用默认：成立日即为当年首日，yearNav = 1.0，base = 1.0；后续年度才需要真正的跨年重置 |
-| Q-A07 | **同日多笔交易 XIRR 处理**：同一天多笔买入/卖出，是合并为净现金流还是按时间顺序逐笔？ | 影响 XIRR 现金流构建逻辑 | ✅ 采用默认：同日合并为净现金流（买入总额-卖出总额为净买入），与 PRD Q-08 一致 |
-| Q-A08 | **热力图在 APP 端是否必须**：v1 APP 是否需要月度热力图？ | 影响 APP 图表复杂度 | ✅ 采用默认：v1 APP 不做热力图，仅 Web 端有；APP 端热力图列入 P1 |
-
----
-
-## 14. 附录：头像上传模块（AC-11 / AC-15，增量交付）
-
-### 14.1 目录结构
+### 19.1 目录结构
 
 ```
 packages/backend/src/modules/upload/
@@ -2088,7 +1978,7 @@ packages/backend/src/modules/upload/
     └── local-disk.storage.ts                # 本地磁盘实现
 ```
 
-### 14.2 关键约定
+### 19.2 关键约定
 
 | 项 | 值 | 说明 |
 |----|----|------|
@@ -2102,7 +1992,7 @@ packages/backend/src/modules/upload/
 | 错误码 | `1006`（HTTP 400） | 类型 / 大小 / 内容不符 / 文件缺失统一用 1006 |
 | 存储驱动 | `STORAGE_DRIVER=local` | factory provider 选择实现，cos / s3 预留 |
 
-### 14.3 三处易踩的坑（已修复）
+### 19.3 三处易踩的坑（已修复）
 
 1. **M1 — 用户 ID 字段名**：`AuthenticatedUser` 是 `{ userId, email }`，取 `user.userId`，不是 `user.id`。
 2. **M2 — FormData 被序列化成 JSON**：axios 实例级写死了 `Content-Type: application/json`，
@@ -2113,7 +2003,7 @@ packages/backend/src/modules/upload/
    修复：controller 作用域的 `FileUploadExceptionFilter`，把无自定义 code 的异常收敛为 400 + 1006；
    **401/403 保持原样映射 1001/1002**，不能被改写，否则前端识别不出「登录已失效」。
 
-### 14.4 安全设计
+### 19.4 安全设计
 
 - 文件名 = `crypto.randomUUID()`，扩展名由**魔数嗅探**推导，**绝不使用 `file.originalname`** → 杜绝路径穿越。
 - `canRemove(url)` 三重校验后才允许删除旧文件：
@@ -2121,7 +2011,7 @@ packages/backend/src/modules/upload/
 - 旧文件删除是 fire-and-forget（`void ... .catch(logger.warn)`），失败只告警，不影响上传结果。
 - 「移除头像」只把 `avatar` 置 NULL，**不删磁盘文件**（避免误操作不可逆）。
 
-### 14.5 头像地址契约放宽（P0-5）
+### 19.5 头像地址契约放宽（P0-5）
 
 `UpdateProfileDto.avatar` 原来是 `@IsUrl({ require_protocol: true })`，会把上传返回的相对路径判为非法。
 现改为正则，同时放行站内相对路径与 http(s) 外链：
@@ -2132,7 +2022,7 @@ packages/backend/src/modules/upload/
 
 `(?!\/)` 用于排除 `//evil.com` 这类协议相对 URL。空串 `''` 仍表示清空（由 `@ValidateIf` 跳过校验，service 转 NULL）。
 
-### 14.6 手工联调清单（10 项）
+### 19.6 手工联调清单（10 项）
 
 | # | 场景 | 预期 |
 |---|------|------|

@@ -1,0 +1,78 @@
+sequenceDiagram
+    autonumber
+    participant U as 用户 (Web/APP)
+    participant C as 控制器 (Controller)
+    participant RS as RecalculationService
+    participant AVS as AssetValuationService
+    participant HDS as HoldingDerivationService
+    participant NS as NavService
+    participant XS as XirrService
+    participant DB as PostgreSQL
+
+    Note over U,DB: ═══ 流程 A：录入证券买卖 → 持仓推导 → 派生落库 → NAV/XIRR 级联 ═══
+
+    U->>C: POST /security-trades {date, securityId, side, quantity, price, fee}
+    C->>DB: INSERT security_trades
+    C->>RS: recalculateRange(portfolioId, date, date)
+
+    RS->>AVS: persistDerived(portfolioId, date)  %% 自动派生入口
+
+    AVS->>AVS: 查当日 AssetSnapshot 是否已 MANUAL？
+    alt 已存在 MANUAL → 跳过自动派生（REG-03）
+        AVS-->>RS: 跳过（保留手工值）
+    else 否则计算 DERIVED
+        AVS->>HDS: deriveAll(portfolioId, date)
+        loop 每个证券
+            HDS->>DB: SELECT security_trades WHERE portfolioId, securityId, date<=?
+            HDS->>DB: SELECT security_prices WHERE securityId, asOf<=?（向前沿用）
+            HDS-->>AVS: Position[]（数量/均价/市值）
+        end
+        AVS->>DB: SELECT cash_balances WHERE asOf<=?（独立，向前沿用）
+        AVS-->>AVS: totalAsset = Σ市值 + cashBalance
+        AVS->>DB: INSERT asset_snapshots ... ON CONFLICT(portfolioId,date) WHERE source='DERIVED' DO UPDATE
+        Note right of DB: 双保险：不覆盖 MANUAL（REG-02/REG-04）
+        DB-->>AVS: AssetSnapshot(DERIVED)
+    end
+
+    AVS-->>RS: done
+    RS->>NS: calculateNavForDate(portfolioId, date)  %% 同事务顺序
+    NS->>DB: SELECT asset_snapshots(终值) + prev daily_nav
+    NS->>DB: UPSERT daily_nav
+    NS-->>RS: NavResult
+
+    RS->>XS: calculateXirrForDate(portfolioId, date)
+    XS->>DB: SELECT cashflows(<=date) + asset_snapshots(终值)
+    XS->>XS: Newton-Raphson（阈值 1e-7，rate≤-0.999 钳制）
+    XS->>DB: UPSERT daily_xirr(xirrValue DECIMAL(20,8))
+    XS-->>RS: xirrValue?
+
+    RS-->>C: {affectedDates:1}
+    C-->>U: 200 {code:0, data: securityTrade}
+
+    Note over U,DB: ═══ 流程 B：手工覆盖 / 重置 双路径（source 仲裁） ═══
+
+    U->>C: POST /snapshots {date, totalAsset, marketValue?, cashBalance?, note?}
+    C->>AVS: upsertManual(portfolioId, date, dto)
+    AVS->>DB: INSERT asset_snapshots ... ON CONFLICT(portfolioId,date) DO UPDATE (source=MANUAL)
+    Note right of DB: 无条件覆盖，含原 DERIVED 行（REG-03 手工优先）
+    DB-->>AVS: AssetSnapshot(MANUAL, valuationFlag=MANUAL_INPUT)
+    AVS-->>C: snapshot(MANUAL)
+    C-->>U: 200 {data: snapshot(MANUAL)}
+
+    U->>C: POST /snapshots/:date/reset  %% 撤销手工 → 回退 DERIVED
+    C->>AVS: resetToDerived(portfolioId, date)
+    AVS->>AVS: 删除 MANUAL 行 → 重跑 persistDerived(date)
+    AVS->>DB: DELETE ... WHERE portfolioId,date,source='MANUAL'
+    AVS->>AVS: persistDerived(portfolioId, date)  %% 重新派生
+    AVS-->>C: snapshot(DERIVED)
+    C-->>U: 200 {data: snapshot(DERIVED)}
+
+    Note over U,DB: ═══ 区间重建（批量）：DELETE ... AND source='DERIVED' + INSERT ... ON CONFLICT DO NOTHING ═══
+    U->>C: POST /recalculate {startDate, endDate?}
+    C->>RS: recalculateRange(portfolioId, start, end?)
+    RS->>RS: getEventDates() = 出入金/买卖/现价/余额 事件日 ∪ 区间端点
+    RS->>DB: DELETE FROM asset_snapshots WHERE portfolioId AND date IN(区间) AND source='DERIVED'
+    RS->>AVS: persistDerived(date) 逐事件日（事件日稀疏落库 + 读前值填充）
+    RS->>NS: 逐日计算 NAV（顺序依赖前日份额）
+    RS->>XS: 逐日计算 XIRR
+    RS-->>C: {affectedDates: N}
