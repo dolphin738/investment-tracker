@@ -1,0 +1,97 @@
+classDiagram
+    class NavSeriesPoint {
+        <<shared type — FROZEN>>
+        +string date
+        +number|null cumulativeNav
+        +number|null yearNav
+        +number|null shares
+        +string label
+    }
+    class XirrSeriesPoint {
+        <<shared type — FROZEN>>
+        +string date
+        +number|null xirrValue
+        +string label
+    }
+
+    class NavTrendChartProps {
+        <<contract — UNCHANGED>>
+        +NavSeriesPoint[] data
+        +boolean? loading
+        +string? title
+        +string? className
+    }
+    class XirrTrendChartProps {
+        <<contract — UNCHANGED>>
+        +XirrSeriesPoint[] data
+        +boolean? loading
+        +string? title
+        +string? className
+    }
+    class YearlyBarChartProps {
+        <<contract — UNCHANGED>>
+        +XirrSeriesPoint[] data
+        +boolean? loading
+        +string? title
+        +string? className
+    }
+
+    class NavTrendChart {
+        <<React FC — REWRITE>>
+        -EChartsOption option  "useMemo([data])"
+        +render() JSX.Element
+    }
+    class XirrTrendChart {
+        <<React FC — REWRITE>>
+        -EChartsOption option  "useMemo([data])"
+        +render() JSX.Element
+    }
+    class YearlyBarChart {
+        <<React FC — REWRITE>>
+        -EChartsOption option  "useMemo([data])"
+        +render() JSX.Element
+    }
+    class MonthlyHeatmap {
+        <<React FC — KEEP AS-IS>>
+        -EChartsOption option  "useMemo"
+        +render() JSX.Element
+    }
+
+    class ReactECharts {
+        <<echarts-for-react>>
+        +EChartsOption option
+        +CSSProperties style
+    }
+    class ChartShell {
+        <<shared UI pattern>>
+        Card / CardHeader / CardTitle.text-base / CardContent
+        loading -> Skeleton h-[260px]
+        empty   -> div h-[260px] "暂无数据"
+    }
+    class Formatters {
+        <<@/lib/utils — REUSE, DO NOT REIMPLEMENT>>
+        +formatDecimal(v, digits=4) string
+        +formatPercent(v, digits=2) string
+    }
+
+    NavTrendChartProps  ..> NavSeriesPoint  : data
+    XirrTrendChartProps ..> XirrSeriesPoint : data
+    YearlyBarChartProps ..> XirrSeriesPoint : data
+
+    NavTrendChart  ..> NavTrendChartProps  : accepts
+    XirrTrendChart ..> XirrTrendChartProps : accepts
+    YearlyBarChart ..> YearlyBarChartProps : accepts
+
+    NavTrendChart  --> ReactECharts : renders
+    XirrTrendChart --> ReactECharts : renders
+    YearlyBarChart --> ReactECharts : renders
+    MonthlyHeatmap --> ReactECharts : renders (reference impl)
+
+    NavTrendChart  --> ChartShell : wraps
+    XirrTrendChart --> ChartShell : wraps
+    YearlyBarChart --> ChartShell : wraps
+    MonthlyHeatmap --> ChartShell : wraps
+
+    NavTrendChart  --> Formatters : tooltip formatDecimal
+    XirrTrendChart --> Formatters : tooltip formatPercent
+    YearlyBarChart --> Formatters : tooltip formatPercent

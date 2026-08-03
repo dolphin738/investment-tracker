@@ -1,0 +1,51 @@
+sequenceDiagram
+    autonumber
+    participant Page as pages/xirr-analysis.tsx<br/>(零改动)
+    participant Hook as use-xirr.hook.ts<br/>(零改动)
+    participant C as XirrTrendChart<br/>(重写)
+    participant M as useMemo(option)
+    participant RE as ReactECharts
+    participant EC as echarts instance
+    participant U as @/lib/utils
+
+    Page->>Hook: useXirrSeries(portfolioId, granularity)
+    Hook-->>Page: { data: XirrSeriesPoint[], isLoading }
+    Page->>C: <XirrTrendChart data={...} loading={isLoading} />
+
+    alt loading === true
+        C-->>Page: <Skeleton className="h-[260px] w-full" />
+        Note over C: 不挂载 ReactECharts，无实例创建
+    else data 为空 / 长度 0
+        C-->>Page: <div class="h-[260px] ...">暂无数据</div>
+        Note over C: 不挂载 ReactECharts
+    else 正常数据
+        C->>M: useMemo(() => buildOption(data), [data])
+        M->>M: xAxis.data = data.map(d => d.label)
+        M->>M: series[0].data = data.map(d => d.xirrValue)  // null 原样保留
+        M->>M: 挂载 axisLabel.formatter / tooltip.formatter (闭包)
+        M-->>C: EChartsOption
+        C->>RE: <ReactECharts option={option} style={{height:260,width:'100%'}} />
+        RE->>EC: echarts.init(dom) + setOption(option)
+        EC-->>Page: canvas 渲染完成
+
+        Note over EC,U: —— 用户 hover ——
+        EC->>EC: tooltip.formatter(params: CallbackDataParams[])
+        alt params[0].value === null || undefined
+            EC-->>EC: 返回 "{axisValueLabel}<br/>XIRR: 数据不足"
+        else
+            EC->>U: formatPercent(params[0].value)
+            U-->>EC: "12.34%"
+            EC-->>EC: 返回 "{axisValueLabel}<br/>{marker}XIRR: 12.34%"
+        end
+
+        Note over Page,EC: —— data 引用变化（切换粒度/组合）——
+        Page->>C: 新 data
+        C->>M: useMemo 依赖 [data] 变化 → 重算
+        M-->>RE: 新 option
+        RE->>EC: setOption(newOption)
+        Note over EC: 实例复用，不 dispose/re-init
+
+        Note over Page,EC: —— 组件卸载 ——
+        Page->>RE: unmount
+        RE->>EC: echarts.dispose()
+    end
