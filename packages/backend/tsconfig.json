@@ -3,21 +3,17 @@
   "compilerOptions": {
     "module": "CommonJS",
     "moduleResolution": "Node",
-    "target": "ES2021",
     "outDir": "./dist",
     "rootDir": "./src",
-    "experimentalDecorators": true,
-    "emitDecoratorMetadata": true,
-    "useDefineForClassFields": false,
-    "declaration": false,
-    "declarationMap": false,
-    "sourceMap": true,
+    "baseUrl": "./",
     "paths": {
-      "@shared/*": ["../shared/src/*"],
       "@/*": ["src/*"]
     },
-    "baseUrl": "."
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "target": "ES2021",
+    "strictPropertyInitialization": false
   },
   "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist", "test"]
+  "exclude": ["node_modules", "dist", "prisma"]
 }

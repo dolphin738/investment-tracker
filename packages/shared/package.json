@@ -2,24 +2,18 @@
   "name": "@investment-tracker/shared",
   "version": "1.0.0",
   "private": true,
-  "description": "投资收益统计系统 — 三端共享 TypeScript 类型与 API 契约",
-  "license": "AGPL-3.0",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "description": "Shared TypeScript types, enums, and API contracts for the investment tracker",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
   "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "default": "./dist/index.js"
-    }
+    ".": "./src/index.ts"
   },
   "scripts": {
-    "build": "tsc",
-    "lint": "echo 'shared: lint not configured'",
+    "lint": "tsc --noEmit",
     "clean": "rimraf dist"
   },
   "devDependencies": {
-    "typescript": "^5.3.3",
-    "rimraf": "^5.0.5"
+    "rimraf": "^5.0.5",
+    "typescript": "^5.3.3"
   }
 }

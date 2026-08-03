@@ -1,20 +1,14 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
-import path from 'node:path';
+import path from 'path';
 
-// ===========================================================================
-// Vite 构建配置
-// - @ 别名指向 src/
-// - @shared 别名指向 packages/shared/src/
-// - 开发代理：/api → localhost:3000（后端 NestJS）
-// ===========================================================================
-
+// Vite 配置：React + Tailwind + shadcn/ui
+// 开发代理 /api → http://localhost:3000
 export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
-      '@shared': path.resolve(__dirname, '../shared/src'),
     },
   },
   server: {
@@ -25,9 +19,5 @@ export default defineConfig({
         changeOrigin: true,
       },
     },
-  },
-  build: {
-    outDir: 'dist',
-    sourcemap: true,
   },
 });
