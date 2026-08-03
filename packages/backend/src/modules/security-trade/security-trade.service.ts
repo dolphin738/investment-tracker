@@ -218,6 +218,9 @@ export class SecurityTradeService {
     if (query.securityId) {
       where.securityId = query.securityId;
     }
+    if (query.side) {
+      where.side = query.side;
+    }
     if (query.startDate || query.endDate) {
       where.date = {
         ...(query.startDate ? { gte: new Date(query.startDate) } : {}),

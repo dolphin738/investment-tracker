@@ -10,13 +10,14 @@
  * - PATCH /api/auth/password — 修改密码（需认证）
  * - PATCH /api/auth/email — 修改邮箱（需认证）
  * - PATCH /api/auth/profile — 修改个人资料（需认证）
+ * - DELETE /api/auth/account — 注销账户（需认证，级联删除全部数据）
  *
  * 注意：全局 JWT 守卫（APP_GUARD）默认保护所有路由，
  * 未标注 @Public() 的接口即为需认证接口，无需再写 @UseGuards。
  * 响应信封由全局 TransformInterceptor 统一包装，此处直接返回裸对象。
  */
 
-import { Body, Controller, Get, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Patch, Post } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
@@ -84,5 +85,16 @@ export class AuthController {
     @Body() dto: UpdateProfileDto,
   ) {
     return this.authService.updateProfile(user.userId, dto);
+  }
+
+  @Delete('account')
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({
+    summary: '注销账户（删除用户及其全部级联数据）',
+    description:
+      '永久删除当前用户。组合/现金流/交易/快照/净值/XIRR 等子数据由 Prisma onDelete: Cascade 级联清理。',
+  })
+  async deleteAccount(@CurrentUser() user: AuthenticatedUser) {
+    return this.authService.deleteAccount(user.userId);
   }
 }

@@ -2,13 +2,14 @@
  * hooks/use-portfolios.ts — 组合 CRUD TanStack Query hooks
  *
  * - usePortfolios：列表 query
- * - useCreatePortfolio / useUpdatePortfolio / useDeletePortfolio：mutation
+ * - useCreatePortfolio / useUpdatePortfolio / useArchivePortfolio / useDeletePortfolio：mutation
  * - 自动同步 portfolio store
  */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
+  archivePortfolio as archiveApi,
   createPortfolio as createApi,
   deletePortfolio as deleteApi,
   listPortfolios as listApi,
@@ -63,6 +64,19 @@ export function useUpdatePortfolio() {
     }) => updateApi(id, payload),
     onSuccess: () => {
       toast.success('组合已更新');
+      queryClient.invalidateQueries({ queryKey: PORTFOLIOS_KEY });
+    },
+  });
+}
+
+/** 归档/取消归档组合 */
+export function useArchivePortfolio() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, archived }: { id: string; archived: boolean }) =>
+      archiveApi(id, archived),
+    onSuccess: (_data, { archived }) => {
+      toast.success(archived ? '组合已归档' : '组合已取消归档');
       queryClient.invalidateQueries({ queryKey: PORTFOLIOS_KEY });
     },
   });

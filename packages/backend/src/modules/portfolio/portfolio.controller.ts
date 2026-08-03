@@ -10,6 +10,7 @@
  * - GET    /api/portfolios/:id      — 获取组合详情
  * - PATCH  /api/portfolios/:id      — 更新组合
  * - DELETE /api/portfolios/:id      — 删除组合（级联删除子数据）
+ * - PATCH  /api/portfolios/:id/archive — 归档 / 取消归档组合
  * - POST   /api/portfolios/:id/recalculate — 全量重算净值与 XIRR
  *
  * 全局 JwtAuthGuard 已保证所有路由需鉴权；组合归属校验在 Service 层完成。
@@ -30,6 +31,7 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { PortfolioService } from './portfolio.service';
 import { CreatePortfolioDto } from './dto/create-portfolio.dto';
 import { UpdatePortfolioDto } from './dto/update-portfolio.dto';
+import { ArchivePortfolioDto } from './dto/archive-portfolio.dto';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../../common/decorators/current-user.decorator';
 
@@ -90,6 +92,20 @@ export class PortfolioController {
     @Param('id') id: string,
   ) {
     return this.portfolioService.remove(user.userId, id);
+  }
+
+  @Patch(':id/archive')
+  @ApiOperation({
+    summary: '归档 / 取消归档组合',
+    description:
+      'body.archived: true 或缺省 → 归档（archivedAt=now）；archived: false → 取消归档（archivedAt=null）。',
+  })
+  async archive(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: ArchivePortfolioDto,
+  ) {
+    return this.portfolioService.archive(user.userId, id, dto);
   }
 
   @Post(':id/recalculate')

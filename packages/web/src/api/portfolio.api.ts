@@ -6,6 +6,7 @@
  * - POST   /portfolios        — 创建
  * - GET    /portfolios/:id    — 详情
  * - PATCH  /portfolios/:id    — 更新
+ * - PATCH  /portfolios/:id/archive — 归档/取消归档
  * - DELETE /portfolios/:id    — 删除（级联）
  */
 
@@ -39,6 +40,14 @@ export function updatePortfolio(
   payload: UpdatePortfolioRequest,
 ): Promise<PortfolioResponse> {
   return http.patch<PortfolioResponse>(`/portfolios/${id}`, payload);
+}
+
+/** 归档/取消归档组合（archived: true=归档，false=取消归档） */
+export function archivePortfolio(
+  id: string,
+  archived: boolean,
+): Promise<PortfolioResponse> {
+  return http.patch<PortfolioResponse>(`/portfolios/${id}/archive`, { archived });
 }
 
 /** 删除组合（级联删除子数据） */

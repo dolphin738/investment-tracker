@@ -20,6 +20,7 @@ import type { Portfolio as PrismaPortfolio } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RecalculationService } from '../calculation/recalculation.service';
 import type { PortfolioSummaryDto } from './dto/portfolio-summary.dto';
+import type { ArchivePortfolioDto } from './dto/archive-portfolio.dto';
 
 /** API 响应中的组合结构（日期字段转为字符串） */
 export interface PortfolioResponse {
@@ -132,6 +133,31 @@ export class PortfolioService {
     await this.findOne(userId, id);
     await this.prisma.portfolio.delete({ where: { id } });
     return null;
+  }
+
+  /**
+   * 归档 / 取消归档组合
+   *
+   * 语义（见 ArchivePortfolioDto）：
+   * - dto.archived 缺省或 true → 归档（archivedAt = now）
+   * - dto.archived === false   → 取消归档（archivedAt = null）
+   *
+   * 数据隔离：先 findOne(userId, id) 校验归属，再用唯一键 id 更新。
+   */
+  async archive(
+    userId: string,
+    id: string,
+    dto: ArchivePortfolioDto,
+  ): Promise<PortfolioResponse> {
+    await this.findOne(userId, id);
+
+    const updated = await this.prisma.portfolio.update({
+      where: { id },
+      data: {
+        archivedAt: dto.archived === false ? null : new Date(),
+      },
+    });
+    return toResponse(updated);
   }
 
   /**

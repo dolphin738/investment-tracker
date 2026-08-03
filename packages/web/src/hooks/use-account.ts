@@ -93,8 +93,7 @@ export function useUploadAvatar() {
 /**
  * 注销账户（SET-P1-06 · 设置页危险操作区）
  *
- * 成功后清除本地登录态并回到登录页。后端接口为 P1 预留，
- * 若暂未开放由 api-client 拦截器统一 Toast 提示错误。
+ * 成功后清除本地登录态并回到登录页。
  */
 export function useDeleteAccount() {
   const queryClient = useQueryClient();

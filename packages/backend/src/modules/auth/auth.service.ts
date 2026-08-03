@@ -6,6 +6,7 @@
  * - 用户登录：校验密码，签发 JWT
  * - 获取当前用户信息：根据 userId 查询用户公开信息
  * - 账户修改：修改密码 / 修改邮箱 / 修改个人资料
+ * - 注销账户：删除用户，子数据由 Prisma onDelete: Cascade 级联清理
  *
  * 错误码约定（见 shared/types/api.ts）：
  * - 1003 邮箱已被注册（HTTP 409）
@@ -250,5 +251,19 @@ export class AuthService {
     });
 
     return this.toUserPublic(updated);
+  }
+
+  /**
+   * 注销账户：删除用户记录。
+   *
+   * 组合 / 现金流 / 交易 / 快照 / 净值 / XIRR / 偏好等子数据
+   * 由 Prisma Schema 中的 onDelete: Cascade 级联清理，无需逐个删除。
+   *
+   * @throws UnauthorizedException 用户不存在或 Token 无效
+   */
+  async deleteAccount(userId: string): Promise<null> {
+    await this.findUserOrThrow(userId);
+    await this.prisma.user.delete({ where: { id: userId } });
+    return null;
   }
 }

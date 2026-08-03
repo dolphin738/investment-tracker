@@ -18,6 +18,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
+  Archive,
   Lock,
   LogOut,
   Mail,
@@ -72,6 +73,7 @@ import { UserAvatar } from '@/components/user-avatar';
 import { useAuthStore } from '@/stores/auth.store';
 import { useDeleteAccount } from '@/hooks/use-account';
 import {
+  useArchivePortfolio,
   useDeletePortfolio,
   usePortfolios,
 } from '@/hooks/use-portfolios';
@@ -84,7 +86,7 @@ import { usePreferenceStore, DEFAULT_PREFERENCES } from '@/stores/preference.sto
 import { ROUTE_PATH, AGGREGATION_OPTIONS, GRANULARITY_OPTIONS } from '@/lib/constants';
 import type { Portfolio } from '@investment-tracker/shared';
 import type { UpdatePreferenceDto } from '@/api/types';
-import { formatDate } from '@/lib/utils';
+import { cn, formatDate } from '@/lib/utils';
 
 /** 日期范围选项 */
 const DATE_RANGE_OPTIONS = [
@@ -118,6 +120,7 @@ export default function SettingsPage(): JSX.Element {
   const { user, logout } = useAuthStore();
   const { data: portfolios = [], isLoading: portfoliosLoading } = usePortfolios();
   const deleteMutation = useDeletePortfolio();
+  const archiveMutation = useArchivePortfolio();
   const currentPortfolioId = usePortfolioStore((s) => s.currentPortfolioId);
   const setCurrentPortfolio = usePortfolioStore((s) => s.setCurrentPortfolio);
 
@@ -341,7 +344,7 @@ export default function SettingsPage(): JSX.Element {
         <CardHeader className="flex-row items-center justify-between">
           <div>
             <CardTitle className="text-base">组合管理</CardTitle>
-            <CardDescription>创建、编辑或删除投资组合（归档待后端开放）</CardDescription>
+            <CardDescription>创建、编辑、归档或删除投资组合</CardDescription>
           </div>
           <Button onClick={() => setCreating(true)} size="sm">
             <Plus className="mr-2 h-4 w-4" />
@@ -370,16 +373,21 @@ export default function SettingsPage(): JSX.Element {
                 {portfolios.map((p) => (
                   <TableRow key={p.id}>
                     <TableCell className="font-medium">
-                      {p.id === currentPortfolioId ? (
-                        <span className="font-semibold text-primary">{p.name}</span>
-                      ) : (
-                        <button
-                          className="text-left hover:underline"
-                          onClick={() => setCurrentPortfolio(p.id)}
-                        >
-                          {p.name}
-                        </button>
-                      )}
+                      <span className="inline-flex items-center gap-2">
+                        {p.id === currentPortfolioId ? (
+                          <span className="font-semibold text-primary">{p.name}</span>
+                        ) : (
+                          <button
+                            className="text-left hover:underline"
+                            onClick={() => setCurrentPortfolio(p.id)}
+                          >
+                            {p.name}
+                          </button>
+                        )}
+                        {p.archivedAt && (
+                          <span className="text-xs text-muted-foreground">已归档</span>
+                        )}
+                      </span>
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
                       {p.description || '-'}
@@ -397,6 +405,25 @@ export default function SettingsPage(): JSX.Element {
                           title="编辑"
                         >
                           <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={() =>
+                            archiveMutation.mutate({
+                              id: p.id,
+                              archived: !p.archivedAt,
+                            })
+                          }
+                          title={p.archivedAt ? '取消归档' : '归档'}
+                          disabled={archiveMutation.isPending}
+                        >
+                          <Archive
+                            className={cn(
+                              'h-4 w-4',
+                              p.archivedAt ? 'text-primary' : '',
+                            )}
+                          />
                         </Button>
                         <Button
                           size="icon"

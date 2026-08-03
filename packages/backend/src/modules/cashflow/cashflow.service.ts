@@ -119,6 +119,7 @@ export class CashFlowService {
 
     const where = {
       portfolioId,
+      ...(query.type ? { type: query.type } : {}),
       ...(query.startDate || query.endDate
         ? {
             date: {

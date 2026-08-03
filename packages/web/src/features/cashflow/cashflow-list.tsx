@@ -2,8 +2,8 @@
  * features/cashflow/cashflow-list.tsx — 出入金流水表格
  *
  * PRD §7.1【C】：表格（日期/类型/金额/备注/操作✎🗑）+ 分页。
- * 类型筛选在后端暂不支持（CashFlowQueryDto 无 type 字段），
- * 故「类型筛选」在当前页数据上做前端过滤。
+ * 类型筛选由后端按 type 参数过滤（CashFlowQueryDto.type），
+ * 前端只透传筛选条件，不再对当前页数据做过滤。
  */
 
 import { useState } from 'react';
@@ -45,7 +45,7 @@ export interface CashflowListProps {
   portfolioId: string;
   /** 查询参数（日期范围等，不含分页页码） */
   query?: TransactionQuery;
-  /** 当前页类型过滤（'all' 表示全部；后端不支持 type 参数，前端过滤） */
+  /** 类型筛选（'all' 表示全部；后端按 type 参数过滤） */
   typeFilter?: string;
   className?: string;
   emptyText?: string;
@@ -66,16 +66,13 @@ export function CashflowList({
 
   const { data, isLoading, isError } = useTransactions(portfolioId, {
     ...query,
+    ...(typeFilter !== 'all' ? { type: typeFilter as 'BUY' | 'SELL' } : {}),
     page,
     pageSize: PAGE_SIZE,
   });
   const deleteMutation = useDeleteTransaction();
 
-  const rawItems = data?.items ?? [];
-  const items =
-    typeFilter === 'all'
-      ? rawItems
-      : rawItems.filter((tx) => tx.type === typeFilter);
+  const items = data?.items ?? [];
   const total = data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 

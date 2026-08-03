@@ -48,7 +48,7 @@ export interface SecurityTradeListProps {
   portfolioId: string;
   /** 查询参数（标的/日期范围；分页在组件内维护） */
   query?: SecurityTradeQuery;
-  /** 方向筛选（'all' | 'BUY_SEC' | 'SELL_SEC'；后端查询暂不支持 side，前端过滤） */
+  /** 方向筛选（'all' | 'BUY_SEC' | 'SELL_SEC'；后端按 side 参数过滤） */
   sideFilter?: string;
   className?: string;
   emptyText?: string;
@@ -69,6 +69,7 @@ export function SecurityTradeList({
 
   const { data, isLoading, isError } = useSecurityTrades(portfolioId, {
     ...query,
+    ...(sideFilter !== 'all' ? { side: sideFilter as SecuritySide } : {}),
     page,
     pageSize: PAGE_SIZE,
   });
@@ -76,11 +77,7 @@ export function SecurityTradeList({
   const { data: securities = [] } = useSecurities(portfolioId);
 
   const securityMap = new Map(securities.map((s) => [s.id, s]));
-  const rawItems = data?.items ?? [];
-  const items =
-    sideFilter === 'all'
-      ? rawItems
-      : rawItems.filter((t) => t.side === sideFilter);
+  const items = data?.items ?? [];
   const total = data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 

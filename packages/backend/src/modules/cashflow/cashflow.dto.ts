@@ -19,7 +19,7 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
-import { CashFlowType } from '@prisma/client';
+import { CashFlowType } from '@investment-tracker/shared';
 
 // ==================== 创建 ====================
 
@@ -86,6 +86,11 @@ export class CashFlowQueryDto {
   @IsOptional()
   @IsDateString()
   endDate?: string;
+
+  @ApiPropertyOptional({ description: '类型筛选', enum: CashFlowType })
+  @IsOptional()
+  @IsEnum(CashFlowType)
+  type?: CashFlowType;
 
   @ApiPropertyOptional({ description: '页码，从 1 开始', default: 1 })
   @IsOptional()

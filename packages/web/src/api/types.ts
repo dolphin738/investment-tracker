@@ -501,6 +501,7 @@ export interface SecurityTradeQuery {
   startDate?: string;
   endDate?: string;
   securityId?: string;
+  side?: SecuritySide;
   page?: number;
   pageSize?: number;
 }

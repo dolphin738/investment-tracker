@@ -18,7 +18,7 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
-import { SecuritySide } from '@prisma/client';
+import { SecuritySide } from '@investment-tracker/shared';
 
 // ==================== 创建 ====================
 
@@ -129,6 +129,11 @@ export class SecurityTradeQueryDto {
   @IsOptional()
   @IsString()
   securityId?: string;
+
+  @ApiPropertyOptional({ description: '买卖方向筛选', enum: SecuritySide })
+  @IsOptional()
+  @IsEnum(SecuritySide)
+  side?: SecuritySide;
 
   @ApiPropertyOptional({ description: '页码，从 1 开始', default: 1 })
   @IsOptional()
