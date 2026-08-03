@@ -8,7 +8,7 @@
 // ==================== 通用响应信封 ====================
 
 /** 统一 API 响应信封 */
-export interface ApiResponse<T> {
+export interface ApiResponse<T = unknown> {
   /** 业务状态码，0 表示成功 */
   code: number;
   /** 响应数据 */

@@ -81,7 +81,8 @@ import {
 } from '@/hooks/use-preferences';
 import { usePreferenceStore, DEFAULT_PREFERENCES } from '@/stores/preference.store';
 import { ROUTE_PATH, AGGREGATION_OPTIONS, GRANULARITY_OPTIONS } from '@/lib/constants';
-import type { Portfolio, UpdatePreferenceDto } from '@/api/types';
+import type { Portfolio } from '@investment-tracker/shared';
+import type { UpdatePreferenceDto } from '@/api/types';
 import { formatDate } from '@/lib/utils';
 
 /** 日期范围选项 */

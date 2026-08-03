@@ -19,6 +19,7 @@ import { SnapshotModule } from './modules/snapshot/snapshot.module';
 import { AccountModule } from './modules/account/account.module';
 import { OverviewModule } from './modules/overview/overview.module';
 import { QueryModule } from './modules/query/query.module';
+import { UploadModule } from './modules/upload/upload.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 
 @Module({
@@ -41,6 +42,8 @@ import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
     AccountModule,
     OverviewModule,
     QueryModule,
+    // 文件上传模块（头像等）
+    UploadModule,
   ],
   controllers: [],
   providers: [

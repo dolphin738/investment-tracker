@@ -74,9 +74,14 @@ export class HoldingDerivationService {
    *
    * @param portfolioId 组合 ID
    * @param date 目标日期
-   * @returns HoldingView[] 持仓列表（仅含 qty > 0 的标的）
+   * @param includeClosed 是否包含已清仓标的（qty === 0，字段归零），默认 false
+   * @returns HoldingView[] 持仓列表（默认仅含 qty > 0 的标的）
    */
-  async derive(portfolioId: string, date: Date): Promise<HoldingView[]> {
+  async derive(
+    portfolioId: string,
+    date: Date,
+    includeClosed = false,
+  ): Promise<HoldingView[]> {
     // 1. 查询 ≤date 的全部证券买卖流水（按 date, createdAt 升序）
     const trades = await this.prisma.securityTrade.findMany({
       where: {
@@ -166,7 +171,7 @@ export class HoldingDerivationService {
     const results: HoldingView[] = [];
 
     for (const [sid, state] of stateMap) {
-      if (state.qty <= 0) continue; // 跳过已清仓
+      if (state.qty <= 0 && !includeClosed) continue; // 默认跳过已清仓
 
       const sec = securityMap.get(sid)!;
       const priceInfo = priceMap.get(sid);

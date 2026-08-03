@@ -62,6 +62,7 @@ const fixtures = vi.hoisted(() => {
       description: '回归测试用组合',
       baseDate: '2024-01-01',
       currency: 'CNY',
+      archivedAt: null,
       createdAt: '2024-01-01T00:00:00.000Z',
       updatedAt: '2024-01-01T00:00:00.000Z',
     },

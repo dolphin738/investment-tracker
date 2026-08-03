@@ -94,8 +94,8 @@ apiClient.interceptors.response.use(
     }
     if (body.code === 0) {
       // 把 data 放回 response.data，方便调用方直接拿
-      // @ts-expect-error 重新赋值为已解包的 data
-      response.data = body.data;
+      // body.data 类型为 unknown，此处断言为解包后的信封（调用方经 http.get<T> 二次定型）
+      response.data = body.data as ApiResponse;
       return response;
     }
     // 业务错误

@@ -128,59 +128,50 @@ export interface UpdateSecurityDto {
 }
 
 // ============================================================================
-// 持仓相关（方案B: 由 SecurityTrade 推导）
+// 持仓相关（方案B: 由 SecurityTrade 推导，只读）
 // ============================================================================
 
-/** 持仓响应（前端展示用，后端推导返回） */
+/**
+ * 持仓响应（方案B 后端实时推导返回，对齐 HoldingDerivationService.HoldingView）
+ *
+ * 数值字段为 number（后端推导计算直接返回，非 Decimal 字符串）。
+ */
 export interface HoldingResponse {
-  id: string;
+  /** 标的 ID */
   securityId: string;
-  securityName: string;
+  /** 标的代码 */
   securityCode: string;
+  /** 标的名称 */
+  securityName: string;
+  /** 标的类型 */
   securityType: string;
-  date: string;
-  quantity: string;
-  avgCost: string;
-  marketPrice: string;
-  marketValue: string;
-  costAmount: string;
-  profit: string;
-  profitRate: string;
-  weight: string;
-  note: string | null;
+  /** 持仓数量 */
+  quantity: number;
+  /** 移动加权平均成本价 */
+  avgCost: number;
+  /** 成本总额 */
+  costTotal: number;
+  /** 现价（向前沿用） */
+  marketPrice: number;
+  /** 现价日期 YYYY-MM-DD，null = 无价格记录（回退成本估值） */
+  priceAsOf: string | null;
+  /** 持仓市值 = quantity * marketPrice */
+  marketValue: number;
+  /** 浮动盈亏 */
+  pnl: number;
+  /** 盈亏率 */
+  pnlRate: number;
+  /** 估值标识：EXACT（有现价）/ COST_BASED（回退成本） */
+  flag: 'EXACT' | 'COST_BASED';
 }
 
 /** 持仓汇总 */
 export interface HoldingsAggregate {
-  totalMarketValue: string;
-  totalCost: string;
-  totalProfit: string;
-  totalProfitRate: string;
+  totalMarketValue: number;
+  totalCost: number;
+  totalProfit: number;
+  totalProfitRate: number;
   securityCount: number;
-}
-
-/** 更新持仓 DTO（前台提交现价等） */
-export interface UpsertHoldingDto {
-  securityId: string;
-  date: string;
-  quantity: string;
-  avgCost: string;
-  marketPrice: string;
-  note?: string;
-}
-
-/** Holding 基础实体（后端存储） */
-export interface Holding {
-  id: string;
-  portfolioId: string;
-  securityId: string;
-  date: string;
-  quantity: string;
-  avgCost: string;
-  marketPrice: string;
-  note: string | null;
-  createdAt: string;
-  updatedAt: string;
 }
 
 // ============================================================================
