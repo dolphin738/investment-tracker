@@ -33,11 +33,25 @@ export interface PreferenceResponse {
   xirrDecimals: number;
   theme: string;
   staleDays: number;
+  /** 出入金后现金余额软提示（SET-P0-07） */
+  cashHintOnCashflow: boolean;
+  /** 证券买卖后现金余额软提示（SET-P0-07） */
+  cashHintOnTrade: boolean;
+  /** 金额千分位（SET-P1-03） */
+  amountThousands: boolean;
+  /** 金额万 / 亿缩写（SET-P1-03） */
+  amountAbbrev: boolean;
   createdAt: string;
   updatedAt: string;
 }
 
-/** 系统默认偏好值 */
+/**
+ * 系统默认偏好值
+ *
+ * 软提示 / 金额格式 4 项以 PRD §6.9.1 L908-909 与 §7.8 L1377 为唯一权威：
+ * true / true / true / false。必须与 schema.prisma 的 @default 及前端
+ * DEFAULT_PREFERENCES 三处保持一致，任一处翻转都会造成前后端默认打架。
+ */
 const DEFAULTS = {
   defaultGranularity: 'month',
   defaultDateRange: '1y',
@@ -47,6 +61,10 @@ const DEFAULTS = {
   xirrDecimals: 2,
   theme: 'system',
   staleDays: 3,
+  cashHintOnCashflow: true,
+  cashHintOnTrade: true,
+  amountThousands: true,
+  amountAbbrev: false,
 };
 
 @Injectable()
@@ -73,6 +91,10 @@ export class PreferenceService {
           xirrDecimals: DEFAULTS.xirrDecimals,
           theme: DEFAULTS.theme,
           staleDays: DEFAULTS.staleDays,
+          cashHintOnCashflow: DEFAULTS.cashHintOnCashflow,
+          cashHintOnTrade: DEFAULTS.cashHintOnTrade,
+          amountThousands: DEFAULTS.amountThousands,
+          amountAbbrev: DEFAULTS.amountAbbrev,
         },
       });
     }
@@ -102,6 +124,10 @@ export class PreferenceService {
       xirrDecimals: pref.xirrDecimals,
       theme: pref.theme,
       staleDays: pref.staleDays,
+      cashHintOnCashflow: pref.cashHintOnCashflow,
+      cashHintOnTrade: pref.cashHintOnTrade,
+      amountThousands: pref.amountThousands,
+      amountAbbrev: pref.amountAbbrev,
       createdAt: pref.createdAt.toISOString(),
       updatedAt: pref.updatedAt.toISOString(),
     };
@@ -147,6 +173,10 @@ export class PreferenceService {
           xirrDecimals: DEFAULTS.xirrDecimals,
           theme: DEFAULTS.theme,
           staleDays: DEFAULTS.staleDays,
+          cashHintOnCashflow: DEFAULTS.cashHintOnCashflow,
+          cashHintOnTrade: DEFAULTS.cashHintOnTrade,
+          amountThousands: DEFAULTS.amountThousands,
+          amountAbbrev: DEFAULTS.amountAbbrev,
         },
       });
     }
@@ -185,6 +215,16 @@ export class PreferenceService {
       data.theme = dto.theme;
     if (dto.staleDays !== undefined)
       data.staleDays = dto.staleDays;
+    // Gap C：软提示 / 金额格式（SET-P0-07 / SET-P1-03）
+    // 缺任一行都会让前端「保存偏好」里对应的勾选被静默丢弃
+    if (dto.cashHintOnCashflow !== undefined)
+      data.cashHintOnCashflow = dto.cashHintOnCashflow;
+    if (dto.cashHintOnTrade !== undefined)
+      data.cashHintOnTrade = dto.cashHintOnTrade;
+    if (dto.amountThousands !== undefined)
+      data.amountThousands = dto.amountThousands;
+    if (dto.amountAbbrev !== undefined)
+      data.amountAbbrev = dto.amountAbbrev;
 
     const pref = await this.prisma.userPreference.update({
       where: { userId },
@@ -203,6 +243,10 @@ export class PreferenceService {
       xirrDecimals: pref.xirrDecimals,
       theme: pref.theme,
       staleDays: pref.staleDays,
+      cashHintOnCashflow: pref.cashHintOnCashflow,
+      cashHintOnTrade: pref.cashHintOnTrade,
+      amountThousands: pref.amountThousands,
+      amountAbbrev: pref.amountAbbrev,
       createdAt: pref.createdAt.toISOString(),
       updatedAt: pref.updatedAt.toISOString(),
     };

@@ -16,6 +16,9 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+// Prisma 需要 value import：Gap A 的净投入 / 浮动盈亏全程用 Prisma.Decimal 运算，
+// 绝不落 float（金额精度契约，见 docs/incremental-account-v2.md D2）
+import { Prisma } from '@prisma/client';
 import type { Portfolio as PrismaPortfolio } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RecalculationService } from '../calculation/recalculation.service';
@@ -290,6 +293,39 @@ export class PortfolioService {
 
     const countMap = new Map(holdingsCounts.map((h) => [h.pid, h.count]));
 
+    // 每组合最新一条日净值（Gap A：净值 / 当年收益率）
+    // PostgreSQL 下 Prisma 会把 distinct + orderBy 下推为 DISTINCT ON，
+    // 一条 SQL 拿全部组合，与组合数无关（不引入新的 N+1）。
+    const latestNavs =
+      portfolioIds.length > 0
+        ? await this.prisma.dailyNav.findMany({
+            where: { portfolioId: { in: portfolioIds } },
+            orderBy: [{ portfolioId: 'asc' }, { date: 'desc' }],
+            distinct: ['portfolioId'],
+            select: { portfolioId: true, cumulativeNav: true, yearNav: true },
+          })
+        : [];
+    const navMap = new Map(latestNavs.map((n) => [n.portfolioId, n]));
+
+    // 净投入 = Σ存入(BUY) - Σ取出(SELL)，按 (组合, 类型) 一次聚合完
+    const cashflowSums =
+      portfolioIds.length > 0
+        ? await this.prisma.cashFlow.groupBy({
+            by: ['portfolioId', 'type'],
+            where: { portfolioId: { in: portfolioIds } },
+            _sum: { amount: true },
+          })
+        : [];
+    const netInvestedMap = new Map<string, Prisma.Decimal>();
+    for (const row of cashflowSums) {
+      const amount = row._sum.amount ?? new Prisma.Decimal(0);
+      const current = netInvestedMap.get(row.portfolioId) ?? new Prisma.Decimal(0);
+      netInvestedMap.set(
+        row.portfolioId,
+        row.type === 'BUY' ? current.plus(amount) : current.minus(amount),
+      );
+    }
+
     return portfolios.map((p) => {
       const latestSnapshot = p.snapshots[0] ?? null;
       const latestTrade = p.securityTrades[0] ?? null;
@@ -307,12 +343,28 @@ export class PortfolioService {
         lastUpdatedAt = latestTrade.date.toISOString().split('T')[0];
       }
 
+      // Gap A：净值 / 收益率 / 净投入 / 浮动盈亏
+      const nav = navMap.get(p.id) ?? null;
+      const netInvestedDec = netInvestedMap.get(p.id) ?? new Prisma.Decimal(0);
+      // 无快照时 totalAsset 兜底为 '0'，此时相减会得到一个大幅为负的**假亏损**，
+      // 因此 floatingProfit 必须回 null 而不是算出来的负数。
+      const totalAssetDec = latestSnapshot?.totalAsset ?? null;
+
       return {
         id: p.id,
         name: p.name,
-        totalAsset: latestSnapshot?.totalAsset.toString() ?? '0',
+        totalAsset: totalAssetDec?.toString() ?? '0',
         holdingsCount: countMap.get(p.id) ?? 0,
         lastUpdatedAt,
+        baseDate: p.baseDate ? p.baseDate.toISOString().split('T')[0] : null,
+        currency: p.currency,
+        createdAt: p.createdAt.toISOString(),
+        cumulativeNav: nav ? nav.cumulativeNav.toFixed(6) : null,
+        yearReturnRate: nav ? nav.yearNav.minus(1).toFixed(8) : null,
+        netInvested: netInvestedDec.toFixed(2),
+        floatingProfit: totalAssetDec
+          ? totalAssetDec.minus(netInvestedDec).toFixed(2)
+          : null,
       };
     });
   }

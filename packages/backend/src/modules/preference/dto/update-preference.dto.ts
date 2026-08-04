@@ -7,6 +7,7 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import {
+  IsBoolean,
   IsInt,
   IsOptional,
   IsString,
@@ -91,4 +92,28 @@ export class UpdatePreferenceDto {
   @Min(1)
   @Max(30)
   staleDays?: number;
+
+  // ===== Gap C 新增：软提示 / 金额格式（SET-P0-07 / SET-P1-03）=====
+  // main.ts 的 ValidationPipe 开了 forbidNonWhitelisted，
+  // 这 4 项不在 DTO 白名单里前端一提交就 400 —— 是解锁前端持久化的关键。
+
+  @ApiPropertyOptional({ description: '出入金后现金余额软提示开关（SET-P0-07）' })
+  @IsOptional()
+  @IsBoolean()
+  cashHintOnCashflow?: boolean;
+
+  @ApiPropertyOptional({ description: '证券买卖后现金余额软提示开关（SET-P0-07）' })
+  @IsOptional()
+  @IsBoolean()
+  cashHintOnTrade?: boolean;
+
+  @ApiPropertyOptional({ description: '金额千分位（SET-P1-03）' })
+  @IsOptional()
+  @IsBoolean()
+  amountThousands?: boolean;
+
+  @ApiPropertyOptional({ description: '金额万 / 亿缩写（SET-P1-03）' })
+  @IsOptional()
+  @IsBoolean()
+  amountAbbrev?: boolean;
 }

@@ -122,6 +122,8 @@ describe('toUserPublic 返回结构（PATCH /auth/profile 与上传接口共用�
       avatar: '/api/uploads/avatar/2f1c9b0e-7a3d-4f6b-9c2e-5d8a1b0c3e4f.png',
       phone: '13800138000',
       bio: '长期主义者',
+      // ACC-P0-02：注册时间由 toUserPublic 统一投影
+      createdAt: now.toISOString(),
     });
     expect(result).not.toHaveProperty('password');
   });
@@ -141,7 +143,7 @@ describe('toUserPublic 返回结构（PATCH /auth/profile 与上传接口共用�
 
     const result = toUserPublic(user as unknown as Parameters<typeof toUserPublic>[0]);
 
-    expect(Object.keys(result).sort()).toEqual(['avatar', 'bio', 'email', 'id', 'name', 'phone']);
+    expect(Object.keys(result).sort()).toEqual(['avatar', 'bio', 'createdAt', 'email', 'id', 'name', 'phone']);
     expect(result.avatar).toBeNull();
     expect(result.phone).toBeNull();
     expect(result.bio).toBeNull();

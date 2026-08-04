@@ -14,8 +14,15 @@ import { PrismaService } from '../../prisma/prisma.service';
 export interface AccountStatsResponse {
   /** 用户拥有的组合数量 */
   portfolioCount: number;
-  /** 所有组合的累计交易笔数 */
-  transactionCount: number;
+  /**
+   * 出入金笔数（CashFlow 计数）
+   *
+   * 契约变更（Gap B）：原名 `transactionCount`，但其实现只统计 CashFlow（出入金），
+   * 完全不含证券买卖，字段名严重误导。**直接改名、不保留兼容别名**。
+   */
+  cashflowCount: number;
+  /** 证券买卖笔数（SecurityTrade 计数，方案B：SecurityTrade 为持仓唯一来源） */
+  tradeCount: number;
   /** 有快照数据的天数（跨组合去重） */
   snapshotDays: number;
   /** 最早数据日期（YYYY-MM-DD），null 表示无数据 */
@@ -42,7 +49,8 @@ export class AccountService {
     // 并行查询所有统计数据
     const [
       portfolioCount,
-      totalTransactionCount,
+      totalCashflowCount,
+      totalTradeCount,
       snapshotDateRange,
       user,
     ] = await Promise.all([
@@ -51,6 +59,11 @@ export class AccountService {
 
       // 所有组合累计出入金笔数（方案B：CashFlow 为现金流唯一来源）
       this.prisma.cashFlow.count({
+        where: { portfolio: { userId } },
+      }),
+
+      // 所有组合累计证券买卖笔数（方案B：SecurityTrade 为持仓唯一来源）
+      this.prisma.securityTrade.count({
         where: { portfolio: { userId } },
       }),
 
@@ -95,7 +108,8 @@ export class AccountService {
 
     return {
       portfolioCount,
-      transactionCount: totalTransactionCount,
+      cashflowCount: totalCashflowCount,
+      tradeCount: totalTradeCount,
       snapshotDays,
       firstDate: earliestDate ? formatDate(earliestDate) : null,
       lastDate: latestDate ? formatDate(latestDate) : null,

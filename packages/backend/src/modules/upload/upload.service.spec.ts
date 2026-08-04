@@ -236,6 +236,8 @@ describe('UploadService.uploadAvatar — 成功路径', () => {
       avatar: result.url,
       phone: '13800138000',
       bio: '长期主义',
+      // ACC-P0-02：注册时间由 toUserPublic 统一投影
+      createdAt: expect.any(String),
     });
     // 公开投影绝不能泄漏密码哈希
     expect(result.user).not.toHaveProperty('passwordHash');

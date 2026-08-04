@@ -42,6 +42,11 @@ function makePrefRow(overrides: Record<string, unknown> = {}) {
     xirrDecimals: 2,
     theme: 'system',
     staleDays: 3,
+    // Gap C：软提示 / 金额格式（PRD §6.9.1 / §7.8 默认 true/true/true/false）
+    cashHintOnCashflow: true,
+    cashHintOnTrade: true,
+    amountThousands: true,
+    amountAbbrev: false,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     updatedAt: new Date('2026-01-02T00:00:00.000Z'),
     ...overrides,

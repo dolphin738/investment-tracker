@@ -25,5 +25,9 @@ export function toUserPublic(user: User): UserPublic {
     avatar: user.avatar,
     phone: user.phone,
     bio: user.bio,
+    // 注册时间：账户页「注册于 …」的唯一来源（ACC-P0-02）。
+    // 加在这里即对 register / login / getProfile / updateProfile /
+    // updateEmail / updatePassword / upload 全链路生效。
+    createdAt: user.createdAt.toISOString(),
   };
 }

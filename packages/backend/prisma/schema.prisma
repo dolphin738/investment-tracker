@@ -276,6 +276,12 @@ model UserPreference {
   staleDays          Int      @default(3) @map("stale_days")
   showLiquidated     Boolean  @default(false) @map("show_liquidated")
   costBasisView      String   @default("avg") @map("cost_basis_view")
+  // 现金余额软提示 / 金额格式（SET-P0-07 / SET-P1-03）
+  // 默认值以 PRD §6.9.1 L908-909 与 §7.8 L1377 为唯一权威：true / true / true / false
+  cashHintOnCashflow Boolean  @default(true) @map("cash_hint_on_cashflow")
+  cashHintOnTrade    Boolean  @default(true) @map("cash_hint_on_trade")
+  amountThousands    Boolean  @default(true) @map("amount_thousands")
+  amountAbbrev       Boolean  @default(false) @map("amount_abbrev")
   dashboardLayout    Json?    @map("dashboard_layout")
   createdAt          DateTime @default(now()) @map("created_at")
   updatedAt          DateTime @updatedAt @map("updated_at")

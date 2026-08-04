@@ -42,4 +42,11 @@ export interface UserPublic {
   phone: string | null;
   /** 个人简介，最长 200 字，可为空 */
   bio: string | null;
+  /**
+   * 注册时间 ISO 8601
+   *
+   * 账户页「注册于 …」的唯一数据源（ACC-P0-02）。由 toUserPublic 投影，
+   * 缺它会让前端类型说谎、运行时永远 undefined。
+   */
+  createdAt: string;
 }

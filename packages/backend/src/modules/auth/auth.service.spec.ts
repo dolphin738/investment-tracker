@@ -111,7 +111,16 @@ function buildDeletedUser(elapsedDays: number, overrides: Record<string, unknown
 }
 
 /** UserPublic 的完整字段集（用于契约断言：不多一个、不少一个） */
-const USER_PUBLIC_KEYS = ['avatar', 'bio', 'email', 'id', 'name', 'phone'];
+const USER_PUBLIC_KEYS = [
+  'avatar',
+  'bio',
+  // 注册时间：账户页「注册于 …」需要（ACC-P0-02），由 toUserPublic 统一投影
+  'createdAt',
+  'email',
+  'id',
+  'name',
+  'phone',
+];
 
 /** 全局异常过滤器输出的响应信封 */
 interface CapturedResponse {
@@ -215,6 +224,8 @@ describe('AuthService', () => {
         avatar: null,
         phone: null,
         bio: null,
+        // ACC-P0-02：注册时间由 toUserPublic 统一投影
+        createdAt: '2024-01-01T00:00:00.000Z',
       });
       // 确保不返回 passwordHash
       expect(result).not.toHaveProperty('passwordHash');
@@ -289,6 +300,7 @@ describe('AuthService', () => {
         avatar: null,
         phone: null,
         bio: null,
+        createdAt: '2024-01-01T00:00:00.000Z',
       });
 
       // 验证 bcrypt.compare 被调用
@@ -351,6 +363,7 @@ describe('AuthService', () => {
         avatar: 'https://cdn.example.com/a.png',
         phone: '13800138000',
         bio: '长期投资',
+        createdAt: '2024-01-01T00:00:00.000Z',
       });
       expect(result).not.toHaveProperty('passwordHash');
 
@@ -450,6 +463,7 @@ describe('AuthService', () => {
         avatar: null,
         phone: null,
         bio: null,
+        createdAt: '2024-01-01T00:00:00.000Z',
       });
     });
   });
@@ -585,6 +599,7 @@ describe('AuthService', () => {
         avatar: null,
         phone: null,
         bio: '价值投资',
+        createdAt: '2024-01-01T00:00:00.000Z',
       });
     });
 
@@ -662,7 +677,7 @@ describe('AuthService', () => {
     // ------------------------------------------------------
     // 补充：返回体必须是完整 UserPublic（6 个字段，且不含敏感字段）
     // ------------------------------------------------------
-    it('should return a complete UserPublic with exactly 6 fields', async () => {
+    it('should return a complete UserPublic with exactly 7 fields', async () => {
       mockPrisma.user.update.mockResolvedValue(
         buildUser({ avatar: 'https://cdn.example.com/a.png', phone: '13800138000', bio: 'hi' }),
       );
@@ -671,7 +686,8 @@ describe('AuthService', () => {
 
       expect(Object.keys(result).sort()).toEqual(USER_PUBLIC_KEYS);
       expect(result).not.toHaveProperty('passwordHash');
-      expect(result).not.toHaveProperty('createdAt');
+      // createdAt 已是 UserPublic 的正式字段（ACC-P0-02），必须存在且为 ISO 字符串
+      expect(typeof result.createdAt).toBe('string');
     });
   });
 
