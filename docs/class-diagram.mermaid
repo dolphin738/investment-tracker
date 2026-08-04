@@ -1,0 +1,60 @@
+%% SYS-P1-02 注销账户自助恢复 — 类图
+%% 来源：docs/system_design.md §3.6
+classDiagram
+    class AuthService {
+        -PrismaService prisma
+        -JwtService jwtService
+        +login(email, password) AuthTokenResult
+        +restoreAccount(dto) AuthTokenResult
+        +deleteAccount(userId) null
+        -remainingRestoreDays(deletedAt) number
+        -signToken(user) string
+        -toUserPublic(user) UserPublic
+    }
+    class AuthController {
+        +login(LoginDto)
+        +restoreAccount(RestoreAccountDto)
+        +deleteAccount(user)
+    }
+    class RestoreAccountDto {
+        +string email
+        +string password
+    }
+    class AuthTokenResult {
+        +string accessToken
+        +UserPublic user
+    }
+    class AccountPendingDeletionException {
+        +number code
+        +AccountPendingDeletionData data
+    }
+    class AccountNotDeletedException {
+        +number code
+    }
+    class AccountRestoreExpiredException {
+        +number code
+    }
+    class HttpExceptionFilter {
+        +catch(exception, host)
+        -extractCustomCode(e) number
+        -extractCustomData(e) unknown
+    }
+    class BUSINESS_ERROR_CODE {
+        <<constant>>
+        +ACCOUNT_PENDING_DELETION 1007
+        +ACCOUNT_NOT_DELETED 1008
+        +ACCOUNT_RESTORE_EXPIRED 1009
+    }
+    class CleanupService {
+        +purgeSoftDeletedUsers() number
+    }
+
+    AuthController --> AuthService : 调用
+    AuthController ..> RestoreAccountDto : 入参
+    AuthService --> AuthTokenResult : 返回
+    AuthService ..> AccountPendingDeletionException : login 抛出
+    AuthService ..> AccountNotDeletedException : restore 抛出
+    AuthService ..> AccountRestoreExpiredException : restore 抛出
+    HttpExceptionFilter ..> AccountPendingDeletionException : 捕获并透传 code+data
+    AccountPendingDeletionException ..> BUSINESS_ERROR_CODE : 引用
+    CleanupService ..> BUSINESS_ERROR_CODE : 共用保留期常量

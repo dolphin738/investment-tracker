@@ -17,6 +17,8 @@
  * 10. 错误码信封映射（经全局异常过滤器）：1004 / 2000 / 1003 与 HTTP 状态码的对应关系
  * 11. 改密码闭环：新密码可登录、旧密码失败
  * 12. UserPublic 契约：register / login / getProfile 均返回 avatar / phone / bio
+ * 13. 注销冷静期与自助恢复（SYS-P1-02）：login 冷静期信号 1007（含边界
+ *     0 天 / 29.5 天 / 30 天整）+ restoreAccount 六分支（1001/1008/1009/成功）
  */
 
 import 'reflect-metadata';
@@ -28,10 +30,12 @@ import {
   type ArgumentMetadata,
   type ArgumentsHost,
 } from '@nestjs/common';
+import { ACCOUNT_RETENTION_MS } from '@investment-tracker/shared';
 import { AuthService } from './auth.service';
 import { HttpExceptionFilter } from '../../common/filters/http-exception.filter';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
+import { RestoreAccountDto } from './dto/restore-account.dto';
 import { UpdateEmailDto } from './dto/update-email.dto';
 import { UpdatePasswordDto } from './dto/update-password.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
@@ -87,10 +91,23 @@ function buildUser(overrides: Record<string, unknown> = {}) {
     avatar: null,
     phone: null,
     bio: null,
+    // 软删除标记（SET-P1-06）：默认为正常账户
+    deletedAt: null,
     createdAt: new Date('2024-01-01'),
     updatedAt: new Date('2024-01-01'),
     ...overrides,
   };
+}
+
+/** 一天的毫秒数（构造冷静期边界用） */
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** 构造一个「已软删 elapsedDays 天」的用户 */
+function buildDeletedUser(elapsedDays: number, overrides: Record<string, unknown> = {}) {
+  return buildUser({
+    deletedAt: new Date(Date.now() - elapsedDays * DAY_MS),
+    ...overrides,
+  });
 }
 
 /** UserPublic 的完整字段集（用于契约断言：不多一个、不少一个） */
@@ -935,6 +952,259 @@ describe('AuthService', () => {
       expect(user).not.toHaveProperty('passwordHash');
     });
   });
+
+  // ----------------------------------------------------------
+  // 测试 13: 注销冷静期与自助恢复（SYS-P1-02 / PRD §6.10.1 ③）
+  //
+  // 断言的都是「经全局过滤器后前端真正收到的信封」，而不仅仅是异常类型 ——
+  // 因为本功能的正确性恰恰取决于 HTTP 状态码 + code + data 三者的组合：
+  //   · 冷静期信号必须是 409/1007（不能是 401，否则被前端拦截器当失效踢走）
+  //   · remainingDays 必须真的透传到 data（过滤器原先写死 null）
+  // ----------------------------------------------------------
+  describe('注销冷静期与自助恢复（SYS-P1-02）', () => {
+    /** api-client.ts 中会触发「清 token + 跳登录」的业务码 */
+    const UNAUTH_CODES = [1001, 1002];
+
+    /** 冷静期剩余天数（1007 的 data 形状） */
+    interface PendingData {
+      remainingDays: number;
+    }
+
+    // ========== login 分支 ==========
+
+    describe('login', () => {
+      it('① 邮箱不存在 → 401 + 1001（不查密码、不签 token）', async () => {
+        mockPrisma.user.findUnique.mockResolvedValue(null);
+
+        const res = await captureRejection(
+          service.login('nobody@example.com', 'Password123'),
+        );
+
+        expect(res.status).toBe(401);
+        expect(res.body).toEqual({
+          code: 1001,
+          data: null,
+          message: '邮箱或密码错误',
+        });
+        expect(bcrypt.compare).not.toHaveBeenCalled();
+        expect(mockJwtService.signAsync).not.toHaveBeenCalled();
+      });
+
+      it('② 密码错误且账户确在冷静期 → 仍是 401 + 1001（绝不泄露冷静期）', async () => {
+        mockPrisma.user.findUnique.mockResolvedValue(buildDeletedUser(3));
+        (bcrypt.compare as jest.Mock).mockResolvedValue(false);
+
+        const res = await captureRejection(
+          service.login('test@example.com', 'WrongPassword'),
+        );
+
+        expect(res.status).toBe(401);
+        expect(res.body.code).toBe(1001);
+        expect(res.body.message).toBe('邮箱或密码错误');
+        // 反证：不得出现冷静期业务码或任何剩余天数线索
+        expect(res.body.code).not.toBe(1007);
+        expect(res.body.data).toBeNull();
+        expect(mockJwtService.signAsync).not.toHaveBeenCalled();
+      });
+
+      it('⑤ 正常账户 + 密码正确 → 登录成功并签发 token', async () => {
+        mockPrisma.user.findUnique.mockResolvedValue(buildUser());
+        (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+        mockJwtService.signAsync.mockResolvedValue('jwt_ok');
+
+        const result = await service.login('test@example.com', 'Password123');
+
+        expect(result.accessToken).toBe('jwt_ok');
+        expect(Object.keys(result.user).sort()).toEqual(USER_PUBLIC_KEYS);
+      });
+
+      it('③ 软删 + 密码正确 + 刚注销（0 天）→ 409 + 1007 + remainingDays=30', async () => {
+        mockPrisma.user.findUnique.mockResolvedValue(buildDeletedUser(0));
+        (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+
+        const res = await captureRejection(
+          service.login('test@example.com', 'Password123'),
+        );
+
+        expect(res.status).toBe(409);
+        expect(res.body.code).toBe(1007);
+        expect((res.body.data as PendingData).remainingDays).toBe(30);
+        expect(res.body.message).toBe('账户处于注销冷静期，请在登录页恢复');
+        // 反证：绝不能落进前端的「登录已失效」分支
+        expect(res.status).not.toBe(401);
+        expect(UNAUTH_CODES).not.toContain(res.body.code);
+        // 冷静期只是信号，不得签发 token
+        expect(mockJwtService.signAsync).not.toHaveBeenCalled();
+      });
+
+      it('③ 边界：已过 29.5 天 → 仍是 1007，剩余天数向上取整为 1', async () => {
+        mockPrisma.user.findUnique.mockResolvedValue(buildDeletedUser(29.5));
+        (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+
+        const res = await captureRejection(
+          service.login('test@example.com', 'Password123'),
+        );
+
+        expect(res.status).toBe(409);
+        expect(res.body.code).toBe(1007);
+        expect((res.body.data as PendingData).remainingDays).toBe(1);
+      });
+
+      it('④ 边界：整 30 天（保留期届满）→ 退回 401 + 1001 通用文案', async () => {
+        // 记录仍在库中（CleanupService 尚未跑批），但按 now - deletedAt 独立判定已到期
+        mockPrisma.user.findUnique.mockResolvedValue(buildDeletedUser(30));
+        (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+
+        const res = await captureRejection(
+          service.login('test@example.com', 'Password123'),
+        );
+
+        expect(res.status).toBe(401);
+        expect(res.body.code).toBe(1001);
+        expect(res.body.data).toBeNull();
+        expect(mockJwtService.signAsync).not.toHaveBeenCalled();
+      });
+
+      it('④ 超期更久（45 天，跑批未执行）→ 同样是 401 + 1001', async () => {
+        mockPrisma.user.findUnique.mockResolvedValue(buildDeletedUser(45));
+        (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+
+        const res = await captureRejection(
+          service.login('test@example.com', 'Password123'),
+        );
+
+        expect(res.status).toBe(401);
+        expect(res.body.code).toBe(1001);
+      });
+    });
+
+    // ========== restoreAccount 分支 ==========
+
+    describe('restoreAccount', () => {
+      it('① 邮箱不存在（含已硬删）→ 401 + 1001，不查密码', async () => {
+        mockPrisma.user.findUnique.mockResolvedValue(null);
+
+        const res = await captureRejection(
+          service.restoreAccount('ghost@example.com', 'Password123'),
+        );
+
+        expect(res.status).toBe(401);
+        expect(res.body).toEqual({
+          code: 1001,
+          data: null,
+          message: '邮箱或密码错误',
+        });
+        expect(bcrypt.compare).not.toHaveBeenCalled();
+        expect(mockPrisma.user.update).not.toHaveBeenCalled();
+      });
+
+      it('② 密码错误（账户确在冷静期）→ 401 + 1001，不得提示可恢复', async () => {
+        mockPrisma.user.findUnique.mockResolvedValue(buildDeletedUser(5));
+        (bcrypt.compare as jest.Mock).mockResolvedValue(false);
+
+        const res = await captureRejection(
+          service.restoreAccount('test@example.com', 'WrongPassword'),
+        );
+
+        expect(res.status).toBe(401);
+        expect(res.body.code).toBe(1001);
+        expect(res.body.data).toBeNull();
+        expect(mockPrisma.user.update).not.toHaveBeenCalled();
+      });
+
+      it('③ 账户未注销（deletedAt=null）→ 409 + 1008，恢复不得成为登录后门', async () => {
+        mockPrisma.user.findUnique.mockResolvedValue(buildUser());
+        (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+
+        const res = await captureRejection(
+          service.restoreAccount('test@example.com', 'Password123'),
+        );
+
+        expect(res.status).toBe(409);
+        expect(res.body).toEqual({
+          code: 1008,
+          data: null,
+          message: '该账户无需恢复，请直接登录',
+        });
+        // 未注销的账户绝不能借 restore 拿到 token
+        expect(mockPrisma.user.update).not.toHaveBeenCalled();
+        expect(mockJwtService.signAsync).not.toHaveBeenCalled();
+      });
+
+      it('④ 软删已满 30 天 → 410 + 1009，且不得清空 deletedAt', async () => {
+        mockPrisma.user.findUnique.mockResolvedValue(buildDeletedUser(30));
+        (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+
+        const res = await captureRejection(
+          service.restoreAccount('test@example.com', 'Password123'),
+        );
+
+        expect(res.status).toBe(410);
+        expect(res.body).toEqual({
+          code: 1009,
+          data: null,
+          message: '恢复期已过，账户数据已不可找回',
+        });
+        expect(mockPrisma.user.update).not.toHaveBeenCalled();
+      });
+
+      it('⑤ 冷静期内 + 密码正确 → 清空 deletedAt 并返回新 token', async () => {
+        mockPrisma.user.findUnique.mockResolvedValue(buildDeletedUser(10));
+        (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+        mockPrisma.user.update.mockResolvedValue(buildUser());
+        mockJwtService.signAsync.mockResolvedValue('jwt_restored');
+
+        const result = await service.restoreAccount('test@example.com', 'Password123');
+
+        // 只清 deletedAt，其他字段一律不动
+        expect(mockPrisma.user.update).toHaveBeenCalledWith({
+          where: { id: 'user-uuid-1' },
+          data: { deletedAt: null },
+        });
+        expect(result.accessToken).toBe('jwt_restored');
+        expect(Object.keys(result.user).sort()).toEqual(USER_PUBLIC_KEYS);
+        expect(result.user).not.toHaveProperty('passwordHash');
+      });
+
+      it('⑤ 边界：刚过 29.5 天仍可恢复（未到 30 天整）', async () => {
+        mockPrisma.user.findUnique.mockResolvedValue(buildDeletedUser(29.5));
+        (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+        mockPrisma.user.update.mockResolvedValue(buildUser());
+        mockJwtService.signAsync.mockResolvedValue('jwt_restored');
+
+        await expect(
+          service.restoreAccount('test@example.com', 'Password123'),
+        ).resolves.toMatchObject({ accessToken: 'jwt_restored' });
+      });
+
+      it('恢复后即可正常登录（闭环：restore → login）', async () => {
+        const stored = buildDeletedUser(10);
+        mockPrisma.user.findUnique.mockImplementation(async () => ({ ...stored }));
+        mockPrisma.user.update.mockImplementation(
+          async ({ data }: { data: Record<string, unknown> }) => {
+            Object.assign(stored, data);
+            return { ...stored };
+          },
+        );
+        (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+        mockJwtService.signAsync.mockResolvedValue('jwt_token');
+
+        await service.restoreAccount(stored.email, 'Password123');
+        expect(stored.deletedAt).toBeNull();
+
+        // 恢复后账户回到正常态，login 不再返回 1007
+        await expect(
+          service.login(stored.email, 'Password123'),
+        ).resolves.toMatchObject({ accessToken: 'jwt_token' });
+      });
+    });
+
+    // ========== 常量同源 ==========
+
+    it('保留期常量与 shared 同源（30 天）', () => {
+      expect(ACCOUNT_RETENTION_MS).toBe(30 * DAY_MS);
+    });
+  });
 });
 
 // ============================================================
@@ -1046,6 +1316,32 @@ describe('Auth DTO 校验（ValidationPipe）', () => {
       await expect(
         run(LoginDto, { email: 'a@example.com', password: '123456' }),
       ).resolves.toMatchObject({ password: '123456' });
+    });
+  });
+
+  describe('RestoreAccountDto（SYS-P1-02）', () => {
+    it('合法入参通过校验', async () => {
+      await expect(
+        run(RestoreAccountDto, { email: 'a@example.com', password: 'Password123' }),
+      ).resolves.toMatchObject({ email: 'a@example.com', password: 'Password123' });
+    });
+
+    // 关键：restore 是「比对」而非「设置」密码，加强度校验会误伤存量弱密码用户，
+    // 让他们连恢复账户的机会都没有 —— 口径必须与 login.dto.ts 一致。
+    it('放行存量 6 位弱密码（与 login 同口径，不得套用注册强度校验）', async () => {
+      await expect(
+        run(RestoreAccountDto, { email: 'a@example.com', password: '123456' }),
+      ).resolves.toMatchObject({ password: '123456' });
+    });
+
+    it.each([
+      ['非法邮箱', { email: 'not-an-email', password: 'Password123' }],
+      ['缺少邮箱', { password: 'Password123' }],
+      ['缺少密码', { email: 'a@example.com' }],
+      ['密码为空串', { email: 'a@example.com', password: '' }],
+      ['混入未声明字段', { email: 'a@example.com', password: 'p', extra: 'x' }],
+    ])('%s → 400 + 2000', async (_label, payload) => {
+      await expectRejected(RestoreAccountDto, payload);
     });
   });
 

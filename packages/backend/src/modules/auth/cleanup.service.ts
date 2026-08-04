@@ -15,10 +15,12 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
+import { ACCOUNT_RETENTION_MS } from '@investment-tracker/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 
-/** 软删除保留窗口：30 天（与 SET-P1-06 的「到期后彻底删除」对齐） */
-const SOFT_DELETE_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+// 软删除保留窗口（30 天）统一取 shared 的 ACCOUNT_RETENTION_MS：
+// 本服务的跑批口径必须与 AuthService.login / restoreAccount 的按期判定同源，
+// 否则会出现「登录说还能恢复、跑批却已删库」这类不一致（SYS-P1-02）。
 
 @Injectable()
 export class CleanupService {
@@ -35,7 +37,7 @@ export class CleanupService {
    */
   @Cron(CronExpression.EVERY_DAY_AT_4AM)
   async purgeSoftDeletedUsers(): Promise<number> {
-    const cutoff = new Date(Date.now() - SOFT_DELETE_RETENTION_MS);
+    const cutoff = new Date(Date.now() - ACCOUNT_RETENTION_MS);
 
     const { count } = await this.prisma.user.deleteMany({
       where: {

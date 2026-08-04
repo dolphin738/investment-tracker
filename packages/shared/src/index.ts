@@ -43,3 +43,16 @@ export type {
   Paginated,
   DateRangeQuery,
 } from './api-contracts.ts';
+
+// ── 业务错误码 / 账户保留期常量（前后端同源，SYS-P1-02）──
+// 注意：types/api.ts 里同名的 ApiResponse / Paginated 等不在此 re-export，
+// 响应信封契约以上面的 api-contracts.ts 为准，避免重复导出冲突。
+export {
+  BUSINESS_ERROR_CODE,
+  ACCOUNT_RETENTION_DAYS,
+  ACCOUNT_RETENTION_MS,
+} from './types/api.ts';
+export type {
+  BusinessErrorCode,
+  AccountPendingDeletionData,
+} from './types/api.ts';

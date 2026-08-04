@@ -2,8 +2,14 @@
  * features/auth/login-form.tsx — 登录表单
  *
  * React Hook Form + Zod 校验，提交后写入 auth store + 跳转。
+ *
+ * 扩展（SYS-P1-02 · PRD §7.10）：当登录接口返回业务码 1007（账户处于注销冷静期）
+ * 时，不再停留在普通登录失败态，而是切换到「恢复引导卡片」，允许用户凭已输入的
+ * 邮箱 + 密码一键恢复账户。其他错误（1001 邮箱/密码错、网络异常等）仍按原逻辑，
+ * 由 api-client 拦截器统一 toast 提示。
  */
 
+import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -14,7 +20,15 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { useLogin } from '@/hooks/use-auth';
+import { useRestoreAccount } from '@/hooks/use-account';
 import { ROUTE_PATH } from '@/lib/constants';
+import { ApiError } from '@/lib/api-client';
+import {
+  BUSINESS_ERROR_CODE,
+  ACCOUNT_RETENTION_DAYS,
+  type AccountPendingDeletionData,
+} from '@investment-tracker/shared';
+import { AccountRestorePrompt } from './account-restore-prompt';
 
 const loginSchema = z.object({
   email: z.string().email('请输入有效的邮箱'),
@@ -23,8 +37,18 @@ const loginSchema = z.object({
 
 type LoginFormValues = z.infer<typeof loginSchema>;
 
+/** 注销冷静期子状态：捕获到 1007 时进入，并暂存用户已输入的凭证用于恢复 */
+interface PendingDeletionState {
+  email: string;
+  password: string;
+  remainingDays: number;
+}
+
 export function LoginForm(): JSX.Element {
   const loginMutation = useLogin();
+  const restoreMutation = useRestoreAccount();
+  const [pendingDeletion, setPendingDeletion] = useState<PendingDeletionState | null>(null);
+
   const {
     register,
     handleSubmit,
@@ -35,8 +59,48 @@ export function LoginForm(): JSX.Element {
   });
 
   const onSubmit = (values: LoginFormValues) => {
-    loginMutation.mutate(values);
+    // 每次重新提交都先清空可能存在的冷静期子状态
+    setPendingDeletion(null);
+    loginMutation.mutate(values, {
+      // 仅拦截 1007：把它从「登录失败」升级为「恢复引导」，其余错误不动
+      onError: (error) => {
+        if (error instanceof ApiError && error.code === BUSINESS_ERROR_CODE.PENDING_DELETION) {
+          const data = (error.data ?? null) as AccountPendingDeletionData | null;
+          setPendingDeletion({
+            email: values.email,
+            password: values.password,
+            remainingDays: data?.remainingDays ?? ACCOUNT_RETENTION_DAYS,
+          });
+        }
+      },
+    });
   };
+
+  const handleRestore = () => {
+    if (!pendingDeletion) {
+      return;
+    }
+    restoreMutation.mutate({
+      email: pendingDeletion.email,
+      password: pendingDeletion.password,
+    });
+  };
+
+  const handleDismiss = () => {
+    setPendingDeletion(null);
+  };
+
+  // 注销冷静期：渲染恢复引导卡片，而非普通登录表单
+  if (pendingDeletion) {
+    return (
+      <AccountRestorePrompt
+        remainingDays={pendingDeletion.remainingDays}
+        isRestoring={restoreMutation.isPending}
+        onRestore={handleRestore}
+        onDismiss={handleDismiss}
+      />
+    );
+  }
 
   return (
     <Card className="w-full max-w-md">

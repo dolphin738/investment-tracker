@@ -1,7 +1,7 @@
 /**
  * HttpExceptionFilter — 全局异常过滤器
  *
- * 将任意异常转换为统一响应信封：{ code, data: null, message }
+ * 将任意异常转换为统一响应信封：{ code, data, message }
  * code 为业务码（0=成功、非 0=错误），与 @investment-tracker/shared
  * types/api.ts 的单一事实来源对齐（对齐 ARCH §4.1 响应信封）：
  *   - 异常自带数字 code（service 主动抛的 1004 / 2000 等）→ 原样透传；
@@ -15,6 +15,10 @@
  *   - 其余未知状态码回退为 HTTP statusCode，保证可辨识性。
  * HTTP 状态码仍由异常本身决定（response.status(status)），
  * 与成功响应（code=0，见 ResponseInterceptor）共同构成完整信封契约。
+ *
+ * data 字段（SYS-P1-02 新增）：
+ *   - 异常自带 data（如 1007 冷静期的 { remainingDays }）→ 原样透传；
+ *   - 未携带 data 时仍回落为 null，既有错误响应形状保持不变。
  */
 
 import {
@@ -29,7 +33,8 @@ import type { Request, Response } from 'express';
 
 interface ErrorResponseBody {
   code: number;
-  data: null;
+  /** 错误附带的结构化数据，绝大多数错误为 null（见 extractCustomData） */
+  data: unknown;
   message: string;
 }
 
@@ -50,6 +55,24 @@ function extractCustomCode(exception: HttpException): number | undefined {
     const code = (response as Record<string, unknown>).code;
     if (typeof code === 'number') {
       return code;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * 从 HttpException 的响应体里取自定义 data，没有则返回 undefined。
+ *
+ * 仅当 service 主动抛出 `{ code, message, data }` 形态的异常时才有值，
+ * 例如 1007 冷静期信号需要把 { remainingDays } 送到前端（SYS-P1-02）。
+ * 注意与 code 分开取：只带 code 不带 data 的既有异常必须继续回落 null。
+ */
+function extractCustomData(exception: HttpException): unknown | undefined {
+  const response = exception.getResponse();
+  if (typeof response === 'object' && response !== null) {
+    const data = (response as Record<string, unknown>).data;
+    if (data !== undefined) {
+      return data;
     }
   }
   return undefined;
@@ -127,9 +150,15 @@ export class HttpExceptionFilter implements ExceptionFilter {
         : undefined;
     const code = customCode ?? businessCodeByStatus(status);
 
+    const customData =
+      exception instanceof HttpException
+        ? extractCustomData(exception)
+        : undefined;
+
     const body: ErrorResponseBody = {
       code,
-      data: null,
+      // 异常未携带 data 时保持既有形状（null），不影响存量错误响应
+      data: customData ?? null,
       message,
     };
 

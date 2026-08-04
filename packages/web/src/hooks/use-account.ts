@@ -13,6 +13,7 @@ import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
   deleteAccount as deleteAccountApi,
+  restoreAccount as restoreAccountApi,
   updateEmail as updateEmailApi,
   updatePassword as updatePasswordApi,
   updateProfile as updateProfileApi,
@@ -21,6 +22,7 @@ import { uploadAvatar as uploadAvatarApi } from '@/api/upload.api';
 import { useAuthStore } from '@/stores/auth.store';
 import { ROUTE_PATH } from '@/lib/constants';
 import type {
+  RestoreRequest,
   UpdateEmailRequest,
   UpdatePasswordRequest,
   UpdateProfileRequest,
@@ -106,6 +108,31 @@ export function useDeleteAccount() {
       logout();
       queryClient.clear();
       navigate(ROUTE_PATH.LOGIN);
+    },
+  });
+}
+
+/**
+ * 注销账户自助恢复（SYS-P1-02 · 登录页恢复引导卡片使用）
+ *
+ * 对应后端 POST /api/auth/account/restore（免 JWT）。凭邮箱 + 密码清空软删标记，
+ * 成功后直接把返回的 accessToken + 用户信息写入 auth store，无需再登录一次，
+ * 随后跳转到概览页。
+ *
+ * 与 useDeleteAccount 对称：一个「注销 → 清登录态」，一个「恢复 → 写登录态」。
+ * 不写 onError：1008 / 1009 / 1001 等失败由 api-client 拦截器统一 toast 处理。
+ */
+export function useRestoreAccount() {
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const loginStore = useAuthStore((s) => s.login);
+  return useMutation({
+    mutationFn: (payload: RestoreRequest) => restoreAccountApi(payload),
+    onSuccess: (data) => {
+      loginStore(data.accessToken, data.user);
+      toast.success('账户已恢复');
+      queryClient.clear();
+      navigate(ROUTE_PATH.DASHBOARD);
     },
   });
 }

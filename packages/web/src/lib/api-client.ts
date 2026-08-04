@@ -5,7 +5,9 @@
  * - 响应拦截器：
  *   - code === 0 → 返回 data 字段
  *   - code === 1001/1002（未认证/Token 过期） → 清除 token，跳转 /login
+ *   - code ∈ SILENT_CODES → 不弹 toast，交由调用方 UI 自行渲染
  *   - code !== 0 → Toast 提示 message，抛出错误
+ * - 抛出的 ApiError 会携带后端信封里的 data（如 1007 的 { remainingDays }）
  * - 调用方使用 apiClient.request/get/post/... 即可直接拿到 data，无需手动解包
  */
 
@@ -17,20 +19,37 @@ import axios, {
 } from 'axios';
 import { toast } from 'sonner';
 import { API_BASE_URL, AUTH_TOKEN_KEY, ROUTE_PATH } from './constants';
-import type { ApiResponse } from '@investment-tracker/shared';
+import { BUSINESS_ERROR_CODE, type ApiResponse } from '@investment-tracker/shared';
 
 /** 业务错误（响应信封 code !== 0） */
 export class ApiError extends Error {
   code: number;
-  constructor(code: number, message: string) {
+  /**
+   * 后端信封里附带的结构化数据，绝大多数错误为 null / undefined。
+   *
+   * 典型用途：业务码 1007（注销冷静期）携带 { remainingDays }，
+   * 登录页据此渲染恢复引导卡片（SYS-P1-02）。
+   */
+  data?: unknown;
+  constructor(code: number, message: string, data?: unknown) {
     super(message);
     this.name = 'ApiError';
     this.code = code;
+    this.data = data;
   }
 }
 
 /** 未认证错误码（401 / Token 过期） */
 const UNAUTH_CODES = [1001, 1002];
+
+/**
+ * 静默业务码：不弹全局 toast，由调用方 UI 自行呈现。
+ *
+ * 1007（注销冷静期）是登录页的「可自助恢复」信号而非错误，
+ * 弹红色 toast 会与恢复引导卡片并存，体验矛盾（PRD §7.10「不显示错误提示」）。
+ * 1008 / 1009 刻意**不入**静默名单：它们是真正的失败，照常 toast。
+ */
+const SILENT_CODES: number[] = [BUSINESS_ERROR_CODE.PENDING_DELETION];
 
 /** 创建 Axios 实例 */
 const apiClient: AxiosInstance = axios.create({
@@ -106,11 +125,13 @@ apiClient.interceptors.response.use(
       if (window.location.pathname !== ROUTE_PATH.LOGIN) {
         window.location.href = ROUTE_PATH.LOGIN;
       }
-      return Promise.reject(new ApiError(body.code, body.message));
+      return Promise.reject(new ApiError(body.code, body.message, body.data));
     }
-    // 其他业务错误：Toast 提示
-    toast.error(body.message || '请求失败');
-    return Promise.reject(new ApiError(body.code, body.message));
+    // 其他业务错误：Toast 提示（静默码除外）
+    if (!SILENT_CODES.includes(body.code)) {
+      toast.error(body.message || '请求失败');
+    }
+    return Promise.reject(new ApiError(body.code, body.message, body.data));
   },
   (error) => {
     // HTTP 层错误（非 2xx）
@@ -124,12 +145,15 @@ apiClient.interceptors.response.use(
           window.location.href = ROUTE_PATH.LOGIN;
         }
         return Promise.reject(
-          new ApiError(body?.code ?? 1001, body?.message ?? '未认证'),
+          new ApiError(body?.code ?? 1001, body?.message ?? '未认证', body?.data),
         );
       }
       const message = body?.message || `请求失败 (${status})`;
-      toast.error(message);
-      return Promise.reject(new ApiError(body?.code ?? status, message));
+      // 冷静期信号（1007）走 HTTP 409 落到这里：不 toast，只把 data 交给调用方
+      if (!(body && SILENT_CODES.includes(body.code))) {
+        toast.error(message);
+      }
+      return Promise.reject(new ApiError(body?.code ?? status, message, body?.data));
     }
     if (error.request) {
       toast.error('网络异常，请检查网络连接');

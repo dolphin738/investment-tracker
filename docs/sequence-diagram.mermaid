@@ -1,0 +1,87 @@
+%% SYS-P1-02 注销账户自助恢复 — 时序图
+%% 来源：docs/system_design.md §4
+%% 本文件含三张图，按 §4.1 / §4.2 / §4.3 顺序排列
+
+%% ── §4.1 登录命中冷静期信号 ──
+sequenceDiagram
+    participant U as 用户
+    participant LF as login-form.tsx
+    participant AC as api-client.ts
+    participant CT as AuthController
+    participant SV as AuthService
+    participant DB as Prisma/DB
+    participant FT as HttpExceptionFilter
+
+    U->>LF: 输入 email + password，点击登录
+    LF->>AC: useLogin.mutate()
+    AC->>CT: POST /api/auth/login
+    CT->>SV: login(email, password)
+    SV->>DB: user.findUnique({email})
+    DB-->>SV: user (deletedAt = 8 天前)
+    SV->>SV: bcrypt.compare() → true
+    Note over SV: 密码通过才允许暴露状态
+    SV->>SV: remainingRestoreDays() = 22
+    SV--x FT: throw AccountPendingDeletionException(22)
+    FT->>FT: extractCustomCode → 1007
+    FT->>FT: extractCustomData → {remainingDays:22}
+    FT-->>AC: HTTP 409 {code:1007, data:{remainingDays:22}}
+    Note over AC: 1007 ∈ SILENT_CODES → 不 toast<br/>非 401 → 不清 token
+    AC-->>LF: reject ApiError(1007, msg, {remainingDays:22})
+    LF->>LF: onError: code===1007 → setPendingState(22)
+    LF-->>U: 渲染状态 B「剩余 22 天，是否恢复？」
+
+%% ── §4.2 自助恢复成功 ──
+sequenceDiagram
+    participant U as 用户
+    participant LF as login-form.tsx
+    participant HK as useRestoreAccount
+    participant CT as AuthController
+    participant SV as AuthService
+    participant DB as Prisma/DB
+    participant ST as auth.store
+
+    U->>LF: 点击「恢复账户」
+    LF->>HK: mutate({email, password})
+    Note over LF,HK: 复用页面已填字段，无需重新输入
+    HK->>CT: POST /api/auth/account/restore (@Public 免 JWT)
+    CT->>SV: restoreAccount(dto)
+    SV->>DB: user.findUnique({email})
+    DB-->>SV: user
+    SV->>SV: ① 存在 ✓
+    SV->>SV: ④ bcrypt.compare ✓（先校验密码）
+    SV->>SV: ② deletedAt ≠ null ✓
+    SV->>SV: ③ elapsed < 30d ✓
+    SV->>DB: user.update({deletedAt: null})
+    Note over DB: 仅清 deletedAt<br/>组合/流水/快照/密码/偏好一律不动
+    DB-->>SV: updated user
+    SV->>SV: signToken(user)
+    SV-->>CT: {accessToken, user}
+    CT-->>HK: HTTP 200 {code:0, data:{...}}
+    HK->>ST: authStore.login(accessToken, user)
+    HK->>HK: toast.success('账户已恢复')
+    HK-->>U: navigate(ROUTE_PATH.DASHBOARD)
+
+%% ── §4.3 恢复失败分支（判定顺序） ──
+sequenceDiagram
+    participant SV as AuthService.restoreAccount
+    participant DB as Prisma/DB
+
+    SV->>DB: findUnique({email})
+    alt 记录不存在（含已硬删）
+        SV--x SV: 401 / 1001「邮箱或密码错误」
+    else 记录存在
+        SV->>SV: bcrypt.compare(password)
+        alt 密码错误
+            Note over SV: 即便账户在冷静期内<br/>也绝不提示可恢复
+            SV--x SV: 401 / 1001「邮箱或密码错误」
+        else 密码正确
+            alt deletedAt === null
+                SV--x SV: 409 / 1008「该账户无需恢复，请直接登录」
+            else elapsed >= 30 天
+                SV--x SV: 410 / 1009「恢复期已过，账户数据已不可找回」
+            else 冷静期内
+                SV->>DB: update deletedAt = null
+                SV-->>SV: 200 {accessToken, user}
+            end
+        end
+    end

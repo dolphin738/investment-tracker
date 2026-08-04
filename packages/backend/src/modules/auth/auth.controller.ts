@@ -6,6 +6,7 @@
  * 接口：
  * - POST  /api/auth/register — 用户注册（公开）
  * - POST  /api/auth/login — 用户登录（公开）
+ * - POST  /api/auth/account/restore — 注销账户自助恢复（公开，SYS-P1-02）
  * - GET   /api/auth/profile — 获取当前用户信息（需认证）
  * - PATCH /api/auth/password — 修改密码（需认证）
  * - PATCH /api/auth/email — 修改邮箱（需认证）
@@ -22,6 +23,7 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
+import { RestoreAccountDto } from './dto/restore-account.dto';
 import { UpdateEmailDto } from './dto/update-email.dto';
 import { UpdatePasswordDto } from './dto/update-password.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
@@ -46,6 +48,21 @@ export class AuthController {
   @ApiOperation({ summary: '用户登录' })
   async login(@Body() dto: LoginDto) {
     return this.authService.login(dto.email, dto.password);
+  }
+
+  // TODO(P2 安全缺口)：本接口与 login 一样目前无限流，经决策本次不引入
+  // @nestjs/throttler（不加新依赖），留待统一认证限流方案落地时一并处理。
+  @Public()
+  @Post('account/restore')
+  @ApiOperation({
+    summary: '注销账户自助恢复（冷静期内，免 JWT）',
+    description:
+      '凭注销前的邮箱 + 密码清空 deletedAt 并直接返回新 token（SYS-P1-02）。' +
+      '错误分支：1001 邮箱或密码错误（HTTP 401）/ 1008 账户未注销（HTTP 409）/ ' +
+      '1009 恢复期已过（HTTP 410）。与 DELETE /auth/account 方法与路径均不同，不冲突。',
+  })
+  async restoreAccount(@Body() dto: RestoreAccountDto) {
+    return this.authService.restoreAccount(dto.email, dto.password);
   }
 
   @Get('profile')

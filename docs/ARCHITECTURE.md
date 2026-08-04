@@ -660,8 +660,13 @@ User (1) ──< Portfolio (N)
 |--------|------|------|--------|-----------|
 | POST | `/api/auth/register` | 用户注册 | `{ email, password, name }` | `{ id, email, name }` |
 | POST | `/api/auth/login` | 用户登录 | `{ email, password }` | `{ accessToken, user: { id, email, name } }` |
+| POST | `/api/auth/account/restore` | 注销账户自助恢复（**公开，SYS-P1-02 / SET-P1-06**）| `{ email, password }` | `{ accessToken, user }`（同登录，恢复后直接进入登录态）|
 | GET | `/api/auth/me` | 获取当前用户 | — | `{ id, email, name }` |
 | PATCH | `/api/auth/profile` | 更新个人资料（写入口，**仅 `/settings` 调用**）| `{ name?, avatar? }` | `{ id, email, name, avatar }` |
+
+> **登录冷静期信号（SYS-P1-02）**：账户软删除（`deletedAt` 非空）后处于 30 天冷静期（保留期常量 `ACCOUNT_RETENTION_MS`，三端同源），期间 `POST /api/auth/login` 不会成功，而是返回 **HTTP 409 + 业务码 1007**，并在响应 `data` 中携带 `{ remainingDays: number }`（冷静期剩余天数，向上取整）。前端 `api-client` 把 1007 列入 `SILENT_CODES` **不弹 toast**，由登录页捕获后渲染「恢复引导卡片」，用户凭已输入的邮箱 + 密码调用 `POST /api/auth/account/restore` 一键恢复。
+>
+> 其他恢复相关错误码：**1008**（账户未注销、无需恢复，HTTP 409）、**1009**（冷静期已过、数据不可找回，HTTP 410）；邮箱/密码错误统一返回 **1001**（不泄露账户枚举信息）。注意 1007/1008/1009 刻意**不使用 401**，否则会被前端拦截器当成「登录失效」清 token 并踢回登录页。
 
 #### 4.2.2 组合管理
 

@@ -252,6 +252,17 @@ export interface AuthTokenResponse {
 
 export type LoginResponse = AuthTokenResponse;
 
+/**
+ * 注销账户自助恢复请求（SYS-P1-02）
+ *
+ * 对应 POST /api/auth/account/restore（免 JWT），复用登录页已填的邮箱 + 密码。
+ * 成功响应与登录一致（LoginResponse），前端可直接进入登录态。
+ */
+export interface RestoreRequest {
+  email: string;
+  password: string;
+}
+
 export type UserProfile = UserPublic;
 
 /** 修改密码请求 */
