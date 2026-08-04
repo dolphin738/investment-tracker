@@ -12,7 +12,7 @@
  * 这样「把昵称删掉后保存」才能真正清空，而不是被当作「不修改」。
  */
 
-import { useEffect, useRef, useState, type ChangeEvent } from 'react';
+import { useEffect, useRef, type ChangeEvent } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -117,36 +117,22 @@ export function EditProfileDialog({
   const isPending = updateMutation.isPending;
   const isBusy = isUploading || isPending;
 
-  /**
-   * 头像 URL 输入框的草稿值（§7.9 · SET-P0-01 验收 2）
-   *
-   * 与表单里的 avatar 分离：输入过程中只改草稿，点「应用」才写进表单并刷新预览。
-   * 这样「输入到一半」不会把半截 URL 塞进待提交数据，也让 [应用] 有明确语义。
-   */
-  const [avatarUrlDraft, setAvatarUrlDraft] = useState<string>('');
-
   /** 仅 http(s) 外链才回灌输入框；站内上传路径（/api/uploads/... 等相对路径）不对外暴露 */
   const isExternalUrl = (v: string): boolean => /^https?:\/\//i.test(v);
 
   /** 当前头像来自本地上传（有值但不是外链） */
   const isUploadedAvatar = Boolean(avatarValue) && !isExternalUrl(avatarValue);
 
-  // 表单里的 avatar 变化时回灌草稿：覆盖「打开对话框初始化」「本地上传成功」
-  // 「移除头像」三条路径，保证输入框与实际头像始终一致。
-  // 仅外链回灌：站内上传路径是内部实现细节，不回显到 URL 输入框。
-  useEffect(() => {
-    setAvatarUrlDraft(isExternalUrl(avatarValue) ? avatarValue : '');
-  }, [avatarValue]);
-
-  /** 点击 [应用]：把草稿 URL 写进表单，立即刷新上方头像预览，随「保存」提交生效 */
-  const handleApplyAvatarUrl = (): void => {
+  /**
+   * 头像 URL 输入框的输入直接写进表单 avatar 字段（随「保存」一起提交）。
+   * 不再有独立的 [应用] 步骤；zod 校验在提交时才生效，非法值会被「保存」拦截并提示，
+   * 输入到一半的半截 URL 也不会真的提交出去。
+   */
+  const handleAvatarUrlChange = (value: string): void => {
     if (isBusy) {
       return;
     }
-    setValue('avatar', avatarUrlDraft.trim(), {
-      shouldDirty: true,
-      shouldValidate: true,
-    });
+    setValue('avatar', value, { shouldDirty: true });
   };
 
   /** 打开系统文件选择器 */
@@ -304,49 +290,28 @@ export function EditProfileDialog({
             {/* 头像 URL：与本地上传并列，最后生效者覆盖前者，随「保存」一起提交 */}
             <div className="space-y-1.5">
               <Label htmlFor="profile-avatar-url">头像 URL</Label>
-              <div className="flex gap-2">
-                <Input
-                  id="profile-avatar-url"
-                  type="text"
-                  inputMode="url"
-                  placeholder={
-                    isUploadedAvatar
-                      ? '已通过本地上传设置头像'
-                      : 'https://example.com/avatar.png'
+              <Input
+                id="profile-avatar-url"
+                type="text"
+                inputMode="url"
+                placeholder={
+                  isUploadedAvatar
+                    ? '已通过本地上传设置头像'
+                    : 'https://example.com/avatar.png'
+                }
+                value={isUploadedAvatar ? '' : avatarValue}
+                onChange={(e) => handleAvatarUrlChange(e.target.value)}
+                onKeyDown={(e) => {
+                  // 避免在 <form> 内误触发提交；URL 直接随「保存」一起提交
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
                   }
-                  value={avatarUrlDraft}
-                  onChange={(e) => setAvatarUrlDraft(e.target.value)}
-                  onKeyDown={(e) => {
-                    // 回车等价于点「应用」，避免在 <form> 内误触发提交
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      handleApplyAvatarUrl();
-                    }
-                  }}
-                  disabled={isBusy}
-                />
-                {/*
-                  显式 [应用] 按钮（§7.9 L1417-1419 · SET-P0-01 验收 2）：
-                  草图要求「输入图片 URL 后点『应用』即可设为头像」，
-                  点击后立刻写入表单并刷新上方头像预览，随「保存」提交生效。
-                  type="button" 必须显式声明，否则会被当作 form 的默认 submit。
-                */}
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={handleApplyAvatarUrl}
-                  disabled={
-                    isBusy ||
-                    avatarUrlDraft.trim() === '' ||
-                    avatarUrlDraft.trim() === avatarValue
-                  }
-                >
-                  应用
-                </Button>
-              </div>
+                }}
+                disabled={isBusy}
+              />
               <p className="text-xs text-muted-foreground">
-                输入图片 URL 后点「应用」即可预览并设为头像；与本地上传并列，
-                二者最后生效者覆盖前者，最终随「保存」提交。本地上传的头像不会显示为
+                输入图片 URL 后将随「保存」一起提交生效；与本地上传并列，
+                二者最后生效者覆盖前者。本地上传的头像不会显示为
                 URL（站内路径不对外暴露）；此处仅用于粘贴外部图片地址
               </p>
             </div>
