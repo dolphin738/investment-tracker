@@ -17,6 +17,15 @@ export interface YearlyBarChartProps {
   loading?: boolean;
   title?: string;
   className?: string;
+  /**
+   * DASH-P1-05 验收 2：高亮当年柱（加深填充色形成视觉强调）。
+   * 说明：ECharts itemStyle.borderColor/borderWidth 不支持回调（makeStyleMapper 原样透传函数，
+   * 渲染期 stroke 会被赋成函数），故高亮采用「当年柱加深填充色」替代描边，成本低且不破坏
+   * 逐柱着色回调（data 仍为 number[]，正红负绿语义保持）。
+   */
+  highlightCurrentYear?: boolean;
+  /** 高亮目标年份（默认系统当前年） */
+  currentYear?: number;
 }
 
 /**
@@ -26,6 +35,9 @@ export interface YearlyBarChartProps {
  */
 const POSITIVE_COLOR = 'hsl(0, 84%, 48%)';   // 红色 - 正向收益（PRD §9.5: 正红负绿）
 const NEGATIVE_COLOR = 'hsl(142, 71%, 38%)'; // 绿色 - 负向收益
+/** 当年柱高亮色（比基准色更深，红色系 / 绿色系保持不变） */
+const HIGHLIGHT_POSITIVE_COLOR = 'hsl(0, 72%, 35%)';
+const HIGHLIGHT_NEGATIVE_COLOR = 'hsl(142, 60%, 26%)';
 /** 空值柱颜色：ECharts canvas 不解析 CSS 变量，故用硬编码值替代原 hsl(var(--muted-foreground)) */
 const MUTED_COLOR = '#94a3b8';
 /** 网格线色：与迁移前实际渲染色一致（class 未生效，实渲染为 #ccc） */
@@ -52,6 +64,8 @@ export function YearlyBarChart({
   loading,
   title = '年度 XIRR 对比',
   className,
+  highlightCurrentYear = false,
+  currentYear,
 }: YearlyBarChartProps): JSX.Element {
   const option = useMemo(() => {
     // useMemo 无条件先于 JSX 执行，须在此处兜底 undefined/null，
@@ -59,6 +73,7 @@ export function YearlyBarChart({
     const points: XirrSeriesPoint[] = data ?? [];
     const labels: string[] = points.map((d) => d.label);
     const values: (number | null)[] = points.map((d) => d.xirrValue);
+    const highlightYear = currentYear ?? new Date().getFullYear();
 
     return {
       tooltip: {
@@ -110,18 +125,25 @@ export function YearlyBarChart({
           data: values,
           itemStyle: {
             borderRadius: [4, 4, 0, 0],
-            // 逐柱着色：等价于迁移前的 <Cell fill={...} />
+            // 逐柱着色：等价于迁移前的 <Cell fill={...} />；当年柱（可选）加深高亮
             color: (params: ItemStyleParam): string => {
               const v = points[params.dataIndex]?.xirrValue;
               // 该分支不可见（null 不绘制柱形），保留仅为语义完整
               if (v === null || v === undefined) return MUTED_COLOR;
-              return v >= 0 ? POSITIVE_COLOR : NEGATIVE_COLOR;
+              const positive = v >= 0;
+              const isCurrentYear =
+                highlightCurrentYear &&
+                points[params.dataIndex]?.label === String(highlightYear);
+              if (isCurrentYear) {
+                return positive ? HIGHLIGHT_POSITIVE_COLOR : HIGHLIGHT_NEGATIVE_COLOR;
+              }
+              return positive ? POSITIVE_COLOR : NEGATIVE_COLOR;
             },
           },
         },
       ],
     };
-  }, [data]);
+  }, [data, highlightCurrentYear, currentYear]);
 
   return (
     <Card className={className}>

@@ -56,15 +56,28 @@ export default function SnapshotsPage(): JSX.Element {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">资产记录</h1>
+          <h1 className="text-2xl font-bold tracking-tight">历史总资产记录</h1>
           <p className="text-sm text-muted-foreground">
-            记录当日总资产，系统据此计算净值与 XIRR；手工记录可重置回系统值
+            🤖 默认由系统每日自动记录；✋ 您也可手工补录或修正某日数值
+          </p>
+          <p className="text-sm text-muted-foreground">
+            ⓘ 每天只保留一条记录：手工记录会取代当天的自动记录
           </p>
         </div>
-        <Button onClick={() => setCreateOpen(true)}>
-          <Plus className="mr-2 h-4 w-4" />
-          录入资产记录
-        </Button>
+        <div className="flex items-center gap-2">
+          {/* Gap D（SET-P0-03 同口径）：后端导出接口未实现，视觉占位禁用 */}
+          <Button
+            variant="outline"
+            disabled
+            title="v1 暂未开放（SET-P0-03）：导出接口待后端实现"
+          >
+            导出 CSV
+          </Button>
+          <Button onClick={() => setCreateOpen(true)}>
+            <Plus className="mr-2 h-4 w-4" />
+            + 新建记录
+          </Button>
+        </div>
       </div>
 
       <Card>
@@ -83,6 +96,16 @@ export default function SnapshotsPage(): JSX.Element {
           />
         </CardContent>
       </Card>
+
+      {/* 底部图例（§7.3） */}
+      <div className="space-y-1 rounded-md border border-border bg-card px-4 py-3 text-xs text-muted-foreground">
+        <p>ⓘ「沿用」= 当日无价格/现金更新，按前值沿用</p>
+        <p>ⓘ「按成本」= 存在无价格记录的标的，按成本价估值</p>
+        <p>ⓘ 每天唯一一条记录；手工录入会取代该日自动记录</p>
+        <p>✎ = 编辑该日记录（保存后该日变为手工记录）</p>
+        <p>🗑 = 删除该日记录（事件日会被系统重新生成自动值）</p>
+        <p>↺ = 撤销手工修改、恢复系统计算值（仅手工记录可用）</p>
+      </div>
 
       {/* 新建弹窗 */}
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>

@@ -109,3 +109,87 @@ export function formatChange(
   const sign = diff > 0 ? '+' : '';
   return `${sign}${diff.toFixed(digits)}pp`;
 }
+
+/**
+ * 格式化「金额差异 + 差异%」：`+9,000.00 (+3.20%)` / `-1,000.00 (-0.35%)`。
+ *
+ * 用于资产记录页手工行差异列、差异提示条、表单覆盖提示（PRD §7.3 / SNAP-P0-04b ⑥）。
+ * - current = 当前（手工）值；base = 基准（系统自动计算值）
+ * - 任一为 null / 非有限数 / base 为 0 → 返回 '-'（差异率无意义，避免除零）
+ * - 金额沿用 formatCurrency 千分位 2 位小数口径（Part E-7）
+ */
+export function formatAmountChange(
+  current: number | string | null | undefined,
+  base: number | string | null | undefined,
+  digits = 2,
+): string {
+  if (
+    current === null ||
+    current === undefined ||
+    current === '' ||
+    base === null ||
+    base === undefined ||
+    base === ''
+  ) {
+    return '-';
+  }
+  const cur = typeof current === 'string' ? Number(current) : current;
+  const b = typeof base === 'string' ? Number(base) : base;
+  if (!Number.isFinite(cur) || !Number.isFinite(b) || b === 0) return '-';
+  const diff = cur - b;
+  const rate = diff / b;
+  const sign = diff > 0 ? '+' : '';
+  // 百分比同样带正负号：正数 (+3.20%)，负数 (-0.36%)（PRD §7.3 口径）
+  const rateSign = rate > 0 ? '+' : '';
+  return `${sign}${formatCurrency(diff)} (${rateSign}${(rate * 100).toFixed(digits)}%)`;
+}
+
+/** 手工记录差异统计结果（SNAP-P0-07 顶部常驻提示条） */
+export interface ManualDiffStats {
+  /** 手工记录条数 N */
+  manualCount: number;
+  /** 与自动值差异率 > threshold 的手工条数 M（默认 >1%，即 Math.abs(diffRate) > 0.01） */
+  diffOverThresholdCount: number;
+}
+
+/**
+ * 统计列表中的手工记录条数 N 与「差异 > 阈值」条数 M。
+ *
+ * 供资产记录页差异提示条「当前有 N 条手工记录，其中 M 条与自动值差异 > 1%」使用。
+ * 口径：source === 'MANUAL' 计入 N；系统值存在且 |(手工-系统)/系统| > threshold 计入 M。
+ * 系统值为前端近似（NAV×份额），精确性待后端 derivedTotalAsset（F5）。
+ *
+ * @param items 快照行（可为当前页列表；分页场景统计口径为当前页，注释见调用处）
+ * @param systemValueMap date → 系统自动计算值 映射（useNavTotalAssetMap）
+ * @param threshold 差异率阈值，默认 0.01（Part E-2）
+ */
+export function computeManualDiffStats(
+  items: ReadonlyArray<{
+    date: string;
+    totalAsset: string | number;
+    source: string;
+  }>,
+  systemValueMap: ReadonlyMap<string, number> | null | undefined,
+  threshold = 0.01,
+): ManualDiffStats {
+  let manualCount = 0;
+  let diffOverThresholdCount = 0;
+  for (const item of items) {
+    if (item.source !== 'MANUAL') continue;
+    manualCount += 1;
+    const systemVal = systemValueMap?.get(item.date);
+    const totalAssetNum = Number(item.totalAsset);
+    if (
+      systemVal !== undefined &&
+      Number.isFinite(systemVal) &&
+      systemVal !== 0 &&
+      Number.isFinite(totalAssetNum)
+    ) {
+      const diffRate = (totalAssetNum - systemVal) / systemVal;
+      if (Math.abs(diffRate) > threshold) {
+        diffOverThresholdCount += 1;
+      }
+    }
+  }
+  return { manualCount, diffOverThresholdCount };
+}

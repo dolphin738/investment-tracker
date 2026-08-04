@@ -8,7 +8,7 @@
  * - 明细表（日期/XIRR/环比变化）
  */
 
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import {
   Card,
   CardContent,
@@ -31,7 +31,7 @@ import { XirrTrendChart } from '@/components/charts/xirr-trend-chart';
 import { YearlyBarChart } from '@/components/charts/yearly-bar-chart';
 import { usePortfolioStore } from '@/stores/portfolio.store';
 import { usePreferenceStore } from '@/stores/preference.store';
-import { useXirrSeries, useLatestXirr } from '@/hooks/use-query-data';
+import { useXirrSeries, useLatestXirr, useYearStartXirr } from '@/hooks/use-query-data';
 import { formatPercent, formatChange, formatDate } from '@/lib/utils';
 import { getDefaultDateRange } from '@/lib/constants';
 import {
@@ -39,6 +39,14 @@ import {
   QueryGranularity,
   type XirrSeriesPoint,
 } from '@investment-tracker/shared';
+
+/** 快捷范围预设（DASH-P0-02 快捷项：近3月/近1年/今年/全部，对齐 dashboard） */
+const QUICK_RANGE_OPTIONS = [
+  { value: '3m', label: '近3月' },
+  { value: '1y', label: '近1年' },
+  { value: 'ytd', label: '今年至今' },
+  { value: 'all', label: '全部' },
+] as const;
 
 export default function XirrAnalysisPage(): JSX.Element {
   const currentPortfolioId = usePortfolioStore((s) => s.currentPortfolioId);
@@ -55,6 +63,9 @@ export default function XirrAnalysisPage(): JSX.Element {
 
   const series = useXirrSeries(currentPortfolioId, dimension);
   const latest = useLatestXirr(currentPortfolioId);
+  // 较年初基准：独立日粒度查询当年首个非空 XIRR（ANL-P0-04 / Part E-6），
+  // 与页面维度/范围解耦 —— 修复旧实现「查询范围不含年初时基准错」的缺陷（Part A2）
+  const yearStartQuery = useYearStartXirr(currentPortfolioId);
 
   if (!currentPortfolioId) {
     return (
@@ -67,16 +78,9 @@ export default function XirrAnalysisPage(): JSX.Element {
   }
 
   const seriesData: XirrSeriesPoint[] = series.data ?? [];
-  const validPoints = seriesData.filter((p) => p.xirrValue !== null);
   const currentValue = latest.data?.xirrValue ?? null;
 
-  // 较年初：取当前年份第一条非空 XIRR 作为年初基准
-  const yearStartValue = useMemo(() => {
-    if (validPoints.length === 0) return null;
-    const currentYear = String(new Date().getFullYear());
-    const yearPoint = validPoints.find((p) => p.date.startsWith(currentYear));
-    return (yearPoint ?? validPoints[0]).xirrValue;
-  }, [validPoints]);
+  const yearStartValue = yearStartQuery.data ?? null;
   const changeFromYearStart = formatChange(currentValue, yearStartValue);
 
   // 年度聚合数据（用于柱状图）
@@ -93,7 +97,11 @@ export default function XirrAnalysisPage(): JSX.Element {
         </p>
       </div>
 
-      <DimensionSwitcher value={dimension} onChange={setDimension} />
+      <DimensionSwitcher
+        value={dimension}
+        onChange={setDimension}
+        quickRanges={QUICK_RANGE_OPTIONS}
+      />
 
       {/* 当前累计 XIRR + 较年初 */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -131,11 +139,12 @@ export default function XirrAnalysisPage(): JSX.Element {
         connectNulls={false}
       />
 
-      {/* 年度柱状图 */}
+      {/* 年度柱状图（当年柱高亮，DASH-P1-05 验收 2） */}
       {dimension.granularity !== QueryGranularity.YEAR && yearlyData.length > 0 && (
         <YearlyBarChart
           data={aggregateByYear(seriesData)}
           title="年度 XIRR 对比"
+          highlightCurrentYear
         />
       )}
 

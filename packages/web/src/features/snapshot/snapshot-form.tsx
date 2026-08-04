@@ -102,7 +102,8 @@ export function SnapshotForm({
     }
   }, [snapshot, reset, today]);
 
-  // 系统自动计算值映射（用于覆盖提示）
+  // 系统自动计算值映射（用于覆盖提示）。
+  // 近似：NAV×份额；待后端 derivedTotalAsset（F5，Part B-3）——手工日此值≈手工值，仅作提示口径
   const navMapQuery = useNavTotalAssetMap(portfolioId);
   const navMap = navMapQuery.data;
   const dateValue = watch('date');
@@ -162,15 +163,20 @@ export function SnapshotForm({
           {errors.date && (
             <p className="text-xs text-red-500">{errors.date.message}</p>
           )}
+          {/* 该日已有自动记录提示（SNAP-P0-06 ①：允许选择已有自动记录的日期，此时即为覆盖） */}
+          {systemValue !== null && (
+            <p className="text-xs text-amber-700">
+              ⓘ 该日已有自动记录，将被覆盖
+            </p>
+          )}
         </div>
 
-        {/* 覆盖提示 */}
+        {/* 覆盖提示（§7.3 新建/编辑弹窗：⚠️ 该日系统自动计算值为 ¥x；保存后取代） */}
         {systemValue !== null && (
           <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
             <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             <span>
-              该日系统自动计算值为 ¥
-              {formatCurrency(systemValue)}，保存后将取代为手工记录。
+              {`该日系统自动计算值为 ¥${formatCurrency(systemValue)}（前端近似值）。保存后，您填写的值将取代该日的自动记录（每天只保留一条），并用于净值/XIRR 重算。`}
             </span>
           </div>
         )}
@@ -226,13 +232,16 @@ export function SnapshotForm({
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="snapshot-note">备注（可选）</Label>
+          <Label htmlFor="snapshot-note">备注（建议填写）</Label>
           <Textarea
             id="snapshot-note"
             placeholder="如：月末估值 / 季度盘点"
             rows={2}
             {...register('note')}
           />
+          <p className="text-xs text-muted-foreground">
+            ⓘ 建议填写修正原因，便于日后回溯
+          </p>
           {errors.note && (
             <p className="text-xs text-red-500">{errors.note.message}</p>
           )}
@@ -242,7 +251,7 @@ export function SnapshotForm({
       <div className="mt-6 flex justify-end gap-2">
         <Button type="submit" disabled={isPending}>
           {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-          {isManualEdit ? '保存' : '录入'}
+          保存并重算
         </Button>
       </div>
     </form>

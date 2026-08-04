@@ -393,14 +393,30 @@ export interface UpsertSnapshotRequest {
   note?: string;
 }
 
-export type SnapshotResponse = AssetSnapshot;
+/**
+ * 快照列表/保存响应。
+ *
+ * 预留字段 `derivedTotalAsset`（F5 待后端）：该日系统自动计算值
+ * （computeDerived = marketValue + cashBalance，不受手工覆盖影响）。
+ * 后端 list 接口补齐该字段前，前端一律用 NAV×份额近似（见 useNavTotalAssetMap），
+ * 不依赖本字段（运行时 undefined，!= null 判空跳过）。
+ */
+export interface SnapshotResponse extends AssetSnapshot {
+  /** 该日系统自动计算值（Decimal 字符串）；DERIVED 行为 null；待后端实现（F5） */
+  derivedTotalAsset?: string | null;
+}
 
 export interface SnapshotQuery {
   startDate?: string;
   endDate?: string;
   page?: number;
   pageSize?: number;
-  source?: string;
+  /**
+   * 来源筛选（DERIVED=自动 / MANUAL=手工）。
+   * F2 已获批：后端 list 支持 source 服务端筛选，前端可发送；
+   * 后端 DTO 落盘前发送会 400（ValidationPipe forbidNonWhitelisted），联调时注意先后顺序。
+   */
+  source?: SnapshotSource;
 }
 
 // ============================================================================
