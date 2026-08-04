@@ -1,60 +1,77 @@
 classDiagram
-    %% ===== 账户页数据源 =====
-    class PortfolioSummaryBackend {
-        <<实际返回 GET /portfolios/summary>>
+    %% ===== 账户域 · 缺口补齐后目标态（incremental-account-v2）=====
+    class PortfolioSummaryDto {
+        <<GET /portfolios/summary · 目标态>>
         +id: string
         +name: string
         +totalAsset: string
         +holdingsCount: number
         +lastUpdatedAt: string|null
+        +baseDate: string|null
+        +currency: string
+        +createdAt: string
+        +cumulativeNav: string|null
+        +yearReturnRate: string|null
+        +netInvested: string
+        +floatingProfit: string|null
     }
-    class PortfolioSummaryFrontend {
-        <<api/types.ts 扩展后>>
-        +id: string
-        +name: string
-        +totalAsset: string
-        +holdingsCount: number
-        +lastUpdatedAt: string|null
-        +baseDate: string|null  %% 待后端补充
-        +currency: string       %% 待后端补充
-        +cumulativeNav: number|null   %% 待后端补充
-        +yearReturnRate: number|null  %% 待后端补充
-        +netInvested: string    %% 待后端补充（合计净投入）
-        +floatingProfit: string %% 待后端补充（合计浮动盈亏）
-    }
-    class AccountStatsBackend {
-        <<实际返回 GET /account/stats>>
+    class AccountStatsResponse {
+        <<GET /account/stats · 目标态>>
         +portfolioCount: number
-        +transactionCount: number  %% =出入金笔数(仅cashFlow.count)
+        +cashflowCount: number
+        +tradeCount: number
         +snapshotDays: number
-        +recordDays: number        %% =账户使用天数
+        +recordDays: number
         +firstDate: string|null
         +lastDate: string|null
     }
-    class AccountStatsFrontend {
-        <<api/types.ts 扩展后>>
-        +portfolioCount: number
-        +cashflowCount: number   %% 映射 transactionCount
-        +tradeCount: number      %% 待后端补充(证券买卖笔数)
-        +snapshotDays: number    %% 总资产记录天数
-        +accountAgeDays: number  %% 映射 recordDays
-        +firstDate: string|null
-        +lastDate: string|null
+    class UserPublic {
+        <<shared · 7 字段>>
+        +id: string
+        +email: string
+        +name: string|null
+        +avatar: string|null
+        +phone: string|null
+        +bio: string|null
+        +createdAt: string
     }
-
-    %% ===== 设置页偏好 =====
     class UserPreference {
         +defaultPortfolioId: string|null
-        +theme / granularity / dateRange ...
-        +cashHintOnCashflow: boolean  %% 后端Prisma缺列
-        +cashHintOnTrade: boolean     %% 后端Prisma缺列
-        +amountThousands: boolean     %% 待后端补充(SET-P1-03)
-        +amountAbbrev: boolean        %% 待后端补充(SET-P1-03)
+        +theme / granularity / dateRange / staleDays ...
+        +cashHintOnCashflow: boolean = true
+        +cashHintOnTrade: boolean = true
+        +amountThousands: boolean = true
+        +amountAbbrev: boolean = false
+    }
+    class Portfolio {
+        +baseDate: Date|null
+        +currency: string
+        +createdAt: Date
+    }
+    class DailyNav {
+        +cumulativeNav: Decimal
+        +yearNav: Decimal
+    }
+    class CashFlow {
+        +type: BUY|SELL
+        +amount: Decimal
+    }
+    class AssetSnapshot {
+        +totalAsset: Decimal
+    }
+    class SecurityTrade {
+        +side: BUY_SEC|SELL_SEC
     }
 
-    PortfolioSummaryBackend <|-- PortfolioSummaryFrontend
-    AccountStatsBackend <|-- AccountStatsFrontend
+    Portfolio --> PortfolioSummaryDto : baseDate / currency / createdAt
+    DailyNav --> PortfolioSummaryDto : cumulativeNav / yearNav-1
+    CashFlow --> PortfolioSummaryDto : netInvested = ΣBUY-ΣSELL
+    AssetSnapshot --> PortfolioSummaryDto : totalAsset / floatingProfit
+    CashFlow --> AccountStatsResponse : cashflowCount
+    SecurityTrade --> AccountStatsResponse : tradeCount
+    UserPublic ..> UserPreference : same user
 
-    note for PortfolioSummaryFrontend "资产全景卡/组合列表卡 缺字段显示 0/—"
-    note for AccountStatsFrontend "证券买卖笔数 显示 0 直至后端补齐 tradeCount"
-    note for UserPreference "cashHint*/amount* 前端渲染但本次不提交服务端"
+    note for PortfolioSummaryDto "null = 无数据；前端渲染 — / 未成立，禁止渲染 0"
+    note for PortfolioSummaryDto "金额 2 位 / 净值 6 位 / 收益率 8 位；收益率为比率非百分数"
+    note for UserPublic "createdAt 由 toUserPublic 投影，User 对外唯一出口"
+    note for UserPreference "默认值以 PRD 6.9.1 为准：true/true/true/false"
