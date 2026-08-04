@@ -1,60 +1,60 @@
-%% SYS-P1-02 注销账户自助恢复 — 类图
-%% 来源：docs/system_design.md §3.6
 classDiagram
-    class AuthService {
-        -PrismaService prisma
-        -JwtService jwtService
-        +login(email, password) AuthTokenResult
-        +restoreAccount(dto) AuthTokenResult
-        +deleteAccount(userId) null
-        -remainingRestoreDays(deletedAt) number
-        -signToken(user) string
-        -toUserPublic(user) UserPublic
+    %% ===== 账户页数据源 =====
+    class PortfolioSummaryBackend {
+        <<实际返回 GET /portfolios/summary>>
+        +id: string
+        +name: string
+        +totalAsset: string
+        +holdingsCount: number
+        +lastUpdatedAt: string|null
     }
-    class AuthController {
-        +login(LoginDto)
-        +restoreAccount(RestoreAccountDto)
-        +deleteAccount(user)
+    class PortfolioSummaryFrontend {
+        <<api/types.ts 扩展后>>
+        +id: string
+        +name: string
+        +totalAsset: string
+        +holdingsCount: number
+        +lastUpdatedAt: string|null
+        +baseDate: string|null  %% 待后端补充
+        +currency: string       %% 待后端补充
+        +cumulativeNav: number|null   %% 待后端补充
+        +yearReturnRate: number|null  %% 待后端补充
+        +netInvested: string    %% 待后端补充（合计净投入）
+        +floatingProfit: string %% 待后端补充（合计浮动盈亏）
     }
-    class RestoreAccountDto {
-        +string email
-        +string password
+    class AccountStatsBackend {
+        <<实际返回 GET /account/stats>>
+        +portfolioCount: number
+        +transactionCount: number  %% =出入金笔数(仅cashFlow.count)
+        +snapshotDays: number
+        +recordDays: number        %% =账户使用天数
+        +firstDate: string|null
+        +lastDate: string|null
     }
-    class AuthTokenResult {
-        +string accessToken
-        +UserPublic user
-    }
-    class AccountPendingDeletionException {
-        +number code
-        +AccountPendingDeletionData data
-    }
-    class AccountNotDeletedException {
-        +number code
-    }
-    class AccountRestoreExpiredException {
-        +number code
-    }
-    class HttpExceptionFilter {
-        +catch(exception, host)
-        -extractCustomCode(e) number
-        -extractCustomData(e) unknown
-    }
-    class BUSINESS_ERROR_CODE {
-        <<constant>>
-        +ACCOUNT_PENDING_DELETION 1007
-        +ACCOUNT_NOT_DELETED 1008
-        +ACCOUNT_RESTORE_EXPIRED 1009
-    }
-    class CleanupService {
-        +purgeSoftDeletedUsers() number
+    class AccountStatsFrontend {
+        <<api/types.ts 扩展后>>
+        +portfolioCount: number
+        +cashflowCount: number   %% 映射 transactionCount
+        +tradeCount: number      %% 待后端补充(证券买卖笔数)
+        +snapshotDays: number    %% 总资产记录天数
+        +accountAgeDays: number  %% 映射 recordDays
+        +firstDate: string|null
+        +lastDate: string|null
     }
 
-    AuthController --> AuthService : 调用
-    AuthController ..> RestoreAccountDto : 入参
-    AuthService --> AuthTokenResult : 返回
-    AuthService ..> AccountPendingDeletionException : login 抛出
-    AuthService ..> AccountNotDeletedException : restore 抛出
-    AuthService ..> AccountRestoreExpiredException : restore 抛出
-    HttpExceptionFilter ..> AccountPendingDeletionException : 捕获并透传 code+data
-    AccountPendingDeletionException ..> BUSINESS_ERROR_CODE : 引用
-    CleanupService ..> BUSINESS_ERROR_CODE : 共用保留期常量
+    %% ===== 设置页偏好 =====
+    class UserPreference {
+        +defaultPortfolioId: string|null
+        +theme / granularity / dateRange ...
+        +cashHintOnCashflow: boolean  %% 后端Prisma缺列
+        +cashHintOnTrade: boolean     %% 后端Prisma缺列
+        +amountThousands: boolean     %% 待后端补充(SET-P1-03)
+        +amountAbbrev: boolean        %% 待后端补充(SET-P1-03)
+    }
+
+    PortfolioSummaryBackend <|-- PortfolioSummaryFrontend
+    AccountStatsBackend <|-- AccountStatsFrontend
+
+    note for PortfolioSummaryFrontend "资产全景卡/组合列表卡 缺字段显示 0/—"
+    note for AccountStatsFrontend "证券买卖笔数 显示 0 直至后端补齐 tradeCount"
+    note for UserPreference "cashHint*/amount* 前端渲染但本次不提交服务端"
