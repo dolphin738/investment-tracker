@@ -250,6 +250,22 @@ describe('calculateXirr (pure function)', () => {
 
     expect(calculateXirr(cashflows)).toBeNull();
   });
+
+  // ----------------------------------------------------------
+  // 防御：非法金额（NaN / Infinity）→ 返回 null
+  // ----------------------------------------------------------
+  it.each([
+    { desc: 'amount is NaN', amount: NaN },
+    { desc: 'amount is Infinity', amount: Infinity },
+    { desc: 'amount is -Infinity', amount: -Infinity },
+  ])('should return null when $desc', ({ amount }) => {
+    const cashflows: Cashflow[] = [
+      { date: d('2024-01-01'), amount: -10000 },
+      { date: d('2024-07-01'), amount },
+    ];
+
+    expect(calculateXirr(cashflows)).toBeNull();
+  });
 });
 
 // ============================================================
@@ -328,5 +344,24 @@ describe('buildCashflows (pure function)', () => {
     const result = calculateXirr(cashflows);
     expect(result).not.toBeNull();
     expect(Math.abs(result! - 0.1)).toBeLessThan(1e-4);
+  });
+
+  // ----------------------------------------------------------
+  // 防御：同日买卖对冲为 0 → 跳过该日零额净现金流
+  // ----------------------------------------------------------
+  it('should skip same-day buy/sell that net to zero', () => {
+    const cashflows = buildCashflows(
+      [
+        { date: d('2024-01-01'), type: 'BUY', amount: 5000 },
+        { date: d('2024-01-01'), type: 'SELL', amount: 5000 },
+        { date: d('2024-06-01'), type: 'BUY', amount: 3000 },
+      ],
+      { date: d('2024-12-31'), totalAsset: 4000 },
+    );
+
+    // 1/1 买卖对冲为 0 → 跳过；仅剩 6/1 买入(-3000) + 终值(+4000)
+    expect(cashflows).toHaveLength(2);
+    expect(cashflows[0]).toEqual({ date: d('2024-06-01'), amount: -3000 });
+    expect(cashflows[1]).toEqual({ date: d('2024-12-31'), amount: 4000 });
   });
 });

@@ -45,7 +45,7 @@
 
 import { CalculationService } from './calculation.service';
 import { NavService } from './nav.service';
-import { RecalculationService } from './recalculation.service';
+import { RecalculationService } from '../recalculation/recalculation.service';
 import { XirrService } from './xirr.service';
 import { InMemoryPrisma, daysBetween, utc } from '@investment-tracker/finance-core/testing';
 
@@ -210,16 +210,21 @@ function buildHarness(): Harness {
   const nav = new NavService(db as never);
   const xirr = new XirrService(db as never);
   const calc = new CalculationService(db as never, nav, xirr);
-  const recalc = new RecalculationService(db as never, calc);
+  // 合并后构造需 3 参；本测试仅调用 recalculateNavRange（不触碰 DERIVED 重建路径），
+  // assetValuation 不会被访问，传 null 即可
+  const recalc = new RecalculationService(db as never, null as never, calc);
   return { db, recalc };
 }
 
-/** 装载场景数据并执行全量重算 */
+/** 装载场景数据并执行计算级联（仅 NAV/XIRR，不重建 DERIVED 快照） */
 async function runScenario(sc: Scenario): Promise<InMemoryPrisma> {
   const { db, recalc } = buildHarness();
   for (const [date, type, amount] of sc.txs) db.seedTx(PID, date, type, amount);
   for (const [date, asset] of sc.snaps) db.seedSnap(PID, date, asset);
-  await recalc.recalculateAll(PID);
+  // 用首笔交易日作起点；recalculateNavRange 对已有快照日逐日算 NAV+XIRR，
+  // 等价于旧 RecalculationService.recalculateAll 对本测试 seeded 快照的处理
+  const start = new Date(sc.txs[0][0] + 'T00:00:00.000Z');
+  await recalc.recalculateNavRange(PID, start);
   return db;
 }
 
@@ -409,7 +414,7 @@ describe('D 组｜单笔投入无后续现金流 → TWR 因子严格等于 MWR 
     db.seedSnap(PID, '2024-12-20', 11000);
     db.seedSnap(PID, '2025-01-10', 11500);
     db.seedSnap(PID, '2025-06-15', 13000);
-    await recalc.recalculateAll(PID);
+    await recalc.recalculateNavRange(PID, utc('2024-11-01'));
 
     const nav = db.getNav(PID, '2025-06-15')!;
     const xirrValue = db.getXirr(PID, '2025-06-15')!.xirrValue!;
@@ -434,7 +439,7 @@ describe('E 组｜等长周期且每期收益率相同 → TWR 因子严格等�
     db.seedSnap(PID, '2024-01-01', 10000);
     db.seedSnap(PID, '2024-01-31', 21000); // preAsset 11000 → +10%
     db.seedSnap(PID, '2024-03-01', 23100); // 19090.909 份 → +10%
-    await recalc.recalculateAll(PID);
+    await recalc.recalculateNavRange(PID, utc('2024-01-01'));
 
     expect(daysBetween(utc('2024-01-01'), utc('2024-01-31'))).toBe(30);
     expect(daysBetween(utc('2024-01-31'), utc('2024-03-01'))).toBe(30);
@@ -460,7 +465,7 @@ describe('F 组｜变动收益率下 TWR 与 MWR 必然背离（金融定义使�
     db.seedSnap(PID, '2024-01-01', 10000);
     db.seedSnap(PID, '2024-01-31', 22000); // preAsset 12000 → +20%
     db.seedSnap(PID, '2024-03-01', 22000); // 持平 → 0%
-    await recalc.recalculateAll(PID);
+    await recalc.recalculateNavRange(PID, utc('2024-01-01'));
 
     const nav = db.getNav(PID, '2024-03-01')!;
     const xirrValue = db.getXirr(PID, '2024-03-01')!.xirrValue!;
@@ -482,7 +487,7 @@ describe('F 组｜变动收益率下 TWR 与 MWR 必然背离（金融定义使�
     db.seedSnap(PID, '2024-01-01', 100);
     db.seedSnap(PID, '2024-02-01', 10200); // preAsset 200 → 翻倍
     db.seedSnap(PID, '2024-03-01', 9180); // −10%
-    await recalc.recalculateAll(PID);
+    await recalc.recalculateNavRange(PID, utc('2024-01-01'));
 
     const nav = db.getNav(PID, '2024-03-01')!;
     const xirrValue = db.getXirr(PID, '2024-03-01')!.xirrValue!;
@@ -507,7 +512,7 @@ describe('G 组｜已知缝隙量化：首个快照日之前的交易（本次�
     db.seedTx(PID, '2024-07-05', 'BUY', 5000);
     db.seedSnap(PID, '2024-07-05', 15500);
     db.seedSnap(PID, '2024-07-31', 16000);
-    await recalc.recalculateAll(PID);
+    await recalc.recalculateNavRange(PID, utc('2024-07-01'));
 
     // nav 侧：7/5 被当成成立日，份额 = 当日买入额 5000，完全无视 7/1 那笔
     const nav0705 = db.getNav(PID, '2024-07-05')!;

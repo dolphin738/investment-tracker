@@ -21,7 +21,7 @@ import {
 import { Prisma } from '@prisma/client';
 import type { Portfolio as PrismaPortfolio } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { RecalculationService } from '../calculation/recalculation.service';
+import { RecalculationService } from '../recalculation/recalculation.service';
 import type { PortfolioSummaryDto } from './dto/portfolio-summary.dto';
 import type { ArchivePortfolioDto } from './dto/archive-portfolio.dto';
 

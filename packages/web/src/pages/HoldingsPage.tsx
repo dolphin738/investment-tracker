@@ -45,6 +45,7 @@ import { SecurityTradeForm } from '@/features/security-trade/security-trade-form
 import { SecurityTradeList } from '@/features/security-trade/security-trade-list';
 import { InlinePriceEditor } from '@/features/security-price/inline-price-editor';
 import { usePortfolioStore } from '@/stores/portfolio.store';
+import { usePreferenceStore } from '@/stores/preference.store';
 import { usePortfolios } from '@/hooks/use-portfolios';
 import { useHoldings } from '@/hooks/use-holdings';
 import { useSecurities } from '@/hooks/use-securities';
@@ -72,6 +73,9 @@ function todayIso(): string {
 export default function HoldingsPage(): JSX.Element {
   const currentPortfolioId = usePortfolioStore((s) => s.currentPortfolioId);
   const { data: portfolios = [], isLoading: portfoliosLoading } = usePortfolios();
+  const getPreference = usePreferenceStore((s) => s.getPreference);
+  const amountThousands = getPreference('amountThousands');
+  const amountAbbrev = getPreference('amountAbbrev');
 
   // 录入买卖弹窗
   const [tradeDialogOpen, setTradeDialogOpen] = useState(false);
@@ -173,7 +177,7 @@ export default function HoldingsPage(): JSX.Element {
                 <CardContent className="py-3">
                   <p className="text-xs text-muted-foreground">总市值</p>
                   <p className="text-lg font-bold tabular-nums">
-                    ¥{formatCurrency(aggregate.totalMarketValue)}
+                    {formatCurrency(aggregate.totalMarketValue, 2, { thousands: amountThousands, abbreviate: amountAbbrev })}
                   </p>
                 </CardContent>
               </Card>
@@ -181,7 +185,7 @@ export default function HoldingsPage(): JSX.Element {
                 <CardContent className="py-3">
                   <p className="text-xs text-muted-foreground">总成本</p>
                   <p className="text-lg font-bold tabular-nums">
-                    ¥{formatCurrency(aggregate.totalCost)}
+                    {formatCurrency(aggregate.totalCost, 2, { thousands: amountThousands, abbreviate: amountAbbrev })}
                   </p>
                 </CardContent>
               </Card>
@@ -195,7 +199,7 @@ export default function HoldingsPage(): JSX.Element {
                     )}
                   >
                     {aggregate.totalProfit >= 0 ? '+' : ''}
-                    ¥{formatCurrency(aggregate.totalProfit)}
+                    {formatCurrency(aggregate.totalProfit, 2, { thousands: amountThousands, abbreviate: amountAbbrev })}
                   </p>
                 </CardContent>
               </Card>
@@ -300,7 +304,7 @@ export default function HoldingsPage(): JSX.Element {
                             })}
                           </TableCell>
                           <TableCell className="text-right tabular-nums">
-                            ¥{formatCurrency(h.avgCost)}
+                            {formatCurrency(h.avgCost, 2, { thousands: amountThousands, abbreviate: amountAbbrev })}
                           </TableCell>
                           <TableCell className="text-right">
                             <InlinePriceEditor
@@ -312,7 +316,7 @@ export default function HoldingsPage(): JSX.Element {
                             />
                           </TableCell>
                           <TableCell className="text-right tabular-nums">
-                            ¥{formatCurrency(h.marketValue)}
+                            {formatCurrency(h.marketValue, 2, { thousands: amountThousands, abbreviate: amountAbbrev })}
                           </TableCell>
                           <TableCell className="text-right tabular-nums">
                             {formatPercent(weight)}

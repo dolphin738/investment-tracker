@@ -45,6 +45,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { CashflowForm } from '@/features/cashflow/cashflow-form';
 import { CashflowList } from '@/features/cashflow/cashflow-list';
 import { usePortfolioStore } from '@/stores/portfolio.store';
+import { usePreferenceStore } from '@/stores/preference.store';
 import { usePortfolios } from '@/hooks/use-portfolios';
 import { useQuery } from '@tanstack/react-query';
 import { getOverview } from '@/api/overview.api';
@@ -77,6 +78,9 @@ export default function TransactionsPage(): JSX.Element {
   const navigate = useNavigate();
   const currentPortfolioId = usePortfolioStore((s) => s.currentPortfolioId);
   const { data: portfolios = [], isLoading: portfoliosLoading } = usePortfolios();
+  const getPreference = usePreferenceStore((s) => s.getPreference);
+  const amountThousands = getPreference('amountThousands');
+  const amountAbbrev = getPreference('amountAbbrev');
   const [open, setOpen] = useState(false);
 
   // ── 【A】总资产展示数据 ──
@@ -153,7 +157,7 @@ export default function TransactionsPage(): JSX.Element {
             const text =
               v === null || v === undefined
                 ? '数据不足'
-                : `¥${formatCurrency(v)}`;
+                : formatCurrency(v, 2, { thousands: amountThousands, abbreviate: amountAbbrev });
             return `${p.marker ?? ''}${p.seriesName ?? ''}: ${text}`;
           });
           return [head, ...lines].join('<br/>');
@@ -193,11 +197,11 @@ export default function TransactionsPage(): JSX.Element {
           symbolSize: 8,
           itemStyle: { color: 'hsl(0, 84%, 48%)' },
           data: manualPoints,
-          tooltip: { formatter: (p: { value: [number, number] }) => `手工记录：¥${formatCurrency(p.value[1])}` },
+          tooltip: { formatter: (p: { value: [number, number] }) => `手工记录：${formatCurrency(p.value[1], 2, { thousands: amountThousands, abbreviate: amountAbbrev })}` },
         },
       ],
     };
-  }, [trendData, manualDates]);
+  }, [trendData, manualDates, amountThousands, amountAbbrev]);
 
   const totalAsset = overview.data?.totalAsset;
   const marketValue = overview.data?.holdingsSummary?.totalMarketValue;
@@ -303,7 +307,7 @@ export default function TransactionsPage(): JSX.Element {
             <div className="rounded-lg bg-muted/40 p-4">
               <p className="text-xs text-muted-foreground">当前总资产</p>
               <p className="mt-1 text-2xl font-bold tabular-nums">
-                {totalAsset ? `¥${formatCurrency(totalAsset)}` : '暂无数据'}
+                {totalAsset ? formatCurrency(totalAsset, 2, { thousands: amountThousands, abbreviate: amountAbbrev }) : '暂无数据'}
               </p>
               <p className="mt-0.5 text-xs text-muted-foreground">
                 {overview.data?.latestDate
@@ -314,7 +318,7 @@ export default function TransactionsPage(): JSX.Element {
             <div className="rounded-lg bg-muted/40 p-4">
               <p className="text-xs text-muted-foreground">持仓市值</p>
               <p className="mt-1 text-2xl font-bold tabular-nums">
-                {marketValue ? `¥${formatCurrency(marketValue)}` : '暂无数据'}
+                {marketValue ? formatCurrency(marketValue, 2, { thousands: amountThousands, abbreviate: amountAbbrev }) : '暂无数据'}
               </p>
               <p className="mt-0.5 text-xs text-muted-foreground">由买卖流水推导</p>
             </div>
@@ -322,7 +326,7 @@ export default function TransactionsPage(): JSX.Element {
               <p className="text-xs text-muted-foreground">现金余额</p>
               <p className="mt-1 text-2xl font-bold tabular-nums">
                 {cashBalance !== undefined && cashBalance !== null
-                  ? `¥${formatCurrency(cashBalance)}`
+                  ? formatCurrency(cashBalance, 2, { thousands: amountThousands, abbreviate: amountAbbrev })
                   : '暂无数据'}
               </p>
               <p className="mt-0.5 text-xs text-muted-foreground">

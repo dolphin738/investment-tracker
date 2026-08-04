@@ -35,7 +35,7 @@ import { MonthlyHeatmap } from '@/components/charts/monthly-heatmap';
 import { usePortfolioStore } from '@/stores/portfolio.store';
 import { usePreferenceStore } from '@/stores/preference.store';
 import { useNavSeries, useLatestNav } from '@/hooks/use-query-data';
-import { formatDecimal, formatPercent, formatDate } from '@/lib/utils';
+import { formatDecimal, formatPercent, formatCurrency, formatDate } from '@/lib/utils';
 import { getDefaultDateRange } from '@/lib/constants';
 import { NavMetric as NavMetricEnum, type NavMetric } from '@/api/types';
 import {
@@ -105,6 +105,10 @@ export default function NavAnalysisPage(): JSX.Element {
 
   // 维度初始值（SET-P0-02 验收 4：读取偏好 defaultGranularity 作为默认维度）
   const getPreference = usePreferenceStore((s) => s.getPreference);
+  const navDecimals = getPreference('navDecimals');
+  const xirrDecimals = getPreference('xirrDecimals');
+  const amountThousands = getPreference('amountThousands');
+  const amountAbbrev = getPreference('amountAbbrev');
   const [dimension, setDimension] = useState<DimensionSwitcherValue>({
     granularity: getPreference('defaultGranularity') as QueryGranularity,
     startDate,
@@ -193,7 +197,7 @@ export default function NavAnalysisPage(): JSX.Element {
           <CardHeader className="pb-2">
             <CardDescription>当前累计净值</CardDescription>
             <CardTitle className="text-2xl">
-              {formatDecimal(latestCumulativeNav)}
+              {formatDecimal(latestCumulativeNav, navDecimals)}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -206,7 +210,7 @@ export default function NavAnalysisPage(): JSX.Element {
           <CardHeader className="pb-2">
             <CardDescription>当年净值</CardDescription>
             <CardTitle className="text-2xl">
-              {formatDecimal(latestYearNav)}
+              {formatDecimal(latestYearNav, navDecimals)}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -217,7 +221,7 @@ export default function NavAnalysisPage(): JSX.Element {
           <CardHeader className="pb-2">
             <CardDescription>累计收益</CardDescription>
             <CardTitle className="text-2xl">
-              {formatPercent(totalReturn)}
+              {formatPercent(totalReturn, 2, { decimals: xirrDecimals })}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -228,7 +232,7 @@ export default function NavAnalysisPage(): JSX.Element {
           <CardHeader className="pb-2">
             <CardDescription>当年收益</CardDescription>
             <CardTitle className="text-2xl">
-              {formatPercent(yearReturn)}
+              {formatPercent(yearReturn, 2, { decimals: xirrDecimals })}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -292,10 +296,10 @@ export default function NavAnalysisPage(): JSX.Element {
                         {row.label}
                       </TableCell>
                       <TableCell className="text-right font-mono">
-                        {formatDecimal(row.cumulativeNav)}
+                        {formatDecimal(row.cumulativeNav, navDecimals)}
                       </TableCell>
                       <TableCell className="text-right font-mono">
-                        {formatDecimal(row.yearNav)}
+                        {formatDecimal(row.yearNav, navDecimals)}
                       </TableCell>
                       <TableCell
                         className={
@@ -307,7 +311,7 @@ export default function NavAnalysisPage(): JSX.Element {
                         }
                       >
                         {row.dailyReturn !== null
-                          ? `${row.dailyReturn >= 0 ? '+' : ''}¥${formatDecimal(row.dailyReturn, 2)}`
+                          ? `${row.dailyReturn >= 0 ? '+' : ''}${formatCurrency(row.dailyReturn, 2, { thousands: amountThousands, abbreviate: amountAbbrev })}`
                           : '-'}
                       </TableCell>
                       <TableCell
@@ -319,7 +323,7 @@ export default function NavAnalysisPage(): JSX.Element {
                               : 'text-right font-mono'
                         }
                       >
-                        {formatPercent(row.returnRate)}
+                        {formatPercent(row.returnRate, 2, { decimals: xirrDecimals })}
                       </TableCell>
                       <TableCell className="text-right font-mono">
                         {row.shares !== null

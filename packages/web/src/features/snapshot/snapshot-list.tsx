@@ -47,6 +47,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { useSnapshots, useDeleteSnapshot, useResetSnapshot } from '@/hooks/use-snapshots';
 import { useNavTotalAssetMap } from '@/hooks/use-query-data';
+import { usePreferenceStore } from '@/stores/preference.store';
 import {
   computeManualDiffStats,
   formatAmountChange,
@@ -89,6 +90,12 @@ export function SnapshotList({
   const [filterEnd, setFilterEnd] = useState('');
   const [autoChecked, setAutoChecked] = useState(true);
   const [manualChecked, setManualChecked] = useState(true);
+
+  // 偏好（金额格式）
+  const getPreference = usePreferenceStore((s) => s.getPreference);
+  const amountThousands = getPreference('amountThousands');
+  const amountAbbrev = getPreference('amountAbbrev');
+  const fmtOpts = { thousands: amountThousands, abbreviate: amountAbbrev };
 
   // 筛选条件变化时回到第一页
   useEffect(() => {
@@ -289,13 +296,13 @@ export function SnapshotList({
                       {formatDate(s.date)}
                     </TableCell>
                     <TableCell className="text-right font-mono tabular-nums whitespace-nowrap">
-                      ¥{formatCurrency(s.totalAsset)}
+                      {formatCurrency(s.totalAsset, 2, fmtOpts)}
                     </TableCell>
                     <TableCell className="text-right font-mono text-sm whitespace-nowrap">
-                      {s.marketValue !== null ? `¥${formatCurrency(s.marketValue)}` : '-'}
+                      {s.marketValue !== null ? formatCurrency(s.marketValue, 2, fmtOpts) : '-'}
                     </TableCell>
                     <TableCell className="text-right font-mono text-sm whitespace-nowrap">
-                      {s.cashBalance !== null ? `¥${formatCurrency(s.cashBalance)}` : '-'}
+                      {s.cashBalance !== null ? formatCurrency(s.cashBalance, 2, fmtOpts) : '-'}
                     </TableCell>
                     <TableCell>
                       {manual ? (
@@ -310,7 +317,7 @@ export function SnapshotList({
                       {manual ? (
                         systemVal !== null ? (
                           <span className="text-muted-foreground">
-                            系统 ¥{formatCurrency(systemVal)}
+                            系统 {formatCurrency(systemVal, 2, fmtOpts)}
                             <span
                               className={
                                 diffRate !== null && diffRate >= 0
@@ -320,7 +327,7 @@ export function SnapshotList({
                             >
                               （
                               {diffRate !== null
-                                ? formatAmountChange(totalAssetNum, systemVal)
+                                ? formatAmountChange(totalAssetNum, systemVal, 2, fmtOpts)
                                 : '-'}
                               ）
                             </span>
@@ -450,8 +457,8 @@ export function SnapshotList({
                   {systemValOf(resetting) !== null && (
                     <>
                       {' '}
-                      将恢复为系统自动计算值 ¥
-                      {formatCurrency(systemValOf(resetting) as number)}。
+                      将恢复为系统自动计算值{' '}
+                      {formatCurrency(systemValOf(resetting) as number, 2, fmtOpts)}。
                     </>
                   )}
                 </>

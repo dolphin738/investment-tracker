@@ -32,7 +32,7 @@ export function snapshotsKey(portfolioId: string, query: SnapshotQuery) {
  * 后端暂不返回（Part E-8），缺失时仅展示前半句；后端补齐 recalcDays 后在此拼接。
  */
 function buildSavedToast(date: string, totalAsset: string): string {
-  return `已记录 ${date} 总资产 ¥${formatCurrency(totalAsset)}（手工，已取代自动值）`;
+  return `已记录 ${date} 总资产 ${formatCurrency(totalAsset)}（手工，已取代自动值）`;
 }
 
 /** 快照列表（透传 source/日期筛选：F2 已获批，source 走服务端筛选） */

@@ -11,7 +11,7 @@
  * - GET /api/portfolios/:portfolioId/nav/history   — 净值历史（带分页）
  * - GET /api/portfolios/:portfolioId/xirr/history  — XIRR 历史（带分页）
  * - GET /api/portfolios/:portfolioId/summary       — 组合统计摘要
- * - POST /api/portfolios/:portfolioId/recalculate  — 手动触发重算
+ * - POST /api/portfolios/:portfolioId/recalculate-range  — 手动触发区间重算
  * - GET /api/portfolios/:portfolioId/metrics/drawdown — 最大回撤
  */
 
@@ -106,8 +106,8 @@ export class QueryController {
     return this.queryEnhanced.getPortfolioSummary(user.userId, portfolioId);
   }
 
-  @Post('recalculate')
-  @ApiOperation({ summary: '手动触发批量重算' })
+  @Post('recalculate-range')
+  @ApiOperation({ summary: '手动触发区间批量重算' })
   async recalculate(
     @CurrentUser() user: AuthenticatedUser,
     @Param('portfolioId') portfolioId: string,

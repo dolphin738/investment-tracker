@@ -176,7 +176,7 @@ export function SnapshotForm({
           <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
             <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             <span>
-              {`该日系统自动计算值为 ¥${formatCurrency(systemValue)}（前端近似值）。保存后，您填写的值将取代该日的自动记录（每天只保留一条），并用于净值/XIRR 重算。`}
+              {`该日系统自动计算值为 ${formatCurrency(systemValue)}（前端近似值）。保存后，您填写的值将取代该日的自动记录（每天只保留一条），并用于净值/XIRR 重算。`}
             </span>
           </div>
         )}

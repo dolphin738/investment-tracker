@@ -93,10 +93,11 @@ export class SnapshotQueryDto {
   @Min(1)
   page?: number = 1;
 
-  @ApiPropertyOptional({ description: '每页条数', default: 20 })
+  @ApiPropertyOptional({ description: '每页条数', default: 20, minimum: 1, maximum: 200 })
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(1)
+  @Max(200)
   pageSize?: number = 20;
 }

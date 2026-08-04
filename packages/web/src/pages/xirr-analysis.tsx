@@ -54,6 +54,7 @@ export default function XirrAnalysisPage(): JSX.Element {
 
   // 维度初始值（SET-P0-02 验收 4：读取偏好 defaultGranularity 作为默认维度）
   const getPreference = usePreferenceStore((s) => s.getPreference);
+  const xirrDecimals = getPreference('xirrDecimals');
   const [dimension, setDimension] = useState<DimensionSwitcherValue>({
     granularity: getPreference('defaultGranularity') as QueryGranularity,
     startDate,
@@ -81,7 +82,7 @@ export default function XirrAnalysisPage(): JSX.Element {
   const currentValue = latest.data?.xirrValue ?? null;
 
   const yearStartValue = yearStartQuery.data ?? null;
-  const changeFromYearStart = formatChange(currentValue, yearStartValue);
+  const changeFromYearStart = formatChange(currentValue, yearStartValue, xirrDecimals);
 
   // 年度聚合数据（用于柱状图）
   const yearlyData: XirrSeriesPoint[] = seriesData.filter(
@@ -109,7 +110,7 @@ export default function XirrAnalysisPage(): JSX.Element {
           <CardHeader className="pb-2">
             <CardDescription>当前累计 XIRR</CardDescription>
             <CardTitle className="text-3xl">
-              {formatPercent(currentValue)}
+              {formatPercent(currentValue, 2, { decimals: xirrDecimals })}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -179,10 +180,10 @@ export default function XirrAnalysisPage(): JSX.Element {
                         {p.label}
                       </TableCell>
                       <TableCell className="font-mono">
-                        {formatPercent(p.xirrValue)}
+                        {formatPercent(p.xirrValue, 2, { decimals: xirrDecimals })}
                       </TableCell>
                       <TableCell className="font-mono text-xs">
-                        {formatChange(p.xirrValue, prev?.xirrValue ?? null)}
+                        {formatChange(p.xirrValue, prev?.xirrValue ?? null, xirrDecimals)}
                       </TableCell>
                     </TableRow>
                   );

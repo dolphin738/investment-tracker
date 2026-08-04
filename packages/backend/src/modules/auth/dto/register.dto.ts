@@ -3,6 +3,7 @@
  */
 
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Transform } from 'class-transformer';
 import { IsEmail, IsOptional, IsString, Matches, MaxLength } from 'class-validator';
 import {
   PASSWORD_MAX_LENGTH,
@@ -13,6 +14,7 @@ import {
 
 export class RegisterDto {
   @ApiProperty({ description: '邮箱地址', example: 'user@example.com' })
+  @Transform(({ value }) => typeof value === 'string' ? value.trim().toLowerCase() : value)
   @IsEmail()
   @MaxLength(255)
   email!: string;

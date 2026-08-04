@@ -38,9 +38,6 @@ pnpm-debug.log*
 # Prisma
 packages/backend/prisma/migrations/dev/
 
-# Test
-*.spec.tsx
-
 # Local helper scripts (commit-free; may carry env/token wiring)
 scripts/
 

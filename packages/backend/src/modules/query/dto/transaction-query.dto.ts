@@ -13,6 +13,7 @@ import {
   IsInt,
   IsOptional,
   IsUUID,
+  Max,
   Min,
 } from 'class-validator';
 import { QueryGranularity, TransactionType } from '@investment-tracker/shared';
@@ -74,10 +75,12 @@ export class TransactionQueryDto {
     description: '每页条数',
     default: 20,
     minimum: 1,
+    maximum: 200,
   })
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)
+  @Max(200)
   pageSize?: number = 20;
 }

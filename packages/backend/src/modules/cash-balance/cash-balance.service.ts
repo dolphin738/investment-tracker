@@ -15,7 +15,7 @@ import {
 } from '@nestjs/common';
 import type { CashBalance as PrismaCashBalance } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { RecalculationService } from '../calculation/recalculation.service';
+import { RecalculationService } from '../recalculation/recalculation.service';
 import type { UpsertCashBalanceDto, CashBalanceQueryDto } from './cash-balance.dto';
 
 /** API 响应中的现金余额结构 */
@@ -78,19 +78,18 @@ export class CashBalanceService {
       throw new BadRequestException('日期不能为未来日期');
     }
 
-    // 删除同一日期的旧余额
-    await this.prisma.cashBalance.deleteMany({
-      where: { portfolioId, asOf },
-    });
-
-    const balance = await this.prisma.cashBalance.create({
-      data: {
-        portfolioId,
-        amount: dto.amount,
-        asOf,
-        note: dto.note,
-      },
-    });
+    // 删除同一日期的旧余额并创建新记录（原子，避免中间失败丢余额）
+    const [, balance] = await this.prisma.$transaction([
+      this.prisma.cashBalance.deleteMany({ where: { portfolioId, asOf } }),
+      this.prisma.cashBalance.create({
+        data: {
+          portfolioId,
+          amount: dto.amount,
+          asOf,
+          note: dto.note,
+        },
+      }),
+    ]);
 
     // 🔴 触发重算
     await this.recalculationService.recalculateRange(portfolioId, asOf);

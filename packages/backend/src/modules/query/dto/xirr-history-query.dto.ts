@@ -11,6 +11,7 @@ import {
   IsEnum,
   IsInt,
   IsOptional,
+  Max,
   Min,
 } from 'class-validator';
 import {
@@ -68,10 +69,12 @@ export class XirrHistoryQueryDto {
     description: '每页条数',
     default: 20,
     minimum: 1,
+    maximum: 200,
   })
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)
+  @Max(200)
   pageSize?: number = 20;
 }

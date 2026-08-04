@@ -15,7 +15,7 @@ import {
 } from '@nestjs/common';
 import type { SecurityPrice as PrismaSecurityPrice } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { RecalculationService } from '../calculation/recalculation.service';
+import { RecalculationService } from '../recalculation/recalculation.service';
 import type { UpsertSecurityPriceDto, SecurityPriceQueryDto } from './security-price.dto';
 
 /** API 响应中的价格结构 */
@@ -88,23 +88,20 @@ export class SecurityPriceService {
       throw new NotFoundException('标的不存在或不属于该组合');
     }
 
-    // 删除同一 (securityId, asOf) 的旧价格，再创建新价格
-    await this.prisma.securityPrice.deleteMany({
-      where: {
-        portfolioId,
-        securityId: dto.securityId,
-        asOf,
-      },
-    });
-
-    const price = await this.prisma.securityPrice.create({
-      data: {
-        portfolioId,
-        securityId: dto.securityId,
-        price: dto.price,
-        asOf,
-      },
-    });
+    // 删除同一 (securityId, asOf) 的旧价格并创建新记录（原子，避免中间失败丢价格）
+    const [, price] = await this.prisma.$transaction([
+      this.prisma.securityPrice.deleteMany({
+        where: { portfolioId, securityId: dto.securityId, asOf },
+      }),
+      this.prisma.securityPrice.create({
+        data: {
+          portfolioId,
+          securityId: dto.securityId,
+          price: dto.price,
+          asOf,
+        },
+      }),
+    ]);
 
     // 🔴 触发重算
     await this.recalculationService.recalculateRange(portfolioId, asOf);

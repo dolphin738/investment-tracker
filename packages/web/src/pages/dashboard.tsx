@@ -57,6 +57,7 @@ import {
   formatDecimal,
   formatCurrency,
   formatDate,
+  isStale,
   cn,
 } from '@/lib/utils';
 import { toIsoDate } from '@/lib/constants';
@@ -126,6 +127,11 @@ export default function DashboardPage(): JSX.Element {
   // 维度状态（SET-P0-02 验收 4：启动时读取偏好作为默认值；
   // PreferenceBootstrap 已在应用启动时把服务端偏好同步进 preference.store）
   const getPreference = usePreferenceStore((s) => s.getPreference);
+  const navDecimals = getPreference('navDecimals');
+  const xirrDecimals = getPreference('xirrDecimals');
+  const amountThousands = getPreference('amountThousands');
+  const amountAbbrev = getPreference('amountAbbrev');
+  const staleDays = getPreference('staleDays');
   const [granularity, setGranularity] = useState<string>(
     getPreference('defaultGranularity'),
   );
@@ -217,10 +223,10 @@ export default function DashboardPage(): JSX.Element {
   const yearNav = ov?.yearNav ?? latestNav.data?.yearNav ?? null;
   const netInvested = ov?.netInvested ?? null;
   const totalReturnRate = ov?.totalReturnRate ?? (
-    cumulativeNav !== null ? cumulativeNav - 1 : null
+    cumulativeNav !== null ? Number(cumulativeNav) - 1 : null
   );
   const yearReturnRate = ov?.yearReturnRate ?? (
-    yearNav !== null ? yearNav - 1 : null
+    yearNav !== null ? Number(yearNav) - 1 : null
   );
 
   if (overview.isLoading && latestNav.isLoading) {
@@ -265,7 +271,9 @@ export default function DashboardPage(): JSX.Element {
       <PageHeader
         title="概览"
         description={
-          ov?.latestDate ? `数据截止 ${ov.latestDate}` : '最近 12 个月收益概览'
+          ov?.latestDate
+            ? `数据截止 ${ov.latestDate}${isStale(ov.latestDate, staleDays) ? '（数据陈旧）' : ''}`
+            : '最近 12 个月收益概览'
         }
         actions={
           <div className="flex gap-2">
@@ -289,17 +297,17 @@ export default function DashboardPage(): JSX.Element {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <StatCard
           title="当前总资产"
-          value={totalAsset ? `¥${formatCurrency(totalAsset)}` : '暂无数据'}
+          value={totalAsset ? formatCurrency(totalAsset, 2, { thousands: amountThousands, abbreviate: amountAbbrev }) : '暂无数据'}
           description={ov?.latestDate ? `截至 ${ov.latestDate}` : undefined}
           trend="neutral"
         />
         <StatCard
           title="累计收益率"
-          value={formatPercent(totalReturnRate)}
-          description={cumulativeNav ? `净值 ${formatDecimal(cumulativeNav)}` : '暂无数据'}
+          value={formatPercent(totalReturnRate, 2, { decimals: xirrDecimals })}
+          description={cumulativeNav ? `净值 ${formatDecimal(cumulativeNav, navDecimals)}` : '暂无数据'}
           trend={
             totalReturnRate !== null
-              ? totalReturnRate >= 0
+              ? Number(totalReturnRate) >= 0
                 ? 'up'
                 : 'down'
               : 'neutral'
@@ -307,11 +315,11 @@ export default function DashboardPage(): JSX.Element {
         />
         <StatCard
           title="当年收益率"
-          value={formatPercent(yearReturnRate)}
-          description={yearNav ? `净值 ${formatDecimal(yearNav)}` : '暂无数据'}
+          value={formatPercent(yearReturnRate, 2, { decimals: xirrDecimals })}
+          description={yearNav ? `净值 ${formatDecimal(yearNav, navDecimals)}` : '暂无数据'}
           trend={
             yearReturnRate !== null
-              ? yearReturnRate >= 0
+              ? Number(yearReturnRate) >= 0
                 ? 'up'
                 : 'down'
               : 'neutral'
@@ -319,11 +327,11 @@ export default function DashboardPage(): JSX.Element {
         />
         <StatCard
           title="年化 XIRR"
-          value={formatPercent(cumulativeXirr)}
+          value={formatPercent(cumulativeXirr, 2, { decimals: xirrDecimals })}
           description="累计年化"
           trend={
             cumulativeXirr !== null
-              ? cumulativeXirr >= 0
+              ? Number(cumulativeXirr) >= 0
                 ? 'up'
                 : 'down'
               : 'neutral'
@@ -331,11 +339,11 @@ export default function DashboardPage(): JSX.Element {
         />
         <StatCard
           title="累计净值"
-          value={cumulativeNav !== null ? formatDecimal(cumulativeNav) : '暂无数据'}
+          value={cumulativeNav !== null ? formatDecimal(cumulativeNav, navDecimals) : '暂无数据'}
           description="单位净值"
           trend={
             cumulativeNav !== null
-              ? cumulativeNav >= 1
+              ? Number(cumulativeNav) >= 1
                 ? 'up'
                 : 'down'
               : 'neutral'
@@ -343,7 +351,7 @@ export default function DashboardPage(): JSX.Element {
         />
         <StatCard
           title="净投入"
-          value={netInvested ? `¥${formatCurrency(netInvested)}` : '暂无数据'}
+          value={netInvested ? formatCurrency(netInvested, 2, { thousands: amountThousands, abbreviate: amountAbbrev }) : '暂无数据'}
           description="存入 - 取出"
           trend="neutral"
         />
@@ -422,8 +430,8 @@ export default function DashboardPage(): JSX.Element {
                     </div>
                     <div className="flex items-center gap-3">
                       <span className="text-sm font-medium tabular-nums">
-                        {tx.type === CashFlowType.BUY ? '+' : '-'}¥
-                        {formatCurrency(tx.amount)}
+                        {tx.type === CashFlowType.BUY ? '+' : '-'}
+                        {formatCurrency(tx.amount, 2, { thousands: amountThousands, abbreviate: amountAbbrev })}
                       </span>
                       {tx.note && (
                         <span className="max-w-[120px] truncate text-xs text-muted-foreground">
@@ -468,7 +476,7 @@ export default function DashboardPage(): JSX.Element {
                     <span className="font-medium">{p.name}</span>
                     <div className="flex items-center gap-4">
                       <span className="tabular-nums">
-                        ¥{formatCurrency(p.totalAsset)}
+                        {formatCurrency(p.totalAsset, 2, { thousands: amountThousands, abbreviate: amountAbbrev })}
                       </span>
                       {/* 用 `!= null` 同时排除 null 与 undefined：
                           后端 /portfolios/summary 当前不返回该字段（见 api/types.ts 缺口注），
@@ -482,12 +490,12 @@ export default function DashboardPage(): JSX.Element {
                               : 'text-down',
                           )}
                         >
-                          {formatPercent(p.cumulativeReturnRate)}
+                          {formatPercent(p.cumulativeReturnRate, 2, { decimals: xirrDecimals })}
                         </span>
                       )}
                       {p.xirr != null && (
                         <span className="text-xs text-muted-foreground">
-                          XIRR {formatPercent(p.xirr)}
+                          XIRR {formatPercent(p.xirr, 2, { decimals: xirrDecimals })}
                         </span>
                       )}
                     </div>

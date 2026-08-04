@@ -77,9 +77,14 @@ export class NavCalculationError extends Error {
  *
  * 逻辑：当前日期的年份 != 前一日净值记录的年份
  * （因为净值记录只在有快照的日期生成，所以 prevNav.date 就是上一个交易日）
+ *
+ * ⚠️ 必须使用 getUTCFullYear()：入参 Date 来自 UTC 午夜（与写库口径一致，
+ * 见 adapter 与测试辅助函数 d()）。若用 getFullYear() 则依赖服务器本地时区，
+ * 负偏移时区（如 UTC-8）部署时 UTC 午夜会落到前一天，导致当年首日判定失败、
+ * yearNav 全年算错。
  */
 function isYearFirstTradingDay(currentDate: Date, prevDate: Date): boolean {
-  return currentDate.getFullYear() !== prevDate.getFullYear();
+  return currentDate.getUTCFullYear() !== prevDate.getUTCFullYear();
 }
 
 /**
@@ -148,11 +153,16 @@ export function computeNav(input: ComputeNavInput): NavResult | null {
   const cumulativeNav = unitNav;
 
   // Step 3：处理当日申赎（买入新增份额，卖出赎回份额）
-  // 等价于 shares = prevShares × totalAsset / preAsset，
+  // 闭式：shares = prevShares × totalAsset / preAsset
+  // 推导：shares = prevShares + (buyAmount - sellAmount) / unitNav
+  //        = prevShares + (buyAmount - sellAmount) × prevShares / preAsset  （unitNav = preAsset/prevShares）
+  //        = prevShares × (preAsset + buyAmount - sellAmount) / preAsset
+  //        = prevShares × totalAsset / preAsset  （preAsset = totalAsset - buyAmount + sellAmount）
+  // 用闭式而非 buyAmount/unitNav - sellAmount/unitNav，避免 buyAmount ≈ sellAmount 时的抵消风险；
+  // 只需一次除法，数值更稳。
   // 在 totalAsset > 0 / prevShares > 0 / preAsset > 0 下恒为正，故无需非负防御。
   // 不变量：totalAsset / shares === unitNav
-  const newShares = buyAmount / unitNav - sellAmount / unitNav;
-  const shares = prevShares + newShares;
+  const shares = (prevShares * totalAsset) / preAsset;
 
   // 当年净值计算
   let yearNav: number;
@@ -164,7 +174,11 @@ export function computeNav(input: ComputeNavInput): NavResult | null {
     yearNav = 1.0;
   } else {
     // 继承年内基准
-    baseCumulativeNav = prevNav.baseCumulativeNav
+    // ⚠️ 用 Number(x) > 0 而非真值判断：Prisma Decimal(0) 是 truthy 对象，
+    // 若用 `prevNav.baseCumulativeNav ? Number(...) : null`，Decimal(0) 会走
+    // Number 分支得 0，随后 yearNav = cumulativeNav / 0 → Infinity。
+    // 改为数值判断后，baseCumulativeNav <= 0 时落入 null 分支，yearNav 回退 1.0。
+    baseCumulativeNav = Number(prevNav.baseCumulativeNav) > 0
       ? Number(prevNav.baseCumulativeNav)
       : null;
     yearNav = baseCumulativeNav !== null

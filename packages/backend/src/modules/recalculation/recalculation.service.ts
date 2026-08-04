@@ -26,9 +26,10 @@
  * 详见 ARCH §7.3 + PRD §5.4.4
  */
 
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { AssetValuationService, todayInAppTz } from '../valuation/asset-valuation.service';
+import { AssetValuationService } from '../valuation/asset-valuation.service';
+import { todayInAppTz } from '../../common/utils/app-date.util';
 import { CalculationService } from '../calculation/calculation.service';
 
 @Injectable()
@@ -158,20 +159,75 @@ export class RecalculationService {
     );
 
     // 升序逐日：NAV → XIRR（不可乱序、不可并行）
+    // 单日失败仍继续尝试后续日期（让尽可能多的日期被计算），
+    // 但最终若有失败必须抛出，不许向调用方谎报成功（禁止静默吞异常）
+    const failures: { date: string; message: string }[] = [];
     for (const { date } of snapshotDates) {
       try {
         await this.calculationService.triggerCalculation(portfolioId, date);
       } catch (error) {
+        const dateStr = date.toISOString().split('T')[0];
+        const message = (error as Error).message;
         this.logger.error(
-          `计算失败 portfolioId=${portfolioId} date=${date.toISOString().split('T')[0]}: ${(error as Error).message}`,
+          `计算失败 portfolioId=${portfolioId} date=${dateStr}: ${message}`,
         );
-        // 🔴 单日失败不阻断后续日期（已记录日志），
-        //    但如果上日净值缺失导致下日 share 为 0，下日也会报错。
-        //    这里选择继续尝试，让尽可能多的日期被计算。
+        failures.push({ date: dateStr, message });
       }
     }
 
+    if (failures.length > 0) {
+      const dateList = failures.map((f) => f.date).join(', ');
+      throw new Error(
+        `计算级联存在 ${failures.length}/${snapshotDates.length} 天失败：[${dateList}]。首个错误：${failures[0].message}`,
+      );
+    }
+
     return snapshotDates.length;
+  }
+
+  // =========================================================
+  // 全量重算
+  // =========================================================
+
+  /**
+   * 全量重算：从组合成立日（第一笔买入日）重建 DERIVED 快照 + 级联计算
+   *
+   * 使用场景：计算口径变更（如 D-06 资产快照口径调整）后历史净值/XIRR 全部失效，
+   * 需要一次性重建。
+   *
+   * 复用 recalculateRange 的三步流程（DELETE DERIVED -> 逐事件日 persistDerived -> NAV/XIRR 级联），
+   * 不另写一套遍历逻辑。end 缺省为 today，即重算到今天。
+   *
+   * @param portfolioId 组合 ID
+   * @returns 重算起始日期（成立日）与受影响天数
+   * @throws BadRequestException 组合尚无买入交易（成立日无法确定）
+   */
+  async recalculateAll(
+    portfolioId: string,
+  ): Promise<{ fromDate: Date; affectedDays: number }> {
+    // 成立日 = 第一笔买入日（与 CalculationService.ensureBaseDate 口径一致）
+    const firstBuy = await this.prisma.cashFlow.findFirst({
+      where: { portfolioId, type: 'BUY' },
+      orderBy: { date: 'asc' },
+      select: { date: true },
+    });
+
+    if (!firstBuy) {
+      throw new BadRequestException('组合尚无买入交易，成立日未确定，无法执行全量重算');
+    }
+
+    const fromDate = firstBuy.date;
+    this.logger.log(
+      `开始全量重算 portfolioId=${portfolioId} fromDate=${fromDate.toISOString().split('T')[0]}`,
+    );
+
+    const result = await this.recalculateRange(portfolioId, fromDate);
+
+    this.logger.log(
+      `全量重算完成 portfolioId=${portfolioId} affectedDays=${result.recalculatedDays}`,
+    );
+
+    return { fromDate, affectedDays: result.recalculatedDays };
   }
 
   // =========================================================

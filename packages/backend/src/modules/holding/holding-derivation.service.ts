@@ -145,15 +145,15 @@ export class HoldingDerivationService {
     // 3. 查询每个标的最新价（asOf ≤ date 的最后一条）
     const securityIds = Array.from(stateMap.keys());
     const priceRows = await this.prisma.$queryRawUnsafe<
-      { security_id: string; price: string; as_of: string }[]
+      { security_id: string; price: string; asOf: string }[]
     >(
       `SELECT DISTINCT ON (sp.security_id)
-         sp.security_id, sp.price::text, sp.as_of::text
+         sp.security_id, sp.price::text, sp."asOf"::text
        FROM security_prices sp
        WHERE sp.portfolio_id = $1
          AND sp.security_id = ANY($2::uuid[])
-         AND sp.as_of <= $3::date
-       ORDER BY sp.security_id, sp.as_of DESC`,
+         AND sp."asOf" <= $3::date
+       ORDER BY sp.security_id, sp."asOf" DESC`,
       portfolioId,
       securityIds,
       date,
@@ -163,7 +163,7 @@ export class HoldingDerivationService {
     for (const row of priceRows) {
       priceMap.set(row.security_id, {
         price: Number(row.price),
-        asOf: row.as_of,
+        asOf: row.asOf,
       });
     }
 

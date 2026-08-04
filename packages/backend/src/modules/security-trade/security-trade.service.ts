@@ -17,7 +17,7 @@ import {
 import type { SecurityTrade as PrismaSecurityTrade } from '@prisma/client';
 import { SecuritySide } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { RecalculationService } from '../calculation/recalculation.service';
+import { RecalculationService } from '../recalculation/recalculation.service';
 import type {
   CreateSecurityTradeDto,
   UpdateSecurityTradeDto,

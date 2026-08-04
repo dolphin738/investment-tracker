@@ -18,6 +18,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { SnapshotSource, SnapshotValuation } from '@investment-tracker/shared';
 import { HoldingDerivationService } from '../holding/holding-derivation.service';
+import { todayInAppTz } from '../../common/utils/app-date.util';
 
 /** computeDerived 返回值 */
 export interface DerivedResult {
@@ -204,12 +205,15 @@ export class AssetValuationService {
    * 🔴 调用方必须在本方法返回后调用 recalculateNavRange(portfolioId, date)
    */
   async deleteRecord(portfolioId: string, date: Date): Promise<Date> {
-    await this.prisma.assetSnapshot.deleteMany({
-      where: { portfolioId, date },
-    });
+    // 同步删除该日的净值/XIRR 行，避免陈旧行作为后续重算的 prevNav 幽灵结转
+    await this.prisma.$transaction([
+      this.prisma.assetSnapshot.deleteMany({ where: { portfolioId, date } }),
+      this.prisma.dailyNav.deleteMany({ where: { portfolioId, date } }),
+      this.prisma.dailyXirr.deleteMany({ where: { portfolioId, date } }),
+    ]);
 
     this.logger.log(
-      `删除总资产记录 portfolioId=${portfolioId} date=${date.toISOString().split('T')[0]}`,
+      `删除总资产记录 portfolioId=${portfolioId} date=${date.toISOString().split('T')[0]}（含当日净值/XIRR）`,
     );
 
     // 检查是否属于事件日
@@ -304,12 +308,4 @@ export class AssetValuationService {
 
     return !!(cf || trade || price || cash);
   }
-}
-
-/** 获取应用时区当天日期（UTC+8 截断） */
-export function todayInAppTz(): Date {
-  const now = new Date();
-  // 使用本地时区的日期字符串来截断，保持向后兼容已有的 Date 处理
-  const s = now.toISOString().split('T')[0];
-  return new Date(s + 'T00:00:00.000Z');
 }

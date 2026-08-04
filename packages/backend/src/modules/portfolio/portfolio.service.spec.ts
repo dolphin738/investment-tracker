@@ -13,7 +13,7 @@
 import 'reflect-metadata';
 import { PortfolioService } from './portfolio.service';
 import type { PrismaService } from '../../prisma/prisma.service';
-import type { RecalculationService } from '../calculation/recalculation.service';
+import type { RecalculationService } from '../recalculation/recalculation.service';
 
 const USER_ID = 'user-1';
 const PORTFOLIO_ID = '11111111-2222-3333-4444-555555555555';

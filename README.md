@@ -1,6 +1,6 @@
 # 投资收益统计系统 · investment-tracker
 
-> 基于 XIRR 的多组合投资收益与净值追踪平台 —— 后端统一计算，Web + HarmonyOS 双端展示。
+> 基于 XIRR 的多组合投资收益与净值追踪平台 —— 后端统一计算，Web 端展示。
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
 
@@ -8,7 +8,7 @@
 
 ## 一、项目简介
 
-`investment-tracker` 是一套个人/多组合投资收益统计系统。围绕**每日 XIRR（年化收益率）**、**累计净值**、**当年净值**三大核心口径，对多组合的买入/卖出/资产快照进行统一计算，并通过 Web 前端与 HarmonyOS 原生 App 双端展示。
+`investment-tracker` 是一套个人/多组合投资收益统计系统。围绕**每日 XIRR（年化收益率）**、**累计净值**、**当年净值**三大核心口径，对多组合的买入/卖出/资产快照进行统一计算，并通过 Web 前端展示。
 
 所有金融计算（XIRR、净值）**全部在后端完成**，前端仅做展示，保证口径一致、可审计。
 
@@ -19,7 +19,7 @@
 - **累计净值 / 当年净值**：单位份额法，当年净值每年首个交易日重置
 - **多维查询**：年 / 月 / 周 / 日 四个维度，默认取期末值可切换平均值
 - **多用户 + 数据隔离**：JWT 认证，按 `user_id` 过滤数据
-- **双端架构**：NestJS 后端 + Web 前端（React + ECharts）
+- **单端架构**：NestJS 后端 + Web 前端（React + ECharts）
 
 ---
 
@@ -30,7 +30,7 @@
 | 后端 | NestJS 10 + Prisma 5 + PostgreSQL 16 |
 | Web 前端 | Vite 5 + React 18 + TypeScript + Tailwind CSS 3 + shadcn/ui |
 | 图表 | ECharts 5（统一图表库，echarts-for-react 封装） |
-| 共享层 | `shared` 包（TypeScript 类型 / API 契约） |
+| 共享层 | `shared` 包（TypeScript 类型 / API 契约）+ `finance-core` 包（零依赖纯金融算法库） |
 | 认证 | JWT + bcrypt |
 | 仓库 | pnpm 9 monorepo + Turborepo |
 | 测试 | 后端 Jest / Web Vitest + React Testing Library |
@@ -41,11 +41,14 @@
 
 ```
 investment-tracker/
+├── .github/workflows/             # CI（lint + test + build）
 ├── docs/                          # 文档
 │   ├── PRD.md                     # 产品需求文档
 │   ├── ARCHITECTURE.md            # 系统架构设计
-│   ├── class-diagram.mermaid      # 类图
-│   ├── sequence-diagram.mermaid   # 时序图
+│   ├── adr/                       # 架构决策记录
+│   ├── diagrams/                  # 类图与时序图（权威副本）
+│   │   ├── class-diagram.mermaid
+│   │   └── sequence-diagram.mermaid
 │   └── ENVIRONMENT-SETUP.md       # 环境准备清单
 ├── packages/
 │   ├── backend/                   # NestJS 后端 API
@@ -53,10 +56,13 @@ investment-tracker/
 │   │   ├── prisma/                # Prisma schema + 迁移 + seed
 │   │   └── .env.example           # 环境变量模板
 │   ├── web/                       # Vite + React 前端
+│   ├── finance-core/             # 零依赖纯金融算法库（XIRR / NAV 纯函数）
 │   └── shared/                    # 共享类型与 API 契约
+├── scripts/                       # 本地辅助脚本（push / dev-env）
 ├── pnpm-workspace.yaml
 ├── turbo.json
 ├── tsconfig.base.json
+├── .gitattributes
 ├── package.json                   # 根构建脚本
 └── LICENSE                        # AGPL-3.0
 ```
@@ -156,7 +162,7 @@ API 文档（Swagger）：启动后端后访问 `http://localhost:3000/api/docs`
 
 - **PRD.md** — 产品需求、用户故事、需求池
 - **ARCHITECTURE.md** — 系统架构、接口、计算口径
-- **class-diagram.mermaid / sequence-diagram.mermaid** — 类图与时序图
+- **diagrams/class-diagram.mermaid / sequence-diagram.mermaid** — 类图与时序图（权威副本）
 - **ENVIRONMENT-SETUP.md** — 环境准备清单（含 PostgreSQL 安装）
 
 ---

@@ -8,9 +8,9 @@ import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import {
   IsBoolean,
+  IsIn,
   IsInt,
   IsOptional,
-  IsString,
   IsUUID,
   Max,
   Min,
@@ -36,7 +36,7 @@ export class UpdatePreferenceDto {
     enum: ['day', 'week', 'month', 'year'],
   })
   @IsOptional()
-  @IsString()
+  @IsIn(['day', 'week', 'month', 'year'])
   defaultGranularity?: string;
 
   @ApiPropertyOptional({
@@ -44,7 +44,7 @@ export class UpdatePreferenceDto {
     enum: ['3m', '1y', 'ytd', 'all'],
   })
   @IsOptional()
-  @IsString()
+  @IsIn(['3m', '1y', 'ytd', 'all'])
   defaultDateRange?: string;
 
   @ApiPropertyOptional({
@@ -52,7 +52,7 @@ export class UpdatePreferenceDto {
     enum: ['last', 'avg'],
   })
   @IsOptional()
-  @IsString()
+  @IsIn(['last', 'avg'])
   aggregation?: string;
 
   @ApiPropertyOptional({
@@ -83,7 +83,7 @@ export class UpdatePreferenceDto {
     enum: ['light', 'dark', 'system'],
   })
   @IsOptional()
-  @IsString()
+  @IsIn(['light', 'dark', 'system'])
   theme?: string;
 
   @ApiPropertyOptional({ description: '快照过期提醒阈值（天数）' })

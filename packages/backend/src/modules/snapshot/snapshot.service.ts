@@ -135,19 +135,6 @@ export class SnapshotService {
   // ==========================================================
 
   /**
-   * 向后兼容别名：upsert → upsertManual（source=MANUAL）
-   *
-   * 供 HoldingService 等 Plan A 模块过渡使用。
-   */
-  async upsert(
-    userId: string,
-    portfolioId: string,
-    dto: UpsertSnapshotDto,
-  ): Promise<SnapshotResponse> {
-    return this.upsertManual(userId, portfolioId, dto);
-  }
-
-  /**
    * 手工录入快照（upsert 语义，source 固定为 MANUAL）
    *
    * 🔴 T5 级联：写入后调用 recalculateNavRange
@@ -236,8 +223,10 @@ export class SnapshotService {
       },
     });
 
-    // 🔴 T5 级联
-    const recalcDate = dto.date ? new Date(dto.date) : existing.date;
+    // 🔴 T5 级联：日期变更时从新旧日期中较早的开始（覆盖影响范围）
+    const recalcDate = dto.date
+      ? new Date(Math.min(new Date(dto.date).getTime(), existing.date.getTime()))
+      : existing.date;
     await this.recalculationService.recalculateNavRange(portfolioId, recalcDate);
 
     return toResponse(updated);

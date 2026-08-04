@@ -416,7 +416,7 @@ export function SecurityTradeForm({
           <div className="rounded-md border bg-muted/40 px-3 py-2 text-sm tabular-nums">
             {tradeAmount !== null ? (
               <>
-                ¥{formatCurrency(tradeAmount)}
+                {formatCurrency(tradeAmount)}
                 <span className="ml-2 text-xs text-muted-foreground">
                   = 数量×单价
                   {sideValue === SecuritySide.BUY_SEC ? '+' : '−'}费用

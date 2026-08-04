@@ -11,8 +11,9 @@
  * 数据库数值列的结构化替身。
  *
  * Prisma 的 Decimal 是对象（带 toString/valueOf），`Number(decimal)` 可正确取值。
- * 保留 object 分支而非直接收 number，是为了让「原样透传 Prisma 行」成为可能——
- * 这一点对 baseCumulativeNav 的真值判断尤其关键（见 PrevNav.baseCumulativeNav）。
+ * 保留 object 分支而非直接收 number，是为了让「原样透传 Prisma 行」成为可能
+ * ——调用方直接把 Prisma 行对象传进来即可，纯函数内部沿用与原实现完全相同的
+ * `Number(x)` 转换语义，不做任何额外规整。
  */
 export type DecimalLike = number | string | { toString(): string };
 
@@ -78,10 +79,10 @@ export interface PrevNav {
   /**
    * 上日的当年基准累计净值。
    *
-   * ⚠️ 原实现用的是真值判断 `prevNav.baseCumulativeNav ? Number(...) : null`。
-   * 保持 DecimalLike 而不是提前转成 number，是为了让该真值判断的语义与原实现
-   * 完全一致（Prisma Decimal 即便数值为 0 也是 truthy 对象；若提前转成 number
-   * 则 0 会落入 falsy 分支，行为将发生改变）。
+   * 纯函数内部用 `Number(prevNav.baseCumulativeNav) > 0` 做数值判断
+   * （而非真值判断），避免 Prisma Decimal(0) 作为 truthy 对象导致除零。
+   * 保留 DecimalLike 而不是提前转成 number，是为了让「原样透传 Prisma 行」
+   * 成为可能，同时保证 Number() 转换语义与原实现完全一致。
    */
   baseCumulativeNav: DecimalLike | null;
 }

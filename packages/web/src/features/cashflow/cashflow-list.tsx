@@ -139,7 +139,7 @@ export function CashflowList({
                       tx.type === CashFlowType.BUY ? 'text-up' : 'text-down',
                     )}
                   >
-                    {tx.type === CashFlowType.BUY ? '+' : '-'}¥
+                    {tx.type === CashFlowType.BUY ? '+' : '-'}
                     {formatCurrency(tx.amount)}
                   </TableCell>
                   <TableCell className="max-w-[180px] truncate text-sm text-muted-foreground">

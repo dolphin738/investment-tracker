@@ -5,6 +5,7 @@
  */
 
 import { ApiProperty } from '@nestjs/swagger';
+import { Transform } from 'class-transformer';
 import { IsEmail, IsNotEmpty, IsString, MaxLength } from 'class-validator';
 import { PASSWORD_MAX_LENGTH } from './password-policy';
 
@@ -16,6 +17,7 @@ export class UpdateEmailDto {
   currentPassword!: string;
 
   @ApiProperty({ description: '新邮箱地址', example: 'new@example.com' })
+  @Transform(({ value }) => typeof value === 'string' ? value.trim().toLowerCase() : value)
   @IsEmail()
   @MaxLength(255)
   newEmail!: string;

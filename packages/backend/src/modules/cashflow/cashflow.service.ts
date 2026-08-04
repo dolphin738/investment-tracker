@@ -15,7 +15,7 @@ import {
 } from '@nestjs/common';
 import type { CashFlow as PrismaCashFlow } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { RecalculationService } from '../calculation/recalculation.service';
+import { RecalculationService } from '../recalculation/recalculation.service';
 import type { CreateCashFlowDto, UpdateCashFlowDto, CashFlowQueryDto } from './cashflow.dto';
 
 /** API 响应中的出入金流水结构 */

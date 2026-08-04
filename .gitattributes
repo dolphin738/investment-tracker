@@ -1,0 +1,33 @@
+# Auto-detect text files and normalize line endings on checkout
+* text=auto eol=lf
+
+# PowerShell scripts must use CRLF for Windows PowerShell 5.1 compatibility
+*.ps1 eol=crlf
+
+# Shell scripts use LF
+*.sh eol=lf
+
+# Source code files use LF
+*.ts eol=lf
+*.tsx eol=lf
+*.js eol=lf
+*.jsx eol=lf
+*.json eol=lf
+*.css eol=lf
+*.html eol=lf
+*.yml eol=lf
+*.yaml eol=lf
+*.md eol=lf
+
+# Binary files — no line ending normalization
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.svg binary
+*.pdf binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.eot binary

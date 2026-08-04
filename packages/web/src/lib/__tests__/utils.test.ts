@@ -13,23 +13,23 @@ import { computeManualDiffStats, formatAmountChange } from '@/lib/utils';
 
 describe('formatAmountChange — 差异金额 + 差异%', () => {
   it('正值：+9,000.00 (+3.20%)', () => {
-    expect(formatAmountChange(290000, 281000)).toBe('+9,000.00 (+3.20%)');
+    expect(formatAmountChange(290000, 281000)).toBe('+¥9,000.00 (+3.20%)');
   });
 
   it('正值（不同比率）：+2,000.00 (+2.00%) 带 + 号', () => {
-    expect(formatAmountChange(102000, 100000)).toBe('+2,000.00 (+2.00%)');
+    expect(formatAmountChange(102000, 100000)).toBe('+¥2,000.00 (+2.00%)');
   });
 
   it('负值：-1,000.00 (-0.36%)', () => {
-    expect(formatAmountChange(280000, 281000)).toBe('-1,000.00 (-0.36%)');
+    expect(formatAmountChange(280000, 281000)).toBe('¥-1,000.00 (-0.36%)');
   });
 
   it('无差异：0.00 (0.00%)', () => {
-    expect(formatAmountChange(281000, 281000)).toBe('0.00 (0.00%)');
+    expect(formatAmountChange(281000, 281000)).toBe('¥0.00 (0.00%)');
   });
 
   it('Decimal 字符串输入与 number 等价', () => {
-    expect(formatAmountChange('290000.00', '281000.00')).toBe('+9,000.00 (+3.20%)');
+    expect(formatAmountChange('290000.00', '281000.00')).toBe('+¥9,000.00 (+3.20%)');
   });
 
   it('任一为 null / 空串 → -', () => {

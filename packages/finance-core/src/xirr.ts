@@ -72,6 +72,15 @@ export function calculateXirr(cashflows: Cashflow[]): number | null {
     return null;
   }
 
+  // 防御：非法金额输入返回 null
+  // Cashflow.amount 虽然类型为 number，但上游 buildCashflows 对 DecimalLike 做 Number()
+  // 转换，若 DB 或 DTO 传入非数字字符串（如 "abc"），Number("abc") = NaN 会一路传播
+  // 到牛顿迭代，最终静默返回 NaN。此处做纯函数自身的防御性校验。
+  // 生产路径有 DTO @IsNumber + DB Decimal 类型挡，这里是最后一道防线。
+  if (cashflows.some((cf) => !Number.isFinite(cf.amount))) {
+    return null;
+  }
+
   // 边界检查：全同号现金流无法求解
   const allPositive = cashflows.every((cf) => cf.amount > 0);
   const allNegative = cashflows.every((cf) => cf.amount < 0);
@@ -153,7 +162,11 @@ export function buildCashflows(
     }
   }
 
-  const cashflows: Cashflow[] = Array.from(cashflowsByDate.values());
+  // 同日买卖恰好对冲为 0 时，该日净现金流无实际经济意义，
+  // 放入数组会导致 NPV 无根、迭代向 +∞ 漂移（仅靠调用方 1e11 兜底）。
+  // 故合并后净额为 0 的日期直接跳过，不放入现金流数组。
+  const cashflows: Cashflow[] = Array.from(cashflowsByDate.values())
+    .filter((cf) => cf.amount !== 0);
 
   // 加入当日资产额作为正终值
   // ⚠️ 终值直接取 totalAsset 成立的前提是「快照为当日期末总资产（含当日申赎）」。

@@ -134,7 +134,7 @@ export function InlinePriceEditor({
         }
         className="group inline-flex items-center gap-1 rounded px-1 py-0.5 text-right font-mono tabular-nums hover:bg-accent"
       >
-        ¥{formatCurrency(value)}
+        {formatCurrency(value)}
         <Pencil className="h-3 w-3 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
       </button>
     </div>

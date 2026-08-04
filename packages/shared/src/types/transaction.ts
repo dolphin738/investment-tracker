@@ -3,7 +3,9 @@
  *
  * 对应 Prisma model Transaction（transactions 表）。
  * BUY = 买入（现金流为负），SELL = 卖出（现金流为正）。
- * 交易金额 amount 始终 > 0，正负号由 type 决定（XIRR 计算时转换）。
+ * 交易金额 amount 始终 > 0，正负号由 type 决定（买入为负/卖出为正）。
+ * XIRR 计算自方案B 起改读 CashFlow 表（见 incremental-account-v2.md），
+ * 本表符号仅供展示与持仓推导，不再参与 XIRR 引擎计算。
  *
  * TransactionType 枚举维持 BUY / SELL 两值不变（C-10 约束）。
  * 分红与费用在持仓模块独立建表（DividendRecord / FeeRecord），不进入 Transaction。
@@ -17,8 +19,11 @@
  * （Prisma enum 在类型层面为 'BUY' | 'SELL' 字符串字面量联合，
  *   TypeScript enum 是名义类型，两者无法直接互相赋值）。
  *
- * - BUY：买入，XIRR 现金流为负（资金流出）
- * - SELL：卖出，XIRR 现金流为正（资金流入）
+ * - BUY：买入，现金流方向为负（资金流出）
+ * - SELL：卖出，现金流方向为正（资金流入）
+ *
+ * 注：XIRR 引擎自方案B 起改读 CashFlow 表（见 incremental-account-v2.md），
+ * 此处的现金流方向标注仅供理解业务语义，不再被 XIRR 计算直接使用。
  */
 export const TransactionType = {
   BUY: 'BUY',

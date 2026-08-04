@@ -18,7 +18,6 @@
  */
 
 import {
-  BadRequestException,
   Controller,
   Get,
   NotFoundException,
@@ -30,6 +29,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { HoldingDerivationService, HoldingView } from './holding-derivation.service';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../../common/decorators/current-user.decorator';
+import { todayInAppTz, parseAppDate } from '../../common/utils/app-date.util';
 
 /** 持仓汇总（总市值/总成本/总盈亏/总盈亏率/标的数） */
 export interface HoldingsAggregate {
@@ -43,19 +43,6 @@ export interface HoldingsAggregate {
   totalProfitRate: number;
   /** 持仓标的数 */
   securityCount: number;
-}
-
-/** 将 YYYY-MM-DD 解析为本地日期（避免 UTC 偏移导致跨日） */
-function parseDateParam(value: string | undefined): Date {
-  if (!value) {
-    const now = new Date();
-    return new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  }
-  const parts = value.split('-').map((p) => Number(p));
-  if (parts.length !== 3 || parts.some((p) => Number.isNaN(p))) {
-    throw new BadRequestException(`无效日期参数: ${value}`);
-  }
-  return new Date(parts[0], parts[1] - 1, parts[2]);
 }
 
 @ApiTags('持仓（方案B 实时推导）')
@@ -88,7 +75,7 @@ export class HoldingController {
       throw new NotFoundException('组合不存在或无权访问');
     }
 
-    const targetDate = parseDateParam(date);
+    const targetDate = date ? parseAppDate(date) : todayInAppTz();
     const items = await this.holdingDerivationService.derive(
       portfolioId,
       targetDate,

@@ -290,13 +290,12 @@ describe('computeNav — Prisma Decimal-like 透传', () => {
     expect(result.shares).toBeCloseTo(14761.904762, 5);
   });
 
-  // 特征化测试（characterization test）：锁定现状，不代表认可该行为。
-  // Decimal(0) 是 truthy 对象 → 走 Number 分支 → yearNav 除以 0 得 Infinity。
-  // 该边界已作为「发现但按铁律未动」上报主理人裁决（现实中 baseCumulativeNav 恒为正）。
-  it('[characterization] should keep a Decimal-like zero base truthy (与原实现的真值判断一致)', () => {
-    // ⚠️ 行为保持：Prisma Decimal 即便数值为 0 也是 truthy 对象，
-    // 原实现 `prevNav.baseCumulativeNav ? Number(...) : null` 会走 Number 分支。
-    // 若在迁移中提前把 Decimal 转成 number，0 会落入 falsy 分支 → 行为改变。
+  // Decimal(0) 原为 truthy 对象 → 走 Number 分支 → yearNav 除以 0 得 Infinity。
+  // 修复后改用 Number(x) > 0 数值判断，Decimal(0) 落入 null 分支，yearNav 回退 1.0。
+  it('should treat a Decimal-like zero base as null and fall back to yearNav 1.0', () => {
+    // ⚠️ 行为已修复：原实现 `prevNav.baseCumulativeNav ? Number(...) : null`
+    // 对 Prisma Decimal(0)（truthy 对象）会走 Number 分支得 0，yearNav = Infinity。
+    // 现改为 `Number(prevNav.baseCumulativeNav) > 0 ? ...`，Decimal(0) 落入 null 分支。
     const result = computeNav({
       totalAsset: 13000,
       prevNav: {
@@ -310,7 +309,7 @@ describe('computeNav — Prisma Decimal-like 透传', () => {
       date: d('2024-03-01'),
     })!;
 
-    expect(result.baseCumulativeNav).toBe(0);
-    expect(result.yearNav).toBe(Infinity);
+    expect(result.baseCumulativeNav).toBeNull();
+    expect(result.yearNav).toBe(1.0);
   });
 });

@@ -3,7 +3,7 @@
  *
  * 路由前缀：/api/portfolios
  *
- * GET /api/portfolios/summary — 多组合对比摘要
+ * GET /api/portfolios/comparison — 多组合对比摘要
  */
 
 import { Controller, Get } from '@nestjs/common';
@@ -18,7 +18,7 @@ import type { AuthenticatedUser } from '../../common/decorators/current-user.dec
 export class PortfolioSummaryController {
   constructor(private readonly queryEnhanced: QueryServiceEnhanced) {}
 
-  @Get('summary')
+  @Get('comparison')
   @ApiOperation({ summary: '多组合对比摘要' })
   async getMultiPortfolioSummary(@CurrentUser() user: AuthenticatedUser) {
     return this.queryEnhanced.getMultiPortfolioSummary(user.userId);

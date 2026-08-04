@@ -1,18 +1,18 @@
+ï»¿# ===========================================================================
+# å¼€å‘ç¯å¢ƒåˆå§‹åŒ–è„šæœ¬
 # ===========================================================================
-# ¿ª·¢»·¾³³õÊ¼»¯½Å±¾
-# ===========================================================================
-# ÓÃ·¨£ºÔÚ PowerShell ÖĞÔËĞĞ  . .\dev-env.ps1
-#   £¨×¢ÒâÇ°ÃæµÄ µã+¿Õ¸ñ£¬±íÊ¾ÔÚµ±Ç°ÖÕ¶Ë»á»°ÖĞÖ´ĞĞ£¬ÉèÖÃ»·¾³±äÁ¿£©
+# ç”¨æ³•ï¼šåœ¨ PowerShell ä¸­è¿è¡Œ  . .\dev-env.ps1
+#   ï¼ˆæ³¨æ„å‰é¢çš„ ç‚¹+ç©ºæ ¼ï¼Œè¡¨ç¤ºåœ¨å½“å‰ç»ˆç«¯ä¼šè¯ä¸­æ‰§è¡Œï¼Œè®¾ç½®ç¯å¢ƒå˜é‡ï¼‰
 #
-# ×÷ÓÃ£º
-#   1. °Ñ WorkBuddy managed node ¼ÓÈë PATH£¨Ê¹ pnpm/node ¿ÉÓÃ£©
-#   2. Çå³ı NODE_OPTIONS£¨ÈÆ¹ı°²È«¹³×Ó¶Ô pnpm µÄÀ¹½Ø£©
+# ä½œç”¨ï¼š
+#   1. æŠŠ WorkBuddy managed node åŠ å…¥ PATHï¼ˆä½¿ pnpm/node å¯ç”¨ï¼‰
+#   2. æ¸…é™¤ NODE_OPTIONSï¼ˆç»•è¿‡å®‰å…¨é’©å­å¯¹ pnpm çš„æ‹¦æˆªï¼‰
 # ===========================================================================
 
 $nodePath = "C:\Users\dolphin738\.workbuddy\binaries\node\versions\22.22.2"
 
 if (-not (Test-Path "$nodePath\node.exe")) {
-    Write-Host " Î´ÕÒµ½ Node.js£º$nodePath\node.exe" -ForegroundColor Red
+    Write-Host " æœªæ‰¾åˆ° Node.jsï¼š$nodePath\node.exe" -ForegroundColor Red
     return
 }
 
@@ -21,19 +21,19 @@ $env:NODE_OPTIONS = $null
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "  ¿ª·¢»·¾³ÒÑ³õÊ¼»¯" -ForegroundColor Green
+Write-Host "  å¼€å‘ç¯å¢ƒå·²åˆå§‹åŒ–" -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  Node : $(node -v)"
 Write-Host "  pnpm : $(pnpm -v)"
-Write-Host "  Ä¿Â¼ : $(Get-Location)"
+Write-Host "  ç›®å½• : $(Get-Location)"
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "³£ÓÃÃüÁî£º" -ForegroundColor Yellow
-Write-Host "  pnpm install        °²×°ÒÀÀµ"
-Write-Host "  pnpm db:format      ¸ñÊ½»¯ Prisma schema"
-Write-Host "  pnpm db:generate    Éú³É Prisma Client"
-Write-Host "  pnpm db:migrate     Ö´ĞĞÊı¾İ¿âÇ¨ÒÆ"
-Write-Host "  pnpm db:seed        Ìî³äÖÖ×ÓÊı¾İ"
-Write-Host "  pnpm dev:backend    Æô¶¯ºó¶Ë (NestJS)"
-Write-Host "  pnpm dev:web        Æô¶¯Ç°¶Ë (Vite)"
+Write-Host "å¸¸ç”¨å‘½ä»¤ï¼š" -ForegroundColor Yellow
+Write-Host "  pnpm install        å®‰è£…ä¾èµ–"
+Write-Host "  pnpm db:format      æ ¼å¼åŒ– Prisma schema"
+Write-Host "  pnpm db:generate    ç”Ÿæˆ Prisma Client"
+Write-Host "  pnpm db:migrate     æ‰§è¡Œæ•°æ®åº“è¿ç§»"
+Write-Host "  pnpm db:seed        å¡«å……ç§å­æ•°æ®"
+Write-Host "  pnpm dev:backend    å¯åŠ¨åç«¯ (NestJS)"
+Write-Host "  pnpm dev:web        å¯åŠ¨å‰ç«¯ (Vite)"
 Write-Host ""

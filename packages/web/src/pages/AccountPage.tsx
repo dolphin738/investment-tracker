@@ -49,6 +49,7 @@ import { UserAvatar } from '@/components/user-avatar';
 import { PortfolioDialog } from '@/features/portfolio/portfolio-dialog';
 import { useAuthStore } from '@/stores/auth.store';
 import { usePortfolioStore } from '@/stores/portfolio.store';
+import { usePreferenceStore } from '@/stores/preference.store';
 import { useProfile } from '@/hooks/use-auth';
 import { getAccountStats } from '@/api/account.api';
 import { getPortfoliosSummary } from '@/api/overview.api';
@@ -95,6 +96,11 @@ export default function AccountPage(): JSX.Element {
   const profile = useProfile();
   const setCurrentPortfolio = usePortfolioStore((s) => s.setCurrentPortfolio);
   const currentPortfolioId = usePortfolioStore((s) => s.currentPortfolioId);
+  const getPreference = usePreferenceStore((s) => s.getPreference);
+  const navDecimals = getPreference('navDecimals');
+  const xirrDecimals = getPreference('xirrDecimals');
+  const amountThousands = getPreference('amountThousands');
+  const amountAbbrev = getPreference('amountAbbrev');
 
   /** [+新建组合]：复用设置页同款 PortfolioDialog，保持创建体验一致 */
   const [creating, setCreating] = useState<boolean>(false);
@@ -275,20 +281,20 @@ export default function AccountPage(): JSX.Element {
                   <div>
                     <p className="text-xs text-muted-foreground">合计总资产</p>
                     <p className="text-xl font-bold tabular-nums">
-                      ¥{formatCurrency(totalAsset)}
+                      {formatCurrency(totalAsset, 2, { thousands: amountThousands, abbreviate: amountAbbrev })}
                     </p>
                   </div>
                   <div>
                     <p className="text-xs text-muted-foreground">合计净投入</p>
                     <p className="text-xl font-bold tabular-nums">
-                      ¥{formatCurrency(totalNetInvested)}
+                      {formatCurrency(totalNetInvested, 2, { thousands: amountThousands, abbreviate: amountAbbrev })}
                     </p>
                   </div>
                   <div>
                     <p className="text-xs text-muted-foreground">合计浮动盈亏</p>
                     <p className="text-xl font-bold tabular-nums">
                       {totalFloatingProfit != null
-                        ? `¥${formatCurrency(totalFloatingProfit)}`
+                        ? formatCurrency(totalFloatingProfit, 2, { thousands: amountThousands, abbreviate: amountAbbrev })
                         : NO_DATA}
                     </p>
                   </div>
@@ -442,12 +448,12 @@ export default function AccountPage(): JSX.Element {
                         </TableCell>
                         <TableCell className="text-sm">{p.currency}</TableCell>
                         <TableCell className="text-right tabular-nums">
-                          ¥{formatCurrency(p.totalAsset || '0')}
+                          {formatCurrency(p.totalAsset || '0', 2, { thousands: amountThousands, abbreviate: amountAbbrev })}
                         </TableCell>
                         {/* 净值：累计净值，6 位小数字符串；null = 尚无 DailyNav */}
                         <TableCell className="text-right tabular-nums text-muted-foreground">
                           {p.cumulativeNav != null
-                            ? formatDecimal(p.cumulativeNav)
+                            ? formatDecimal(p.cumulativeNav, navDecimals)
                             : NO_DATA}
                         </TableCell>
                         {/* 当年%：后端给比率（0.0523 = 5.23%），formatPercent 内部 ×100；正负着色按比率符号 */}
@@ -461,7 +467,7 @@ export default function AccountPage(): JSX.Element {
                           }
                         >
                           {p.yearReturnRate != null
-                            ? formatPercent(p.yearReturnRate)
+                            ? formatPercent(p.yearReturnRate, 2, { decimals: xirrDecimals })
                             : NO_DATA}
                         </TableCell>
                         <TableCell className="font-mono text-sm">

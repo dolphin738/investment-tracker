@@ -87,6 +87,14 @@ graph TB
 ├── pnpm-workspace.yaml             # pnpm monorepo 工作区声明
 ├── tsconfig.base.json              # TypeScript 共享基础配置
 ├── turbo.json                      # Turborepo 构建编排（可选加速）
+├── .gitattributes                  # Git 属性（换行符 / 二进制标记等）
+├── .github/
+│   └── workflows/
+│       └── ci.yml                  # CI 流水线
+├── scripts/                        # 仓库辅助脚本
+│   ├── push-all.ps1                # Windows 一键推送
+│   ├── push-all.sh                 # Unix 一键推送
+│   └── dev-env.ps1                 # 开发环境初始化
 ├── docs/
 │   ├── PRD.md
 │   ├── ARCHITECTURE.md             # 本文件
@@ -99,24 +107,14 @@ graph TB
 │   │   ├── tsconfig.json
 │   │   └── src/
 │   │       ├── index.ts            # 统一导出
-│   │       ├── types/              # 核心数据类型定义
-│   │       │   ├── transaction.ts
-│   │       │   ├── portfolio.ts
-│   │       │   ├── snapshot.ts
-│   │       │   ├── nav.ts
-│   │       │   ├── xirr.ts
-│   │       │   ├── user.ts
-│   │       │   └── common.ts       # 通用类型（分页、API 响应信封等）
-│   │       ├── enums/              # 枚举定义
-│   │       │   ├── transaction-type.ts
-│   │       │   └── query-granularity.ts
-│   │       └── api-contracts/      # API 请求/响应契约
-│   │           ├── auth.contract.ts
-│   │           ├── portfolio.contract.ts
-│   │           ├── transaction.contract.ts
-│   │           ├── snapshot.contract.ts
-│   │           ├── nav.contract.ts
-│   │           └── xirr.contract.ts
+│   │       ├── types.ts            # 类型汇总（re-export types/ 下各文件）
+│   │       ├── enums.ts            # 枚举汇总（CashFlowType / SecuritySide / SnapshotSource 等）
+│   │       ├── api-contracts.ts    # API 请求/响应契约汇总
+│   │       └── types/              # 核心数据类型定义（13 个类型文件）
+│   ├── finance-core/               # 零依赖纯金融算法库（XIRR / NAV 等纯函数，backend 依赖它）
+│   │   ├── package.json
+│   │   ├── tsconfig.json
+│   │   └── src/
 │   ├── backend/                    # NestJS 后端
 │   │   ├── package.json
 │   │   ├── tsconfig.json
@@ -140,13 +138,13 @@ graph TB
 │   │       │   │   └── jwt-auth.guard.ts
 │   │       │   ├── filters/
 │   │       │   │   └── http-exception.filter.ts
-│   │       │   ├── interceptors/
-│   │       │   │   └── transform.interceptor.ts  # 统一响应信封
 │   │       │   ├── pipes/
 │   │       │   │   └── validation.pipe.ts
-│   │       │   └── dto/
-│   │       │       ├── pagination.dto.ts
-│   │       │       └── date-range.dto.ts
+│   │       │   ├── dto/
+│   │       │   │   ├── pagination.dto.ts
+│   │       │   │   └── date-range.dto.ts
+│   │       │   └── utils/
+│   │       │       └── app-date.util.ts     # todayInAppTz / parseAppDate（UTC+8 感知）
 │   │       └── modules/
 │   │           ├── auth/           # 认证模块
 │   │           │   ├── auth.module.ts
@@ -177,19 +175,21 @@ graph TB
 │   │           │   └── dto/
 │   │           │       ├── create-snapshot.dto.ts
 │   │           │       └── update-snapshot.dto.ts
-│   │           ├── calculation/    # 计算引擎模块（核心）
+│   │           ├── calculation/    # 计算引擎模块（单日 NAV→XIRR 叶子单元）
 │   │           │   ├── calculation.module.ts
-│   │           │   ├── calculation.service.ts     # 编排：快照→净值→XIRR
+│   │           │   ├── calculation.service.ts     # 单日编排：快照→净值→XIRR
 │   │           │   ├── xirr.service.ts            # XIRR Newton-Raphson 实现
-│   │           │   ├── nav.service.ts             # 净值份额法实现
-│   │           │   └── recalculation.service.ts   # 批量重算
+│   │           │   └── nav.service.ts             # 净值份额法实现
+│   │           ├── recalculation/  # 区间重建模块（T1~T4 区间重建 + T5 级联 + recalculateAll）
+│   │           │   ├── recalculation.module.ts
+│   │           │   └── recalculation.service.ts   # 唯一区间重建实现（CalculationModule 不再导出）
 │   │           └── query/          # 查询聚合模块
 │   │               ├── query.module.ts
 │   │               ├── query.controller.ts        # XIRR/净值 四维度查询
 │   │               ├── query.service.ts           # 聚合逻辑（期末值/均值）
 │   │               └── dto/
 │   │                   └── query.dto.ts
-│   ├── web/                        # Web 前端
+│   └── web/                        # Web 前端
 │   │   ├── package.json
 │   │   ├── tsconfig.json
 │   │   ├── tsconfig.node.json
@@ -268,60 +268,6 @@ graph TB
 │   │           ├── analysis-nav.page.tsx
 │   │           ├── settings.page.tsx
 │   │           └── not-found.page.tsx
-│   └── harmonyos/                  # HarmonyOS APP
-│       ├── build-profile.json5     # DevEco Studio 构建配置
-│       ├── oh-package.json5        # 鸿蒙依赖管理
-│       └── entry/
-│           ├── src/
-│           │   └── main/
-│           │       ├── module.json5        # 模块配置
-│           │       ├── resources/          # 资源文件（字符串/颜色/图片）
-│           │       └── ets/
-│           │           ├── entryability/
-│           │           │   └── EntryAbility.ets   # 入口 Ability
-│           │           ├── pages/
-│           │           │   ├── IndexPage.ets       # Dashboard 首页
-│           │           │   ├── TransactionPage.ets # 交易录入
-│           │           │   ├── SnapshotPage.ets    # 快照录入
-│           │           │   ├── XirrAnalysisPage.ets # XIRR 分析
-│           │           │   ├── NavAnalysisPage.ets  # 净值分析
-│           │           │   ├── PortfolioPage.ets    # 组合管理
-│           │           │   ├── LoginPage.ets        # 登录
-│           │           │   └── SettingsPage.ets     # 设置
-│           │           ├── components/
-│           │           │   ├── StatCard.ets         # 指标卡片
-│           │           │   ├── LineChart.ets        # 折线图（Canvas 自绘）
-│           │           │   ├── BarChart.ets         # 柱状图（Canvas 自绘）
-│           │           │   ├── TransactionList.ets  # 交易列表
-│           │           │   ├── SnapshotForm.ets     # 快照表单
-│           │           │   ├── TransactionForm.ets  # 交易表单
-│           │           │   ├── DatePicker.ets       # 日期选择器
-│           │           │   └── NavRouter.ets        # 底部导航栏
-│           │           ├── model/
-│           │           │   ├── Transaction.ets
-│           │           │   ├── Portfolio.ets
-│           │           │   ├── Snapshot.ets
-│           │           │   ├── NavRecord.ets
-│           │           │   ├── XirrRecord.ets
-│           │           │   └── ApiResponse.ets
-│           │           ├── network/
-│           │           │   ├── HttpClient.ets       # @ohos.net.http 封装
-│           │           │   ├── ApiConfig.ets        # API 基址配置
-│           │           │   ├── AuthApi.ets          # 认证接口
-│           │           │   ├── PortfolioApi.ets
-│           │           │   ├── TransactionApi.ets
-│           │           │   ├── SnapshotApi.ets
-│           │           │   ├── NavApi.ets
-│           │           │   └── XirrApi.ets
-│           │           ├── store/
-│           │           │   ├── AppStore.ets         # 全局状态（@Observed）
-│           │           │   ├── AuthStore.ets        # 认证状态 + Token
-│           │           │   └── PortfolioStore.ets   # 当前组合状态
-│           │           └── utils/
-│           │               ├── DateUtils.ets
-│           │               ├── FormatUtils.ets      # 金额/百分比格式化
-│           │               └── ChartUtils.ets       # Canvas 图表绘制工具
-│           └── build-profile.json5
 ```
 
 ---
@@ -342,7 +288,7 @@ graph TB
 | **Web 表单** | React Hook Form + Zod | RHF ^7.51 + Zod ^3.23 | ✅ 确认 | RHF 性能优秀，Zod schema 可前后端共享校验 |
 | **Web 路由** | React Router | ^6.22 | ✅ 确认 | React 生态标准路由 |
 | **Web HTTP** | Axios | ^1.6 | ✅ 确认 | 拦截器机制适合统一注入 JWT + 错误处理 |
-| **APP 语言** | ArkTS | HarmonyOS API 12+ | ✅ 确认 | 鸿蒙官方语言，TypeScript 超集 |
+| **APP 语言** | ArkTS | HarmonyOS API 12+ | ✅ 确认（P2，`packages/harmonyos` 已移除） | 鸿蒙官方语言，TypeScript 超集 |
 | **APP UI** | ArkUI | API 12+ | ✅ 确认 | 声明式 UI，鸿蒙原生 |
 | **APP 图表** | Canvas 自绘（折线/柱状）+ WebView+ECharts（热力图） | — | ✅ **推荐** | 鸿蒙三方图表库生态不成熟（`@ohos/mpchart` 兼容性存疑），Canvas API 稳定可靠。折线/柱状自绘约 200 行/组件；月度热力图较复杂，用 WebView 嵌入 ECharts HTML 更高效。v1 仅做折线/柱状自绘，热力图列入 P1 |
 | **APP 网络** | @ohos.net.http | API 12+ | ✅ 确认 | 鸿蒙官方 HTTP 模块 |
@@ -352,6 +298,7 @@ graph TB
 | **Web 测试** | Vitest + React Testing Library | Vitest ^1.6 + RTL ^15 | ✅ 确认 | Vite 原生测试，快速 |
 | **仓库结构** | pnpm monorepo | pnpm ^9 | ✅ 确认 | 磁盘高效，workspace 协议支持共享包 |
 | **构建编排** | Turborepo | ^2.0 | ✅ **新增**（可选） | 加速 monorepo 构建缓存，非必须但提升 DX |
+| **金融算法库** | finance-core（内部包） | — | ✅ **新增** | 零依赖纯金融算法库（XIRR / NAV 等纯函数），`packages/finance-core`，backend 依赖它 |
 
 ---
 
@@ -708,7 +655,7 @@ User (1) ──< Portfolio (N)
 
 > **读取语义**：无记录的自然日按**前值填充**（取前一个有记录日的 `totalAsset`，无需判断来源）；`GET` 响应中 `marketValue`/`cashBalance` 为拆解项，`null` 表示未拆解（Q-B15 选填）。
 > **手工记录校验**：`totalAsset ≥ 0`；`marketValue`/`cashBalance` 选填；`note` 强提示；不允许未来日期。
-> 🔴 **写操作的级联义务（T5，见 §7.3.1 / §8.1 / REG-06）**：`POST` / `PATCH` / `DELETE` / `reset` 四个写接口**均须**在同一事务内调用 `recalculateNavRange(portfolioId, date)`，重算 `[date, today]` 的 `daily_nav` / `daily_xirr`。**快照层只动当日那一行，计算层必须级联至今日** —— 漏做即产生「改了历史总资产但其后净值/XIRR 不变」的静默数据错误。四个接口的响应体统一附加 `meta.recalculatedDays: number`，供前端 toast 反馈「已重算 N 天」（`SNAP-P0-06` 验收 4 / `SNAP-P0-07` 验收 5）。
+> 🔴 **写操作的级联义务（T5，见 §7.3.1 / §8.1 / REG-06）**：`POST` / `PATCH` / `DELETE` / `reset` 四个写接口**均须**在完成快照层写入后调用 `recalculateNavRange(portfolioId, date)`，重算 `[date, today]` 的 `daily_nav` / `daily_xirr`。**快照层只动当日那一行，计算层必须级联至今日** —— 漏做即产生「改了历史总资产但其后净值/XIRR 不变」的静默数据错误。四个接口的响应体统一附加 `meta.recalculatedDays: number`，供前端 toast 反馈「已重算 N 天」（`SNAP-P0-06` 验收 4 / `SNAP-P0-07` 验收 5）。🔴 **写快照与级联未包在同一事务内**（交互式事务超时风险），以 `recalculateNavRange` 末尾抛聚合错误作为安全网（C6，见 §7.3.2）。
 
 #### 4.2.5 标的管理（`/securities`）
 
@@ -765,7 +712,7 @@ User (1) ──< Portfolio (N)
 | Method | Path | 说明 | 请求参数 | 响应 data |
 |--------|------|------|---------|-----------|
 | GET | `/api/portfolios/:portfolioId/overview` | 核心指标 + 趋势（一屏） | `?range` | `OverviewDTO`（当前总资产/累计XIRR/当年XIRR/净值序列片段/近期出入金） |
-| GET | `/api/portfolios/summary` | 多组合对比摘要（一次查询） | — | `PortfolioSummary[]` |
+| GET | `/api/portfolios/comparison` | 多组合对比摘要（一次查询） | — | `PortfolioSummary[]` |
 
 #### 4.2.11 XIRR 查询（四维度）
 
@@ -805,7 +752,8 @@ User (1) ──< Portfolio (N)
 
 | Method | Path | 说明 | 请求体 | 响应 data |
 |--------|------|------|--------|-----------|
-| POST | `/api/portfolios/:portfolioId/recalculate` | 手动触发批量重算 | `{ startDate, endDate? }` | `{ affectedDates: number, duration: number }` |
+| POST | `/api/portfolios/:portfolioId/recalculate-range` | 区间重算（带 startDate/endDate） | `{ startDate, endDate? }` | `{ affectedDates: number, duration: number }` |
+| POST | `/api/portfolios/:id/recalculate` | 全量重算（从成立日起） | — | `{ affectedDates: number, duration: number }` |
 
 #### 4.2.14 统计摘要（Dashboard 卡片）
 
@@ -1046,7 +994,7 @@ export interface PortfolioSummary {
 > 🔴 **时序图已外移至独立文件**：完整方案B 时序图（方案B 全量主链路）见 **[`docs/diagrams/sequence-diagram.mermaid`](./diagrams/sequence-diagram.mermaid)**，包含两条主链路：
 
 - **流程 A — 录入证券买卖 → 持仓推导 → 派生落库 → NAV/XIRR 级联**：`RecalculationService.recalculateRange` → `AssetValuationService.persistDerived`（调用 `HoldingDerivationService` 回放 `SecurityTrade` 推导持仓市值 + 读 `CashBalance` 独立余额）→ 写 `asset_snapshots`（`ON CONFLICT(portfolioId,date) WHERE source='DERIVED'`，不覆盖 MANUAL）→ 同事务顺序算 `DailyNav` → `DailyXirr`（`xirrValue DECIMAL(20,8)`）。
-- **流程 B — 手工覆盖 / 重置 双路径（T5）**：`upsertManual` 无条件覆盖（含原 DERIVED 行，手工优先 REG-03）；`resetToDerived` = `computeDerived(date)` → **原地 upsert 覆盖**该行、`source` 置回 DERIVED（REG-04，🔴 **不是** DELETE + `persistDerived`，见 §8.1）。🔴 **两者及删除路径写完快照后，必须在同一事务内调用 `recalculateNavRange(portfolioId, date)` 完成 `[date, today]` 的 NAV/XIRR 级联**（快照层仅当日、计算层级联至今日，见 §7.3.1 T5 / REG-06）。
+- **流程 B — 手工覆盖 / 重置 双路径（T5）**：`upsertManual` 无条件覆盖（含原 DERIVED 行，手工优先 REG-03）；`resetToDerived` = `computeDerived(date)` → **原地 upsert 覆盖**该行、`source` 置回 DERIVED（REG-04，🔴 **不是** DELETE + `persistDerived`，见 §8.1）。🔴 **两者及删除路径写完快照后，必须调用 `recalculateNavRange(portfolioId, date)` 完成 `[date, today]` 的 NAV/XIRR 级联**（快照层仅当日、计算层级联至今日，见 §7.3.1 T5 / REG-06）。**写快照与级联未包在同一事务内**（交互式事务超时风险），以 `recalculateNavRange` 末尾抛聚合错误兜底（C6，见 §7.3.2 / §8.1）。
 - **区间重建**：`DELETE ... AND source='DERIVED'` + `INSERT ... ON CONFLICT DO NOTHING` 双保险；**快照重派生**用「事件日集合」（出入金/买卖/现价/余额 ∪ 区间端点），**NAV/XIRR 级联**用「快照日期集合」（`SELECT DISTINCT date FROM asset_snapshots`，含手工记录日）+ 读前值填充 + 惰性补齐（§7.3.2）。
 
 > 旧四流程（快照触发 / 交易触发 / 查询聚合 / 历史修改重算）的语义已吸收进上述主链路与 §7.3 五类触发，不再单列。
@@ -1321,7 +1269,8 @@ export class NavService {
 #### 7.3.2 区间重建（核心算法）
 
 ```typescript
-// packages/backend/src/modules/calculation/recalculation.service.ts
+// packages/backend/src/modules/recalculation/recalculation.service.ts
+// todayInAppTz / parseAppDate 统一从 common/utils/app-date.util.ts 导入（UTC+8 感知）
 
 /**
  * T1~T4 入口：快照区间重建 + NAV/XIRR 级联
@@ -1359,8 +1308,17 @@ async recalculateNavRange(portfolioId: string, start: Date, end?: Date): Promise
        AND date BETWEEN ${start} AND ${until}
      ORDER BY date ASC`;                                   // 升序，不可乱序、不可并行
   // 同事务、同顺序：NAV → XIRR（当日份额依赖前日份额，§7.2）
+  // C6：逐日尝试，末尾若有失败则抛聚合错误（不再静默吞掉返回成功）
+  const failures: string[] = [];
   for (const d of navDates) {
-    await this.calculation.triggerCalculation(portfolioId, d); // nav → xirr
+    try {
+      await this.calculation.triggerCalculation(portfolioId, d); // nav → xirr
+    } catch (err) {
+      failures.push(`${d.toISOString().slice(0,10)}: ${err.message}`);
+    }
+  }
+  if (failures.length > 0) {
+    throw new Error(`recalculateNavRange 部分日期失败:\n${failures.join('\n')}`);
   }
   return navDates.length;
 }
@@ -1381,7 +1339,7 @@ async recalculateNavRange(portfolioId: string, start: Date, end?: Date): Promise
 #### 7.3.3 约束（C-11 / C-12）
 
 - **C-11**：任何业务代码**严禁绕过 `AssetValuationService` 直写 `asset_snapshots`**；所有 DERIVED 写入走 `persistDerived`，所有手工路径走 `upsertManual` / `deleteRecord` / `resetToDerived`（§8.1）。
-- **C-13**（🆕 v2.1）：`asset_snapshots` 的**任何**写操作（含手工三路径）**必须**在同一事务内触发计算层级联 —— T1~T4 经 `recalculateRange`、T5 经 `recalculateNavRange`，范围终点一律为 today。**严禁只写快照不重算净值**（REG-06 门禁）。
+- **C-13**（🆕 v2.1）：`asset_snapshots` 的**任何**写操作（含手工三路径）**必须**在完成快照写入后触发计算层级联 —— T1~T4 经 `recalculateRange`、T5 经 `recalculateNavRange`，范围终点一律为 today。**严禁只写快照不重算净值**（REG-06 门禁）。🔴 **写快照与级联未包在同一事务内**（交互式事务超时风险），以 `recalculateNavRange` 末尾抛聚合错误兜底（C6，见 §7.3.2 / §8.1）。
 - **C-12**：读路径（`getSnapshot` / 查询 API）**严禁依赖 `source` 字段做分支**；每日唯一一行即权威值，前值填充只看 `date`。
 
 ---
@@ -1397,7 +1355,7 @@ async recalculateNavRange(portfolioId: string, start: Date, end?: Date): Promise
 | `computeDerived(portfolioId, date)` | ❌ 纯计算 | 返回 `{ totalAsset, marketValue, cashBalance, valuationFlag }`，**不写库**。是「系统本应算出多少」的唯一来源（差异提示、`↺ 重置`、汇总统计均依赖它） | 无（无副作用） |
 | `persistDerived(portfolioId, dateRange)` | ✅ 落库 | 逐事件日 upsert `DERIVED` 记录；遇当日 `MANUAL` **跳过、不覆盖、不新增** | 由 `recalculateRange` 统一编排（§7.3.2） |
 | `upsertManual(portfolioId, date, payload)` | ✅ 落库 | **无条件覆盖**当日行，`source` 改写为 `MANUAL`、`valuationFlag='MANUAL_INPUT'` | 🔴 **必须** `recalculateNavRange(portfolioId, date)` → `[date, today]` |
-| `deleteRecord(portfolioId, date)` | ✅ 落库 | 物理删除当日行。删除后若 `date` ∈ 事件日集合 → 立即 `persistDerived(date)` 回填 DERIVED；否则该日留空、读取时前值填充（`Q-B17`） | 🔴 **必须** `recalculateNavRange(portfolioId, date)` → `[date, today]` |
+| `deleteRecord(portfolioId, date)` | ✅ 落库 | **事务内三删**（C5/C7）：物理删除当日 `asset_snapshots` + `daily_nav` + `daily_xirr` 行（`prisma.$transaction`，避免幽灵 `prevNav`）。删除后若 `date` ∈ 事件日集合 → 立即 `persistDerived(date)` 回填 DERIVED；否则该日留空、读取时前值填充（`Q-B17`） | 🔴 **必须** `recalculateNavRange(portfolioId, date)` → `[date, today]`（三删与级联未包在同一事务内，见 §8.1 说明） |
 | `resetToDerived(portfolioId, date)` | ✅ 落库 | 「↺ 重置为自动值」：`computeDerived(date)` → **upsert 原地覆盖该行**，`source` 置回 `DERIVED`、`valuationFlag` 置回计算结果、清空手工 `note`。🔴 **不是 DELETE + persistDerived**（PRD `SNAP-P0-07` 验收 1 明示「不是删除操作」；若该日非事件日，先删再派生会导致该行彻底消失） | 🔴 **必须** `recalculateNavRange(portfolioId, date)` → `[date, today]` |
 
 > 🔴 **手工三路径（`upsertManual` / `deleteRecord` / `resetToDerived`）的级联义务（T5，见 §7.3.1）**
@@ -1407,9 +1365,11 @@ async recalculateNavRange(portfolioId: string, start: Date, end?: Date): Promise
 > | 快照层 `asset_snapshots` | 只写/删**当日那一行**，不做 `DELETE … source='DERIVED'` 区间重建 | **仅当日** |
 > | 计算层 `daily_nav` / `daily_xirr` | 逐日重算（升序、同事务） | **`[date, today]`，即自该日级联至今日** |
 >
-> 三个函数**必须在同一事务内**先完成快照层写入、再调用 `recalculateNavRange(portfolioId, date)`；任一路径漏调 = REG-06 失败 = 交付阻塞（§13）。
+> 三个函数必须先完成快照层写入、再调用 `recalculateNavRange(portfolioId, date)`；任一路径漏调 = REG-06 失败 = 交付阻塞（§13）。🔴 **写快照与级联未包在同一事务内**（交互式事务超时风险），以 `recalculateNavRange` 末尾抛聚合错误作为安全网（C6，见 §7.3.2）。对比：`security-price` / `cash-balance` 的 `deleteMany`+`create` 以及 `deleteRecord` 的三删（快照 + `daily_nav` + `daily_xirr`）已事务化（`prisma.$transaction`）。
 > Controller 层不得自行拼装级联逻辑，级联入口唯一收敛在 `RecalculationService`（与 §7.3 统一入口约定一致）。
 > API 契约对应：`POST /snapshots`（`SNAP-P0-06` 验收 4）、`DELETE /snapshots/:id`（验收 5）、`POST /snapshots/:date/reset`（`SNAP-P0-07` 验收 5）三者均要求「触发 `[date, today]` 重算并 toast 反馈已重算 N 天」。
+>
+> 🔴 **改日期时的级联起点（C5）**：`PATCH /snapshots/:id` 若修改了日期（旧日期 → 新日期），`recalculateNavRange` 起点取 `min(旧日期, 新日期)`，而非仅从新日期起（避免旧日期残留陈旧 `daily_nav`/`daily_xirr`）。
 
 ### 8.2 写入 SQL 模板（双保险）
 
@@ -1616,7 +1576,7 @@ ON CONFLICT (portfolio_id, date) DO UPDATE
 | **REG-03** | 手工覆盖自动且仍只有一条 | `upsertManual()` 走 `ON CONFLICT` 原地覆盖，`source` 改 `MANUAL`，记录数恒为 1（§8.1 / §8） |
 | **REG-04** | 重置可完整回退到派生值 | `computeDerived(date)` 纯计算不落库 → `resetToDerived()` upsert 覆盖，`source` 置回 `DERIVED`（§8.1 / SNAP-P0-07） |
 | **REG-05** | 每日唯一全局不变量 | `UNIQUE(portfolio_id, date)` 不含 `source`；每条用例结束执行 `INV-1`（`SELECT … HAVING COUNT(*)>1` 返回 0 行）。并发场景手工/重建交叉 ≥50 次仍 `COUNT(*)≤1` |
-| 🆕 **REG-06** | **手工修改历史日期后，其后所有日期的净值 / XIRR 已更新**（计算层级联，防静默数据错误） | `upsertManual()` / `deleteRecord()` / `resetToDerived()` 三条手工路径**均须**在同一事务内调用 `RecalculationService.recalculateNavRange(portfolioId, date)`（§8.1 / §7.3.2）。**代码级断言：三条路径任一未调用即判失败**。单测：`snapshot.service` × 3 路径 + `recalculation.service.recalculateNavRange` |
+| 🆕 **REG-06** | **手工修改历史日期后，其后所有日期的净值 / XIRR 已更新**（计算层级联，防静默数据错误） | `upsertManual()` / `deleteRecord()` / `resetToDerived()` 三条手工路径**均须**在完成快照层写入后调用 `RecalculationService.recalculateNavRange(portfolioId, date)`（§8.1 / §7.3.2）。🔴 **写快照与级联未包在同一事务内**（交互式事务超时风险），以 `recalculateNavRange` 末尾抛聚合错误作为安全网（C6，见 §7.3.2）。**代码级断言：三条路径任一未调用即判失败**。单测：`snapshot.service` × 3 路径 + `recalculation.service.recalculateNavRange` |
 
 **REG-06 回归步骤与断言**
 
@@ -1673,7 +1633,7 @@ graph LR
 | **任务名称** | 实现 Auth + Portfolio + CashFlow（/cashflows）+ Security + SecurityTrade + SecurityPrice + CashBalance + Snapshot 完整 CRUD（含数据隔离与触发重算钩子） |
 | **优先级** | P0 |
 | **依赖** | T01 |
-| **涉及文件** | `packages/backend/src/common/**`（decorators/guards/filters/interceptors/dto）、`packages/backend/src/modules/auth/**`、`portfolio/**`、`cashflow/**`（原 transaction）、`security/**`、`security-trade/**`、`security-price/**`、`cash-balance/**`、`snapshot/**` |
+| **涉及文件** | `packages/backend/src/common/**`（decorators/guards/filters/pipes/dto/utils）、`packages/backend/src/modules/auth/**`、`portfolio/**`、`cashflow/**`（原 transaction）、`security/**`、`security-trade/**`、`security-price/**`、`cash-balance/**`、`snapshot/**` |
 | **交付标准** | ① 注册/登录返回 JWT ② JWT 守卫生效 ③ 数据隔离（user_id 过滤）④ 组合 CRUD ⑤ 七类资源 CRUD 完整，snapshot 走 `upsertManual`/`persistDerived` 语义 ⑥ 全局异常过滤器 + 响应信封 ⑦ Swagger 可访问 |
 
 ### T03: 计算引擎 + 派生层 + 查询 API
@@ -1683,7 +1643,7 @@ graph LR
 | **任务名称** | 实现 XIRR + 净值（金融算法冻结）+ `asset-valuation.service`（computeDerived / persistDerived / upsertManual / deleteRecord / resetToDerived）+ `recalculation.service`（五类触发统一入口、区间重建双保险、`recalculateRange` + `recalculateNavRange` 两个入口）+ 四维度查询聚合 API |
 | **优先级** | P0 |
 | **依赖** | T01 |
-| **涉及文件** | `packages/backend/src/modules/calculation/{calculation.service,xirr.service,nav.service,recalculation.service}.ts`、`modules/valuation/asset-valuation.service.ts`、`modules/query/{query.controller,query.service,query.dto}.ts`、对应 `.module.ts` |
+| **涉及文件** | `packages/backend/src/modules/calculation/{calculation.service,xirr.service,nav.service}.ts`、`modules/recalculation/{recalculation.module,recalculation.service}.ts`、`modules/valuation/asset-valuation.service.ts`、`modules/query/{query.controller,query.service,query.dto}.ts`、对应 `.module.ts` |
 | **交付标准** | ① XIRR Newton-Raphson 正确收敛（r₀=0.1/maxIter=100/tol=1e-7/rate≤-0.999 钳制/全同号返回 null）② 净值份额法（成立日=1.0，当年首日重置）③ `computeDerived` 纯计算不落库、`persistDerived` 遇 MANUAL 跳过 ④ T1~T4 经 `recalculateRange` 触发区间重建（`DELETE … AND source='DERIVED'` + `INSERT … ON CONFLICT DO NOTHING`）；🔴 **T5 手工三路径经 `recalculateNavRange` 只做计算层 `[date, today]` 级联、不重建 DERIVED**（§7.3.1 / §8.1）⑤ NAV/XIRR 级联的日期集合取自「快照日期集合」而非「事件日集合」⑥ 四维度查询聚合正确 ⑦ 单测覆盖核心计算 + **REG-01~06**（REG-06 为计算层级联门禁） |
 
 ### T04: Web 前端完整实现
@@ -1806,24 +1766,9 @@ graph LR
 }
 ```
 
-### 15.6 HarmonyOS oh-package.json5
+### 15.6 HarmonyOS oh-package.json5（已移除）
 
-```json5
-{
-  "name": "investment_tracker_app",
-  "version": "1.0.0",
-  "description": "投资收益统计 HarmonyOS APP",
-  "main": "",
-  "author": "",
-  "license": "ISC",
-  "dependencies": {
-    // 鸿蒙系统模块通过 import 引入，无需在 oh-package 中声明
-  },
-  "devDependencies": {
-    "@ohos/hypium": "1.0.6"
-  }
-}
-```
+> `packages/harmonyos` 已删除（P2 降级，见 §18 附录 A）。届时独立排期再创建。
 
 ---
 
@@ -1903,7 +1848,7 @@ graph LR
 
 - `code: 0` 表示成功
 - `code: 非0` 表示错误，`data` 为 null，`message` 为错误描述
-- 后端通过 `TransformInterceptor` 自动包装成功响应
+- 后端通过全局响应包装自动包装成功响应（`transform.interceptor.ts` 已移除）
 - 后端通过 `HttpExceptionFilter` 自动包装错误响应
 
 ### 16.6 前端 API 调用约定

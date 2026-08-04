@@ -631,7 +631,7 @@ export default function SettingsPage(): JSX.Element {
                   />
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  录入后提示同步更新现金余额（SET-P0-07）
+                  录入后提示同步更新现金余额（SET-P0-07，即将上线）
                 </p>
               </div>
 
@@ -653,7 +653,7 @@ export default function SettingsPage(): JSX.Element {
                   />
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  金额展示格式（SET-P1-03）；本轮先持久化到服务端，全站渲染接入为独立 P1 任务
+                  金额展示格式（SET-P1-03），已全站接入
                 </p>
               </div>
 

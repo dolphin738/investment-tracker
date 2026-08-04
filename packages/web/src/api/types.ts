@@ -2,8 +2,9 @@
  * api/types.ts — API 请求/响应类型（Web 端本地定义）
  *
  * 此文件定义所有 Web 端使用的 API 请求/响应类型。
- * shared 包中已存在的类型（CashFlow, SecurityTrade, AssetSnapshot 等）从 @investment-tracker/shared import。
- * shared 包中不存在的 UI 辅助类型（UserPublic, Security, HoldingResponse 等）在此本地定义。
+ * shared 包中已存在的类型（CashFlow, SecurityTrade, AssetSnapshot, UserPublic, NavMetric 等）
+ * 从 @investment-tracker/shared import 并 re-export，仅 shared 中不存在的 UI 辅助类型
+ * （Security, HoldingResponse 等）在此本地定义。
  */
 
 import type {
@@ -15,7 +16,14 @@ import type {
   AggregationMethod,
   QueryGranularity,
   SecuritySide,
+  UserPublic,
+  NavMetric,
 } from '@investment-tracker/shared';
+
+// NavMetric 既是值（as const 对象）又是类型（字符串联合），需 re-export 供消费处按值/类型分别 import
+export { NavMetric } from '@investment-tracker/shared';
+// UserPublic 已在 shared 定义，re-export 供全项目统一引用
+export type { UserPublic } from '@investment-tracker/shared';
 
 // ============================================================================
 // 本地枚举（shared 包中不存在的 UI 层枚举）
@@ -43,30 +51,9 @@ export enum FeeType {
   OTHER = 'OTHER',
 }
 
-/** 净值指标切换 */
-export enum NavMetric {
-  CUMULATIVE = 'cumulative',
-  YEAR = 'year',
-  BOTH = 'both',
-}
-
 // ============================================================================
 // 用户相关
 // ============================================================================
-
-/** 用户公开信息（Web 端展示用） */
-export interface UserPublic {
-  id: string;
-  email: string;
-  name: string | null;
-  avatar: string | null;
-  phone: string | null;
-  bio: string | null;
-  /** 注册时间 ISO 8601（后端 toUserPublic 投影，唯一出口） */
-  createdAt: string;
-  /** 后端暂不返回（无 UI 消费），标可选避免类型说谎 */
-  updatedAt?: string;
-}
 
 /** 用户偏好 */
 export interface UserPreference {
@@ -444,12 +431,17 @@ export interface NavQueryParams {
 
 export interface OverviewResponse {
   totalAsset: string;
-  cumulativeNav: number;
-  yearNav: number;
-  xirr: number | null;
+  /** 累计净值（后端 toFixed(6) 字符串） */
+  cumulativeNav: string;
+  /** 当年净值（后端 toFixed(6) 字符串） */
+  yearNav: string;
+  /** 年化 XIRR（后端 toString 字符串）；null = 数据不足 */
+  xirr: string | null;
   netInvested: string;
-  totalReturnRate: number;
-  yearReturnRate: number;
+  /** 累计收益率（后端 toFixed(8) 字符串，比率非百分数） */
+  totalReturnRate: string;
+  /** 当年收益率（后端 toFixed(8) 字符串，比率非百分数） */
+  yearReturnRate: string;
   latestDate: string;
   /** 持仓汇总（后端 OverviewService 返回） */
   holdingsSummary: {

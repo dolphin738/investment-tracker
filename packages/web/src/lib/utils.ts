@@ -49,48 +49,107 @@ export function formatDate(
   }
 }
 
+/** 格式化选项（供 formatCurrency / formatPercent / formatDecimal 使用） */
+export interface FormatOptions {
+  /** 小数位数，覆盖位置参数 digits */
+  decimals?: number;
+}
+
+/** 金额格式化选项 */
+export interface FormatCurrencyOptions extends FormatOptions {
+  /** 千分位分隔（默认 true） */
+  thousands?: boolean;
+  /** 万 / 亿缩写（默认 false） */
+  abbreviate?: boolean;
+}
+
 /**
  * 将小数形式百分比（0.1234）格式化为 "12.34%"。
  * 输入 null 时返回 '-'。
  * digits 保留小数位数，默认 2。
+ * options.decimals 覆盖 digits。
  */
 export function formatPercent(
   value: number | string | null | undefined,
   digits = 2,
+  options?: FormatOptions,
 ): string {
   if (value === null || value === undefined || value === '') return '-';
   const num = typeof value === 'string' ? Number(value) : value;
   if (!Number.isFinite(num)) return '-';
-  return `${(num * 100).toFixed(digits)}%`;
+  const dec = options?.decimals ?? digits;
+  return `${(num * 100).toFixed(dec)}%`;
 }
 
 /**
  * 格式化净值/小数（默认 4 位小数）。
+ * options.decimals 覆盖 digits。
  */
 export function formatDecimal(
   value: number | string | null | undefined,
   digits = 4,
+  options?: FormatOptions,
 ): string {
   if (value === null || value === undefined || value === '') return '-';
   const num = typeof value === 'string' ? Number(value) : value;
   if (!Number.isFinite(num)) return '-';
-  return num.toFixed(digits);
+  const dec = options?.decimals ?? digits;
+  return num.toFixed(dec);
 }
 
 /**
- * 格式化金额（2 位小数，千分位）。
+ * 格式化金额（默认 2 位小数，千分位开，带 ¥ 前缀）。
+ *
+ * - options.thousands 控制千分位（默认 true）
+ * - options.abbreviate 控制万 / 亿缩写（默认 false）
+ * - options.decimals 覆盖 digits
  */
 export function formatCurrency(
   value: number | string | null | undefined,
   digits = 2,
+  options?: FormatCurrencyOptions,
 ): string {
   if (value === null || value === undefined || value === '') return '-';
   const num = typeof value === 'string' ? Number(value) : value;
   if (!Number.isFinite(num)) return '-';
-  return num.toLocaleString('zh-CN', {
-    minimumFractionDigits: digits,
-    maximumFractionDigits: digits,
-  });
+  const dec = options?.decimals ?? digits;
+  const useThousands = options?.thousands ?? true;
+  const useAbbrev = options?.abbreviate ?? false;
+
+  if (useAbbrev) {
+    const abs = Math.abs(num);
+    if (abs >= 1e8) {
+      return `¥${(num / 1e8).toFixed(dec)}亿`;
+    }
+    if (abs >= 1e4) {
+      return `¥${(num / 1e4).toFixed(dec)}万`;
+    }
+  }
+
+  if (useThousands) {
+    return `¥${num.toLocaleString('zh-CN', {
+      minimumFractionDigits: dec,
+      maximumFractionDigits: dec,
+    })}`;
+  }
+  return `¥${num.toFixed(dec)}`;
+}
+
+/**
+ * 判断数据是否陈旧（距今超过 staleDays 天）。
+ * @param dateStr ISO 日期字符串或 Date 对象
+ * @param staleDays 阈值天数（默认 3）
+ */
+export function isStale(
+  dateStr: string | Date | null | undefined,
+  staleDays = 3,
+): boolean {
+  if (!dateStr) return false;
+  const date = typeof dateStr === 'string' ? new Date(dateStr) : dateStr;
+  if (Number.isNaN(date.getTime())) return false;
+  const diffMs = Date.now() - date.getTime();
+  const diffDays = diffMs / (1000 * 60 * 60 * 24);
+  return diffDays > staleDays;
 }
 
 /**
@@ -111,17 +170,19 @@ export function formatChange(
 }
 
 /**
- * 格式化「金额差异 + 差异%」：`+9,000.00 (+3.20%)` / `-1,000.00 (-0.35%)`。
+ * 格式化「金额差异 + 差异%」：`+¥9,000.00 (+3.20%)` / `-¥1,000.00 (-0.35%)`。
  *
  * 用于资产记录页手工行差异列、差异提示条、表单覆盖提示（PRD §7.3 / SNAP-P0-04b ⑥）。
  * - current = 当前（手工）值；base = 基准（系统自动计算值）
  * - 任一为 null / 非有限数 / base 为 0 → 返回 '-'（差异率无意义，避免除零）
- * - 金额沿用 formatCurrency 千分位 2 位小数口径（Part E-7）
+ * - 金额沿用 formatCurrency 口径（含 ¥ 前缀、千分位、2 位小数）
+ * - options 透传给内部 formatCurrency（thousands / abbreviate / decimals）
  */
 export function formatAmountChange(
   current: number | string | null | undefined,
   base: number | string | null | undefined,
   digits = 2,
+  options?: FormatCurrencyOptions,
 ): string {
   if (
     current === null ||
@@ -141,7 +202,7 @@ export function formatAmountChange(
   const sign = diff > 0 ? '+' : '';
   // 百分比同样带正负号：正数 (+3.20%)，负数 (-0.36%)（PRD §7.3 口径）
   const rateSign = rate > 0 ? '+' : '';
-  return `${sign}${formatCurrency(diff)} (${rateSign}${(rate * 100).toFixed(digits)}%)`;
+  return `${sign}${formatCurrency(diff, digits, options)} (${rateSign}${(rate * 100).toFixed(digits)}%)`;
 }
 
 /** 手工记录差异统计结果（SNAP-P0-07 顶部常驻提示条） */
