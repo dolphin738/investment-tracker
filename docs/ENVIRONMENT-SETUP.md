@@ -298,10 +298,10 @@ git commit -m "chore: 初始化项目骨架与文档"
 
 请逐项确认后再进入开发阶段：
 
-- [ ] PostgreSQL 16 已安装，能通过 psql 登录
-- [ ] 数据库 `investment_tracker` 与用户 `investment_app` 已创建
-- [ ] Node.js 22.22.2 可用（`node -v`）
-- [ ] pnpm 已启用（`pnpm -v`）
+- [x] PostgreSQL 16 已安装，能通过 psql 登录
+- [x] 数据库 `investment_tracker` 与用户 `investment_app` 已创建
+- [x] Node.js 22.22.2 可用（`node -v`）
+- [x] pnpm 已启用（`pnpm -v`）
 - [x] Git 已安装（`git --version`）
 - [x] DevEco Studio 已安装，能新建空工程并预览
 - [x] 华为开发者账号已注册
