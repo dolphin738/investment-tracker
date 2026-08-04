@@ -19,7 +19,7 @@
 - **累计净值 / 当年净值**：单位份额法，当年净值每年首个交易日重置
 - **多维查询**：年 / 月 / 周 / 日 四个维度，默认取期末值可切换平均值
 - **多用户 + 数据隔离**：JWT 认证，按 `user_id` 过滤数据
-- **双端覆盖**：Web 前端（React + 图表）、HarmonyOS 原生 App（ArkTS）
+- **双端架构**：NestJS 后端 + Web 前端（React + ECharts）
 
 ---
 
@@ -30,7 +30,6 @@
 | 后端 | NestJS 10 + Prisma 5 + PostgreSQL 16 |
 | Web 前端 | Vite 5 + React 18 + TypeScript + Tailwind CSS 3 + shadcn/ui |
 | 图表 | ECharts 5（统一图表库，echarts-for-react 封装） |
-| HarmonyOS | ArkTS + ArkUI（DevEco Studio） |
 | 共享层 | `shared` 包（TypeScript 类型 / API 契约） |
 | 认证 | JWT + bcrypt |
 | 仓库 | pnpm 9 monorepo + Turborepo |
@@ -54,7 +53,6 @@ investment-tracker/
 │   │   ├── prisma/                # Prisma schema + 迁移 + seed
 │   │   └── .env.example           # 环境变量模板
 │   ├── web/                       # Vite + React 前端
-│   ├── harmonyos/                 # HarmonyOS App（DevEco Studio 工程）
 │   └── shared/                    # 共享类型与 API 契约
 ├── pnpm-workspace.yaml
 ├── turbo.json
@@ -159,7 +157,7 @@ API 文档（Swagger）：启动后端后访问 `http://localhost:3000/api/docs`
 - **PRD.md** — 产品需求、用户故事、需求池
 - **ARCHITECTURE.md** — 系统架构、接口、计算口径
 - **class-diagram.mermaid / sequence-diagram.mermaid** — 类图与时序图
-- **ENVIRONMENT-SETUP.md** — 环境准备清单（含 PostgreSQL / DevEco Studio 安装）
+- **ENVIRONMENT-SETUP.md** — 环境准备清单（含 PostgreSQL 安装）
 
 ---
 

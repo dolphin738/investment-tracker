@@ -1,7 +1,7 @@
 /**
  * @investment-tracker/shared — 统一导出入口
  *
- * 三端（backend / web / harmonyos）共用的类型、枚举与 API 契约。
+ * 两端（backend / web）共用的类型、枚举与 API 契约。
  */
 
 // ── 枚举 ──

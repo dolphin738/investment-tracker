@@ -38,12 +38,6 @@ pnpm-debug.log*
 # Prisma
 packages/backend/prisma/migrations/dev/
 
-# HarmonyOS build
-packages/harmonyos/.cxx/
-packages/harmonyos/build/
-packages/harmonyos/entry/build/
-packages/harmonyos/.preview/
-
 # Test
 *.spec.tsx
 
