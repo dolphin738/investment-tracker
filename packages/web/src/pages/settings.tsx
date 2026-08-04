@@ -71,7 +71,7 @@ import { ChangePasswordDialog } from '@/features/account/change-password-dialog'
 import { EditProfileDialog } from '@/features/account/edit-profile-dialog';
 import { UserAvatar } from '@/components/user-avatar';
 import { useAuthStore } from '@/stores/auth.store';
-import { useDeleteAccount, useUpdateProfile } from '@/hooks/use-account';
+import { useDeleteAccount } from '@/hooks/use-account';
 import {
   useArchivePortfolio,
   useClearPortfolioData,
@@ -159,17 +159,6 @@ export default function SettingsPage(): JSX.Element {
   const [clearDataConfirmName, setClearDataConfirmName] = useState<string>('');
   const clearDataMutation = useClearPortfolioData();
   const currentPortfolio = portfolios.find((p) => p.id === currentPortfolioId) ?? null;
-
-  // 头像 URL 设置（SET-P0-01 验收 2：本地上传 + URL 设置两种方式）
-  const [avatarUrl, setAvatarUrl] = useState<string>(user?.avatar ?? '');
-  const updateProfileMutation = useUpdateProfile();
-  const handleApplyAvatarUrl = (): void => {
-    const url = avatarUrl.trim();
-    if (!url) {
-      return;
-    }
-    updateProfileMutation.mutate({ avatar: url });
-  };
 
   // 🆕 偏好本地编辑状态（乐观更新）
   const [prefForm, setPrefForm] = useState({
@@ -266,7 +255,7 @@ export default function SettingsPage(): JSX.Element {
           <CardDescription>当前登录用户信息与安全设置</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {/* 头像 + 昵称 + 邮箱 */}
+          {/* 头像 + 昵称 + 邮箱 + 账户中心入口（§7.8 L1315） */}
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
             <UserAvatar
               size="lg"
@@ -282,6 +271,14 @@ export default function SettingsPage(): JSX.Element {
                 {user?.email ?? '-'}
               </p>
             </div>
+            <Button
+              variant="link"
+              size="sm"
+              className="sm:ml-auto"
+              onClick={() => navigate(ROUTE_PATH.ACCOUNT)}
+            >
+              前往账户中心 →
+            </Button>
           </div>
 
           {/* 资料明细 */}
@@ -296,34 +293,6 @@ export default function SettingsPage(): JSX.Element {
                 {user?.bio || '-'}
               </p>
             </div>
-          </div>
-
-          {/* 头像 URL 设置（SET-P0-01 验收 2：本地上传 + URL 设置两种方式） */}
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-            <div className="flex-1 space-y-1.5">
-              <Label htmlFor="avatar-url">头像 URL</Label>
-              <Input
-                id="avatar-url"
-                type="url"
-                placeholder="https://example.com/avatar.png"
-                value={avatarUrl}
-                onChange={(e) => setAvatarUrl(e.target.value)}
-              />
-              <p className="text-xs text-muted-foreground">
-                输入图片 URL 后点「应用」即可设为头像；也可在「编辑资料」中本地上传
-              </p>
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleApplyAvatarUrl}
-              disabled={!avatarUrl.trim() || updateProfileMutation.isPending}
-            >
-              {updateProfileMutation.isPending && (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              )}
-              应用 URL
-            </Button>
           </div>
 
           {/* 操作区 */}
@@ -357,163 +326,11 @@ export default function SettingsPage(): JSX.Element {
               退出登录
             </Button>
           </div>
-        </CardContent>
-      </Card>
 
-      {/* 危险操作区（SET-P0-05 清空数据 + SET-P1-06 注销账户，语义严格区分） */}
-      <Card className="border-destructive/40">
-        <CardHeader>
-          <CardTitle className="text-base text-destructive">危险操作区</CardTitle>
-          <CardDescription>以下操作不可恢复或代价极高，请谨慎执行</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {/* 清空当前组合数据（SET-P0-05）：只清数据、保留组合 */}
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <p className="text-sm font-medium">清空当前组合数据</p>
-              <p className="text-xs text-muted-foreground">
-                删除当前组合的全部出入金、证券买卖、净值与 XIRR 等数据，
-                但保留组合本身（SET-P0-05）
-              </p>
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              className="text-destructive hover:text-destructive"
-              onClick={() => {
-                setClearDataConfirmName('');
-                setClearDataOpen(true);
-              }}
-              disabled={!currentPortfolio}
-              title={currentPortfolio ? undefined : '请先在顶部选择一个组合'}
-            >
-              清空数据
-            </Button>
-          </div>
-
-          {/* 注销账户（SET-P1-06）：软删除账户本身及全部数据 */}
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-3">
-            <div>
-              <p className="text-sm font-semibold text-destructive">注销账户</p>
-              <p className="text-xs text-muted-foreground">
-                软删除账户本身及全部组合（保留 30 天可恢复，到期后彻底删除）（SET-P1-06）
-              </p>
-            </div>
-            <Button
-              variant="destructive"
-              size="sm"
-              onClick={() => {
-                setDeleteAccountEmail('');
-                setDeleteAccountOpen(true);
-              }}
-            >
-              注销账户
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* 组合管理 */}
-      <Card>
-        <CardHeader className="flex-row items-center justify-between">
-          <div>
-            <CardTitle className="text-base">组合管理</CardTitle>
-            <CardDescription>创建、编辑、归档或删除投资组合</CardDescription>
-          </div>
-          <Button onClick={() => setCreating(true)} size="sm">
-            <Plus className="mr-2 h-4 w-4" />
-            新建组合
-          </Button>
-        </CardHeader>
-        <CardContent>
-          {portfoliosLoading ? (
-            <div className="text-sm text-muted-foreground">加载中…</div>
-          ) : portfolios.length === 0 ? (
-            <div className="py-8 text-center text-sm text-muted-foreground">
-              暂无组合，请点击右上角新建
-            </div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>名称</TableHead>
-                  <TableHead>描述</TableHead>
-                  <TableHead>成立日</TableHead>
-                  <TableHead>币种</TableHead>
-                  <TableHead className="text-right">操作</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {portfolios.map((p) => (
-                  <TableRow key={p.id}>
-                    <TableCell className="font-medium">
-                      <span className="inline-flex items-center gap-2">
-                        {p.id === currentPortfolioId ? (
-                          <span className="font-semibold text-primary">{p.name}</span>
-                        ) : (
-                          <button
-                            className="text-left hover:underline"
-                            onClick={() => setCurrentPortfolio(p.id)}
-                          >
-                            {p.name}
-                          </button>
-                        )}
-                        {p.archivedAt && (
-                          <span className="text-xs text-muted-foreground">已归档</span>
-                        )}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {p.description || '-'}
-                    </TableCell>
-                    <TableCell className="font-mono text-sm">
-                      {p.baseDate ? formatDate(p.baseDate) : '-'}
-                    </TableCell>
-                    <TableCell className="text-sm">{p.currency}</TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex justify-end gap-1">
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          onClick={() => setEditing(p)}
-                          title="编辑"
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          onClick={() =>
-                            archiveMutation.mutate({
-                              id: p.id,
-                              archived: !p.archivedAt,
-                            })
-                          }
-                          title={p.archivedAt ? '取消归档' : '归档'}
-                          disabled={archiveMutation.isPending}
-                        >
-                          <Archive
-                            className={cn(
-                              'h-4 w-4',
-                              p.archivedAt ? 'text-primary' : '',
-                            )}
-                          />
-                        </Button>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          onClick={() => setDeletingId(p.id)}
-                          title="删除"
-                        >
-                          <Trash2 className="h-4 w-4 text-red-500" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
+          {/* 头像修改提示（§7.8 L1318-1319）：本区只展示头像，不提供独立头像 URL 框 */}
+          <p className="text-xs text-muted-foreground">
+            ⓘ 头像修改在「编辑资料」卡片内完成（本地上传 与 头像 URL 并列）；本区只展示头像，不提供独立的「头像 URL」输入框
+          </p>
         </CardContent>
       </Card>
 
@@ -788,6 +605,163 @@ export default function SettingsPage(): JSX.Element {
           <Button variant="outline" disabled className="ml-2">
             下载导入模板
           </Button>
+        </CardContent>
+      </Card>
+
+      {/* 组合管理 */}
+      <Card>
+        <CardHeader className="flex-row items-center justify-between">
+          <div>
+            <CardTitle className="text-base">组合管理</CardTitle>
+            <CardDescription>创建、编辑、归档或删除投资组合</CardDescription>
+          </div>
+          <Button onClick={() => setCreating(true)} size="sm">
+            <Plus className="mr-2 h-4 w-4" />
+            新建组合
+          </Button>
+        </CardHeader>
+        <CardContent>
+          {portfoliosLoading ? (
+            <div className="text-sm text-muted-foreground">加载中…</div>
+          ) : portfolios.length === 0 ? (
+            <div className="py-8 text-center text-sm text-muted-foreground">
+              暂无组合，请点击右上角新建
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>名称</TableHead>
+                  <TableHead>描述</TableHead>
+                  <TableHead>成立日</TableHead>
+                  <TableHead>币种</TableHead>
+                  <TableHead className="text-right">操作</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {portfolios.map((p) => (
+                  <TableRow key={p.id}>
+                    <TableCell className="font-medium">
+                      <span className="inline-flex items-center gap-2">
+                        {p.id === currentPortfolioId ? (
+                          <span className="font-semibold text-primary">{p.name}</span>
+                        ) : (
+                          <button
+                            className="text-left hover:underline"
+                            onClick={() => setCurrentPortfolio(p.id)}
+                          >
+                            {p.name}
+                          </button>
+                        )}
+                        {p.archivedAt && (
+                          <span className="text-xs text-muted-foreground">已归档</span>
+                        )}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {p.description || '-'}
+                    </TableCell>
+                    <TableCell className="font-mono text-sm">
+                      {p.baseDate ? formatDate(p.baseDate) : '-'}
+                    </TableCell>
+                    <TableCell className="text-sm">{p.currency}</TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex justify-end gap-1">
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={() => setEditing(p)}
+                          title="编辑"
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={() =>
+                            archiveMutation.mutate({
+                              id: p.id,
+                              archived: !p.archivedAt,
+                            })
+                          }
+                          title={p.archivedAt ? '取消归档' : '归档'}
+                          disabled={archiveMutation.isPending}
+                        >
+                          <Archive
+                            className={cn(
+                              'h-4 w-4',
+                              p.archivedAt ? 'text-primary' : '',
+                            )}
+                          />
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={() => setDeletingId(p.id)}
+                          title="删除"
+                        >
+                          <Trash2 className="h-4 w-4 text-red-500" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* 危险操作区（SET-P0-05 清空数据 + SET-P1-06 注销账户，语义严格区分） */}
+      <Card className="border-destructive/40">
+        <CardHeader>
+          <CardTitle className="text-base text-destructive">危险操作区</CardTitle>
+          <CardDescription>以下操作不可恢复或代价极高，请谨慎执行</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {/* 清空当前组合数据（SET-P0-05）：只清数据、保留组合 */}
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium">清空当前组合数据</p>
+              <p className="text-xs text-muted-foreground">
+                删除当前组合的全部出入金、证券买卖、净值与 XIRR 等数据，
+                但保留组合本身（SET-P0-05）
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-destructive hover:text-destructive"
+              onClick={() => {
+                setClearDataConfirmName('');
+                setClearDataOpen(true);
+              }}
+              disabled={!currentPortfolio}
+              title={currentPortfolio ? undefined : '请先在顶部选择一个组合'}
+            >
+              清空数据
+            </Button>
+          </div>
+
+          {/* 注销账户（SET-P1-06）：软删除账户本身及全部数据 */}
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-3">
+            <div>
+              <p className="text-sm font-semibold text-destructive">注销账户</p>
+              <p className="text-xs text-muted-foreground">
+                软删除账户本身及全部组合（保留 30 天可恢复，到期后彻底删除）（SET-P1-06）
+              </p>
+            </div>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => {
+                setDeleteAccountEmail('');
+                setDeleteAccountOpen(true);
+              }}
+            >
+              注销账户
+            </Button>
+          </div>
         </CardContent>
       </Card>
 

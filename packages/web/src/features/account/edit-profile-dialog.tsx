@@ -3,15 +3,16 @@
  *
  * 受控组件：通过 open / onOpenChange 控制显隐。
  *
- * 头像（AC-11）：点击头像唤起文件选择 → 前端预校验（类型 + 大小）→ 上传 →
- * 后端落盘并写库后返回新 URL，写回表单用于预览。avatar 表单字段本身是只读的，
- * 用户不再手填 URL，只能通过上传或「移除头像」改变它。
+ * 头像（AC-11）：支持两种设置方式，二者均在编辑资料卡片内完成：
+ *   1）本地上传 —— 点击头像唤起文件选择 → 前端预校验（类型 + 大小）→ 上传 → 后端落盘写库后回写预览；
+ *   2）头像 URL —— 在下方输入框填入图片地址并点「应用」即时生效。
+ * 两种方式并列，最后生效者覆盖前者；「移除头像」可清空为默认头像。
  *
  * 清空语义：未填字段统一归一为空串 '' 再提交，后端把 '' 转成 NULL，
  * 这样「把昵称删掉后保存」才能真正清空，而不是被当作「不修改」。
  */
 
-import { useEffect, useRef, type ChangeEvent } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -77,6 +78,9 @@ export function EditProfileDialog({
   const updateMutation = useUpdateProfile();
   const uploadMutation = useUploadAvatar();
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  /** 头像 URL 输入框受控值（与本地上传并列，最后生效者覆盖前者） */
+  const [avatarUrlInput, setAvatarUrlInput] = useState<string>('');
 
   const {
     register,
@@ -160,6 +164,32 @@ export function EditProfileDialog({
       {
         onSuccess: () => {
           setValue('avatar', '', { shouldDirty: false });
+        },
+      },
+    );
+  };
+
+  /**
+   * 头像 URL：填入图片地址后点「应用」即时生效（与本地上传并列）。
+   * 轻量校验复用 editProfileSchema.avatar 的 refine 规则；成功回写表单并提示。
+   */
+  const handleApplyAvatarUrl = (): void => {
+    const url = avatarUrlInput.trim();
+    if (!url) {
+      return;
+    }
+    const result = editProfileSchema.shape.avatar.safeParse(url);
+    if (!result.success) {
+      toast.error(result.error.issues[0]?.message ?? '头像地址格式不正确');
+      return;
+    }
+    updateMutation.mutate(
+      { avatar: url },
+      {
+        onSuccess: () => {
+          setValue('avatar', url, { shouldDirty: true });
+          setAvatarUrlInput('');
+          toast.success('头像已更新');
         },
       },
     );
@@ -259,6 +289,33 @@ export function EditProfileDialog({
               />
               {/* avatar 只读，值由上传流程写入，注册进表单以便随「保存」一起提交 */}
               <input type="hidden" {...register('avatar')} />
+            </div>
+
+            {/* 头像 URL：与本地上传并列，最后生效者覆盖前者 */}
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+              <div className="flex-1 space-y-1.5">
+                <Label htmlFor="profile-avatar-url">头像 URL</Label>
+                <Input
+                  id="profile-avatar-url"
+                  type="url"
+                  placeholder="https://example.com/avatar.png"
+                  value={avatarUrlInput}
+                  onChange={(e) => setAvatarUrlInput(e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  输入图片 URL 后点「应用」即可设为头像；也可本地上传
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleApplyAvatarUrl}
+                disabled={!avatarUrlInput.trim() || isPending}
+              >
+                {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                应用
+              </Button>
             </div>
 
             <div className="space-y-2">
