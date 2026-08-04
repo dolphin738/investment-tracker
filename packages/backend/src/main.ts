@@ -6,16 +6,30 @@
 
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor';
+import {
+  resolveUploadDir,
+  STATIC_ASSETS_PREFIX,
+} from './modules/upload/upload.constants';
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
   // 全局前缀 /api
   app.setGlobalPrefix('api');
+
+  // 🔴 上传目录静态资源挂载
+  //
+  // LocalDiskStorage 把头像落盘到 <UPLOAD_DIR>/avatar/<uuid>.<ext>，
+  // 对外 URL 是 /api/uploads/avatar/<uuid>.<ext>（见 upload.constants.ts）。
+  // 注意：setGlobalPrefix('api') 只作用于 Nest 路由，不作用于 express 静态中间件，
+  // 所以 prefix 必须手写含 /api 的 STATIC_ASSETS_PREFIX，否则 GET 头像一律 404。
+  const uploadDir = resolveUploadDir((key) => process.env[key]);
+  app.useStaticAssets(uploadDir, { prefix: STATIC_ASSETS_PREFIX });
 
   // CORS
   app.enableCors({
@@ -63,6 +77,7 @@ async function bootstrap(): Promise<void> {
   await app.listen(port);
   console.log(`🚀 Backend listening on http://localhost:${port}`);
   console.log(`📚 Swagger docs: http://localhost:${port}/api/docs`);
+  console.log(`🖼️  Static uploads: ${STATIC_ASSETS_PREFIX} → ${uploadDir}`);
 }
 
 bootstrap().catch((err: unknown) => {

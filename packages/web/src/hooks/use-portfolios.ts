@@ -17,6 +17,9 @@ import {
   updatePortfolio as updateApi,
 } from '@/api/portfolio.api';
 import { usePortfolioStore } from '@/stores/portfolio.store';
+// 归档 / 删除组合时后端会把偏好里的 defaultPortfolioId 置空，需要一并失效偏好查询。
+// use-preferences 只依赖 preference.api / preference.store，不反向引用本模块，无循环依赖。
+import { PREFERENCE_KEY } from '@/hooks/use-preferences';
 import type {
   CreatePortfolioRequest,
   UpdatePortfolioRequest,
@@ -83,6 +86,10 @@ export function useArchivePortfolio() {
         usePortfolioStore.getState().clearCurrent();
       }
       queryClient.invalidateQueries({ queryKey: PORTFOLIOS_KEY });
+      // 后端 archive() 会 clearDefaultPortfolioIfMatch 把默认组合置空；
+      // 不失效偏好查询的话，设置页「默认组合」下拉仍指向已归档组合，
+      // 而候选列表已把归档组合过滤掉 → 选中值悬空，必须刷新才恢复「不设置」。
+      queryClient.invalidateQueries({ queryKey: PREFERENCE_KEY });
     },
   });
 }
@@ -100,6 +107,8 @@ export function useDeletePortfolio() {
         clearCurrent();
       }
       queryClient.invalidateQueries({ queryKey: PORTFOLIOS_KEY });
+      // 删除的若是默认组合，服务端同样会置空 defaultPortfolioId，存在同款「悬空」问题
+      queryClient.invalidateQueries({ queryKey: PREFERENCE_KEY });
     },
   });
 }

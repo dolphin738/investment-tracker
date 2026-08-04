@@ -12,7 +12,14 @@
  * - multer 用内存存储（未配置 dest/storage），文件在 buffer 里，由 StorageService 决定落盘位置。
  * - fileFilter 直接 cb(BadRequestException)：Nest 的 transformException 对 HttpException 原样放行，
  *   这样「传了 PDF」能返回精确的 1006 类型文案，而不是退化成「请选择要上传的图片文件」。
- * - 直接 return 完整信封 { code, data, message }：TransformInterceptor 检测到 number 型 code 会跳过二次包装。
+ * - 🔴 返回**裸对象** UploadAvatarResult，信封交给全局 ResponseInterceptor 统一包装。
+ *   历史写法在这里手工 return { code, data, message }，注释里假设的是
+ *   TransformInterceptor（它有 isEnvelope 检测、会跳过二次包装），
+ *   但 main.ts 实际注册的是 ResponseInterceptor —— 它**无条件**再包一层，
+ *   于是响应变成 { code:0, data:{ code:0, data:{url,user}, message }, message:'ok' }。
+ *   前端 api-client 只解一层信封，拿到的 data 里既没有 url 也没有 user，
+ *   导致 setUser(undefined) 把 localStorage 的用户写成 "null"，刷新后直接掉登录态。
+ *   与其它所有控制器保持一致：只返回业务数据，不自己造信封。
  */
 
 import {
@@ -39,13 +46,6 @@ import {
   FILE_TYPE_MESSAGE,
   MAX_SIZE,
 } from './upload.constants';
-
-/** 上传成功响应信封 */
-interface UploadAvatarEnvelope {
-  code: number;
-  data: UploadAvatarResult;
-  message: string;
-}
 
 @ApiTags('文件上传')
 @Controller('upload')
@@ -90,9 +90,9 @@ export class UploadController {
   async uploadAvatar(
     @CurrentUser() user: AuthenticatedUser,
     @UploadedFile() file: UploadedFileLike,
-  ): Promise<UploadAvatarEnvelope> {
+  ): Promise<UploadAvatarResult> {
     // M1：JWT 挂载的用户对象字段是 userId（不是 id）
-    const result = await this.uploadService.uploadAvatar(user.userId, file);
-    return { code: 0, data: result, message: '上传成功' };
+    // 只返回业务数据，{ code, data, message } 信封由全局 ResponseInterceptor 负责
+    return this.uploadService.uploadAvatar(user.userId, file);
   }
 }

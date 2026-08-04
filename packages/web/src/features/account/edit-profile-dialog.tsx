@@ -91,16 +91,23 @@ export function EditProfileDialog({
     defaultValues: { avatar: '', name: '', phone: '', bio: '' },
   });
 
+  // 表单只在「对话框打开」这一刻用当前用户信息初始化一次。
+  //
+  // 依赖数组刻意不含 user：上传头像成功后 useUploadAvatar 会 setUser(data.user)，
+  // 换掉 auth store 里 user 的引用；若把 user 放进依赖，effect 会重跑 reset()，
+  // 把 isDirty 冲回 false，「保存」按钮（disabled={isBusy || !isDirty}）随即变灰点不动。
+  // 用 getState() 而不是闭包里的 user，既能拿到最新值，又不触发 exhaustive-deps 告警。
   useEffect(() => {
     if (open) {
+      const currentUser = useAuthStore.getState().user;
       reset({
-        avatar: user?.avatar ?? '',
-        name: user?.name ?? '',
-        phone: user?.phone ?? '',
-        bio: user?.bio ?? '',
+        avatar: currentUser?.avatar ?? '',
+        name: currentUser?.name ?? '',
+        phone: currentUser?.phone ?? '',
+        bio: currentUser?.bio ?? '',
       });
     }
-  }, [open, user, reset]);
+  }, [open, reset]);
 
   const avatarValue = watch('avatar') ?? '';
   const nameValue = watch('name') ?? '';

@@ -88,6 +88,16 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ token: null, user: null, isAuthenticated: false });
   },
   setUser: (user) => {
+    // 防御：user 为 undefined / null 时直接忽略。
+    //
+    // 早期没有这道判断时，任何「接口返回结构不符合预期」都会写入字符串 "null"，
+    // 下次 loadInitialState() 解析出 user=null → isAuthenticated=false，
+    // 表现为「操作时一切正常，一刷新就掉登录态」这种极难定位的故障
+    // （头像上传的响应信封套娃 bug 就是这样把用户踢下线的）。
+    // 保留旧用户信息远好过静默清空登录态。
+    if (!user) {
+      return;
+    }
     const normalized = normalizeUserPublic(user);
     localStorage.setItem(AUTH_USER_KEY, JSON.stringify(normalized));
     set({ user: normalized });

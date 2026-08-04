@@ -203,14 +203,31 @@ export default function SettingsPage(): JSX.Element {
     }
   };
 
-  /** 🆕 保存偏好（乐观更新） */
+  /**
+   * 🆕 保存偏好（乐观更新）
+   *
+   * 「默认组合」是服务端偏好（preference.defaultPortfolioId），
+   * 而界面当前显示哪个组合由 portfolio store 的 currentPortfolioId 决定，两者相互独立。
+   * 此前只写偏好、不动 store，PreferenceBootstrap 又只在 currentPortfolioId 为空时才按
+   * 默认组合选中，于是「改了默认组合必须重登才生效」。
+   * 这里在保存成功后主动把当前组合切到新的默认组合，符合用户预期。
+   */
   const handleSavePreferences = () => {
+    const nextDefault =
+      prefForm.defaultPortfolioId === '' ? null : prefForm.defaultPortfolioId;
     const payload: UpdatePreferenceDto = { ...prefForm };
     // 空字符串视为 null
     if (payload.defaultPortfolioId === '') {
       payload.defaultPortfolioId = null;
     }
-    updatePrefsMutation.mutate(payload);
+    updatePrefsMutation.mutate(payload, {
+      onSuccess: () => {
+        // 选择「不设置」时不动当前视图，只有明确指定了新默认组合才切换
+        if (nextDefault && nextDefault !== currentPortfolioId) {
+          setCurrentPortfolio(nextDefault);
+        }
+      },
+    });
   };
 
   /** 🆕 更新表单单个字段 */
