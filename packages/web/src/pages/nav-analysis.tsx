@@ -28,7 +28,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Label } from '@/components/ui/label';
-import { DimensionSwitcher } from '@/features/query/dimension-switcher';
+import { DimensionSwitcher, QUICK_RANGE_OPTIONS } from '@/features/query/dimension-switcher';
 import type { DimensionSwitcherValue } from '@/features/query/dimension-switcher';
 import { NavTrendChart } from '@/components/charts/nav-trend-chart';
 import { MonthlyHeatmap } from '@/components/charts/monthly-heatmap';
@@ -82,6 +82,10 @@ function computeDailyDetails(data: NavSeriesPoint[]): DailyDetailRow[] {
       const diff = p.cumulativeNav - prev.cumulativeNav;
       dailyReturn = diff * prev.shares;
       if (prev.cumulativeNav !== 0) {
+        // 收益%公式等价性（Part E-8 / F10）：
+        // PRD「每日收益 / 前一日总资产」= (Δnav × prevShares) / (prevNav × prevShares) = Δnav / prevNav，
+        // 与现有 diff / prev.cumulativeNav 数学等价，无需改逻辑。
+        // 「前一日」= 前一个有记录的计算日（稀疏日期下的金融口径近似，F10 已确认维持现状）。
         returnRate = diff / prev.cumulativeNav;
       }
     }
@@ -113,7 +117,8 @@ export default function NavAnalysisPage(): JSX.Element {
     granularity: getPreference('defaultGranularity') as QueryGranularity,
     startDate,
     endDate,
-    aggregation: AggregationMethod.LAST,
+    // ANL-P0-03：默认聚合读偏好（SET-P0-02 验收4），与 XIRR 页现状一致
+    aggregation: getPreference('aggregation') as AggregationMethod,
   });
   const [metric, setMetric] = useState<NavMetric>(NavMetricEnum.BOTH);
 
@@ -176,7 +181,11 @@ export default function NavAnalysisPage(): JSX.Element {
       </div>
 
       <div className="flex flex-wrap items-end gap-4">
-        <DimensionSwitcher value={dimension} onChange={setDimension} />
+        <DimensionSwitcher
+          value={dimension}
+          onChange={setDimension}
+          quickRanges={QUICK_RANGE_OPTIONS}
+        />
         <div className="space-y-1.5">
           <Label className="text-xs text-muted-foreground">指标</Label>
           <RadioGroup
@@ -266,7 +275,7 @@ export default function NavAnalysisPage(): JSX.Element {
         <CardHeader>
           <CardTitle className="text-base">每日净值明细</CardTitle>
           <CardDescription>
-            每日收益 =（当日累计净值 − 前日累计净值）× 前日份额；正红负绿
+            每日收益 =（当日累计净值 − 前日累计净值）× 前日份额；收益百分比 = 每日收益 / 前一日总资产；正红负绿
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -285,7 +294,7 @@ export default function NavAnalysisPage(): JSX.Element {
                     <TableHead className="text-right">累计净值</TableHead>
                     <TableHead className="text-right">当年净值</TableHead>
                     <TableHead className="text-right">每日收益</TableHead>
-                    <TableHead className="text-right">收益%</TableHead>
+                    <TableHead className="text-right">收益百分比</TableHead>
                     <TableHead className="text-right">份额</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -327,9 +336,10 @@ export default function NavAnalysisPage(): JSX.Element {
                       </TableCell>
                       <TableCell className="text-right font-mono">
                         {row.shares !== null
-                          ? Number(row.shares).toLocaleString('zh-CN', {
-                              minimumFractionDigits: 2,
-                              maximumFractionDigits: 2,
+                          ? // ANL-P0-06 验收3：份额显示 6 位小数（Part E-7 跨网约定）
+                            Number(row.shares).toLocaleString('zh-CN', {
+                              minimumFractionDigits: 6,
+                              maximumFractionDigits: 6,
                             })
                           : '-'}
                       </TableCell>
@@ -339,6 +349,10 @@ export default function NavAnalysisPage(): JSX.Element {
               </Table>
             </div>
           )}
+          {/* 明细表脚注（§7.6 草图口径说明；「前一日」= 前一个记录日，F10） */}
+          <p className="mt-3 text-xs text-muted-foreground">
+            注：每日收益 =（当日累计净值 − 前日累计净值）× 前日份额；收益百分比 = 每日收益 / 前一日总资产；正红负绿。
+          </p>
         </CardContent>
       </Card>
     </div>

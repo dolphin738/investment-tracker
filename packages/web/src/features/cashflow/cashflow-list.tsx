@@ -1,13 +1,21 @@
 /**
  * features/cashflow/cashflow-list.tsx — 出入金流水表格
  *
- * PRD §7.1【C】：表格（日期/类型/金额/备注/操作✎🗑）+ 分页。
- * 类型筛选由后端按 type 参数过滤（CashFlowQueryDto.type），
+ * PRD §7.1【C】：表格（日期/类型/金额/备注/操作✎🗑）+ 分页（20/50/100）。
+ * 类型筛选由后端按 types 参数过滤（F2 已获批，Part E-1 多选语义），
  * 前端只透传筛选条件，不再对当前页数据做过滤。
+ * 分页为受控组件：page/pageSize 由父页面持有（URL query，FLOW-P0-02 验收2）。
  */
 
 import { useState } from 'react';
-import { ChevronLeft, ChevronRight, Pencil, Trash2, Loader2 } from 'lucide-react';
+import {
+  ChevronLeft,
+  ChevronRight,
+  Pencil,
+  RotateCcw,
+  Trash2,
+  Loader2,
+} from 'lucide-react';
 import {
   Table,
   TableBody,
@@ -18,6 +26,13 @@ import {
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import {
   Dialog,
   DialogContent,
@@ -37,44 +52,64 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { useTransactions, useDeleteTransaction } from '@/hooks/use-transactions';
 import { CashflowForm } from './cashflow-form';
+import { PAGE_SIZE_OPTIONS } from './query-params';
 import { formatCurrency, formatDate, cn } from '@/lib/utils';
 import type { TransactionQuery, TransactionResponse } from '@/api/types';
 import { CashFlowType } from '@investment-tracker/shared';
 
 export interface CashflowListProps {
   portfolioId: string;
-  /** 查询参数（日期范围等，不含分页页码） */
+  /** 查询参数（日期范围/排序等，不含 page/pageSize/types） */
   query?: TransactionQuery;
-  /** 类型筛选（'all' 表示全部；后端按 type 参数过滤） */
-  typeFilter?: string;
+  /** 类型多选（空数组 = 全部；F2 已获批透传 types，Part E-1 语义） */
+  types?: Array<'BUY' | 'SELL'>;
+  /** 当前页码（受控，URL query 持有） */
+  page: number;
+  /** 每页条数（受控，20/50/100，URL query 持有） */
+  pageSize: number;
+  onPageChange: (page: number) => void;
+  onPageSizeChange: (pageSize: number) => void;
+  /** 空态「清除筛选」回调（存在非默认筛选条件时显示） */
+  onClearFilter?: () => void;
   className?: string;
   emptyText?: string;
 }
 
-const PAGE_SIZE = 20;
-
 export function CashflowList({
   portfolioId,
   query,
-  typeFilter = 'all',
+  types = [],
+  page,
+  pageSize,
+  onPageChange,
+  onPageSizeChange,
+  onClearFilter,
   className,
   emptyText = '暂无出入金记录',
 }: CashflowListProps): JSX.Element {
-  const [page, setPage] = useState(1);
   const [editing, setEditing] = useState<TransactionResponse | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const { data, isLoading, isError } = useTransactions(portfolioId, {
     ...query,
-    ...(typeFilter !== 'all' ? { type: typeFilter as 'BUY' | 'SELL' } : {}),
+    ...(types.length > 0 ? { types } : {}),
     page,
-    pageSize: PAGE_SIZE,
+    pageSize,
   });
   const deleteMutation = useDeleteTransaction();
 
   const items = data?.items ?? [];
   const total = data?.total ?? 0;
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
+  /** 是否存在非默认筛选条件（决定空态是否展示「清除筛选」按钮） */
+  const hasActiveFilters =
+    types.length > 0 ||
+    Boolean(query?.startDate) ||
+    Boolean(query?.endDate) ||
+    query?.sortBy === 'amount' ||
+    query?.sortOrder === 'asc' ||
+    page > 1;
 
   const handleConfirmDelete = () => {
     if (deletingId) {
@@ -98,8 +133,20 @@ export function CashflowList({
           加载失败，请稍后重试
         </div>
       ) : items.length === 0 ? (
-        <div className="py-10 text-center text-sm text-muted-foreground">
-          {emptyText}
+        // FLOW-P0-02 验收5：空态 + 「清除筛选」按钮（有非默认筛选条件时）
+        <div className="py-10 text-center">
+          <p className="text-sm text-muted-foreground">{emptyText}</p>
+          {hasActiveFilters && onClearFilter && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="mt-3"
+              onClick={onClearFilter}
+            >
+              <RotateCcw className="mr-1 h-3.5 w-3.5" />
+              清除筛选
+            </Button>
+          )}
         </div>
       ) : (
         <div className="overflow-x-auto">
@@ -172,18 +219,35 @@ export function CashflowList({
         </div>
       )}
 
-      {/* 分页 */}
-      {!isLoading && !isError && total > PAGE_SIZE && (
-        <div className="flex items-center justify-between pt-3">
-          <span className="text-xs text-muted-foreground">
-            共 {total} 条 · 第 {page}/{totalPages} 页
-          </span>
+      {/* 分页：页码 + 每页条数（20/50/100）+ 上/下一页 */}
+      {!isLoading && !isError && total > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-3">
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground">
+              共 {total} 条 · 第 {page}/{totalPages} 页
+            </span>
+            <Select
+              value={String(pageSize)}
+              onValueChange={(v) => onPageSizeChange(Number(v))}
+            >
+              <SelectTrigger className="h-8 w-[92px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {PAGE_SIZE_OPTIONS.map((opt) => (
+                  <SelectItem key={opt} value={String(opt)}>
+                    {opt} / 页
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
           <div className="flex gap-1">
             <Button
               size="sm"
               variant="outline"
               disabled={page <= 1}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              onClick={() => onPageChange(page - 1)}
             >
               <ChevronLeft className="h-4 w-4" />
               上一页
@@ -192,7 +256,7 @@ export function CashflowList({
               size="sm"
               variant="outline"
               disabled={page >= totalPages}
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              onClick={() => onPageChange(page + 1)}
             >
               下一页
               <ChevronRight className="h-4 w-4" />

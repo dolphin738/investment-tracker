@@ -40,6 +40,17 @@ export interface QuickRangeOption {
   label: string;
 }
 
+/**
+ * 快捷范围预设（DASH-P0-02 快捷项：近3月/近1年/今年至今/全部，对齐 dashboard）。
+ * 供净值分析页 / XIRR 分析页共用（resolveQuickRange 支持 3m/1y/ytd/all）。
+ */
+export const QUICK_RANGE_OPTIONS: ReadonlyArray<QuickRangeOption> = [
+  { value: '3m', label: '近3月' },
+  { value: '1y', label: '近1年' },
+  { value: 'ytd', label: '今年至今' },
+  { value: 'all', label: '全部' },
+];
+
 export interface DimensionSwitcherProps {
   value: DimensionSwitcherValue;
   onChange: (value: DimensionSwitcherValue) => void;

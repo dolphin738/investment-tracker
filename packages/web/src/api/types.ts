@@ -332,6 +332,25 @@ export interface UpdateTransactionRequest {
   note?: string | null;
 }
 
+/**
+ * 重算反馈（FLOW-P0-04 / CASH-P0-03；Part E-6 字段命名）。
+ *
+ * F3 获批后由后端 cashflow create/update/remove 响应并入；字段缺失即 undefined，
+ * 前端 toast 据此做兜底降级（见 use-transactions.buildRecalcSuffix）。
+ * - fromDate / affectedDays：F3 后端返回（recalculateRange 已有，透出即可）
+ * - updatedAutoDays / skippedManualDays：F4 后端返回（手工跳过统计），缺失时前端省略提示
+ */
+export interface RecalculationInfo {
+  /** 重算起始日 YYYY-MM-DD（自该日起净值/XIRR 被批量重算） */
+  fromDate: string;
+  /** 受影响天数 N */
+  affectedDays: number;
+  /** 被重写的自动总资产记录条数 M（F4；缺失时不展示） */
+  updatedAutoDays?: number;
+  /** 手工记录被跳过的天数 Z（F4；缺失时不展示） */
+  skippedManualDays?: number;
+}
+
 /** 出入金响应（含扩展字段） */
 export interface TransactionResponse {
   id: string;
@@ -347,14 +366,33 @@ export interface TransactionResponse {
   note: string | null;
   createdAt: string;
   updatedAt: string;
+  /** 重算反馈（F3/F4 后端返回；缺失即 undefined，前端兜底近似） */
+  recalculation?: RecalculationInfo;
+}
+
+/** 删除出入金响应（F3：后端返回 { recalculation }；旧后端仍返回 null 时前端兜底） */
+export interface TransactionDeleteResponse {
+  recalculation?: RecalculationInfo;
 }
 
 export interface TransactionQuery {
   startDate?: string;
   endDate?: string;
   page?: number;
+  /** 分页大小（FLOW-P0-02 验收2：20 / 50 / 100，默认 20） */
   pageSize?: number;
-  type?: 'BUY' | 'SELL';
+  /**
+   * 类型多选（F2 已获批，Part E-1 语义）：
+   * - 空数组 / 不传 = 全部（与「重置」一致，避免歧义）
+   * - 勾选一个 = 仅该类；勾选两个 = 全部（等价不传）
+   * 传输形式：URL query `types=BUY,SELL`（逗号分隔，listTransactions 内 join 后透传，
+   * 避免 axios 默认 `types[]=...` 序列化触发后端 forbidNonWhitelisted 400）。
+   */
+  types?: Array<'BUY' | 'SELL'>;
+  /** 排序字段（F5 已获批）：date | amount；缺省后端按 date desc */
+  sortBy?: 'date' | 'amount';
+  /** 排序方向（F5 已获批）：asc | desc */
+  sortOrder?: 'asc' | 'desc';
   securityId?: string;
 }
 

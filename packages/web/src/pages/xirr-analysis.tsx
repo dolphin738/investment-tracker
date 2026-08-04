@@ -25,7 +25,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Skeleton } from '@/components/ui/skeleton';
-import { DimensionSwitcher } from '@/features/query/dimension-switcher';
+import { DimensionSwitcher, QUICK_RANGE_OPTIONS } from '@/features/query/dimension-switcher';
 import type { DimensionSwitcherValue } from '@/features/query/dimension-switcher';
 import { XirrTrendChart } from '@/components/charts/xirr-trend-chart';
 import { YearlyBarChart } from '@/components/charts/yearly-bar-chart';
@@ -39,14 +39,6 @@ import {
   QueryGranularity,
   type XirrSeriesPoint,
 } from '@investment-tracker/shared';
-
-/** 快捷范围预设（DASH-P0-02 快捷项：近3月/近1年/今年/全部，对齐 dashboard） */
-const QUICK_RANGE_OPTIONS = [
-  { value: '3m', label: '近3月' },
-  { value: '1y', label: '近1年' },
-  { value: 'ytd', label: '今年至今' },
-  { value: 'all', label: '全部' },
-] as const;
 
 export default function XirrAnalysisPage(): JSX.Element {
   const currentPortfolioId = usePortfolioStore((s) => s.currentPortfolioId);

@@ -13,19 +13,32 @@ import { http } from '@/lib/api-client';
 import type {
   CreateTransactionRequest,
   PaginatedResponse,
+  TransactionDeleteResponse,
   TransactionQuery,
   TransactionResponse,
   UpdateTransactionRequest,
 } from './types';
 
-/** 获取交易列表（分页） */
+/**
+ * 获取交易列表（分页 + 筛选 + 排序）
+ *
+ * URL query 透传白名单（对齐后端 CashFlowQueryDto，避免 forbidNonWhitelisted 400）：
+ *   startDate / endDate / types / sortBy / sortOrder / page / pageSize
+ * `types` 数组序列化为逗号分隔（Part E-2：`types=BUY,SELL`）；空数组不发送（= 全部）。
+ */
 export function listTransactions(
   portfolioId: string,
   query: TransactionQuery = {},
 ): Promise<PaginatedResponse<TransactionResponse>> {
+  const params: Record<string, unknown> = { ...query };
+  if (Array.isArray(query.types) && query.types.length > 0) {
+    params.types = query.types.join(',');
+  } else {
+    delete params.types;
+  }
   return http.get<PaginatedResponse<TransactionResponse>>(
     `/portfolios/${portfolioId}/cashflows`,
-    { params: query },
+    { params },
   );
 }
 
@@ -52,10 +65,12 @@ export function updateTransaction(
   );
 }
 
-/** 删除交易 */
+/** 删除交易（F3：后端返回 { recalculation }；旧后端返回 null 时前端兜底） */
 export function deleteTransaction(
   portfolioId: string,
   id: string,
-): Promise<null> {
-  return http.delete<null>(`/portfolios/${portfolioId}/cashflows/${id}`);
+): Promise<TransactionDeleteResponse | null> {
+  return http.delete<TransactionDeleteResponse | null>(
+    `/portfolios/${portfolioId}/cashflows/${id}`,
+  );
 }

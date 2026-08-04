@@ -67,6 +67,8 @@ export function useUpsertCashBalance() {
       payload: UpsertCashBalanceRequest;
     }) => upsertApi(portfolioId, payload),
     onSuccess: () => {
+      // CASH-P0-03 重算范围反馈：依赖后端 recalc 并入响应（与 F3 通用修复联动），
+      // 当前保持「现金余额已保存」；后端透出 recalculation 后可在此拼接「已重算自 {asOf} 起」。
       toast.success('现金余额已保存');
       AFFECTED_QUERY_KEYS.forEach((key) =>
         queryClient.invalidateQueries({ queryKey: [...key] }),

@@ -4,16 +4,18 @@
  * 【A】总资产展示卡片（纯展示，不得出现输入框）：
  *   当前总资产 / 持仓市值 / 现金余额 + 近30日走势图 + 手工记录标记
  *   「[查看全部历史 →]」「[⚙ 管理历史记录 →]」均跳 /snapshots（后者带可编辑态参数）
- * 【B】现金余额（手工维护）：金额 + 生效日期 + 保存（调 cash-balance API）
- * 【C】出入金流水列表：筛选（日期范围/类型存入取出）+ 表格 + 分页
+ * 【B】现金余额（手工维护）：当前余额展示行 + ⓘ 提示 + 金额/生效日期/保存（调 cash-balance API）
+ * 【C】出入金流水列表：类型多选 checkbox（全不勾=全部）+ 日期范围 + 排序 + 分页（20/50/100）
+ *   —— 筛选/排序/分页全部写入 URL query（FLOW-P0-02 验收2：刷新/分享保持）
  */
 
-import { useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import ReactECharts from 'echarts-for-react';
 import {
   Camera,
   ChevronRight,
+  Info,
   Plus,
   RotateCcw,
   Settings2,
@@ -44,6 +46,14 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { CashflowForm } from '@/features/cashflow/cashflow-form';
 import { CashflowList } from '@/features/cashflow/cashflow-list';
+import {
+  parseTransactionSearchParams,
+  SORT_OPTIONS,
+  TRANSACTION_TYPE_OPTIONS,
+  typesToParam,
+  type TransactionTypeOption,
+} from '@/features/cashflow/query-params';
+import { CASH_BALANCE_FOCUS_EVENT } from '@/hooks/use-transactions';
 import { usePortfolioStore } from '@/stores/portfolio.store';
 import { usePreferenceStore } from '@/stores/preference.store';
 import { usePortfolios } from '@/hooks/use-portfolios';
@@ -76,12 +86,86 @@ interface AxisTooltipParam {
 
 export default function TransactionsPage(): JSX.Element {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const currentPortfolioId = usePortfolioStore((s) => s.currentPortfolioId);
   const { data: portfolios = [], isLoading: portfoliosLoading } = usePortfolios();
   const getPreference = usePreferenceStore((s) => s.getPreference);
   const amountThousands = getPreference('amountThousands');
   const amountAbbrev = getPreference('amountAbbrev');
   const [open, setOpen] = useState(false);
+
+  // ── 【C】筛选/排序/分页 ← URL query（FLOW-P0-02 验收2：刷新/分享保持） ──
+  const parsed = useMemo(
+    () => parseTransactionSearchParams(searchParams),
+    [searchParams],
+  );
+  const {
+    types,
+    startDate: filterStartDate,
+    endDate: filterEndDate,
+    sortBy,
+    sortOrder,
+    page,
+    pageSize,
+  } = parsed;
+
+  /** 更新 URL query（null / '' 删除该参数；变更即生效，无需「筛选」按钮） */
+  const updateParams = useCallback(
+    (patch: Record<string, string | number | null>) => {
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        for (const [key, value] of Object.entries(patch)) {
+          if (value === null || value === undefined || value === '') {
+            next.delete(key);
+          } else {
+            next.set(key, String(value));
+          }
+        }
+        return next;
+      });
+    },
+    [setSearchParams],
+  );
+
+  /** 类型多选切换（全不勾 = 全部，Part E-1） */
+  const handleToggleType = (t: TransactionTypeOption) => {
+    const next = types.includes(t) ? types.filter((x) => x !== t) : [...types, t];
+    updateParams({ types: typesToParam(next), page: 1 });
+  };
+
+  /** 重置：清空全部筛选/排序/分页参数（回落到 全部 + date desc + 第 1 页 + 20 条） */
+  const handleResetFilter = () => {
+    setSearchParams({});
+  };
+
+  /** 排序切换（value = `${sortBy}:${sortOrder}`，如 date:desc） */
+  const handleSortChange = (v: string) => {
+    const [by, order] = v.split(':');
+    updateParams({ sortBy: by, sortOrder: order, page: 1 });
+  };
+
+  const handlePageChange = (p: number) => {
+    updateParams({ page: p });
+  };
+
+  const handlePageSizeChange = (size: number) => {
+    updateParams({ pageSize: size, page: 1 });
+  };
+
+  /**
+   * 传给列表的查询参数：日期范围 + 非默认排序。
+   * F5 仅非默认时透传（默认 date desc 与后端现状一致，避免后端 F5 未落盘时白名单 400）。
+   */
+  const listQuery: TransactionQuery = useMemo(() => {
+    const q: TransactionQuery = {};
+    if (filterStartDate) q.startDate = filterStartDate;
+    if (filterEndDate) q.endDate = filterEndDate;
+    if (sortBy === 'amount' || sortOrder === 'asc') {
+      q.sortBy = sortBy;
+      q.sortOrder = sortOrder;
+    }
+    return q;
+  }, [filterStartDate, filterEndDate, sortBy, sortOrder]);
 
   // ── 【A】总资产展示数据 ──
   const overview = useQuery({
@@ -109,12 +193,18 @@ export default function TransactionsPage(): JSX.Element {
   const [balanceAmount, setBalanceAmount] = useState('');
   const [balanceDate, setBalanceDate] = useState(toIsoDate(new Date()));
   const upsertBalanceMutation = useUpsertCashBalance();
+  const balanceAmountRef = useRef<HTMLInputElement>(null);
 
-  // ── 【C】出入金筛选 ──
-  const [filterType, setFilterType] = useState<string>('all');
-  const [filterStartDate, setFilterStartDate] = useState<string>('');
-  const [filterEndDate, setFilterEndDate] = useState<string>('');
-  const [query, setQuery] = useState<TransactionQuery>({ pageSize: 20 });
+  // FLOW-P0-06：监听软提示「去更新」事件 → 聚焦【B】金额输入框
+  // （只聚焦，绝不自动修改 CashBalance；事件由 use-transactions 的 soft hint action 派发）
+  useEffect(() => {
+    const handler = () => {
+      balanceAmountRef.current?.focus();
+      balanceAmountRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    };
+    window.addEventListener(CASH_BALANCE_FOCUS_EVENT, handler);
+    return () => window.removeEventListener(CASH_BALANCE_FOCUS_EVENT, handler);
+  }, []);
 
   // ── 近30日走势数据 ──
   const trendData = useMemo(() => {
@@ -216,22 +306,11 @@ export default function TransactionsPage(): JSX.Element {
         portfolioId: currentPortfolioId!,
         payload: { asOf: balanceDate, amount },
       },
-      { onSuccess: () => setBalanceAmount('') },
+      {
+        // 保存后清空输入；latestBalance 因 useUpsertCashBalance invalidate 自动刷新 → 展示最新余额
+        onSuccess: () => setBalanceAmount(''),
+      },
     );
-  };
-
-  const handleFilter = () => {
-    const q: TransactionQuery = { pageSize: 20 };
-    if (filterStartDate) q.startDate = filterStartDate;
-    if (filterEndDate) q.endDate = filterEndDate;
-    setQuery(q);
-  };
-
-  const handleResetFilter = () => {
-    setFilterType('all');
-    setFilterStartDate('');
-    setFilterEndDate('');
-    setQuery({ pageSize: 20 });
   };
 
   // ===== 加载态 =====
@@ -270,14 +349,14 @@ export default function TransactionsPage(): JSX.Element {
       {/* 页头 */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">出入金</h1>
+          <h1 className="text-2xl font-bold tracking-tight">出入金管理</h1>
           <p className="text-sm text-muted-foreground">
             管理存入/取出现金流，系统据此计算净值与 XIRR
           </p>
         </div>
         <Button onClick={() => setOpen(true)}>
           <Plus className="mr-2 h-4 w-4" />
-          录入出入金
+          新增出入金
         </Button>
       </div>
 
@@ -362,6 +441,35 @@ export default function TransactionsPage(): JSX.Element {
           </CardDescription>
         </CardHeader>
         <CardContent>
+          {/* 当前余额展示行（CASH-P0-02 验收1） */}
+          <div className="mb-4 rounded-lg bg-muted/40 p-4">
+            <p className="text-xs text-muted-foreground">当前余额</p>
+            <p className="mt-1 text-xl font-bold tabular-nums">
+              {cashBalance !== undefined && cashBalance !== null
+                ? formatCurrency(cashBalance, 2, { thousands: amountThousands, abbreviate: amountAbbrev })
+                : '未维护，可在下方录入'}
+            </p>
+            {cashBalance !== undefined && cashBalance !== null && latestBalance.data && (
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                自 {formatDate(latestBalance.data.asOf)} 起沿用
+              </p>
+            )}
+          </div>
+
+          {/* CASH-P0-03 两条 ⓘ 提示 */}
+          <ul className="mb-4 space-y-1.5 text-xs text-muted-foreground">
+            <li className="flex items-start gap-1.5">
+              <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span>存取与证券买卖不会自动调整此值，请在操作后自行更新。</span>
+            </li>
+            <li className="flex items-start gap-1.5">
+              <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span>修改后自该日起的自动总资产记录将重新计算（您手工记录的日期会被跳过）。</span>
+            </li>
+          </ul>
+
+          {/* CASH-P1-01「查看变更历史 ▾」为 P1 项，本轮不做（后端列表接口与 useCashBalances 已就绪，后续可复用） */}
+
           <div className="flex flex-wrap items-end gap-3">
             <div className="space-y-1.5">
               <Label htmlFor="balance-amount" className="text-xs">
@@ -369,6 +477,7 @@ export default function TransactionsPage(): JSX.Element {
               </Label>
               <Input
                 id="balance-amount"
+                ref={balanceAmountRef}
                 type="number"
                 step="0.01"
                 min="0"
@@ -411,23 +520,32 @@ export default function TransactionsPage(): JSX.Element {
       <Card>
         <CardHeader>
           <CardTitle className="text-base">出入金流水</CardTitle>
-          <CardDescription>支持按日期范围与类型筛选，编辑/删除将触发重算</CardDescription>
+          <CardDescription>支持按日期范围与类型多选筛选、排序；编辑/删除将触发重算</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {/* 筛选栏 */}
+          {/* 筛选栏（变更即写入 URL query，FLOW-P0-02 验收2） */}
           <div className="flex flex-wrap items-end gap-3">
             <div className="space-y-1.5">
               <Label className="text-xs">类型</Label>
-              <Select value={filterType} onValueChange={setFilterType}>
-                <SelectTrigger className="w-[110px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">全部</SelectItem>
-                  <SelectItem value="BUY">存入</SelectItem>
-                  <SelectItem value="SELL">取出</SelectItem>
-                </SelectContent>
-              </Select>
+              <div className="flex h-9 items-center gap-4 rounded-md border border-input px-3">
+                {TRANSACTION_TYPE_OPTIONS.map((t) => (
+                  <label
+                    key={t}
+                    className="flex cursor-pointer items-center gap-1.5 text-sm"
+                  >
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 accent-primary"
+                      checked={types.includes(t)}
+                      onChange={() => handleToggleType(t)}
+                    />
+                    <span className={t === 'BUY' ? 'text-up' : 'text-down'}>
+                      {t === 'BUY' ? '存入' : '取出'}
+                    </span>
+                  </label>
+                ))}
+              </div>
+              <p className="text-xs text-muted-foreground">不勾选 = 全部</p>
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs">起始日期</Label>
@@ -435,7 +553,9 @@ export default function TransactionsPage(): JSX.Element {
                 type="date"
                 className="w-[150px]"
                 value={filterStartDate}
-                onChange={(e) => setFilterStartDate(e.target.value)}
+                onChange={(e) =>
+                  updateParams({ startDate: e.target.value || null, page: 1 })
+                }
               />
             </div>
             <div className="space-y-1.5">
@@ -444,13 +564,27 @@ export default function TransactionsPage(): JSX.Element {
                 type="date"
                 className="w-[150px]"
                 value={filterEndDate}
-                onChange={(e) => setFilterEndDate(e.target.value)}
+                onChange={(e) =>
+                  updateParams({ endDate: e.target.value || null, page: 1 })
+                }
               />
             </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">排序</Label>
+              <Select value={`${sortBy}:${sortOrder}`} onValueChange={handleSortChange}>
+                <SelectTrigger className="w-[130px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {SORT_OPTIONS.map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
             <div className="flex gap-2">
-              <Button size="sm" onClick={handleFilter}>
-                筛选
-              </Button>
               <Button size="sm" variant="outline" onClick={handleResetFilter}>
                 <RotateCcw className="mr-1 h-3.5 w-3.5" />
                 重置
@@ -460,8 +594,13 @@ export default function TransactionsPage(): JSX.Element {
 
           <CashflowList
             portfolioId={currentPortfolioId}
-            query={query}
-            typeFilter={filterType}
+            query={listQuery}
+            types={types}
+            page={page}
+            pageSize={pageSize}
+            onPageChange={handlePageChange}
+            onPageSizeChange={handlePageSizeChange}
+            onClearFilter={handleResetFilter}
           />
         </CardContent>
       </Card>

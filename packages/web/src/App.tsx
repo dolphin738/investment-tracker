@@ -119,6 +119,12 @@ const router = createBrowserRouter([
         ),
       },
       {
+        // FLOW-P0-01 验收4：/transactions → /cashflows 前端 301 语义
+        // （React Router 内 replace 即 SPA 内重定向；真实 HTTP 301 由部署层配置，Part F-F9）
+        path: 'transactions',
+        element: <Navigate to={ROUTE_PATH.TRANSACTIONS} replace />,
+      },
+      {
         path: 'snapshots',
         element: (
           <Suspense fallback={<PageLoading />}>

@@ -45,8 +45,12 @@ export interface CashflowFormProps {
   portfolioId: string;
   /** 传入则编辑，否则新建 */
   cashflow?: TransactionResponse | null;
-  /** 提交成功后回调（关闭弹窗） */
-  onSuccess?: () => void;
+  /**
+   * 提交成功后回调（携带 mutation 响应，供页面读取重算结果/关闭弹窗）。
+   * 重算 toast 与 FLOW-P0-06 软提示由 use-transactions 的 mutation onSuccess 统一触发，
+   * 此处仅透传响应，不重复弹 toast。
+   */
+  onSuccess?: (result?: TransactionResponse) => void;
   className?: string;
 }
 
@@ -107,7 +111,7 @@ export function CashflowForm({
         { portfolioId, id: cashflow.id, payload },
         {
           onSettled: () => setSubmitting(false),
-          onSuccess: () => onSuccess?.(),
+          onSuccess: (data) => onSuccess?.(data),
         },
       );
     } else {
@@ -115,9 +119,9 @@ export function CashflowForm({
         { portfolioId, payload },
         {
           onSettled: () => setSubmitting(false),
-          onSuccess: () => {
+          onSuccess: (data) => {
             reset({ date: today, type: CashFlowType.BUY, amount: '', note: '' });
-            onSuccess?.();
+            onSuccess?.(data);
           },
         },
       );
