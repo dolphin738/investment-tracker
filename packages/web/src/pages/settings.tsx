@@ -204,34 +204,11 @@ export default function SettingsPage(): JSX.Element {
     xirrDecimals: DEFAULT_PREFERENCES.xirrDecimals,
     theme: DEFAULT_PREFERENCES.theme,
     staleDays: DEFAULT_PREFERENCES.staleDays,
-  });
-
-  /**
-   * ⚠️ 后端缺口 D · 仅本地渲染、**不进 PATCH payload** 的偏好项
-   *
-   * - 软提示开关（SET-P0-07）：`cashHintOnCashflow` / `cashHintOnTrade`
-   * - 金额格式（SET-P1-03）：`amountThousands` / `amountAbbrev`
-   *
-   * 后端 `prisma/schema.prisma` 的 `UserPreference` 与 `UpdatePreferenceDto`
-   * 均无这些列/字段，而 NestJS 侧开启了 `ValidationPipe({ forbidNonWhitelisted: true })`，
-   * 一旦把它们塞进 PATCH /api/users/preferences 会直接 400。
-   * 因此本轮只渲染控件、只做本地态，待后端补齐上述四个字段后再接入
-   * `prefForm` + `handleSavePreferences` 的 payload。
-   */
-  const [uiOnlyPrefs, setUiOnlyPrefs] = useState({
     cashHintOnCashflow: DEFAULT_PREFERENCES.cashHintOnCashflow,
     cashHintOnTrade: DEFAULT_PREFERENCES.cashHintOnTrade,
-    amountThousands: true,
-    amountAbbrev: false,
+    amountThousands: DEFAULT_PREFERENCES.amountThousands,
+    amountAbbrev: DEFAULT_PREFERENCES.amountAbbrev,
   });
-
-  /** 更新「仅渲染」偏好项（不落库，见 uiOnlyPrefs 注释） */
-  const updateUiOnlyPref = <K extends keyof typeof uiOnlyPrefs>(
-    key: K,
-    value: (typeof uiOnlyPrefs)[K],
-  ) => {
-    setUiOnlyPrefs((prev) => ({ ...prev, [key]: value }));
-  };
 
   // 当服务端偏好加载完成后同步表单
   useEffect(() => {
@@ -246,15 +223,11 @@ export default function SettingsPage(): JSX.Element {
         xirrDecimals: serverPrefs.xirrDecimals,
         theme: serverPrefs.theme,
         staleDays: serverPrefs.staleDays,
+        cashHintOnCashflow: serverPrefs.cashHintOnCashflow,
+        cashHintOnTrade: serverPrefs.cashHintOnTrade,
+        amountThousands: serverPrefs.amountThousands,
+        amountAbbrev: serverPrefs.amountAbbrev,
       });
-      // 后端暂不返回软提示字段（缺口 D），用 ?? 回落默认值，避免 undefined 造成非受控警告
-      setUiOnlyPrefs((prev) => ({
-        ...prev,
-        cashHintOnCashflow:
-          serverPrefs.cashHintOnCashflow ?? DEFAULT_PREFERENCES.cashHintOnCashflow,
-        cashHintOnTrade:
-          serverPrefs.cashHintOnTrade ?? DEFAULT_PREFERENCES.cashHintOnTrade,
-      }));
     }
   }, [serverPrefs]);
 
@@ -356,7 +329,11 @@ export default function SettingsPage(): JSX.Element {
       prefForm.navDecimals !== serverPrefs.navDecimals ||
       prefForm.xirrDecimals !== serverPrefs.xirrDecimals ||
       prefForm.theme !== serverPrefs.theme ||
-      prefForm.staleDays !== serverPrefs.staleDays);
+      prefForm.staleDays !== serverPrefs.staleDays ||
+      prefForm.cashHintOnCashflow !== serverPrefs.cashHintOnCashflow ||
+      prefForm.cashHintOnTrade !== serverPrefs.cashHintOnTrade ||
+      prefForm.amountThousands !== serverPrefs.amountThousands ||
+      prefForm.amountAbbrev !== serverPrefs.amountAbbrev);
 
   return (
     <div className="space-y-6">
@@ -614,6 +591,8 @@ export default function SettingsPage(): JSX.Element {
                 </div>
               </div>
 
+              {/* 外观主题 / 软提示开关 / 金额格式 / 快照过期阈值：四块横排（窄屏回退纵向） */}
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
               {/* 外观主题 */}
               <div className="space-y-2">
                 <Label className="flex items-center gap-2">
@@ -634,57 +613,47 @@ export default function SettingsPage(): JSX.Element {
                 </p>
               </div>
 
-              {/*
-                软提示开关（SET-P0-07 · §7.8 L1376）
-                ⚠️ 后端缺口 D：UserPreference 表与 UpdatePreferenceDto 均无
-                cashHintOnCashflow / cashHintOnTrade 列，提交会被 forbidNonWhitelisted 拒为 400，
-                故此处只渲染控件、只改本地态，不进 handleSavePreferences 的 payload。
-              */}
+              {/* 软提示开关（SET-P0-07 · §7.8 L1376） */}
               <div className="space-y-2">
                 <Label>软提示开关</Label>
-                <div className="flex flex-wrap items-center gap-6">
+                <div className="flex flex-wrap items-center gap-4">
                   <PrefCheckbox
                     id="pref-hint-cashflow"
-                    checked={uiOnlyPrefs.cashHintOnCashflow}
-                    onCheckedChange={(v) =>
-                      updateUiOnlyPref('cashHintOnCashflow', v)
-                    }
+                    checked={prefForm.cashHintOnCashflow}
+                    onCheckedChange={(v) => updateField('cashHintOnCashflow', v)}
                     label="出入金后提示"
                   />
                   <PrefCheckbox
                     id="pref-hint-trade"
-                    checked={uiOnlyPrefs.cashHintOnTrade}
-                    onCheckedChange={(v) => updateUiOnlyPref('cashHintOnTrade', v)}
+                    checked={prefForm.cashHintOnTrade}
+                    onCheckedChange={(v) => updateField('cashHintOnTrade', v)}
                     label="买卖后提示"
                   />
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  录入后提示同步更新现金余额（SET-P0-07）；⚠️ 待后端补充字段后方可持久化
+                  录入后提示同步更新现金余额（SET-P0-07）
                 </p>
               </div>
 
-              {/*
-                金额格式（SET-P1-03 · §7.8 L1377）
-                ⚠️ 后端缺口 D：待后端新增 UserPreference.amountThousands / amountAbbrev
-              */}
+              {/* 金额格式（SET-P1-03 · §7.8 L1377） */}
               <div className="space-y-2">
                 <Label>金额格式</Label>
-                <div className="flex flex-wrap items-center gap-6">
+                <div className="flex flex-wrap items-center gap-4">
                   <PrefCheckbox
                     id="pref-amount-thousands"
-                    checked={uiOnlyPrefs.amountThousands}
-                    onCheckedChange={(v) => updateUiOnlyPref('amountThousands', v)}
+                    checked={prefForm.amountThousands}
+                    onCheckedChange={(v) => updateField('amountThousands', v)}
                     label="千分位"
                   />
                   <PrefCheckbox
                     id="pref-amount-abbrev"
-                    checked={uiOnlyPrefs.amountAbbrev}
-                    onCheckedChange={(v) => updateUiOnlyPref('amountAbbrev', v)}
+                    checked={prefForm.amountAbbrev}
+                    onCheckedChange={(v) => updateField('amountAbbrev', v)}
                     label="万 / 亿缩写"
                   />
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  金额展示格式（SET-P1-03）；⚠️ 待后端补充字段后方可持久化
+                  金额展示格式（SET-P1-03）；本轮先持久化到服务端，全站渲染接入为独立 P1 任务
                 </p>
               </div>
 
@@ -696,7 +665,7 @@ export default function SettingsPage(): JSX.Element {
                   type="number"
                   min={1}
                   max={30}
-                  className="w-[120px]"
+                  className="w-full"
                   value={prefForm.staleDays}
                   onChange={(e) => {
                     const v = Number(e.target.value);
@@ -706,6 +675,7 @@ export default function SettingsPage(): JSX.Element {
                 <p className="text-xs text-muted-foreground">
                   资产快照超过此天数未更新时显示提醒（1~30 天）
                 </p>
+              </div>
               </div>
 
               {/* 🆕 货币 / 语言（待后端集成） */}

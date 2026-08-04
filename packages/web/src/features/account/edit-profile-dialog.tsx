@@ -125,10 +125,17 @@ export function EditProfileDialog({
    */
   const [avatarUrlDraft, setAvatarUrlDraft] = useState<string>('');
 
+  /** 仅 http(s) 外链才回灌输入框；站内上传路径（/api/uploads/... 等相对路径）不对外暴露 */
+  const isExternalUrl = (v: string): boolean => /^https?:\/\//i.test(v);
+
+  /** 当前头像来自本地上传（有值但不是外链） */
+  const isUploadedAvatar = Boolean(avatarValue) && !isExternalUrl(avatarValue);
+
   // 表单里的 avatar 变化时回灌草稿：覆盖「打开对话框初始化」「本地上传成功」
   // 「移除头像」三条路径，保证输入框与实际头像始终一致。
+  // 仅外链回灌：站内上传路径是内部实现细节，不回显到 URL 输入框。
   useEffect(() => {
-    setAvatarUrlDraft(avatarValue);
+    setAvatarUrlDraft(isExternalUrl(avatarValue) ? avatarValue : '');
   }, [avatarValue]);
 
   /** 点击 [应用]：把草稿 URL 写进表单，立即刷新上方头像预览，随「保存」提交生效 */
@@ -302,7 +309,11 @@ export function EditProfileDialog({
                   id="profile-avatar-url"
                   type="text"
                   inputMode="url"
-                  placeholder="https://example.com/avatar.png"
+                  placeholder={
+                    isUploadedAvatar
+                      ? '已通过本地上传设置头像'
+                      : 'https://example.com/avatar.png'
+                  }
                   value={avatarUrlDraft}
                   onChange={(e) => setAvatarUrlDraft(e.target.value)}
                   onKeyDown={(e) => {
@@ -324,14 +335,19 @@ export function EditProfileDialog({
                   type="button"
                   variant="outline"
                   onClick={handleApplyAvatarUrl}
-                  disabled={isBusy || avatarUrlDraft === avatarValue}
+                  disabled={
+                    isBusy ||
+                    avatarUrlDraft.trim() === '' ||
+                    avatarUrlDraft.trim() === avatarValue
+                  }
                 >
                   应用
                 </Button>
               </div>
               <p className="text-xs text-muted-foreground">
                 输入图片 URL 后点「应用」即可预览并设为头像；与本地上传并列，
-                二者最后生效者覆盖前者，最终随「保存」提交
+                二者最后生效者覆盖前者，最终随「保存」提交。本地上传的头像不会显示为
+                URL（站内路径不对外暴露）；此处仅用于粘贴外部图片地址
               </p>
             </div>
 

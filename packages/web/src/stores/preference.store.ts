@@ -23,6 +23,8 @@ export const DEFAULT_PREFERENCES: Omit<UserPreference, 'id' | 'userId' | 'create
   staleDays: 3,
   cashHintOnCashflow: true,
   cashHintOnTrade: true,
+  amountThousands: true,
+  amountAbbrev: false,
 };
 
 interface PreferenceState {

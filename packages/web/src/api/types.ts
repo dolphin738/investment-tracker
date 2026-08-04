@@ -62,8 +62,10 @@ export interface UserPublic {
   avatar: string | null;
   phone: string | null;
   bio: string | null;
+  /** 注册时间 ISO 8601（后端 toUserPublic 投影，唯一出口） */
   createdAt: string;
-  updatedAt: string;
+  /** 后端暂不返回（无 UI 消费），标可选避免类型说谎 */
+  updatedAt?: string;
 }
 
 /** 用户偏好 */
@@ -83,6 +85,10 @@ export interface UserPreference {
   cashHintOnCashflow: boolean;
   /** 证券买卖后现金余额软提示开关（SET-P0-07） */
   cashHintOnTrade: boolean;
+  /** 金额千分位（SET-P1-03） */
+  amountThousands: boolean;
+  /** 金额万 / 亿缩写（SET-P1-03） */
+  amountAbbrev: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -100,6 +106,8 @@ export interface UpdatePreferenceDto {
   staleDays?: number;
   cashHintOnCashflow?: boolean;
   cashHintOnTrade?: boolean;
+  amountThousands?: boolean;
+  amountAbbrev?: boolean;
 }
 
 // ============================================================================
@@ -445,48 +453,42 @@ export interface OverviewResponse {
 }
 
 /**
- * 组合摘要（GET /portfolios/summary · 用于账户页资产全景 / 概览页组合对比）
+ * 组合摘要（GET /portfolios/summary · 用于账户页资产全景 / 组合列表）
  *
- * ⚠️ 后端缺口（PRD v3.1.8 §7.7 账户页草图对齐 · 本轮只动前端，不补后端）：
- * 后端 `portfolio.service.getSummary()` 实际只返回
- * `{ id, name, totalAsset, holdingsCount, lastUpdatedAt }`，
- * 下列字段在运行时**恒为 undefined**。此前它们被声明为必填的 `T | null`，
- * 调用方用 `x !== null` 判空会放行 undefined 并渲染出 NaN —— 故统一改为 optional，
- * 强制调用方用 `!= null` 判空并回落占位符「—」。待后端补齐后再去掉 `?`。
- *
- * 待后端补充字段清单：
- * - `cumulativeNav`（净值）、`cumulativeReturnRate`（累计收益率）
- * - `yearReturnRate`（当年 %）、`xirr`、`latestDate`
- * - `netInvested`（合计净投入）、`floatingProfit`（合计浮动盈亏）
- * - `baseDate`（成立日）、`currency`（币种）—— 前端可从 `usePortfolios()` 兜底
+ * 数值字段一律以 string 跨网（Prisma.Decimal.toFixed(n)）：
+ * - 金额 2 位（totalAsset / netInvested / floatingProfit）
+ * - 净值 6 位（cumulativeNav）
+ * - 收益率 8 位（yearReturnRate，**比率**非百分数，前端 formatPercent 内部 ×100）
+ * - 「无数据」一律 null（cumulativeNav / yearReturnRate / floatingProfit / baseDate），
+ *   前端渲染「—」或「未成立」，禁止把 null 渲染成 0（SYS-P0-05 四态）。
  */
 export interface PortfolioSummary {
   id: string;
   name: string;
   /** 最新一条总资产快照金额；无快照时后端返回 '0' */
   totalAsset: string;
-  /** 持仓标的数（后端已返回） */
-  holdingsCount?: number;
-  /** 最近更新日 YYYY-MM-DD（后端已返回，取快照/买卖较晚者） */
-  lastUpdatedAt?: string | null;
-  /** ⚠️ 后端缺口：累计净值 */
-  cumulativeNav?: number | null;
-  /** ⚠️ 后端缺口：累计收益率 */
+  /** 持仓标的数 */
+  holdingsCount: number;
+  /** 最近更新日 YYYY-MM-DD（取快照/买卖较晚者） */
+  lastUpdatedAt: string | null;
+  /** 组合成立日 = 首笔存入日（FIN-D6）YYYY-MM-DD；null = 尚无存入，组合未成立 */
+  baseDate: string | null;
+  /** 组合币种（v1 恒为 CNY） */
+  currency: string;
+  /** 组合创建时间 ISO 8601（baseDate 为 null 时前端展示「创建于 …」） */
+  createdAt: string;
+  /** 最新累计净值，6 位小数字符串；null = 尚无 DailyNav */
+  cumulativeNav: string | null;
+  /** 当年收益率（比率，非百分数）= yearNav - 1，8 位小数字符串；null = 尚无 DailyNav */
+  yearReturnRate: string | null;
+  /** 累计收益率（比率，非百分数）；后端 summary 当前不返回，概览页旧消费端兼容保留（运行时 undefined，!= null 判空跳过） */
   cumulativeReturnRate?: number | null;
-  /** ⚠️ 后端缺口：当年收益率 */
-  yearReturnRate?: number | null;
-  /** ⚠️ 后端缺口：XIRR */
+  /** XIRR（比率，非百分数）；后端 summary 当前不返回，概览页旧消费端兼容保留（运行时 undefined，!= null 判空跳过） */
   xirr?: number | null;
-  /** ⚠️ 后端缺口：数据截止日 */
-  latestDate?: string | null;
-  /** ⚠️ 后端缺口：合计净投入（ACC-P0-03，禁止前端自算 · FIN-F0-09 C-01） */
-  netInvested?: string | null;
-  /** ⚠️ 后端缺口：合计浮动盈亏（ACC-P0-03，禁止前端自算 · FIN-F0-09 C-01） */
-  floatingProfit?: string | null;
-  /** ⚠️ 后端缺口：成立日（前端从 usePortfolios() 的 baseDate 兜底） */
-  baseDate?: string | null;
-  /** ⚠️ 后端缺口：币种（前端从 usePortfolios() 的 currency 兜底） */
-  currency?: string | null;
+  /** 净投入 = Σ存入 - Σ取出，2 位小数字符串（必填；无出入金为 '0.00'） */
+  netInvested: string;
+  /** 浮动盈亏 = totalAsset - netInvested，2 位小数字符串；null = 无总资产记录 */
+  floatingProfit: string | null;
 }
 
 // ============================================================================
@@ -495,24 +497,19 @@ export interface PortfolioSummary {
 
 /**
  * 账户统计（GET /account/stats · 账户页数据统计卡 ACC-P0-06）
- *
- * ⚠️ 后端缺口：`account.service.getStats()` 的 `transactionCount` 统计口径是
- * `prisma.cashFlow.count()`，**只含出入金笔数**，不含证券买卖笔数；
- * 「证券买卖笔数」当前无任何后端字段可用（需后端补 `securityTrade.count()`），
- * 前端一律显示占位「—」。
  */
 export interface AccountStats {
   portfolioCount: number;
-  /** 出入金笔数（后端口径 = cashFlow.count，非「全部交易」） */
-  transactionCount: number;
+  /** 出入金笔数（CashFlow 计数） */
+  cashflowCount: number;
+  /** 证券买卖笔数（SecurityTrade 计数） */
+  tradeCount: number;
   /** 总资产记录天数（跨组合去重） */
   snapshotDays: number;
   /** 账户使用天数（注册至今） */
   recordDays: number;
   firstDate: string | null;
   lastDate: string | null;
-  /** ⚠️ 后端缺口：证券买卖笔数（待后端新增 securityTrade.count） */
-  tradeCount?: number;
 }
 
 // ============================================================================
