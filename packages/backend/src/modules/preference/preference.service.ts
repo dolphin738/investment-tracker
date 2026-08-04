@@ -16,7 +16,7 @@
  * - staleDays: 3
  */
 
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { UpdatePreferenceDto } from './dto/update-preference.dto';
 
@@ -77,6 +77,19 @@ export class PreferenceService {
       });
     }
 
+    // 自愈：默认组合可能已被删除或归档（归档组合已从选择器隐藏）。
+    // 继续把失效 ID 回传给前端，只会让「重设默认组合」一直携带一个选不回来的旧值，
+    // 因此这里就地清空，保证 GET 出去的默认组合永远是「存在且未归档」的。
+    if (
+      pref.defaultPortfolioId &&
+      !(await this.isSelectablePortfolio(userId, pref.defaultPortfolioId))
+    ) {
+      pref = await this.prisma.userPreference.update({
+        where: { userId },
+        data: { defaultPortfolioId: null },
+      });
+    }
+
     return {
       id: pref.id,
       userId: pref.userId,
@@ -92,6 +105,20 @@ export class PreferenceService {
       createdAt: pref.createdAt.toISOString(),
       updatedAt: pref.updatedAt.toISOString(),
     };
+  }
+
+  /**
+   * 判断组合是否可被选为「默认组合」：属于该用户、存在、且未归档。
+   */
+  private async isSelectablePortfolio(
+    userId: string,
+    portfolioId: string,
+  ): Promise<boolean> {
+    const portfolio = await this.prisma.portfolio.findFirst({
+      where: { id: portfolioId, userId, archivedAt: null },
+      select: { id: true },
+    });
+    return portfolio !== null;
   }
 
   /**
@@ -122,6 +149,20 @@ export class PreferenceService {
           staleDays: DEFAULTS.staleDays,
         },
       });
+    }
+
+    // 默认组合：只接受「属于本人、存在且未归档」的组合。
+    // 校验失败给出可读原因，而不是让前端只看到一个 class-validator 的 UUID 报错。
+    if (dto.defaultPortfolioId) {
+      const selectable = await this.isSelectablePortfolio(
+        userId,
+        dto.defaultPortfolioId,
+      );
+      if (!selectable) {
+        throw new BadRequestException(
+          '默认组合不存在、无权访问或已归档，请选择其他组合',
+        );
+      }
     }
 
     // 构建更新数据

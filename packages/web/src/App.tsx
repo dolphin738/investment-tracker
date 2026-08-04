@@ -27,6 +27,7 @@ import { Toaster } from 'sonner';
 import { AppLayout } from '@/components/layout/app-layout';
 import { AuthGuard } from '@/components/auth-guard';
 import { PreferenceBootstrap } from '@/components/preference-bootstrap';
+import { ThemeManager } from '@/components/theme-manager';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { ROUTE_PATH } from '@/lib/constants';
 
@@ -174,6 +175,7 @@ const router = createBrowserRouter([
 const App: FC = () => {
   return (
     <QueryClientProvider client={queryClient}>
+      <ThemeManager />
       <RouterProvider router={router} />
       <Toaster
         position="top-right"

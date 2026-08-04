@@ -28,6 +28,13 @@ export interface Portfolio {
   baseDate: string | null;
   /** 币种，v1 默认 'CNY' */
   currency: string;
+  /**
+   * 归档时间 ISO 8601（SET-P1-04）；null = 未归档。
+   *
+   * 归档组合保留全部数据，但从「组合选择器 / 默认组合候选」中隐藏，
+   * 仅在设置页「组合管理」列表可见并可取消归档。
+   */
+  archivedAt: string | null;
   /** 创建时间 ISO 8601 */
   createdAt: string;
   /** 更新时间 ISO 8601 */

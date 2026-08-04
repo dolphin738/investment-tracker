@@ -32,6 +32,9 @@ export function PortfolioSelector({
   const currentPortfolioId = usePortfolioStore((s) => s.currentPortfolioId);
   const setCurrentPortfolio = usePortfolioStore((s) => s.setCurrentPortfolio);
 
+  // 归档组合从选择器隐藏（SET-P1-04）：仅保留未归档组合可选
+  const visiblePortfolios = portfolios.filter((p) => !p.archivedAt);
+
   return (
     <div className={className}>
       <Select
@@ -54,7 +57,7 @@ export function PortfolioSelector({
         <SelectContent>
           <SelectGroup>
             <SelectLabel>我的组合</SelectLabel>
-            {portfolios.map((p) => (
+            {visiblePortfolios.map((p) => (
               <SelectItem key={p.id} value={p.id}>
                 <span className="flex items-center gap-2">
                   {p.id === currentPortfolioId && (
@@ -64,7 +67,7 @@ export function PortfolioSelector({
                 </span>
               </SelectItem>
             ))}
-            {portfolios.length === 0 && (
+            {visiblePortfolios.length === 0 && (
               <div className="px-2 py-1.5 text-xs text-muted-foreground">
                 暂无组合，请新建
               </div>

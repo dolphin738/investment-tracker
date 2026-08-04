@@ -30,6 +30,8 @@ export interface PortfolioResponse {
   description: string | null;
   baseDate: string | null;
   currency: string;
+  /** 归档时间 ISO 8601（SET-P1-04）；null = 未归档 */
+  archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -43,6 +45,9 @@ function toResponse(p: PrismaPortfolio): PortfolioResponse {
     description: p.description,
     baseDate: p.baseDate ? p.baseDate.toISOString().split('T')[0] : null,
     currency: p.currency,
+    // 🔴 归档态必须回传：前端据此渲染「已归档」标记、切换归档/取消归档语义，
+    //    并把归档组合从组合选择器 / 默认组合候选中隐藏（SET-P1-04）
+    archivedAt: p.archivedAt ? p.archivedAt.toISOString() : null,
     createdAt: p.createdAt.toISOString(),
     updatedAt: p.updatedAt.toISOString(),
   };
@@ -169,7 +174,27 @@ export class PortfolioService {
   async remove(userId: string, id: string): Promise<null> {
     await this.findOne(userId, id);
     await this.prisma.portfolio.delete({ where: { id } });
+    // 默认组合被删除后，偏好里的 defaultPortfolioId 会变成悬垂引用
+    // （该列无外键约束），必须同步置空，否则后续更新偏好会一直带着失效 ID
+    await this.clearDefaultPortfolioIfMatch(userId, id);
     return null;
+  }
+
+  /**
+   * 若用户偏好里的「默认组合」正是 portfolioId，则置空。
+   *
+   * 归档 / 删除组合时调用：归档组合按 SET-P1-04 会从选择器隐藏，
+   * 继续作为「默认组合」既不可见也不可选，属于失效状态，
+   * 留着只会让「重设默认组合」一直携带一个已失效的旧 ID。
+   */
+  private async clearDefaultPortfolioIfMatch(
+    userId: string,
+    portfolioId: string,
+  ): Promise<void> {
+    await this.prisma.userPreference.updateMany({
+      where: { userId, defaultPortfolioId: portfolioId },
+      data: { defaultPortfolioId: null },
+    });
   }
 
   /**
@@ -180,6 +205,9 @@ export class PortfolioService {
    * - dto.archived === false   → 取消归档（archivedAt = null）
    *
    * 数据隔离：先 findOne(userId, id) 校验归属，再用唯一键 id 更新。
+   *
+   * 副作用：归档时若该组合正是用户偏好里的「默认组合」，同步把默认组合置空
+   * —— 归档组合已从选择器隐藏，再当默认组合只会变成一个永远选不回来的失效 ID。
    */
   async archive(
     userId: string,
@@ -188,12 +216,18 @@ export class PortfolioService {
   ): Promise<PortfolioResponse> {
     await this.findOne(userId, id);
 
+    const archiving = dto.archived !== false;
     const updated = await this.prisma.portfolio.update({
       where: { id },
       data: {
-        archivedAt: dto.archived === false ? null : new Date(),
+        archivedAt: archiving ? new Date() : null,
       },
     });
+
+    if (archiving) {
+      await this.clearDefaultPortfolioIfMatch(userId, id);
+    }
+
     return toResponse(updated);
   }
 

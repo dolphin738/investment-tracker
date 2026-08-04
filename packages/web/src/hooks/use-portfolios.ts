@@ -76,8 +76,12 @@ export function useArchivePortfolio() {
   return useMutation({
     mutationFn: ({ id, archived }: { id: string; archived: boolean }) =>
       archiveApi(id, archived),
-    onSuccess: (_data, { archived }) => {
+    onSuccess: (_data, { id, archived }) => {
       toast.success(archived ? '组合已归档' : '组合已取消归档');
+      // 归档的若是当前选中组合，立即清空选择，避免选择器指向一个在列表里看不见的归档组合（D2）
+      if (archived && usePortfolioStore.getState().currentPortfolioId === id) {
+        usePortfolioStore.getState().clearCurrent();
+      }
       queryClient.invalidateQueries({ queryKey: PORTFOLIOS_KEY });
     },
   });

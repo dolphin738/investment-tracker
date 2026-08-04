@@ -5,21 +5,37 @@
  * - useProfile：query，获取当前用户信息
  */
 
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { login as loginApi, register as registerApi, getProfile } from '@/api/auth.api';
 import { useAuthStore } from '@/stores/auth.store';
+import { usePortfolioStore } from '@/stores/portfolio.store';
+import { usePreferenceStore } from '@/stores/preference.store';
 import { ROUTE_PATH } from '@/lib/constants';
 import type { LoginRequest, RegisterRequest } from '@/api/types';
+
+/**
+ * 切换账号时彻底清空上个用户的本地状态，避免新账号残留旧数据：
+ * - React Query 缓存（组合列表 / 偏好等）
+ * - 组合 store（列表 + 当前选中）
+ * - 偏好 store
+ */
+function resetSessionState(queryClient: ReturnType<typeof useQueryClient>): void {
+  queryClient.clear();
+  usePortfolioStore.getState().reset();
+  usePreferenceStore.getState().clear();
+}
 
 /** 登录 mutation */
 export function useLogin() {
   const navigate = useNavigate();
   const loginStore = useAuthStore((s) => s.login);
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (payload: LoginRequest) => loginApi(payload),
     onSuccess: (data) => {
+      resetSessionState(queryClient);
       loginStore(data.accessToken, data.user);
       toast.success('登录成功');
       navigate(ROUTE_PATH.DASHBOARD);

@@ -365,11 +365,13 @@ export default function SettingsPage(): JSX.Element {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="__none__">不设置</SelectItem>
-                    {portfolios.map((p) => (
-                      <SelectItem key={p.id} value={p.id}>
-                        {p.name}
-                      </SelectItem>
-                    ))}
+                    {portfolios
+                      .filter((p) => !p.archivedAt)
+                      .map((p) => (
+                        <SelectItem key={p.id} value={p.id}>
+                          {p.name}
+                        </SelectItem>
+                      ))}
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground">

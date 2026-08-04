@@ -10,6 +10,7 @@
 
 import { create } from 'zustand';
 import type { Portfolio } from '@investment-tracker/shared';
+import { usePreferenceStore } from '@/stores/preference.store';
 
 const PORTFOLIO_STORAGE_KEY = 'investment_tracker_current_portfolio';
 
@@ -21,6 +22,8 @@ interface PortfolioState {
   setCurrentPortfolio: (id: string) => void;
   /** 当前组合失效（被删除时清空） */
   clearCurrent: () => void;
+  /** 切换账号时整体重置（列表 + 当前选中），避免残留上个用户的组合 */
+  reset: () => void;
 }
 
 function loadInitialPortfolioId(): string | null {
@@ -38,20 +41,36 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
   },
   setPortfolios: (portfolios) => {
     const { currentPortfolioId } = get();
-    // 如果当前组合不在列表中（或尚未选中），自动选第一个
-    const exists = portfolios.some((p) => p.id === currentPortfolioId);
-    if (!exists && portfolios.length > 0) {
-      const first = portfolios[0];
-      localStorage.setItem(PORTFOLIO_STORAGE_KEY, first.id);
-      set({ portfolios, currentPortfolioId: first.id });
+    // 只从「未归档」组合里挑选，归档组合仅在设置页组合管理可见、不应被自动选中
+    const selectable = portfolios.filter((p) => !p.archivedAt);
+
+    // 当前组合仍可选 → 保留用户选择
+    if (selectable.some((p) => p.id === currentPortfolioId)) {
+      set({ portfolios });
       return;
     }
-    if (!exists && portfolios.length === 0) {
+
+    // 当前组合失效（不存在 / 已归档 / 残留）→ 就地重选，别早退（修复 KI-1：去掉清空分支的早退，
+    // 统一进入下方「默认 or 兜底」逻辑，使失效 ID 清空后能正确重选，不卡在空占位）
+    const prefs = usePreferenceStore.getState().preferences;
+    const defaultId = prefs?.defaultPortfolioId ?? null;
+    const next =
+      selectable.find((p) => p.id === defaultId) ??
+      // 偏好未加载（undefined）时先不兜底选 selectable[0]，避免误选第一个覆盖真正的默认组合，
+      // 保留 currentPortfolioId=null 等 PreferenceBootstrap 拿到偏好再决定
+      (prefs ? selectable[0] : undefined);
+
+    if (next) {
+      localStorage.setItem(PORTFOLIO_STORAGE_KEY, next.id);
+      set({ portfolios, currentPortfolioId: next.id });
+      return;
+    }
+
+    // 无可选 / 偏好未加载：清掉失效 ID，交给 PreferenceBootstrap 兜底
+    if (currentPortfolioId !== null) {
       localStorage.removeItem(PORTFOLIO_STORAGE_KEY);
-      set({ portfolios, currentPortfolioId: null });
-      return;
     }
-    set({ portfolios });
+    set({ portfolios, currentPortfolioId: null });
   },
   setCurrentPortfolio: (id) => {
     localStorage.setItem(PORTFOLIO_STORAGE_KEY, id);
@@ -60,5 +79,9 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
   clearCurrent: () => {
     localStorage.removeItem(PORTFOLIO_STORAGE_KEY);
     set({ currentPortfolioId: null });
+  },
+  reset: () => {
+    localStorage.removeItem(PORTFOLIO_STORAGE_KEY);
+    set({ portfolios: [], currentPortfolioId: null });
   },
 }));

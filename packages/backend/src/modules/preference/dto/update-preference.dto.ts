@@ -5,8 +5,8 @@
  */
 
 import { ApiPropertyOptional } from '@nestjs/swagger';
+import { Transform } from 'class-transformer';
 import {
-  IsEnum,
   IsInt,
   IsOptional,
   IsString,
@@ -16,7 +16,16 @@ import {
 } from 'class-validator';
 
 export class UpdatePreferenceDto {
-  @ApiPropertyOptional({ description: '登录后自动选中的组合 ID' })
+  @ApiPropertyOptional({
+    description: '登录后自动选中的组合 ID（null / 空串 = 不设置默认组合）',
+    nullable: true,
+  })
+  // 「不设置默认组合」在前端表单里天然是空串，直接透传会被 @IsUUID 判为
+  // `defaultPortfolioId must be a UUID` 而 400。这里统一归一为 null，
+  // 让「清空默认组合」与「设置默认组合」走同一条通路。
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' && value.trim() === '' ? null : value,
+  )
   @IsOptional()
   @IsUUID()
   defaultPortfolioId?: string | null;

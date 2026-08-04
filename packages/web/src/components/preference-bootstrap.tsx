@@ -18,6 +18,7 @@
 import { useEffect, type ReactNode } from 'react';
 import { usePreferences } from '@/hooks/use-preferences';
 import { usePreferenceStore } from '@/stores/preference.store';
+import { usePortfolioStore } from '@/stores/portfolio.store';
 
 export interface PreferenceBootstrapProps {
   children: ReactNode;
@@ -34,6 +35,24 @@ export function PreferenceBootstrap({
       setPreferences(serverPrefs);
     }
   }, [serverPrefs, setPreferences]);
+
+  // 「默认组合」生效：偏好加载完成后，若当前尚未选中任何组合，
+  // 则自动选中偏好里的默认组合（未归档），否则回退到第一个「未归档」组合。
+  // 仅在 currentPortfolioId 为空时执行一次，不会覆盖用户手动选择（修复 D3）。
+  useEffect(() => {
+    const portfolioState = usePortfolioStore.getState();
+    if (portfolioState.currentPortfolioId !== null) {
+      return;
+    }
+    const selectable = portfolioState.portfolios.filter((p) => !p.archivedAt);
+    if (selectable.length === 0) {
+      return;
+    }
+    const defaultId = serverPrefs?.defaultPortfolioId ?? null;
+    const target =
+      selectable.find((p) => p.id === defaultId)?.id ?? selectable[0].id;
+    usePortfolioStore.getState().setCurrentPortfolio(target);
+  }, [serverPrefs]);
 
   return <>{children}</>;
 }
