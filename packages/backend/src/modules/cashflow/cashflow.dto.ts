@@ -7,10 +7,12 @@
  */
 
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
+  IsArray,
   IsDateString,
   IsEnum,
+  IsIn,
   IsNotEmpty,
   IsNumber,
   IsOptional,
@@ -91,6 +93,58 @@ export class CashFlowQueryDto {
   @IsOptional()
   @IsEnum(CashFlowType)
   type?: CashFlowType;
+
+  /**
+   * 类型多选筛选（F2）。
+   *
+   * URL query 传参（对齐设计文档 Part E-2）：
+   * - 逗号分隔：`types=BUY,SELL`
+   * - 重复参数：`types=BUY&types=SELL`（NestJS 解析为数组）
+   * - 空数组 / 未传 = 全部（与「重置」语义一致）
+   *
+   * 注意：axios 默认会把数组序列化成 `types[]=...`（带方括号），
+   * 在 forbidNonWhitelisted 下会被 400 拒绝；前端必须传逗号分隔字符串
+   * 或使用 paramsSerializer（arrayFormat: 'repeat'）。
+   */
+  @ApiPropertyOptional({
+    description: '类型多选筛选（逗号分隔或重复参数；空数组=全部）',
+    enum: CashFlowType,
+    isArray: true,
+  })
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (value === undefined || value === null || value === '') {
+      return value;
+    }
+    if (Array.isArray(value)) {
+      return value;
+    }
+    return String(value)
+      .split(',')
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0);
+  })
+  @IsArray()
+  @IsEnum(CashFlowType, { each: true })
+  types?: CashFlowType[];
+
+  @ApiPropertyOptional({
+    description: '排序字段（白名单：date=日期 / amount=金额）',
+    enum: ['date', 'amount'],
+    default: 'date',
+  })
+  @IsOptional()
+  @IsIn(['date', 'amount'])
+  sortBy?: 'date' | 'amount' = 'date';
+
+  @ApiPropertyOptional({
+    description: '排序方向',
+    enum: ['asc', 'desc'],
+    default: 'desc',
+  })
+  @IsOptional()
+  @IsIn(['asc', 'desc'])
+  sortOrder?: 'asc' | 'desc' = 'desc';
 
   @ApiPropertyOptional({ description: '页码，从 1 开始', default: 1 })
   @IsOptional()

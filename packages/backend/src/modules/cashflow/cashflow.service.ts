@@ -30,6 +30,25 @@ export interface CashFlowResponse {
   updatedAt: string;
 }
 
+/**
+ * 重算反馈元信息（F3/F4：create/update/remove 透出 recalculateRange 结果）。
+ *
+ * 字段命名对齐设计文档 Part E-6：
+ * - fromDate: 重算起始日（YYYY-MM-DD）
+ * - affectedDays: 受影响天数（= recalculateRange.recalculatedDays）
+ * - skippedManualDays: 被跳过的手工记录天数（F4）
+ */
+export interface RecalculationMeta {
+  fromDate: string;
+  affectedDays: number;
+  skippedManualDays: number;
+}
+
+/** create/update 响应 = 既有 CashFlowResponse + 重算反馈（新增字段，向后兼容） */
+export type CashFlowMutationResponse = CashFlowResponse & {
+  recalculation: RecalculationMeta;
+};
+
 /** 将 Prisma 实体转为 API 响应（Decimal → string, Date → string） */
 function toResponse(cf: PrismaCashFlow): CashFlowResponse {
   return {
@@ -42,6 +61,14 @@ function toResponse(cf: PrismaCashFlow): CashFlowResponse {
     createdAt: cf.createdAt.toISOString(),
     updatedAt: cf.updatedAt.toISOString(),
   };
+}
+
+/** recalculateRange 返回结构（F4 扩展后） */
+interface RecalculateRangeResult {
+  recalculatedDays: number;
+  fromDate: string;
+  toDate: string;
+  skippedManualDays: number;
 }
 
 @Injectable()
@@ -74,16 +101,25 @@ export class CashFlowService {
     }
   }
 
+  /** 把 recalculateRange 结果映射为响应中的 recalculation 字段（F3/F4） */
+  private toRecalculationMeta(result: RecalculateRangeResult): RecalculationMeta {
+    return {
+      fromDate: result.fromDate,
+      affectedDays: result.recalculatedDays,
+      skippedManualDays: result.skippedManualDays,
+    };
+  }
+
   /**
    * 创建出入金流水
    *
-   * 🔴 副作用：触发 recalculateRange
+   * 🔴 副作用：触发 recalculateRange，结果透出到响应 recalculation 字段（F3/F4）
    */
   async create(
     userId: string,
     portfolioId: string,
     dto: CreateCashFlowDto,
-  ): Promise<CashFlowResponse> {
+  ): Promise<CashFlowMutationResponse> {
     await this.verifyOwnership(userId, portfolioId);
     this.validateDateNotFuture(dto.date);
 
@@ -99,9 +135,15 @@ export class CashFlowService {
     });
 
     // 🔴 触发重算
-    await this.recalculationService.recalculateRange(portfolioId, date);
+    const recalcResult = await this.recalculationService.recalculateRange(
+      portfolioId,
+      date,
+    );
 
-    return toResponse(cashflow);
+    return {
+      ...toResponse(cashflow),
+      recalculation: this.toRecalculationMeta(recalcResult),
+    };
   }
 
   /**
@@ -116,10 +158,21 @@ export class CashFlowService {
 
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 20;
+    const sortBy = query.sortBy ?? 'date';
+    const sortOrder = query.sortOrder ?? 'desc';
+
+    // F2：类型多选优先（非空数组），否则回退单值 type（向后兼容）；
+    // 空数组 / 未传 = 全部
+    const typeFilter =
+      query.types && query.types.length > 0
+        ? { type: { in: query.types } }
+        : query.type
+          ? { type: query.type }
+          : {};
 
     const where = {
       portfolioId,
-      ...(query.type ? { type: query.type } : {}),
+      ...typeFilter,
       ...(query.startDate || query.endDate
         ? {
             date: {
@@ -130,10 +183,14 @@ export class CashFlowService {
         : {}),
     };
 
+    // F5：排序字段白名单（DTO 已用 @IsIn 严格校验 date/amount + asc/desc），
+    // 默认 date desc（与既有硬编码行为一致）
+    const orderBy = sortBy === 'amount' ? { amount: sortOrder } : { date: sortOrder };
+
     const [items, total] = await Promise.all([
       this.prisma.cashFlow.findMany({
         where,
-        orderBy: { date: 'desc' },
+        orderBy,
         skip: (page - 1) * pageSize,
         take: pageSize,
       }),
@@ -165,14 +222,14 @@ export class CashFlowService {
   /**
    * 更新出入金流水
    *
-   * 🔴 副作用：触发 recalculateRange（新旧两个日期）
+   * 🔴 副作用：触发 recalculateRange（新旧两个日期），结果透出到响应 recalculation 字段（F3/F4）
    */
   async update(
     userId: string,
     portfolioId: string,
     id: string,
     dto: UpdateCashFlowDto,
-  ): Promise<CashFlowResponse> {
+  ): Promise<CashFlowMutationResponse> {
     await this.verifyOwnership(userId, portfolioId);
 
     const existing = await this.prisma.cashFlow.findFirst({
@@ -201,21 +258,28 @@ export class CashFlowService {
       new Date(dto.date).getTime(),
       existing.date.getTime(),
     )) : existing.date;
-    await this.recalculationService.recalculateRange(portfolioId, recalcDate);
+    const recalcResult = await this.recalculationService.recalculateRange(
+      portfolioId,
+      recalcDate,
+    );
 
-    return toResponse(updated);
+    return {
+      ...toResponse(updated),
+      recalculation: this.toRecalculationMeta(recalcResult),
+    };
   }
 
   /**
    * 删除出入金流水
    *
-   * 🔴 副作用：触发 recalculateRange
+   * 🔴 副作用：触发 recalculateRange，结果透出到响应 recalculation 字段（F3/F4）。
+   * 响应由 null 变为 { recalculation }（设计文档 Part E-6 / F3 约定）。
    */
   async remove(
     userId: string,
     portfolioId: string,
     id: string,
-  ): Promise<null> {
+  ): Promise<{ recalculation: RecalculationMeta }> {
     await this.verifyOwnership(userId, portfolioId);
 
     const existing = await this.prisma.cashFlow.findFirst({
@@ -229,8 +293,13 @@ export class CashFlowService {
     await this.prisma.cashFlow.delete({ where: { id } });
 
     // 🔴 触发重算
-    await this.recalculationService.recalculateRange(portfolioId, recalcDate);
+    const recalcResult = await this.recalculationService.recalculateRange(
+      portfolioId,
+      recalcDate,
+    );
 
-    return null;
+    return {
+      recalculation: this.toRecalculationMeta(recalcResult),
+    };
   }
 }

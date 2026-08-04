@@ -59,13 +59,18 @@ export class RecalculationService {
    * @param portfolioId 组合 ID
    * @param start 起始日期
    * @param end 结束日期（缺省 = today）
-   * @returns meta 信息（含重算天数）
+   * @returns meta 信息（含重算天数 + 被跳过的手工记录天数）
    */
   async recalculateRange(
     portfolioId: string,
     start: Date,
     end?: Date,
-  ): Promise<{ recalculatedDays: number; fromDate: string; toDate: string }> {
+  ): Promise<{
+    recalculatedDays: number;
+    fromDate: string;
+    toDate: string;
+    skippedManualDays: number;
+  }> {
     const until = end ?? todayInAppTz();
 
     const fromStr = start.toISOString().split('T')[0];
@@ -103,14 +108,25 @@ export class RecalculationService {
     // ③ NAV/XIRR 级联（按快照日期集合，非事件日集合）
     const days = await this.recalculateNavRange(portfolioId, start, until);
 
+    // F4：被跳过的手工记录天数 = 重算区间内 source='MANUAL' 的快照记录数
+    // （AssetSnapshot 有 @@unique([portfolioId, date])，每日至多一条，记录数即天数）
+    const skippedManualDays = await this.prisma.assetSnapshot.count({
+      where: {
+        portfolioId,
+        date: { gte: start, lte: until },
+        source: 'MANUAL',
+      },
+    });
+
     this.logger.log(
-      `区间重建完成 portfolioId=${portfolioId} recalculatedDays=${days}`,
+      `区间重建完成 portfolioId=${portfolioId} recalculatedDays=${days} skippedManualDays=${skippedManualDays}`,
     );
 
     return {
       recalculatedDays: days,
       fromDate: fromStr,
       toDate: toStr,
+      skippedManualDays,
     };
   }
 
