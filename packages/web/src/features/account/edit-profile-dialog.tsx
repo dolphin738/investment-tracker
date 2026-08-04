@@ -12,7 +12,7 @@
  * 这样「把昵称删掉后保存」才能真正清空，而不是被当作「不修改」。
  */
 
-import { useEffect, useRef, type ChangeEvent } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -116,6 +116,31 @@ export function EditProfileDialog({
   const isUploading = uploadMutation.isPending;
   const isPending = updateMutation.isPending;
   const isBusy = isUploading || isPending;
+
+  /**
+   * 头像 URL 输入框的草稿值（§7.9 · SET-P0-01 验收 2）
+   *
+   * 与表单里的 avatar 分离：输入过程中只改草稿，点「应用」才写进表单并刷新预览。
+   * 这样「输入到一半」不会把半截 URL 塞进待提交数据，也让 [应用] 有明确语义。
+   */
+  const [avatarUrlDraft, setAvatarUrlDraft] = useState<string>('');
+
+  // 表单里的 avatar 变化时回灌草稿：覆盖「打开对话框初始化」「本地上传成功」
+  // 「移除头像」三条路径，保证输入框与实际头像始终一致。
+  useEffect(() => {
+    setAvatarUrlDraft(avatarValue);
+  }, [avatarValue]);
+
+  /** 点击 [应用]：把草稿 URL 写进表单，立即刷新上方头像预览，随「保存」提交生效 */
+  const handleApplyAvatarUrl = (): void => {
+    if (isBusy) {
+      return;
+    }
+    setValue('avatar', avatarUrlDraft.trim(), {
+      shouldDirty: true,
+      shouldValidate: true,
+    });
+  };
 
   /** 打开系统文件选择器 */
   const handlePickFile = (): void => {
@@ -272,16 +297,41 @@ export function EditProfileDialog({
             {/* 头像 URL：与本地上传并列，最后生效者覆盖前者，随「保存」一起提交 */}
             <div className="space-y-1.5">
               <Label htmlFor="profile-avatar-url">头像 URL</Label>
-              <Input
-                id="profile-avatar-url"
-                type="text"
-                inputMode="url"
-                placeholder="https://example.com/avatar.png"
-                value={avatarValue}
-                onChange={(e) => setValue('avatar', e.target.value, { shouldDirty: true })}
-              />
+              <div className="flex gap-2">
+                <Input
+                  id="profile-avatar-url"
+                  type="text"
+                  inputMode="url"
+                  placeholder="https://example.com/avatar.png"
+                  value={avatarUrlDraft}
+                  onChange={(e) => setAvatarUrlDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    // 回车等价于点「应用」，避免在 <form> 内误触发提交
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleApplyAvatarUrl();
+                    }
+                  }}
+                  disabled={isBusy}
+                />
+                {/*
+                  显式 [应用] 按钮（§7.9 L1417-1419 · SET-P0-01 验收 2）：
+                  草图要求「输入图片 URL 后点『应用』即可设为头像」，
+                  点击后立刻写入表单并刷新上方头像预览，随「保存」提交生效。
+                  type="button" 必须显式声明，否则会被当作 form 的默认 submit。
+                */}
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleApplyAvatarUrl}
+                  disabled={isBusy || avatarUrlDraft === avatarValue}
+                >
+                  应用
+                </Button>
+              </div>
               <p className="text-xs text-muted-foreground">
-                输入图片 URL 后将随「保存」一起生效；也可本地上传
+                输入图片 URL 后点「应用」即可预览并设为头像；与本地上传并列，
+                二者最后生效者覆盖前者，最终随「保存」提交
               </p>
             </div>
 

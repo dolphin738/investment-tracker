@@ -24,6 +24,7 @@ import {
   Mail,
   Pencil,
   Plus,
+  Star,
   Trash2,
   Loader2,
   Palette,
@@ -116,6 +117,38 @@ const XIRR_DECIMAL_OPTIONS = [2, 3, 4].map((n) => ({
   label: `${n} 位`,
 }));
 
+/**
+ * 勾选项（原生 checkbox + Tailwind，风格对齐 components/ui/radio-group.tsx 的实现口径，
+ * 不额外引入 @radix-ui/react-checkbox 依赖）。
+ */
+function PrefCheckbox({
+  id,
+  checked,
+  onCheckedChange,
+  label,
+}: {
+  id: string;
+  checked: boolean;
+  onCheckedChange: (checked: boolean) => void;
+  label: string;
+}): JSX.Element {
+  return (
+    <label
+      htmlFor={id}
+      className="inline-flex cursor-pointer items-center gap-2 text-sm"
+    >
+      <input
+        id={id}
+        type="checkbox"
+        className="h-4 w-4 rounded border-input accent-primary"
+        checked={checked}
+        onChange={(e) => onCheckedChange(e.target.checked)}
+      />
+      {label}
+    </label>
+  );
+}
+
 export default function SettingsPage(): JSX.Element {
   const navigate = useNavigate();
   const { user, logout } = useAuthStore();
@@ -173,6 +206,33 @@ export default function SettingsPage(): JSX.Element {
     staleDays: DEFAULT_PREFERENCES.staleDays,
   });
 
+  /**
+   * ⚠️ 后端缺口 D · 仅本地渲染、**不进 PATCH payload** 的偏好项
+   *
+   * - 软提示开关（SET-P0-07）：`cashHintOnCashflow` / `cashHintOnTrade`
+   * - 金额格式（SET-P1-03）：`amountThousands` / `amountAbbrev`
+   *
+   * 后端 `prisma/schema.prisma` 的 `UserPreference` 与 `UpdatePreferenceDto`
+   * 均无这些列/字段，而 NestJS 侧开启了 `ValidationPipe({ forbidNonWhitelisted: true })`，
+   * 一旦把它们塞进 PATCH /api/users/preferences 会直接 400。
+   * 因此本轮只渲染控件、只做本地态，待后端补齐上述四个字段后再接入
+   * `prefForm` + `handleSavePreferences` 的 payload。
+   */
+  const [uiOnlyPrefs, setUiOnlyPrefs] = useState({
+    cashHintOnCashflow: DEFAULT_PREFERENCES.cashHintOnCashflow,
+    cashHintOnTrade: DEFAULT_PREFERENCES.cashHintOnTrade,
+    amountThousands: true,
+    amountAbbrev: false,
+  });
+
+  /** 更新「仅渲染」偏好项（不落库，见 uiOnlyPrefs 注释） */
+  const updateUiOnlyPref = <K extends keyof typeof uiOnlyPrefs>(
+    key: K,
+    value: (typeof uiOnlyPrefs)[K],
+  ) => {
+    setUiOnlyPrefs((prev) => ({ ...prev, [key]: value }));
+  };
+
   // 当服务端偏好加载完成后同步表单
   useEffect(() => {
     if (serverPrefs) {
@@ -187,6 +247,14 @@ export default function SettingsPage(): JSX.Element {
         theme: serverPrefs.theme,
         staleDays: serverPrefs.staleDays,
       });
+      // 后端暂不返回软提示字段（缺口 D），用 ?? 回落默认值，避免 undefined 造成非受控警告
+      setUiOnlyPrefs((prev) => ({
+        ...prev,
+        cashHintOnCashflow:
+          serverPrefs.cashHintOnCashflow ?? DEFAULT_PREFERENCES.cashHintOnCashflow,
+        cashHintOnTrade:
+          serverPrefs.cashHintOnTrade ?? DEFAULT_PREFERENCES.cashHintOnTrade,
+      }));
     }
   }, [serverPrefs]);
 
@@ -228,6 +296,40 @@ export default function SettingsPage(): JSX.Element {
         }
       },
     });
+  };
+
+  /**
+   * 当前默认组合 ID（服务端偏好口径）
+   *
+   * 取 prefForm 而非 serverPrefs，是为了让「设为默认」点击后立即高亮，
+   * 与偏好区下拉框保持同一数据源，避免两处显示打架。
+   */
+  const isDefaultPortfolio = (portfolioId: string): boolean =>
+    prefForm.defaultPortfolioId === portfolioId;
+
+  /**
+   * 🆕 组合管理区「设为默认」（SET-P0-06 · §7.8 ④ 操作列）
+   *
+   * 与 handleSavePreferences 的默认组合逻辑保持完全一致：
+   * 先写服务端偏好 defaultPortfolioId，成功后把当前视图组合切过去，
+   * 并同步偏好表单，避免「保存偏好」按钮误显示为有未保存变更。
+   * 已归档组合不能作为默认组合（默认组合下拉同样过滤了 archivedAt）。
+   */
+  const handleSetDefaultPortfolio = (portfolio: Portfolio) => {
+    if (portfolio.archivedAt) {
+      return;
+    }
+    updatePrefsMutation.mutate(
+      { defaultPortfolioId: portfolio.id },
+      {
+        onSuccess: () => {
+          setPrefForm((prev) => ({ ...prev, defaultPortfolioId: portfolio.id }));
+          if (portfolio.id !== currentPortfolioId) {
+            setCurrentPortfolio(portfolio.id);
+          }
+        },
+      },
+    );
   };
 
   /** 🆕 更新表单单个字段 */
@@ -532,6 +634,60 @@ export default function SettingsPage(): JSX.Element {
                 </p>
               </div>
 
+              {/*
+                软提示开关（SET-P0-07 · §7.8 L1376）
+                ⚠️ 后端缺口 D：UserPreference 表与 UpdatePreferenceDto 均无
+                cashHintOnCashflow / cashHintOnTrade 列，提交会被 forbidNonWhitelisted 拒为 400，
+                故此处只渲染控件、只改本地态，不进 handleSavePreferences 的 payload。
+              */}
+              <div className="space-y-2">
+                <Label>软提示开关</Label>
+                <div className="flex flex-wrap items-center gap-6">
+                  <PrefCheckbox
+                    id="pref-hint-cashflow"
+                    checked={uiOnlyPrefs.cashHintOnCashflow}
+                    onCheckedChange={(v) =>
+                      updateUiOnlyPref('cashHintOnCashflow', v)
+                    }
+                    label="出入金后提示"
+                  />
+                  <PrefCheckbox
+                    id="pref-hint-trade"
+                    checked={uiOnlyPrefs.cashHintOnTrade}
+                    onCheckedChange={(v) => updateUiOnlyPref('cashHintOnTrade', v)}
+                    label="买卖后提示"
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  录入后提示同步更新现金余额（SET-P0-07）；⚠️ 待后端补充字段后方可持久化
+                </p>
+              </div>
+
+              {/*
+                金额格式（SET-P1-03 · §7.8 L1377）
+                ⚠️ 后端缺口 D：待后端新增 UserPreference.amountThousands / amountAbbrev
+              */}
+              <div className="space-y-2">
+                <Label>金额格式</Label>
+                <div className="flex flex-wrap items-center gap-6">
+                  <PrefCheckbox
+                    id="pref-amount-thousands"
+                    checked={uiOnlyPrefs.amountThousands}
+                    onCheckedChange={(v) => updateUiOnlyPref('amountThousands', v)}
+                    label="千分位"
+                  />
+                  <PrefCheckbox
+                    id="pref-amount-abbrev"
+                    checked={uiOnlyPrefs.amountAbbrev}
+                    onCheckedChange={(v) => updateUiOnlyPref('amountAbbrev', v)}
+                    label="万 / 亿缩写"
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  金额展示格式（SET-P1-03）；⚠️ 待后端补充字段后方可持久化
+                </p>
+              </div>
+
               {/* 快照过期阈值 */}
               <div className="space-y-2">
                 <Label htmlFor="pref-stale">快照过期提醒阈值（天）</Label>
@@ -608,22 +764,80 @@ export default function SettingsPage(): JSX.Element {
         </CardContent>
       </Card>
 
-      {/* 数据管理 */}
+      {/*
+        数据管理（§7.8 ③ · SET-P0-03 导出 / SET-P0-04 导入）
+        本轮**仅视觉对齐草图**，导出/导入逻辑不实现：所有控件保持 disabled 占位。
+      */}
       <Card>
         <CardHeader>
           <CardTitle className="text-base">数据管理</CardTitle>
           <CardDescription>导入导出（v1 暂未开放，列入 P1）</CardDescription>
         </CardHeader>
-        <CardContent className="space-y-3">
-          <Button variant="outline" disabled>
-            导入数据 (CSV/Excel)
-          </Button>
-          <Button variant="outline" disabled className="ml-2">
-            导出数据
-          </Button>
-          <Button variant="outline" disabled className="ml-2">
-            下载导入模板
-          </Button>
+        <CardContent className="space-y-4">
+          {/* 导出（SET-P0-03） */}
+          <div className="space-y-2">
+            <Label className="text-sm">导出</Label>
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-2 opacity-60">
+              {[
+                { id: 'exp-cashflow', label: '出入金', checked: true },
+                { id: 'exp-trade', label: '证券买卖', checked: true },
+                { id: 'exp-price', label: '现价', checked: true },
+                { id: 'exp-cash', label: '现金余额', checked: true },
+                { id: 'exp-snapshot', label: '总资产记录', checked: true },
+                { id: 'exp-nav', label: '每日净值', checked: false },
+                { id: 'exp-xirr', label: '每日 XIRR', checked: false },
+              ].map((item) => (
+                <label
+                  key={item.id}
+                  htmlFor={item.id}
+                  className="inline-flex items-center gap-2 text-sm text-muted-foreground"
+                >
+                  <input
+                    id={item.id}
+                    type="checkbox"
+                    className="h-4 w-4 rounded border-input accent-primary"
+                    defaultChecked={item.checked}
+                    disabled
+                  />
+                  {item.label}
+                </label>
+              ))}
+            </div>
+            <Button variant="outline" size="sm" disabled>
+              导出 CSV
+            </Button>
+          </div>
+
+          {/* 导入（SET-P0-04） */}
+          <div className="space-y-2">
+            <Label className="text-sm">导入</Label>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" size="sm" disabled>
+                下载模板：出入金
+              </Button>
+              <Button variant="outline" size="sm" disabled>
+                下载模板：证券买卖
+              </Button>
+              <Button variant="outline" size="sm" disabled>
+                下载模板：总资产记录
+              </Button>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" size="sm" disabled>
+                选择文件…
+              </Button>
+              <Button variant="outline" size="sm" disabled>
+                预览前 10 行
+              </Button>
+              <Button size="sm" disabled>
+                开始导入
+              </Button>
+            </div>
+          </div>
+
+          <p className="text-xs text-muted-foreground">
+            ⓘ 导出 / 导入功能 v1 暂未开放，以上控件仅为界面占位（SET-P0-03 / SET-P0-04）
+          </p>
         </CardContent>
       </Card>
 
@@ -686,6 +900,34 @@ export default function SettingsPage(): JSX.Element {
                     <TableCell className="text-sm">{p.currency}</TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-1">
+                        {/* 设为默认（SET-P0-06）：写偏好 defaultPortfolioId + 切换当前组合 */}
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={() => handleSetDefaultPortfolio(p)}
+                          title={
+                            p.archivedAt
+                              ? '已归档组合不能设为默认'
+                              : isDefaultPortfolio(p.id)
+                                ? '当前默认组合'
+                                : '设为默认'
+                          }
+                          aria-label="设为默认"
+                          disabled={
+                            Boolean(p.archivedAt) ||
+                            isDefaultPortfolio(p.id) ||
+                            updatePrefsMutation.isPending
+                          }
+                        >
+                          <Star
+                            className={cn(
+                              'h-4 w-4',
+                              isDefaultPortfolio(p.id)
+                                ? 'fill-primary text-primary'
+                                : '',
+                            )}
+                          />
+                        </Button>
                         <Button
                           size="icon"
                           variant="ghost"
@@ -767,7 +1009,8 @@ export default function SettingsPage(): JSX.Element {
             <div>
               <p className="text-sm font-semibold text-destructive">注销账户</p>
               <p className="text-xs text-muted-foreground">
-                软删除账户本身及全部组合（保留 30 天可恢复，到期后彻底删除）（SET-P1-06）
+                软删除账户本身及全部组合；30 天内可在登录页用原邮箱 + 密码自助恢复，
+                超期由系统彻底删除（SET-P1-06）
               </p>
             </div>
             <Button
@@ -817,9 +1060,13 @@ export default function SettingsPage(): JSX.Element {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>确认注销账户？</AlertDialogTitle>
+            {/*
+              PRD §7.8 L1400-1402 硬约束：本应用**没有人工客服代恢复通道**，
+              文案严禁出现「如需恢复请联系客服」，必须写明「自助恢复」口径。
+            */}
             <AlertDialogDescription>
-              注销将删除账户本身及全部组合（软删除保留 30 天可恢复，到期后彻底删除）。
-              30 天内无法登录，如需恢复请联系客服。
+              注销将删除账户本身及全部组合（软删除保留 30 天，到期后由系统彻底删除）。
+              30 天内可在登录页用原邮箱 + 密码自助恢复；超过 30 天后数据将被系统彻底删除，不可找回。
               此操作与「清空当前组合数据」不同：后者仅清空单个组合数据、保留账户。
             </AlertDialogDescription>
           </AlertDialogHeader>

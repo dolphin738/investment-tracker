@@ -470,7 +470,10 @@ export default function DashboardPage(): JSX.Element {
                       <span className="tabular-nums">
                         ¥{formatCurrency(p.totalAsset)}
                       </span>
-                      {p.cumulativeReturnRate !== null && (
+                      {/* 用 `!= null` 同时排除 null 与 undefined：
+                          后端 /portfolios/summary 当前不返回该字段（见 api/types.ts 缺口注），
+                          旧写法 `!== null` 会放行 undefined 并渲染出 NaN%。 */}
+                      {p.cumulativeReturnRate != null && (
                         <span
                           className={cn(
                             'tabular-nums',
@@ -482,7 +485,7 @@ export default function DashboardPage(): JSX.Element {
                           {formatPercent(p.cumulativeReturnRate)}
                         </span>
                       )}
-                      {p.xirr !== null && (
+                      {p.xirr != null && (
                         <span className="text-xs text-muted-foreground">
                           XIRR {formatPercent(p.xirr)}
                         </span>

@@ -444,29 +444,75 @@ export interface OverviewResponse {
   }>;
 }
 
-/** 组合摘要（用于账户页资产全景、overview API） */
+/**
+ * 组合摘要（GET /portfolios/summary · 用于账户页资产全景 / 概览页组合对比）
+ *
+ * ⚠️ 后端缺口（PRD v3.1.8 §7.7 账户页草图对齐 · 本轮只动前端，不补后端）：
+ * 后端 `portfolio.service.getSummary()` 实际只返回
+ * `{ id, name, totalAsset, holdingsCount, lastUpdatedAt }`，
+ * 下列字段在运行时**恒为 undefined**。此前它们被声明为必填的 `T | null`，
+ * 调用方用 `x !== null` 判空会放行 undefined 并渲染出 NaN —— 故统一改为 optional，
+ * 强制调用方用 `!= null` 判空并回落占位符「—」。待后端补齐后再去掉 `?`。
+ *
+ * 待后端补充字段清单：
+ * - `cumulativeNav`（净值）、`cumulativeReturnRate`（累计收益率）
+ * - `yearReturnRate`（当年 %）、`xirr`、`latestDate`
+ * - `netInvested`（合计净投入）、`floatingProfit`（合计浮动盈亏）
+ * - `baseDate`（成立日）、`currency`（币种）—— 前端可从 `usePortfolios()` 兜底
+ */
 export interface PortfolioSummary {
   id: string;
   name: string;
+  /** 最新一条总资产快照金额；无快照时后端返回 '0' */
   totalAsset: string;
-  cumulativeNav: number | null;
-  cumulativeReturnRate: number | null;
-  yearReturnRate: number | null;
-  xirr: number | null;
-  latestDate: string | null;
+  /** 持仓标的数（后端已返回） */
+  holdingsCount?: number;
+  /** 最近更新日 YYYY-MM-DD（后端已返回，取快照/买卖较晚者） */
+  lastUpdatedAt?: string | null;
+  /** ⚠️ 后端缺口：累计净值 */
+  cumulativeNav?: number | null;
+  /** ⚠️ 后端缺口：累计收益率 */
+  cumulativeReturnRate?: number | null;
+  /** ⚠️ 后端缺口：当年收益率 */
+  yearReturnRate?: number | null;
+  /** ⚠️ 后端缺口：XIRR */
+  xirr?: number | null;
+  /** ⚠️ 后端缺口：数据截止日 */
+  latestDate?: string | null;
+  /** ⚠️ 后端缺口：合计净投入（ACC-P0-03，禁止前端自算 · FIN-F0-09 C-01） */
+  netInvested?: string | null;
+  /** ⚠️ 后端缺口：合计浮动盈亏（ACC-P0-03，禁止前端自算 · FIN-F0-09 C-01） */
+  floatingProfit?: string | null;
+  /** ⚠️ 后端缺口：成立日（前端从 usePortfolios() 的 baseDate 兜底） */
+  baseDate?: string | null;
+  /** ⚠️ 后端缺口：币种（前端从 usePortfolios() 的 currency 兜底） */
+  currency?: string | null;
 }
 
 // ============================================================================
 // Account API
 // ============================================================================
 
+/**
+ * 账户统计（GET /account/stats · 账户页数据统计卡 ACC-P0-06）
+ *
+ * ⚠️ 后端缺口：`account.service.getStats()` 的 `transactionCount` 统计口径是
+ * `prisma.cashFlow.count()`，**只含出入金笔数**，不含证券买卖笔数；
+ * 「证券买卖笔数」当前无任何后端字段可用（需后端补 `securityTrade.count()`），
+ * 前端一律显示占位「—」。
+ */
 export interface AccountStats {
   portfolioCount: number;
+  /** 出入金笔数（后端口径 = cashFlow.count，非「全部交易」） */
   transactionCount: number;
+  /** 总资产记录天数（跨组合去重） */
   snapshotDays: number;
+  /** 账户使用天数（注册至今） */
   recordDays: number;
   firstDate: string | null;
   lastDate: string | null;
+  /** ⚠️ 后端缺口：证券买卖笔数（待后端新增 securityTrade.count） */
+  tradeCount?: number;
 }
 
 // ============================================================================
