@@ -93,7 +93,7 @@ export class AuthController {
     summary: '注销账户（软删除，保留 30 天可恢复）',
     description:
       '软删除当前用户（deletedAt=now，SET-P1-06）。用户及其全部组合数据保留 30 天可恢复；' +
-      '软删除期间该用户不能登录，email 仍占用唯一索引。',
+      '软删除期间该用户不能登录，email 仍占用唯一索引（30 天后清理释放）。',
   })
   async deleteAccount(@CurrentUser() user: AuthenticatedUser) {
     return this.authService.deleteAccount(user.userId);

@@ -114,8 +114,10 @@ export class AuthService {
    * @throws ConflictException 邮箱已被注册
    */
   async register(email: string, password: string, name?: string): Promise<UserPublic> {
-    // 邮箱唯一约束覆盖软删除用户：deleted_at 记录仍占用 email，
-    // 避免「重注册同邮箱 → 旧数据与新账户混淆」以及唯一索引冲突。
+    // 软删保留期内（deletedAt 非空）该 email 仍占用唯一索引，会拦截同邮箱重注册。
+    // 这是刻意设计：避免「重注册同邮箱 → 旧数据与新账户混淆」。
+    // 保留期满（30 天）后 CleanupService 物理硬删整行，索引槽随之释放，
+    // 届时同邮箱可正常重注册，无需额外的索引处理。
     const existing = await this.prisma.user.findUnique({ where: { email } });
     if (existing) {
       throw new ConflictException('邮箱已被注册');
@@ -262,7 +264,8 @@ export class AuthService {
    *
    * 仅置 deletedAt = now，用户及其全部组合/现金流/交易/快照/净值/XIRR 数据
    * 仍保留在库中（保留 30 天可恢复）。软删除期间该用户不能登录，
-   * email 仍占用唯一索引；到期后由运维/定时任务彻底清理。
+   * email 仍占用唯一索引（30 天后由 CleanupService 硬删释放，
+   * 同邮箱重注册即恢复）；到期后由定时任务彻底清理。
    *
    * @throws UnauthorizedException 用户不存在或 Token 无效
    */
