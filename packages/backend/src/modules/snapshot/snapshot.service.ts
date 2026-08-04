@@ -20,6 +20,7 @@ import {
 import type { AssetSnapshot as PrismaAssetSnapshot, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RecalculationService } from '../recalculation/recalculation.service';
+import { AssetValuationService } from '../valuation/asset-valuation.service';
 import type { UpsertSnapshotDto, SnapshotQueryDto } from './dto/upsert-snapshot.dto';
 
 /** API 响应中的快照结构（方案B） */
@@ -62,6 +63,7 @@ export class SnapshotService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly recalculationService: RecalculationService,
+    private readonly assetValuation: AssetValuationService,
   ) {}
 
   /** 验证组合归属（数据隔离） */
@@ -111,6 +113,8 @@ export class SnapshotService {
             },
           }
         : {}),
+      // 来源筛选：前端不传则为 undefined，不筛选
+      ...(query.source ? { source: query.source } : {}),
     };
 
     const [items, total] = await Promise.all([
@@ -249,6 +253,8 @@ export class SnapshotService {
    * - 若为 source=MANUAL：直接删除，然后回填 DERIVED
    * - 若为 source=DERIVED：直接删除
    *
+   * 🔴 委托 AssetValuationService.deleteRecord（内部 isEventDate + persistDerived
+   *    正确回填 DERIVED，替代旧的 totalAsset=0 占位逻辑）
    * 🔴 T5 级联：删除后调用 recalculateNavRange
    */
   async deleteRecord(
@@ -265,55 +271,20 @@ export class SnapshotService {
       throw new NotFoundException('资产快照不存在');
     }
 
-    const recalcDate = existing.date;
-
-    // 先删除快照
-    await this.prisma.assetSnapshot.delete({ where: { id } });
-
-    // 若原为 MANUAL 且该日期是 "事件日"（有交易/余额/价格数据），
-    // 尝试回填 DERIVED 记录（由 T03 的 triggerCalculation 生成）
-    // 这里简单检查该日期是否有交易数据
-    const hasData = await this.prisma.$transaction(async (tx) => {
-      const [trades, cashflows, prices, balances] = await Promise.all([
-        tx.securityTrade.count({ where: { portfolioId, date: recalcDate } }),
-        tx.cashFlow.count({ where: { portfolioId, date: recalcDate } }),
-        tx.securityPrice.count({ where: { portfolioId, asOf: recalcDate } }),
-        tx.cashBalance.count({ where: { portfolioId, asOf: recalcDate } }),
-      ]);
-      return trades > 0 || cashflows > 0 || prices > 0 || balances > 0;
-    });
-
-    if (hasData) {
-      // 插入占位 DERIVED 快照：供 T03 的 recalculateNavRange 使用
-      await this.prisma.assetSnapshot.upsert({
-        where: { portfolioId_date: { portfolioId, date: recalcDate } },
-        create: {
-          portfolioId,
-          date: recalcDate,
-          totalAsset: 0, // 占位值，重算时覆盖
-          source: 'DERIVED',
-          valuationFlag: 'CARRIED_FORWARD',
-          recordedAt: new Date(),
-        },
-        update: {
-          source: 'DERIVED',
-          valuationFlag: 'CARRIED_FORWARD',
-          recordedAt: new Date(),
-        },
-      });
-    }
+    // 委托删除：物理删除 + 事件日回填 DERIVED（persistDerived 内部 computeDerived）
+    await this.assetValuation.deleteRecord(portfolioId, existing.date);
 
     // 🔴 T5 级联
-    await this.recalculationService.recalculateNavRange(portfolioId, recalcDate);
+    await this.recalculationService.recalculateNavRange(portfolioId, existing.date);
 
     return null;
   }
 
   /**
-   * 重置为 DERIVED：将指定日期快照覆盖为 DERIVED 来源
+   * 重置为 DERIVED：将指定日期快照覆盖为 DERIVED 来源，恢复系统计算值
    *
-   * 若该日期已有 DERIVED 记录则直接返回；否则 upsert 覆盖 source=DERIVED。
-   *
+   * 🔴 委托 AssetValuationService.resetToDerived（内部 computeDerived → upsert
+   *    原地覆盖，恢复系统计算值，替代旧「只改 source 标记」逻辑）
    * 🔴 T5 级联：写入后调用 recalculateNavRange
    */
   async resetToDerived(
@@ -326,34 +297,16 @@ export class SnapshotService {
 
     const date = new Date(dateStr);
 
-    // 检查是否已是 DERIVED
-    const existing = await this.prisma.assetSnapshot.findUnique({
+    // 委托重置：computeDerived(date) → upsert 覆盖，source 置回 DERIVED
+    await this.assetValuation.resetToDerived(portfolioId, date);
+
+    // 读取重置后的行，保持响应结构与改前一致
+    const snapshot = await this.prisma.assetSnapshot.findUnique({
       where: { portfolioId_date: { portfolioId, date } },
     });
-
-    if (existing && existing.source === 'DERIVED') {
-      return toResponse(existing);
+    if (!snapshot) {
+      throw new NotFoundException('资产快照不存在');
     }
-
-    const snapshot = await this.prisma.assetSnapshot.upsert({
-      where: { portfolioId_date: { portfolioId, date } },
-      create: {
-        portfolioId,
-        date,
-        totalAsset: existing?.totalAsset ?? 0,
-        marketValue: existing?.marketValue,
-        cashBalance: existing?.cashBalance,
-        source: 'DERIVED',
-        valuationFlag: 'CARRIED_FORWARD',
-        note: existing?.note,
-        recordedAt: new Date(),
-      },
-      update: {
-        source: 'DERIVED',
-        valuationFlag: 'CARRIED_FORWARD',
-        recordedAt: new Date(),
-      },
-    });
 
     // 🔴 T5 级联
     await this.recalculationService.recalculateNavRange(portfolioId, date);

@@ -17,6 +17,7 @@ import {
   Min,
 } from 'class-validator';
 import { SnapshotValuation } from '@prisma/client';
+import { SnapshotSource } from '@investment-tracker/shared';
 
 // ==================== 手工录入 / 更新 ====================
 
@@ -76,6 +77,14 @@ export class SnapshotQueryDto {
   @IsOptional()
   @IsDateString()
   endDate?: string;
+
+  @ApiPropertyOptional({
+    description: '来源筛选：DERIVED=自动 / MANUAL=手工（不传则不过滤）',
+    enum: SnapshotSource,
+  })
+  @IsOptional()
+  @IsEnum(SnapshotSource)
+  source?: SnapshotSource;
 
   @ApiPropertyOptional({ description: '页码，从 1 开始', default: 1 })
   @IsOptional()
