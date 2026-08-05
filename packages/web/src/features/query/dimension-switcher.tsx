@@ -41,13 +41,18 @@ export interface QuickRangeOption {
 }
 
 /**
- * 快捷范围预设（DASH-P0-02 快捷项：近3月/近1年/今年至今/全部，对齐 dashboard）。
- * 供净值分析页 / XIRR 分析页共用（resolveQuickRange 支持 3m/1y/ytd/all）。
+ * 快捷范围预设（DASH-P0-02 / 决策 Q-6 乙：7 项，唯一真相源）。
+ *
+ * 概览页、净值分析页、XIRR 分析页共用此常量与 resolveQuickRange，
+ * 不再各自维护本地副本，避免口径漂移。
  */
 export const QUICK_RANGE_OPTIONS: ReadonlyArray<QuickRangeOption> = [
+  { value: '1w', label: '近一周' },
+  { value: '1m', label: '近1月' },
   { value: '3m', label: '近3月' },
+  { value: '6m', label: '近6月' },
   { value: '1y', label: '近1年' },
-  { value: 'ytd', label: '今年至今' },
+  { value: 'ytd', label: '今年' },
   { value: 'all', label: '全部' },
 ];
 
@@ -64,29 +69,48 @@ export interface DimensionSwitcherProps {
   className?: string;
 }
 
-/** 快捷范围计算（对齐 dashboard DATE_RANGE_OPTIONS 口径） */
-function resolveQuickRange(
-  range: string,
-): { startDate?: string; endDate?: string } {
+/** 快捷范围解析结果（起止日期恒为具体值，便于直接下发查询参数） */
+export interface ResolvedDateRange {
+  startDate: string;
+  endDate: string;
+}
+
+/**
+ * 快捷范围计算（QUICK_RANGE_OPTIONS 7 项的唯一口径实现，决策 Q-6 乙）。
+ *
+ * - endDate 恒为今天；startDate 按预设回推。
+ * - 'ytd' = 当年 1 月 1 日；'all' = 成立日至今，startDate 固定 2000-01-01
+ *   （必须显式返回，否则调用方合并时 `?? value.startDate` 会保留旧起始日，范围不扩大）。
+ * - 未知值回落「近1年」，与旧 dashboard resolveDateRange 的 default 分支一致。
+ */
+export function resolveQuickRange(range: string): ResolvedDateRange {
   const end = new Date();
   const endStr = toIsoDate(end);
   const start = new Date();
   switch (range) {
+    case '1w':
+      start.setDate(start.getDate() - 7);
+      break;
+    case '1m':
+      start.setMonth(start.getMonth() - 1);
+      break;
     case '3m':
       start.setMonth(start.getMonth() - 3);
-      return { startDate: toIsoDate(start), endDate: endStr };
+      break;
+    case '6m':
+      start.setMonth(start.getMonth() - 6);
+      break;
     case '1y':
       start.setFullYear(start.getFullYear() - 1);
-      return { startDate: toIsoDate(start), endDate: endStr };
+      break;
     case 'ytd':
       return { startDate: `${end.getFullYear()}-01-01`, endDate: endStr };
-    // 'all' = 成立日至今：startDate 固定 2000-01-01（对齐 dashboard DATE_RANGE_OPTIONS 口径），
-    // 必须显式返回 startDate，否则合并时 ?? value.startDate 会保留旧起始日，范围不扩大。
     case 'all':
       return { startDate: '2000-01-01', endDate: endStr };
     default:
-      return {};
+      start.setFullYear(start.getFullYear() - 1);
   }
+  return { startDate: toIsoDate(start), endDate: endStr };
 }
 
 /** Select 占位值（Radix Select 不允许空字符串 value，用哨兵值渲染占位） */
@@ -161,11 +185,12 @@ export function DimensionSwitcher({
               value={quickRange}
               onValueChange={(v) => {
                 setQuickRange(v);
+                // resolveQuickRange 恒返回具体起止日期，直接覆盖即可
                 const range = resolveQuickRange(v);
                 onChange({
                   ...value,
-                  startDate: range.startDate ?? value.startDate,
-                  endDate: range.endDate ?? value.endDate,
+                  startDate: range.startDate,
+                  endDate: range.endDate,
                 });
               }}
             >

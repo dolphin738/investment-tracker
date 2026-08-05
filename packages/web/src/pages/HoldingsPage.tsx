@@ -2,20 +2,23 @@
  * pages/HoldingsPage.tsx — 持仓页（PRD §7.2 · 方案B 只读推导）
  *
  * - 标题「+ 录入买卖」按钮 → 打开证券买卖录入弹窗（不是跳出入金页！）
- * - 【A】持仓汇总：总市值 / 总成本 / 浮盈 / 标的数
- * - 【B】持仓列表（只读，由 security-trades 推导）：
- *   标的/代码/类型/数量/成本价/现价/市值/占比，现价支持内联编辑（调 security-price API）
+ * - 【A】持仓汇总：总市值 / 总成本 / 浮盈 / 总盈亏率 / 标的数（HOLD-B-P0-06）
+ * - 【B】持仓列表（只读，由 security-trades 推导），PRD §5.2.3 全 11 列：
+ *   标的/代码/类型/数量/成本价/现价/成本额/市值/浮动盈亏/盈亏率/占比
+ *   （HOLD-B-P0-03 / P0-04；现价支持内联编辑，占比带横向进度条）
  * - 【C】证券买卖明细流水：列表 + 筛选（标的/日期/方向）+ 编辑/删除
  * - 空态引导按钮 → 打开录入弹窗（与出入金页完全解耦）
+ *
+ * 排序（决策 Q-5 甲）：列表在前端按市值降序展示，不依赖后端排序参数。
  */
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { PackageOpen, Plus, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Table,
   TableBody,
@@ -25,6 +28,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
+import { Progress } from '@/components/ui/progress';
 import {
   Select,
   SelectContent,
@@ -76,6 +80,8 @@ export default function HoldingsPage(): JSX.Element {
   const getPreference = usePreferenceStore((s) => s.getPreference);
   const amountThousands = getPreference('amountThousands');
   const amountAbbrev = getPreference('amountAbbrev');
+  // 盈亏率 / 总盈亏率沿用「收益率小数位」偏好（与概览页、分析页口径一致）
+  const xirrDecimals = getPreference('xirrDecimals');
 
   // 录入买卖弹窗
   const [tradeDialogOpen, setTradeDialogOpen] = useState(false);
@@ -92,6 +98,21 @@ export default function HoldingsPage(): JSX.Element {
 
   const holdings = useHoldings(currentPortfolioId, { date: todayIso() });
   const securities = useSecurities(currentPortfolioId);
+
+  /**
+   * 【A4】持仓列表前端排序（决策 Q-5 甲）：默认按市值降序。
+   *
+   * - 必须放在所有早退分支之前，遵守 Hooks 调用顺序恒定的规则。
+   * - 复制后再 sort，避免原地修改 react-query 缓存数组。
+   * - 占比权重基于 aggregate.totalMarketValue 计算，排序不影响权重。
+   */
+  const sortedItems = useMemo(
+    () =>
+      [...(holdings.data?.items ?? [])].sort(
+        (a, b) => b.marketValue - a.marketValue,
+      ),
+    [holdings.data?.items],
+  );
 
   // ===== 加载态 =====
   if (portfoliosLoading) {
@@ -129,7 +150,6 @@ export default function HoldingsPage(): JSX.Element {
     );
   }
 
-  const items = holdings.data?.items ?? [];
   const aggregate = holdings.data?.aggregate;
   const securityList = securities.data ?? [];
 
@@ -169,10 +189,11 @@ export default function HoldingsPage(): JSX.Element {
         </TabsList>
 
         {/* ============ 持仓 Tab ============ */}
-        <div className="mt-4 space-y-6">
-          {/* 【A】汇总 */}
+        {/* 【A1】必须用 TabsContent 包裹，否则两个区块恒同时渲染、Tab 切换失效 */}
+        <TabsContent value="holdings" className="mt-4 space-y-6">
+          {/* 【A】汇总（HOLD-B-P0-06：含总盈亏率共 5 项） */}
           {aggregate && (
-            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
               <Card>
                 <CardContent className="py-3">
                   <p className="text-xs text-muted-foreground">总市值</p>
@@ -200,6 +221,22 @@ export default function HoldingsPage(): JSX.Element {
                   >
                     {aggregate.totalProfit >= 0 ? '+' : ''}
                     {formatCurrency(aggregate.totalProfit, 2, { thousands: amountThousands, abbreviate: amountAbbrev })}
+                  </p>
+                </CardContent>
+              </Card>
+              {/* 【A3】总盈亏率（HOLD-B-P0-06）：红涨绿跌（§9.5） */}
+              <Card>
+                <CardContent className="py-3">
+                  <p className="text-xs text-muted-foreground">总盈亏率</p>
+                  <p
+                    className={cn(
+                      'text-lg font-bold tabular-nums',
+                      aggregate.totalProfitRate >= 0 ? 'text-up' : 'text-down',
+                    )}
+                  >
+                    {formatPercent(aggregate.totalProfitRate, 2, {
+                      decimals: xirrDecimals,
+                    })}
                   </p>
                 </CardContent>
               </Card>
@@ -231,9 +268,9 @@ export default function HoldingsPage(): JSX.Element {
             </Card>
           )}
 
-          {holdings.isLoading && <TableSkeleton rows={5} cols={8} />}
+          {holdings.isLoading && <TableSkeleton rows={5} cols={11} />}
 
-          {!holdings.isLoading && !holdings.isError && items.length === 0 && (
+          {!holdings.isLoading && !holdings.isError && sortedItems.length === 0 && (
             <EmptyState
               icon={<PackageOpen className="h-12 w-12" />}
               title="暂无持仓数据"
@@ -251,10 +288,11 @@ export default function HoldingsPage(): JSX.Element {
             />
           )}
 
-          {!holdings.isLoading && !holdings.isError && items.length > 0 && (
+          {!holdings.isLoading && !holdings.isError && sortedItems.length > 0 && (
             <Card>
               <div className="overflow-x-auto">
                 <Table>
+                  {/* 【A2】PRD §5.2.3 全 11 列，顺序不可调整 */}
                   <TableHeader>
                     <TableRow>
                       <TableHead>标的</TableHead>
@@ -263,12 +301,15 @@ export default function HoldingsPage(): JSX.Element {
                       <TableHead className="text-right">数量</TableHead>
                       <TableHead className="text-right">成本价</TableHead>
                       <TableHead className="text-right">现价</TableHead>
+                      <TableHead className="text-right">成本额</TableHead>
                       <TableHead className="text-right">市值</TableHead>
+                      <TableHead className="text-right">浮动盈亏</TableHead>
+                      <TableHead className="text-right">盈亏率</TableHead>
                       <TableHead className="text-right">占比</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {items.map((h) => {
+                    {sortedItems.map((h) => {
                       const weight =
                         aggregate && aggregate.totalMarketValue > 0
                           ? h.marketValue / aggregate.totalMarketValue
@@ -315,11 +356,42 @@ export default function HoldingsPage(): JSX.Element {
                               flag={h.flag}
                             />
                           </TableCell>
+                          {/* 【A2】成本额 */}
+                          <TableCell className="text-right tabular-nums">
+                            {formatCurrency(h.costTotal, 2, { thousands: amountThousands, abbreviate: amountAbbrev })}
+                          </TableCell>
                           <TableCell className="text-right tabular-nums">
                             {formatCurrency(h.marketValue, 2, { thousands: amountThousands, abbreviate: amountAbbrev })}
                           </TableCell>
+                          {/* 【A2】浮动盈亏：带正负号，红涨绿跌（§9.5） */}
+                          <TableCell
+                            className={cn(
+                              'text-right tabular-nums',
+                              h.pnl >= 0 ? 'text-up' : 'text-down',
+                            )}
+                          >
+                            {h.pnl >= 0 ? '+' : ''}
+                            {formatCurrency(h.pnl, 2, { thousands: amountThousands, abbreviate: amountAbbrev })}
+                          </TableCell>
+                          {/* 【A2】盈亏率：红涨绿跌（§9.5） */}
+                          <TableCell
+                            className={cn(
+                              'text-right tabular-nums',
+                              h.pnlRate >= 0 ? 'text-up' : 'text-down',
+                            )}
+                          >
+                            {formatPercent(h.pnlRate, 2, { decimals: xirrDecimals })}
+                          </TableCell>
+                          {/* 【A5】占比：数值 + 横向进度条（HOLD-B-P0-04 验收5） */}
                           <TableCell className="text-right tabular-nums">
-                            {formatPercent(weight)}
+                            <div className="flex flex-col items-end gap-1">
+                              <span>{formatPercent(weight)}</span>
+                              <Progress
+                                value={weight * 100}
+                                className="h-1.5 w-16"
+                                aria-label={`占比 ${formatPercent(weight)}`}
+                              />
+                            </div>
                           </TableCell>
                         </TableRow>
                       );
@@ -329,10 +401,10 @@ export default function HoldingsPage(): JSX.Element {
               </div>
             </Card>
           )}
-        </div>
+        </TabsContent>
 
         {/* ============ 买卖明细 Tab ============ */}
-        <div className="mt-4 space-y-4">
+        <TabsContent value="trades" className="mt-4 space-y-4">
           {/* 【C】筛选 */}
           <Card>
             <CardContent className="pt-4">
@@ -404,7 +476,7 @@ export default function HoldingsPage(): JSX.Element {
             query={tradeQuery}
             sideFilter={filterSide}
           />
-        </div>
+        </TabsContent>
       </Tabs>
 
       {/* 录入/编辑证券买卖弹窗 */}

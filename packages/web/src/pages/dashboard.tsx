@@ -2,12 +2,15 @@
  * pages/dashboard.tsx — 概览页（PRD §7.4）
  *
  * - 6 指标卡片：当前总资产 / 累计收益率 / 当年收益率 / 年化XIRR / 累计净值 / 净投入
- * - 维度切换 [日][周][月][年] + 范围下拉（近1月/3月/1年/全部）
- * - 四宫格：净值趋势（累计+当年双线）/ XIRR 趋势 / 近期出入金最近5笔 / 组合表现对比
+ * - 维度切换 [日][周][月][年] + 范围下拉（共享 7 项快捷范围，DASH-P0-02 / 决策 Q-6 乙）
+ * - 四宫格：净值趋势（累计+当年双线）/ XIRR 趋势 / 近期出入金最近5笔（带「查看全部」，
+ *   DASH-P0-05）/ 组合表现对比
+ * - 有组合但无数据时，四宫格位置渲染三步引导卡（DASH-P0-06）
  * - 按钮「+录入出入金」「+录入买卖」→ 分别打开出入金/买卖弹窗
  */
 
 import { useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
   ArrowDownToLine,
   ArrowUpFromLine,
@@ -39,6 +42,10 @@ import { EmptyState } from '@/components/EmptyState';
 import { PageHeader } from '@/components/PageHeader';
 import { CashflowForm } from '@/features/cashflow/cashflow-form';
 import { SecurityTradeForm } from '@/features/security-trade/security-trade-form';
+import {
+  QUICK_RANGE_OPTIONS,
+  resolveQuickRange,
+} from '@/features/query/dimension-switcher';
 import { usePortfolioStore } from '@/stores/portfolio.store';
 import { usePreferenceStore } from '@/stores/preference.store';
 import { usePortfolios } from '@/hooks/use-portfolios';
@@ -60,7 +67,6 @@ import {
   isStale,
   cn,
 } from '@/lib/utils';
-import { toIsoDate } from '@/lib/constants';
 import {
   QueryGranularity,
   AggregationMethod,
@@ -74,47 +80,116 @@ const GRANULARITY_TABS = [
   { value: 'year', label: '年' },
 ] as const;
 
-/** 快捷日期范围（PRD §7.4：近1月/3月/1年/全部；另加「今年至今」以覆盖偏好 defaultDateRange=ytd） */
-const DATE_RANGE_OPTIONS = [
-  { value: '1m', label: '近1月' },
-  { value: '3m', label: '近3月' },
-  { value: '1y', label: '近1年' },
-  { value: 'ytd', label: '今年至今' },
-  { value: 'all', label: '全部' },
-] as const;
-
-/** 根据快捷项计算起止日期 */
-function resolveDateRange(range: string): { startDate: string; endDate: string } {
-  const end = new Date();
-  const endStr = toIsoDate(end);
-  const start = new Date();
-  switch (range) {
-    case '1m':
-      start.setMonth(start.getMonth() - 1);
-      break;
-    case '3m':
-      start.setMonth(start.getMonth() - 3);
-      break;
-    case '1y':
-      start.setFullYear(start.getFullYear() - 1);
-      break;
-    case 'ytd':
-      start.setMonth(0, 1);
-      break;
-    case 'all':
-      start.setFullYear(2000, 0, 1);
-      break;
-    default:
-      start.setFullYear(start.getFullYear() - 1);
-  }
-  return { startDate: toIsoDate(start), endDate: endStr };
-}
+/**
+ * 快捷日期范围（DASH-P0-02 / 决策 Q-6 乙）：
+ * 统一复用 features/query/dimension-switcher 的 QUICK_RANGE_OPTIONS + resolveQuickRange，
+ * 本页不再维护本地副本（原 DATE_RANGE_OPTIONS / resolveDateRange 已移除）。
+ * 新 7 项已覆盖偏好 defaultDateRange 的全部取值（1m/3m/1y/ytd/all），无需回落。
+ */
 
 /** 出入金类型中文映射（BUY=存入，SELL=取出） */
 const TYPE_LABEL: Record<string, string> = {
   BUY: '存入',
   SELL: '取出',
 };
+
+/** 空态引导步骤（DASH-P0-06：有组合但无数据时的三步引导） */
+interface OnboardingStep {
+  /** 步骤序号（展示用） */
+  index: number;
+  /** 步骤标题 */
+  title: string;
+  /** 步骤说明 */
+  description: string;
+  /** 可选行动按钮文案；缺省表示该步无按钮（如「创建组合」在设置页完成） */
+  actionLabel?: string;
+  /** 行动类型，决定点击后打开哪个录入弹窗 */
+  action?: 'cashflow' | 'trade';
+}
+
+const ONBOARDING_STEPS: ReadonlyArray<OnboardingStep> = [
+  {
+    index: 1,
+    title: '创建组合',
+    description: '已完成。可在「设置 → 组合管理」中继续新建或调整组合。',
+  },
+  {
+    index: 2,
+    title: '录入首笔存入',
+    description: '记录第一笔本金存入，作为净值与 XIRR 的计算起点。',
+    actionLabel: '录入出入金',
+    action: 'cashflow',
+  },
+  {
+    index: 3,
+    title: '录入证券买卖 / 现价',
+    description: '录入买卖流水并维护现价，持仓、净值与收益将自动推导。',
+    actionLabel: '录入买卖',
+    action: 'trade',
+  },
+];
+
+export interface OnboardingGuideProps {
+  /** 点击「录入出入金」 */
+  onOpenCashflow: () => void;
+  /** 点击「录入买卖」 */
+  onOpenTrade: () => void;
+}
+
+/**
+ * 有组合但无数据的三步引导卡（DASH-P0-06）。
+ *
+ * 触发条件由调用方判定：portfolios.length > 0 且 overview 加载完成但无数据。
+ * 渲染在四宫格位置，6 指标卡与维度切换器仍正常展示。
+ */
+function OnboardingGuide({
+  onOpenCashflow,
+  onOpenTrade,
+}: OnboardingGuideProps): JSX.Element {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">开始记录你的投资</CardTitle>
+        <p className="text-sm text-muted-foreground">
+          当前组合还没有任何数据，按下面三步录入即可看到净值、XIRR 与持仓分析。
+        </p>
+      </CardHeader>
+      <CardContent>
+        <ol className="grid grid-cols-1 gap-4 md:grid-cols-3">
+          {ONBOARDING_STEPS.map((step) => (
+            <li
+              key={step.index}
+              className="flex flex-col gap-2 rounded-lg border bg-muted/30 p-4"
+            >
+              <div className="flex items-center gap-2">
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">
+                  {step.index}
+                </span>
+                <span className="text-sm font-medium">{step.title}</span>
+              </div>
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                {step.description}
+              </p>
+              {step.actionLabel && (
+                <Button
+                  size="sm"
+                  variant={step.action === 'trade' ? 'default' : 'outline'}
+                  className="mt-auto self-start"
+                  onClick={
+                    step.action === 'trade' ? onOpenTrade : onOpenCashflow
+                  }
+                >
+                  <Plus className="mr-2 h-4 w-4" />
+                  {step.actionLabel}
+                </Button>
+              )}
+            </li>
+          ))}
+        </ol>
+      </CardContent>
+    </Card>
+  );
+}
 
 export default function DashboardPage(): JSX.Element {
   const currentPortfolioId = usePortfolioStore((s) => s.currentPortfolioId);
@@ -139,7 +214,7 @@ export default function DashboardPage(): JSX.Element {
     getPreference('defaultDateRange'),
   );
   const { startDate, endDate } = useMemo(
-    () => resolveDateRange(dateRange),
+    () => resolveQuickRange(dateRange),
     [dateRange],
   );
 
@@ -228,6 +303,17 @@ export default function DashboardPage(): JSX.Element {
   const yearReturnRate = ov?.yearReturnRate ?? (
     yearNav !== null ? Number(yearNav) - 1 : null
   );
+
+  /**
+   * DASH-P0-06：「有组合但无数据」判定。
+   * 走到这里 portfolios.length > 0 已由上方早退分支保证；
+   * overview 加载完成（非 isLoading）且无返回数据，即视为该组合尚未录入任何数据，
+   * 此时用三步引导卡替换四宫格（6 指标卡与维度切换器仍正常渲染）。
+   *
+   * 额外排除 isError：请求失败同样满足 `!data`，但那是「加载失败」而非「没有数据」，
+   * 误判会把错误伪装成空态并盖掉仍可正常加载的净值/XIRR 图表。
+   */
+  const hasNoData = !overview.isLoading && !overview.isError && !overview.data;
 
   if (overview.isLoading && latestNav.isLoading) {
     return (
@@ -373,7 +459,7 @@ export default function DashboardPage(): JSX.Element {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {DATE_RANGE_OPTIONS.map((opt) => (
+            {QUICK_RANGE_OPTIONS.map((opt) => (
               <SelectItem key={opt.value} value={opt.value}>
                 {opt.label}
               </SelectItem>
@@ -382,134 +468,153 @@ export default function DashboardPage(): JSX.Element {
         </Select>
       </div>
 
-      {/* ===== 四宫格 ===== */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <NavTrendChart
-          data={navSeries.data ?? []}
-          loading={navSeries.isLoading}
-          title="净值趋势（累计 + 当年）"
+      {/* ===== 有组合但无数据：三步引导（DASH-P0-06） ===== */}
+      {hasNoData && (
+        <OnboardingGuide
+          onOpenCashflow={() => setCashflowOpen(true)}
+          onOpenTrade={() => setTradeOpen(true)}
         />
-        <XirrTrendChart
-          data={xirrSeries.data ?? []}
-          loading={xirrSeries.isLoading}
-          title="XIRR 趋势"
-          connectNulls={false}
-        />
+      )}
 
-        {/* 近期出入金（最近5笔） */}
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle className="text-base">近期出入金</CardTitle>
-            <ArrowLeftRight className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            {recentTransactions.isLoading ? (
-              <TableSkeleton rows={3} cols={3} />
-            ) : recentTransactions.data &&
-              recentTransactions.data.items.length > 0 ? (
-              <div className="space-y-3">
-                {recentTransactions.data.items.map((tx) => (
-                  <div
-                    key={tx.id}
-                    className="flex items-center justify-between border-b pb-2 last:border-0 last:pb-0"
-                  >
-                    <div className="flex items-center gap-3">
-                      <span className="text-sm text-muted-foreground">
-                        {formatDate(tx.date, 'MM-dd')}
-                      </span>
-                      <span
-                        className={cn(
-                          'text-xs font-medium',
-                          tx.type === CashFlowType.BUY
-                            ? 'text-up'
-                            : 'text-down',
-                        )}
-                      >
-                        {TYPE_LABEL[tx.type] || tx.type}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <span className="text-sm font-medium tabular-nums">
-                        {tx.type === CashFlowType.BUY ? '+' : '-'}
-                        {formatCurrency(tx.amount, 2, { thousands: amountThousands, abbreviate: amountAbbrev })}
-                      </span>
-                      {tx.note && (
-                        <span className="max-w-[120px] truncate text-xs text-muted-foreground">
-                          {tx.note}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                ))}
+      {/* ===== 四宫格（仅在有数据时渲染） ===== */}
+      {!hasNoData && (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <NavTrendChart
+            data={navSeries.data ?? []}
+            loading={navSeries.isLoading}
+            title="净值趋势（累计 + 当年）"
+          />
+          <XirrTrendChart
+            data={xirrSeries.data ?? []}
+            loading={xirrSeries.isLoading}
+            title="XIRR 趋势"
+            connectNulls={false}
+          />
+
+          {/* 近期出入金（最近5笔） */}
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle className="text-base">近期出入金</CardTitle>
+              {/* DASH-P0-05：跳转出入金页查看完整流水 */}
+              <div className="flex items-center gap-3">
+                <Link
+                  to="/cashflows"
+                  className="text-xs text-muted-foreground hover:underline"
+                >
+                  查看全部
+                </Link>
+                <ArrowLeftRight className="h-4 w-4 text-muted-foreground" />
               </div>
-            ) : (
-              <EmptyState
-                title="还没有出入金记录"
-                description="录入第一笔出入金开始跟踪收益"
-                action={
-                  <Button size="sm" onClick={() => setCashflowOpen(true)}>
-                    <ArrowDownToLine className="mr-2 h-4 w-4" />
-                    录入出入金
-                  </Button>
-                }
-              />
-            )}
-          </CardContent>
-        </Card>
-
-        {/* 组合表现对比 */}
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle className="text-base">组合表现对比</CardTitle>
-            <ArrowUpFromLine className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            {portfolioSummary.isLoading ? (
-              <TableSkeleton rows={3} cols={4} />
-            ) : portfolioSummary.data && portfolioSummary.data.length > 0 ? (
-              <div className="space-y-2">
-                {portfolioSummary.data.map((p) => (
-                  <div
-                    key={p.id}
-                    className="flex items-center justify-between rounded-lg bg-muted/40 px-3 py-2 text-sm"
-                  >
-                    <span className="font-medium">{p.name}</span>
-                    <div className="flex items-center gap-4">
-                      <span className="tabular-nums">
-                        {formatCurrency(p.totalAsset, 2, { thousands: amountThousands, abbreviate: amountAbbrev })}
-                      </span>
-                      {/* 用 `!= null` 同时排除 null 与 undefined：
-                          后端 /portfolios/summary 当前不返回该字段（见 api/types.ts 缺口注），
-                          旧写法 `!== null` 会放行 undefined 并渲染出 NaN%。 */}
-                      {p.cumulativeReturnRate != null && (
+            </CardHeader>
+            <CardContent>
+              {recentTransactions.isLoading ? (
+                <TableSkeleton rows={3} cols={3} />
+              ) : recentTransactions.data &&
+                recentTransactions.data.items.length > 0 ? (
+                <div className="space-y-3">
+                  {recentTransactions.data.items.map((tx) => (
+                    <div
+                      key={tx.id}
+                      className="flex items-center justify-between border-b pb-2 last:border-0 last:pb-0"
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className="text-sm text-muted-foreground">
+                          {formatDate(tx.date, 'MM-dd')}
+                        </span>
                         <span
                           className={cn(
-                            'tabular-nums',
-                            p.cumulativeReturnRate >= 0
+                            'text-xs font-medium',
+                            tx.type === CashFlowType.BUY
                               ? 'text-up'
                               : 'text-down',
                           )}
                         >
-                          {formatPercent(p.cumulativeReturnRate, 2, { decimals: xirrDecimals })}
+                          {TYPE_LABEL[tx.type] || tx.type}
                         </span>
-                      )}
-                      {p.xirr != null && (
-                        <span className="text-xs text-muted-foreground">
-                          XIRR {formatPercent(p.xirr, 2, { decimals: xirrDecimals })}
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className="text-sm font-medium tabular-nums">
+                          {tx.type === CashFlowType.BUY ? '+' : '-'}
+                          {formatCurrency(tx.amount, 2, { thousands: amountThousands, abbreviate: amountAbbrev })}
                         </span>
-                      )}
+                        {tx.note && (
+                          <span className="max-w-[120px] truncate text-xs text-muted-foreground">
+                            {tx.note}
+                          </span>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="py-10 text-center text-sm text-muted-foreground">
-                暂无组合数据
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+                  ))}
+                </div>
+              ) : (
+                <EmptyState
+                  title="还没有出入金记录"
+                  description="录入第一笔出入金开始跟踪收益"
+                  action={
+                    <Button size="sm" onClick={() => setCashflowOpen(true)}>
+                      <ArrowDownToLine className="mr-2 h-4 w-4" />
+                      录入出入金
+                    </Button>
+                  }
+                />
+              )}
+            </CardContent>
+          </Card>
+
+          {/* 组合表现对比 */}
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle className="text-base">组合表现对比</CardTitle>
+              <ArrowUpFromLine className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              {portfolioSummary.isLoading ? (
+                <TableSkeleton rows={3} cols={4} />
+              ) : portfolioSummary.data && portfolioSummary.data.length > 0 ? (
+                <div className="space-y-2">
+                  {portfolioSummary.data.map((p) => (
+                    <div
+                      key={p.id}
+                      className="flex items-center justify-between rounded-lg bg-muted/40 px-3 py-2 text-sm"
+                    >
+                      <span className="font-medium">{p.name}</span>
+                      <div className="flex items-center gap-4">
+                        <span className="tabular-nums">
+                          {formatCurrency(p.totalAsset, 2, { thousands: amountThousands, abbreviate: amountAbbrev })}
+                        </span>
+                        {/* 用 `!= null` 同时排除 null 与 undefined：
+                            后端 /portfolios/summary 当前不返回该字段（见 api/types.ts 缺口注），
+                            旧写法 `!== null` 会放行 undefined 并渲染出 NaN%。 */}
+                        {p.cumulativeReturnRate != null && (
+                          <span
+                            className={cn(
+                              'tabular-nums',
+                              p.cumulativeReturnRate >= 0
+                                ? 'text-up'
+                                : 'text-down',
+                            )}
+                          >
+                            {formatPercent(p.cumulativeReturnRate, 2, { decimals: xirrDecimals })}
+                          </span>
+                        )}
+                        {p.xirr != null && (
+                          <span className="text-xs text-muted-foreground">
+                            XIRR {formatPercent(p.xirr, 2, { decimals: xirrDecimals })}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="py-10 text-center text-sm text-muted-foreground">
+                  暂无组合数据
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {/* 录入出入金弹窗 */}
       <Dialog open={cashflowOpen} onOpenChange={setCashflowOpen}>
