@@ -1,12 +1,12 @@
 # 投资收益统计系统 — 架构设计文档（Canonical）
 
-> **版本**: v2.1
+> **版本**: v2.2
 > **架构师**: 高见远（Gao）
 > **日期**: 2026-08-03
-> **状态**: 重写发布（基于评审结论落地）+ **v2.1 修订：T5 手工总资产记录的计算层级联口径修正**（§6 / §7.3.1 / §7.3.2 / §8.1 / §13 REG-06；修复「快照层仅当日」被误写为「计算层也仅当日」导致的静默数据错误风险）
-> **依据**: PRD v3.1.3（Consolidated，单一权威）+ ENVIRONMENT-SETUP + 用户拍板决策（含 v2.3 方案B 数据架构）
+> **状态**: 重写发布（基于评审结论落地）+ **v2.1 修订：T5 手工总资产记录的计算层级联口径修正**（§6 / §7.3.1 / §7.3.2 / §8.1 / §13 REG-06；修复「快照层仅当日」被误写为「计算层也仅当日」导致的静默数据错误风险）+ **v2.2 修订：8 页对齐增量（T01–T05）落地同步**（新增 data-transfer 模块 §4.2.17、快照 A3 单条端点与 `derivedTotalAsset`、overview `freshness` 契约、`computeDerivedBatch`/`deriveBatch` 批量派生、URL query 持久化与前端新 feature、依赖 `xlsx`/`papaparse`；**Prisma schema 零变更**）
+> **依据**: PRD v3.1.9（Consolidated，单一权威）+ ENVIRONMENT-SETUP + 用户拍板决策（含 v2.3 方案B 数据架构）
 >
-> **⚠️ 本档为唯一架构真相源（Canonical）**：取代并吸收 `ARCHITECTURE-modules.md`（已归档至 `docs/archive/`）。任何工程实现以本档 + PRD v3.1.3 为准；二者冲突时以 PRD 金融口径（① 级）与数据架构口径（② 级）裁决优先级为最高依据（见 PRD §2.1–§2.3）。
+> **⚠️ 本档为唯一架构真相源（Canonical）**：取代并吸收 `ARCHITECTURE-modules.md`（已归档至 `docs/archive/`）。任何工程实现以本档 + PRD v3.1.9 为准；二者冲突时以 PRD 金融口径（① 级）与数据架构口径（② 级）裁决优先级为最高依据（见 PRD §2.1–§2.3）。
 
 ---
 
@@ -183,6 +183,22 @@ graph TB
 │   │           ├── recalculation/  # 区间重建模块（T1~T4 区间重建 + T5 级联 + recalculateAll）
 │   │           │   ├── recalculation.module.ts
 │   │           │   └── recalculation.service.ts   # 唯一区间重建实现（CalculationModule 不再导出）
+│   │           ├── data-transfer/  # 🆕 数据导入导出模块（T05 · CSV/Excel，见 §4.2.17）
+│   │           │   ├── data-transfer.module.ts
+│   │           │   ├── data-transfer.controller.ts   # export / template / import-preview / import-commit
+│   │           │   ├── data-transfer.service.ts      # 解析 → 校验 → 单事务写入 → 单次重算
+│   │           │   ├── csv/
+│   │           │   │   ├── csv-serializer.ts          # 对象数组 → CSV（BOM + Decimal 字符串化）
+│   │           │   │   ├── csv-parser.ts              # CSV → 对象数组（papaparse 封装 + 行号保留）
+│   │           │   │   ├── xlsx-parser.ts             # XLSX → 同一行结构（xlsx 库）
+│   │           │   │   ├── xlsx-serializer.ts         # 行结构 → XLSX
+│   │           │   │   ├── export-schemas.ts          # 7 类导出的列定义
+│   │           │   │   └── import-schemas.ts          # 3 类导入的逐行校验 schema
+│   │           │   └── dto/
+│   │           │       ├── export-query.dto.ts        # type + format(csv|xlsx)
+│   │           │       ├── import-preview.dto.ts      # type（multipart file）
+│   │           │       ├── import-commit.dto.ts       # type + token
+│   │           │       └── template-query.dto.ts      # type + format
 │   │           └── query/          # 查询聚合模块
 │   │               ├── query.module.ts
 │   │               ├── query.controller.ts        # XIRR/净值 四维度查询
@@ -205,14 +221,17 @@ graph TB
 │   │       ├── lib/
 │   │       │   ├── utils.ts        # cn() 等工具函数
 │   │       │   ├── api-client.ts   # Axios 实例 + 拦截器
-│   │       │   └── format.ts       # 金额/百分比/日期格式化
+│   │       │   ├── format.ts       # 金额/百分比/日期格式化
+│   │       │   ├── url-query.ts    # 🆕 useUrlState<T>(schema) + codec 原语（URL query 持久化，见 §10.1.6）
+│   │       │   └── constants.ts    # 🆕 HOLDINGS/OVERVIEW QUERY KEYS、EXPORT_TYPE_OPTIONS、todayInAppTzIso()
 │   │       ├── api/                # API 请求层
 │   │       │   ├── auth.api.ts
 │   │       │   ├── portfolio.api.ts
 │   │       │   ├── transaction.api.ts
 │   │       │   ├── snapshot.api.ts
 │   │       │   ├── nav.api.ts
-│   │       │   └── xirr.api.ts
+│   │       │   ├── xirr.api.ts
+│   │       │   └── data-transfer.api.ts  # 🆕 export / preview / commit / template（T05）
 │   │       ├── stores/             # Zustand 全局状态
 │   │       │   ├── auth.store.ts
 │   │       │   └── portfolio.store.ts  # 当前选中组合
@@ -221,7 +240,8 @@ graph TB
 │   │       │   ├── use-snapshots.hook.ts
 │   │       │   ├── use-nav.hook.ts
 │   │       │   ├── use-xirr.hook.ts
-│   │       │   └── use-portfolios.hook.ts
+│   │       │   ├── use-portfolios.hook.ts
+│   │       │   └── use-data-transfer.ts  # 🆕 useExportCsv / useImportPreview / useImportCommit（T05）
 │   │       ├── components/         # shadcn/ui 基础组件 + 通用组件
 │   │       │   └── ui/             # shadcn/ui 生成的基础组件
 │   │       │       ├── button.tsx
@@ -256,8 +276,21 @@ graph TB
 │   │       │   ├── portfolio/
 │   │       │   │   ├── portfolio-selector.tsx
 │   │       │   │   └── portfolio-manager.tsx
-│   │       │   └── settings/
-│   │       │       └── settings-page.tsx
+│   │       │   ├── settings/
+│   │       │   │   └── settings-page.tsx
+│   │       │   ├── holdings/
+│   │       │   │   ├── holdings-query-params.ts   # 🆕 URL schema（date/closed/types/sec，T02）
+│   │       │   │   └── holdings-toolbar.tsx       # 🆕 日期选择 + 已清仓开关 + 类型多选（T02）
+│   │       │   ├── overview/
+│   │       │   │   ├── overview-query-params.ts   # 🆕 URL schema（g/range/from/to，T03）
+│   │       │   │   └── freshness-banner.tsx       # 🆕 数据新鲜度提示条（DASH-P1-03，T03）
+│   │       │   ├── cashflow/
+│   │       │   │   └── cash-balance-history.tsx   # 🆕 现金余额变更历史展开器（CASH-P1-01，T04）
+│   │       │   └── data-transfer/
+│   │       │       ├── export-panel.tsx           # 🆕 7 类导出面板（csv/xlsx，T05）
+│   │       │       ├── import-dialog.tsx          # 🆕 导入对话框（preview/commit，T05）
+│   │       │       ├── import-template-buttons.tsx # 🆕 模板下载按钮（T05）
+│   │       │       └── csv-download.ts            # 🆕 Blob + BOM + a[download]（T05）
 │   │       └── pages/              # 页面组件
 │   │           ├── login.page.tsx
 │   │           ├── register.page.tsx
@@ -299,6 +332,7 @@ graph TB
 | **仓库结构** | pnpm monorepo | pnpm ^9 | ✅ 确认 | 磁盘高效，workspace 协议支持共享包 |
 | **构建编排** | Turborepo | ^2.0 | ✅ **新增**（可选） | 加速 monorepo 构建缓存，非必须但提升 DX |
 | **金融算法库** | finance-core（内部包） | — | ✅ **新增** | 零依赖纯金融算法库（XIRR / NAV 等纯函数），`packages/finance-core`，backend 依赖它 |
+| **数据导入导出** | papaparse ^5.4.1（web + backend 各一份）+ **xlsx ^0.18.5（仅后端，SheetJS CE）** | — | 🆕 **v2.2 新增** | CSV/Excel 解析与生成：CSV 走 papaparse（引号转义 / CRLF / BOM）；xlsx 走 SheetJS（导入 .xlsx/.xls 归一化为同一行结构、导出 format=xlsx）。**前端不装 xlsx**，解析统一在后端（T05） |
 
 ---
 
@@ -647,11 +681,14 @@ User (1) ──< Portfolio (N)
 
 | Method | Path | 说明 | 请求体/参数 | 响应 data |
 |--------|------|------|------------|-----------|
-| GET | `/api/portfolios/:portfolioId/snapshots` | 获取记录列表（含 `source`/`valuationFlag`/拆解） | `?startDate&endDate&page&pageSize` | `Paginated<AssetSnapshot>`（含 `marketValue`/`cashBalance`/`source`/`valuationFlag`/`recordedAt`） |
-| POST | `/api/portfolios/:portfolioId/snapshots` | 手工录入/覆盖（→`source=MANUAL`） | `{ date, totalAsset, marketValue?, cashBalance?, note? }` | `AssetSnapshot`（source=MANUAL） |
-| PATCH | `/api/portfolios/:portfolioId/snapshots/:id` | 编辑手工记录 | `{ totalAsset?, marketValue?, cashBalance?, note? }` | `AssetSnapshot` |
+| GET | `/api/portfolios/:portfolioId/snapshots` | 获取记录列表（含 `source`/`valuationFlag`/拆解/**`derivedTotalAsset`**） | `?startDate&endDate&page&pageSize` | `Paginated<AssetSnapshot>`（含 `marketValue`/`cashBalance`/`source`/`valuationFlag`/`recordedAt`/**`derivedTotalAsset`**） |
+| GET | `/api/portfolios/:portfolioId/snapshots/:date` | 🆕 **A3 单条端点**：查询指定日期单条快照 | `date` 必须 `YYYY-MM-DD`（否则 400）；该日无记录 → 404 | `AssetSnapshot`（含 `derivedTotalAsset`，与列表同口径） |
+| POST | `/api/portfolios/:portfolioId/snapshots` | 手工录入/覆盖（→`source=MANUAL`） | `{ date, totalAsset, marketValue?, cashBalance?, note? }` | `AssetSnapshot`（source=MANUAL，含 `derivedTotalAsset`） |
+| PATCH | `/api/portfolios/:portfolioId/snapshots/:id` | 编辑手工记录 | `{ totalAsset?, marketValue?, cashBalance?, note? }` | `AssetSnapshot`（含 `derivedTotalAsset`） |
 | DELETE | `/api/portfolios/:portfolioId/snapshots/:id` | 删除记录（若属事件日立即回填 DERIVED） | — | `null` |
-| POST | `/api/portfolios/:portfolioId/snapshots/:date/reset` | 「重置为自动值」→ `source=DERIVED`（等价于撤销手工） | — | `AssetSnapshot`（source=DERIVED） |
+| POST | `/api/portfolios/:portfolioId/snapshots/:date/reset` | 「重置为自动值」→ `source=DERIVED`（等价于撤销手工） | — | `AssetSnapshot`（source=DERIVED，`derivedTotalAsset` = `totalAsset`） |
+
+> **🆕 `derivedTotalAsset`（v2.2 · 8 页对齐 · AL-054 / 决策 Q-1 甲）**：运行时计算的**响应字段，不落库**（Prisma schema 零变更）。取值规则（`SnapshotService.attachDerivedTotalAsset`）：`source === 'DERIVED'` → 直接等于 `totalAsset`（该行本就是系统派生结果，不重复计算）；`source === 'MANUAL'` → `AssetValuationService.computeDerivedBatch` 的实时结果；计算失败 / 数据缺失 → `null`（🔴 列表仍返回 200，绝不因此抛错）。🔴 **N+1 规避**：无论列表中有多少条 MANUAL 行，只调用一次 `computeDerivedBatch`（内部恒 3 次查库），严禁逐条调 `computeDerived`（否则退化为 3N 次查库）。
 
 > **读取语义**：无记录的自然日按**前值填充**（取前一个有记录日的 `totalAsset`，无需判断来源）；`GET` 响应中 `marketValue`/`cashBalance` 为拆解项，`null` 表示未拆解（Q-B15 选填）。
 > **手工记录校验**：`totalAsset ≥ 0`；`marketValue`/`cashBalance` 选填；`note` 强提示；不允许未来日期。
@@ -711,8 +748,10 @@ User (1) ──< Portfolio (N)
 
 | Method | Path | 说明 | 请求参数 | 响应 data |
 |--------|------|------|---------|-----------|
-| GET | `/api/portfolios/:portfolioId/overview` | 核心指标 + 趋势（一屏） | `?range` | `OverviewDTO`（当前总资产/累计XIRR/当年XIRR/净值序列片段/近期出入金） |
+| GET | `/api/portfolios/:portfolioId/overview` | 核心指标 + 趋势（一屏） | `?range` | `OverviewDTO`（当前总资产/累计XIRR/当年XIRR/净值序列片段/近期出入金/**`freshness`**） |
 | GET | `/api/portfolios/comparison` | 多组合对比摘要（一次查询） | — | `PortfolioSummary[]` |
+
+> **🆕 `freshness: FreshnessInfo`（v2.2 · 8 页对齐 · AL-015 / 决策 O-6/Q-5 甲）**：概览响应新增**数据新鲜度聚合对象**（`DASH-P1-03`），判定**全部在后端**完成，前端只渲染。字段与口径见 `packages/shared/src/types/overview.ts`：`staleDays`（读 `UserPreference.staleDays`，默认 3）、`isStale`、`latestPriceAsOf`/`latestPriceLagDays`（行情维度 = 当前持仓标的 `MIN(MAX(SecurityPrice.asOf) per held security)`，只要一只持仓标的无行情记录即视为最陈旧 → asOf=null）、`latestCashAsOf`/`latestCashLagDays`（现金维度 = `MAX(CashBalance.asOf)`）、`reasons[]`（超阈值才产出，含本地化文案）。滞后天数 = asOf → 今天（`todayInAppTz()`，UTC+8）自然日差。🔴 **不再用快照 `latestDate` 判定**（旧口径废弃）。计算失败时降级为空 freshness（`staleDays=3, isStale=false`），主响应照常返回。
 
 #### 4.2.11 XIRR 查询（四维度）
 
@@ -801,6 +840,30 @@ User (1) ──< Portfolio (N)
 | GET | `/api/users/preferences` | 获取用户偏好（SET-P0-02）| — | `UserPreference` |
 | PATCH | `/api/users/preferences` | 更新用户偏好（全站唯一写入口）| `{ theme?, defaultPortfolioId?, ... }` | `UserPreference` |
 
+#### 4.2.17 数据导入导出（data-transfer · 🆕 v2.2 · T05 · CSV/Excel）
+
+> **模块定位**：设置页「数据管理区」（`SET-P0-03` 导出 / `SET-P0-04` 导入）+ 出入金 CSV（`FLOW-P1-01`）+ 买卖流水 CSV（`HOLD-B-P1-01`）的统一实现。**导出 7 类、导入 3 类；格式 `csv | xlsx`**（Excel 为 Q-6 乙「仅 CSV」的扩展，用户拍板）。shared 契约见 `packages/shared/src/types/data-transfer.ts`。
+
+| Method | Path | 说明 | 请求体/参数 | 响应 data |
+|--------|------|------|------------|-----------|
+| GET | `/api/portfolios/:portfolioId/export` | 导出 7 类数据 | `?type={ExportType}&format=csv\|xlsx`（format 缺省 csv） | 🔴 **文件直出**（`@Res()` 绕过响应信封；`Content-Disposition: attachment`），前端 `responseType:'blob'` |
+| GET | `/api/data-transfer/template` | 下载导入模板（3 类） | `?type={ImportType}&format=csv\|xlsx` | 🔴 文件直出（同上），表头 + 1 行示例，**不需要 portfolioId** |
+| POST | `/api/portfolios/:portfolioId/import/preview` | 导入预览（**不落库**） | `multipart/form-data`：`file`（≤5MB）+ `type` | `ImportPreviewResult`（前 10 行样例 + 全量行级错误 + `minDate` + token） |
+| POST | `/api/portfolios/:portfolioId/import/commit` | 导入提交 | `{ type, token }` | `ImportCommitResult`（`{inserted, updated, skipped, failed[], recalculated}`） |
+
+**导出 7 类（`ExportType`）**：`securities` / `securityTrades` / `cashFlows` / `cashBalances` / `securityPrices` / `assetSnapshots` / `navSeries`（navSeries = 每日净值 + 每日 XIRR 合并列：`date/cumulativeNav/yearlyNav/shares/totalAsset/xirr`）。
+
+**导入 3 类（`ImportType`）**：`securityTrades` / `cashFlows` / `assetSnapshots`。
+
+**关键约定**：
+- **文件格式**：CSV = UTF-8 **前置 BOM `\uFEFF`**（Excel 兼容）；XLSX = 后端 `xlsx` 库生成/解析。**英文表头 + 第二行 `#` 注释行**（导入端跳过 `#` 开头行）；Decimal 一律**字符串原样**读写（不经过 `Number()`、不科学计数、不丢精度）。
+- **两阶段导入**：`preview` 只解析 + 逐行校验（9 种错误码：`INVALID_FILE_TYPE` / `FILE_TOO_LARGE` / `TOO_MANY_ROWS` / `MISSING_REQUIRED_COLUMN` / `INVALID_DATE_FORMAT` / `INVALID_DECIMAL_PRECISION` / `INVALID_ENUM_VALUE` / `SECURITY_NOT_FOUND` / `DUPLICATE_SNAPSHOT_DATE`），**绝不写库**；`commit` 持 preview token（10 分钟有效）在**单个 Prisma 事务**内写入。
+- 🔴 **单次重算铁律**：commit 事务提交后，**全流程仅调用 1 次** `recalculateNavRange(portfolioId, minDate)`（`[minDate, today]`），**严禁逐行触发**（T05 单测断言调用次数 === 1）。
+- **冲突策略**：`securityTrades` / `cashFlows` **纯 insert 不去重**（同日多笔合法；预览对疑似重复行给 warning，不阻断）；`assetSnapshots` 按 `(portfolioId, date)` **upsert**，`source` **强制 `MANUAL`**、`valuationFlag='MANUAL_INPUT'`（遵守每日唯一约束）。
+- **跨组合安全**：export / preview / commit 均校验 `portfolioId` 归属当前用户；文件内其它 `portfolioId` 列一律忽略（以路径参数为准）。
+- **上传限制**：`.csv` / `.xlsx` / `.xls`（MIME + 后缀双校验）、≤ 5MB、行数 ≤ 10000。
+- **前端**：`ExportPanel` 7 类多选 + 格式选择（CSV/Excel），多类型**串行逐个下载**（间隔 300ms，不打包 zip）；`ImportDialog` 选类型 → 上传 → 预览 10 行 + 错误表（可导出错误 CSV）→ 确认导入；成功后 `invalidateQueries` 覆盖 `holdings / overview / nav / transactions / snapshots / cash-balances`。
+
 ---
 
 ## 5. 核心数据结构
@@ -812,7 +875,7 @@ User (1) ──< Portfolio (N)
 <details><summary>核心类速览（点击展开）</summary>
 
 - **数据模型**：`User` 1—N `Portfolio`；`Portfolio` 聚合 `CashFlow`(出入金) / `Security`—`SecurityTrade`(买卖流水) / `SecurityPrice`(现价) / `CashBalance`(独立) / `AssetSnapshot`(每日唯一) / `DailyNav` / `DailyXirr` / `DividendRecord` / `FeeRecord` / `UserPreference`。
-- **服务类**：`AssetValuationService`(派生层入口：computeDerived/persistDerived/upsertManual)、`HoldingDerivationService`(持仓回放)、`RecalculationService`(区间重建编排)、`XirrService`、`NavService`。
+- **服务类**：`AssetValuationService`(派生层入口：computeDerived/persistDerived/upsertManual/**computeDerivedBatch**)、`HoldingDerivationService`(持仓回放，含 **deriveBatch** 单日/批量唯一算法)、`RecalculationService`(区间重建编排)、`XirrService`、`NavService`、🆕 `DataTransferService`(CSV/Excel 导入导出编排，见 §4.2.17)。
 - **关键不变量**：`AssetSnapshot` 的 `UNIQUE(portfolioId, date)` 不含 `source`；服务写 `asset_snapshots` 必须走 `AssetValuationService`（C-11），读路径不得依赖 `source`（C-12）。
 
 </details>
@@ -937,6 +1000,45 @@ export interface AssetSnapshot {
   recordedAt: string;
   createdAt: string;
   updatedAt: string;
+  // 🆕 v2.2：该日系统派生总资产（运行时计算，不落库）
+  // DERIVED → = totalAsset；MANUAL → computeDerivedBatch 实时结果；计算失败 → null（列表仍 200）
+  derivedTotalAsset?: string | null;
+}
+
+// packages/shared/src/types/overview.ts（🆕 v2.2 · freshness 契约，DASH-P1-03）
+export interface FreshnessReason {
+  kind: 'PRICE' | 'CASH';        // 来源类别（FreshnessKind）
+  asOf: string | null;           // 该来源最新数据日期 YYYY-MM-DD；无数据记录 → null
+  lagDays: number | null;        // 滞后天数（UTC+8 自然日差）；无数据记录 → null
+  label: string;                 // 已本地化文案（如「行情已 4 天未更新」）
+}
+export interface FreshnessInfo {
+  staleDays: number;             // 陈旧阈值（UserPreference.staleDays，默认 3）
+  isStale: boolean;              // 任一 lagDays > staleDays（或持仓标的缺行情）
+  latestPriceAsOf: string | null;    // 持仓标的中最落后的行情日期 MIN(MAX(asOf) per held)
+  latestPriceLagDays: number | null;
+  latestCashAsOf: string | null;     // MAX(CashBalance.asOf)
+  latestCashLagDays: number | null;
+  reasons: FreshnessReason[];        // 超阈值才产出；未超阈值为空数组
+}
+
+// packages/shared/src/types/data-transfer.ts（🆕 v2.2 · T05 契约）
+export type ExportType = 'securities' | 'securityTrades' | 'cashFlows'
+  | 'cashBalances' | 'securityPrices' | 'assetSnapshots' | 'navSeries';
+export type ImportType = 'securityTrades' | 'cashFlows' | 'assetSnapshots';
+export type ImportErrorCode = 'INVALID_FILE_TYPE' | 'FILE_TOO_LARGE' | 'TOO_MANY_ROWS'
+  | 'MISSING_REQUIRED_COLUMN' | 'INVALID_DATE_FORMAT' | 'INVALID_DECIMAL_PRECISION'
+  | 'INVALID_ENUM_VALUE' | 'SECURITY_NOT_FOUND' | 'DUPLICATE_SNAPSHOT_DATE';
+export interface ImportRowError { row: number; field: string | null; code: ImportErrorCode; message: string; }
+export interface ImportPreviewResult {
+  type: ImportType; totalRows: number; validRows: number;
+  sample: Record<string, string>[]; errors: ImportRowError[];
+  minDate: string | null; token: string;   // token 10 分钟有效
+}
+export interface RecalcSummary { fromDate: string; toDate: string; recalculatedDays: number; }
+export interface ImportCommitResult {
+  inserted: number; updated: number; skipped: number;
+  failed: ImportRowError[]; recalculated: RecalcSummary | null;
 }
 
 // packages/shared/src/types/nav.ts
@@ -1353,6 +1455,7 @@ async recalculateNavRange(portfolioId: string, start: Date, end?: Date): Promise
 | 函数 | 是否落库 | 语义 | 计算层级联 |
 |------|---------|------|-----------|
 | `computeDerived(portfolioId, date)` | ❌ 纯计算 | 返回 `{ totalAsset, marketValue, cashBalance, valuationFlag }`，**不写库**。是「系统本应算出多少」的唯一来源（差异提示、`↺ 重置`、汇总统计均依赖它） | 无（无副作用） |
+| `computeDerivedBatch(portfolioId, dates[])` | ❌ 纯计算 | 🆕 v2.2：**批量** `computeDerived`（8 页对齐 · AL-054 配套）。一次调用返回 `Map<date, DerivedResult>`，**N 日恒 3 次查库**（1× SecurityTrade + 1× SecurityPrice + 1× CashBalance，配合 `HoldingDerivationService.deriveBatch` 按日分组回放），**严禁逐条调 `computeDerived` 造成 3N 次查库**。是 `SnapshotService.attachDerivedTotalAsset` 回填 `derivedTotalAsset` 的唯一入口（N+1 规避） | 无（无副作用） |
 | `persistDerived(portfolioId, dateRange)` | ✅ 落库 | 逐事件日 upsert `DERIVED` 记录；遇当日 `MANUAL` **跳过、不覆盖、不新增** | 由 `recalculateRange` 统一编排（§7.3.2） |
 | `upsertManual(portfolioId, date, payload)` | ✅ 落库 | **无条件覆盖**当日行，`source` 改写为 `MANUAL`、`valuationFlag='MANUAL_INPUT'` | 🔴 **必须** `recalculateNavRange(portfolioId, date)` → `[date, today]` |
 | `deleteRecord(portfolioId, date)` | ✅ 落库 | **事务内三删**（C5/C7）：物理删除当日 `asset_snapshots` + `daily_nav` + `daily_xirr` 行（`prisma.$transaction`，避免幽灵 `prevNav`）。删除后若 `date` ∈ 事件日集合 → 立即 `persistDerived(date)` 回填 DERIVED；否则该日留空、读取时前值填充（`Q-B17`） | 🔴 **必须** `recalculateNavRange(portfolioId, date)` → `[date, today]`（三删与级联未包在同一事务内，见 §8.1 说明） |
@@ -1440,6 +1543,7 @@ ON CONFLICT (portfolio_id, date) DO UPDATE
 - `持仓数量(s, date)` = 该标的 ≤ date 全部流水回放结果
 - `现价(s, date)` = `SecurityPrice` 中 asOf ≤ date 的最后一条（向前沿用）；**若无任何价格记录 → 回退 `avgCost` 估值**，UI 标注「按成本估值」
 - `持仓市值(date)` = `Σ 数量(s,date) × 现价(s,date)`，是总资产**第一个加项**
+- 🆕 **批量推导 `deriveBatch(portfolioId, dates[])`（v2.2 · 8 页对齐）**：单日推导的**批量唯一算法** —— 一次调用按 `(securityId, date)` 分组回放全部相关流水，同时服务多个目标日期，配合 `computeDerivedBatch`（N 日恒 3 次查库）避免 N 日 × N 标的的逐条回放（N+1 规避）。**口径与单日推导完全一致**，禁止另起炉灶
 
 ### 9.2 卖出硬校验（HOLD-B-P0-08）
 
@@ -1522,8 +1626,18 @@ ON CONFLICT (portfolio_id, date) DO UPDATE
 | 年度收益柱状图 | ECharts | `YearlyBarChart` | 年度收益率对比 |
 | 月度收益热力图 | ECharts | `MonthlyHeatmap` | 年份×月份收益热力图 |
 
----
+#### 10.1.6 🆕 URL Query 持久化与新增 feature（v2.2 · 8 页对齐）
 
+> **统一基建 `lib/url-query.ts`**：`useUrlState<T>(schema)` + codec 原语（`stringCodec` / `booleanCodec` / `dateCodec` / `enumCodec` / `arrayCodec`），页面各自定义 schema（白名单 + 默认值 + codec）。**约定**：小写 key；布尔 `1/0`；多值逗号分隔；**等于默认值不写入 URL**；未知 key 忽略；非法值静默降级为默认（不报错）。默认值来源：持仓页日期 = `todayInAppTzIso()`、已清仓 = `UserPreference.showLiquidated`（URL `closed` 优先）；概览维度/范围 = 偏好（`defaultGranularity`/`defaultDateRange`）。
+
+| 页面 | URL key | 状态 schema | 说明 |
+|------|---------|------------|------|
+| 持仓 `/holdings` | `date` / `closed` / `types` / `sec` | `HoldingsQueryState`（`features/holdings/holdings-query-params.ts`） | `types` 白名单 = `STOCK/FUND/BOND/CASH/OTHER`（ETF 归 `FUND`）；`sec` 来自概览页「去更新行情」跳转 |
+| 概览 `/` | `g` / `range` / `from` / `to` | `OverviewQueryState`（`features/overview/overview-query-params.ts`） | `range` = `1w/1m/3m/6m/1y/ytd/all/custom`；`from`/`to` 仅 `range=custom` 生效 |
+
+**🆕 新增 feature（均已在 §1.3 目录树落位）**：`HoldingsToolbar`（日期选择 + 已清仓开关 + 类型多选，T02）、`FreshnessBanner`（数据新鲜度提示条，T03；`isStale` 才渲染、三按钮 + sessionStorage 静默）、`CashBalanceHistory`（现金余额变更历史展开器，T04）、`ExportPanel` / `ImportDialog` / `ImportTemplateButtons` / `CsvDownload`（数据导入导出，T05）。
+
+---
 
 ## 11. 架构裁决（Q-B 系列正式裁决）
 
@@ -1680,7 +1794,9 @@ graph LR
   "class-validator": "^0.14.1",
   "class-transformer": "^0.5.1",
   "reflect-metadata": "^0.2.1",
-  "rxjs": "^7.8.1"
+  "rxjs": "^7.8.1",
+  "papaparse": "^5.4.1",          // 🆕 v2.2 · CSV 解析/生成（T05）
+  "xlsx": "^0.18.5"               // 🆕 v2.2 · Excel 解析/生成（仅后端，SheetJS CE）
 }
 ```
 
@@ -1695,6 +1811,7 @@ graph LR
   "@types/express": "^4.17.21",
   "@types/node": "^20.11.0",
   "@types/passport-jwt": "^4.0.1",
+  "@types/papaparse": "^5.3.14",  // 🆕 v2.2 · papaparse 类型
   "prisma": "^5.10.0",
   "ts-node": "^10.9.2",
   "tsconfig-paths": "^4.2.0",
@@ -1726,6 +1843,7 @@ graph LR
   "tailwind-merge": "^2.2.0",
   "class-variance-authority": "^0.7.0",
   "lucide-react": "^0.330.0",
+  "papaparse": "^5.4.1",          // 🆕 v2.2 · CSV 解析（前端仅预览/下载用；xlsx 解析统一在后端）
   "@radix-ui/react-dialog": "^1.0.5",
   "@radix-ui/react-select": "^2.0.0",
   "@radix-ui/react-tabs": "^1.0.4",
@@ -1751,7 +1869,8 @@ graph LR
   "vitest": "^1.2.2",
   "@testing-library/react": "^14.2.1",
   "@testing-library/jest-dom": "^6.4.2",
-  "jsdom": "^24.0.0"
+  "jsdom": "^24.0.0",
+  "@types/papaparse": "^5.3.14"   // 🆕 v2.2 · papaparse 类型
 }
 ```
 
@@ -1861,6 +1980,34 @@ graph LR
 //   - code === 1001/1002 → 跳转登录页
 //   - code !== 0 → Toast 提示 message，抛出错误
 ```
+
+### 16.7 🆕 URL Query 命名规范（v2.2 · 8 页对齐）
+
+统一由 `lib/url-query.ts`（`useUrlState`）实现，三处页面（持仓 / 概览 / 现金流）共用同一套 codec 原语，**禁止各页面另写 parse/serialize**。
+
+| 规则 | 约定 |
+|------|------|
+| key 命名 | **小写**（`date` / `closed` / `types` / `sec` / `g` / `range` / `from` / `to`） |
+| 布尔 | `1` / `0`（不是 `true/false`） |
+| 多值 | 逗号分隔（如 `types=STOCK,FUND`） |
+| 默认值 | **等于默认值时不写入 URL**（URL 保持干净、可分享） |
+| 非法值 | 静默降级为默认值，**不报错**；未知 key 忽略（白名单） |
+| 组合初值 | 持仓 `date` = `todayInAppTzIso()`、`closed` = `UserPreference.showLiquidated`（URL 优先）；概览 `g/range` = 偏好默认 |
+
+### 16.8 🆕 CSV/Excel 导入导出约定（v2.2 · T05）
+
+| 项 | 约定 |
+|----|------|
+| 编码 / 格式 | CSV = UTF-8 **前置 BOM `\uFEFF`**；XLSX = 后端 `xlsx` 库生成/解析（前端不装 xlsx）。`format=csv\|xlsx`，缺省 `csv` |
+| 表头 | **英文表头**（与 API 字段一致，保证「导出 → 修改 → 导入」闭环）+ 第二行 `#` 注释行（导入跳过 `#` 开头行） |
+| Decimal | 一律**字符串**原样读写（不经过 `Number()`、不科学计数、不丢精度）；导入用字符串正则校验小数位，超精度报错（`INVALID_DECIMAL_PRECISION`）而非静默截断 |
+| 日期 | 一律 `YYYY-MM-DD`（导入拒绝 `YYYY/MM/DD` 等变体，`INVALID_DATE_FORMAT`）；XLSX 单元格日期若为 Excel 序列号需转 `YYYY-MM-DD` |
+| 导出文件名 | `{组合名}-{类型}-{YYYYMMDD}.{csv\|xlsx}`（组合名做文件系统安全清洗） |
+| 导入错误码（9 种） | `INVALID_FILE_TYPE` / `FILE_TOO_LARGE` / `TOO_MANY_ROWS` / `MISSING_REQUIRED_COLUMN` / `INVALID_DATE_FORMAT` / `INVALID_DECIMAL_PRECISION` / `INVALID_ENUM_VALUE` / `SECURITY_NOT_FOUND` / `DUPLICATE_SNAPSHOT_DATE` |
+| 上传限制 | `.csv` / `.xlsx` / `.xls`（MIME + 后缀双校验）、≤ 5MB、行数 ≤ 10000 |
+| 重算铁律 | 导入 commit 单 Prisma 事务；事务提交后**全流程仅调用 1 次** `recalculateNavRange(portfolioId, minDate)`（`[minDate, today]`），**严禁逐行触发** |
+
+**invalidate 矩阵**：CSV/XLSX 导入 commit → `holdings / overview / nav / transactions / snapshots / cash-balances`；现金余额编辑/删除 → `cash-balances / overview / nav / snapshots / holdings`；行情价格更新 → `holdings / overview / nav / snapshots`；偏好 `staleDays` 变更 → `overview`。
 
 ---
 
