@@ -1,9 +1,9 @@
 # 投资收益统计系统 — 架构设计文档（Canonical）
 
-> **版本**: v2.2
+> **版本**: v2.3
 > **架构师**: 高见远（Gao）
 > **日期**: 2026-08-03
-> **状态**: 重写发布（基于评审结论落地）+ **v2.1 修订：T5 手工总资产记录的计算层级联口径修正**（§6 / §7.3.1 / §7.3.2 / §8.1 / §13 REG-06；修复「快照层仅当日」被误写为「计算层也仅当日」导致的静默数据错误风险）+ **v2.2 修订：8 页对齐增量（T01–T05）落地同步**（新增 data-transfer 模块 §4.2.17、快照 A3 单条端点与 `derivedTotalAsset`、overview `freshness` 契约、`computeDerivedBatch`/`deriveBatch` 批量派生、URL query 持久化与前端新 feature、依赖 `xlsx`/`papaparse`；**Prisma schema 零变更**）
+> **状态**: 重写发布（基于评审结论落地）+ **v2.1 修订：T5 手工总资产记录的计算层级联口径修正**（§6 / §7.3.1 / §7.3.2 / §8.1 / §13 REG-06；修复「快照层仅当日」被误写为「计算层也仅当日」导致的静默数据错误风险）+ **v2.2 修订：8 页对齐增量（T01–T05）落地同步**（新增 data-transfer 模块 §4.2.17、快照 A3 单条端点与 `derivedTotalAsset`、overview `freshness` 契约、`computeDerivedBatch`/`deriveBatch` 批量派生、URL query 持久化与前端新 feature、依赖 `xlsx`/`papaparse`；**Prisma schema 零变更**）+ **v2.3 修订：§1.3 目录树整体刷新，与代码结构对齐**（cashflow/data-transfer/dividend/fee/overview/holding/valuation 等模块落位、web features/api/hooks 对齐、shared types 补齐）
 > **依据**: PRD v3.1.9（Consolidated，单一权威）+ ENVIRONMENT-SETUP + 用户拍板决策（含 v2.3 方案B 数据架构）
 >
 > **⚠️ 本档为唯一架构真相源（Canonical）**：取代并吸收 `ARCHITECTURE-modules.md`（已归档至 `docs/archive/`）。任何工程实现以本档 + PRD v3.1.9 为准；二者冲突时以 PRD 金融口径（① 级）与数据架构口径（② 级）裁决优先级为最高依据（见 PRD §2.1–§2.3）。
@@ -82,225 +82,378 @@ graph TB
 ```
 投资收益app/
 ├── .gitignore
+├── .npmrc                           # npm/pnpm 源与权限配置
+├── LICENSE
 ├── README.md
-├── package.json                    # 根 package.json（workspace 配置 + 通用脚本）
-├── pnpm-workspace.yaml             # pnpm monorepo 工作区声明
-├── tsconfig.base.json              # TypeScript 共享基础配置
-├── turbo.json                      # Turborepo 构建编排（可选加速）
-├── .gitattributes                  # Git 属性（换行符 / 二进制标记等）
+├── dev-env.ps1                      # 开发环境初始化（Windows，位于仓库根）
+├── package.json                     # 根 package.json（workspace 配置 + 通用脚本）
+├── pnpm-lock.yaml                   # pnpm 锁文件
+├── pnpm-workspace.yaml              # pnpm monorepo 工作区声明
+├── tsconfig.base.json               # TypeScript 共享基础配置
+├── turbo.json                       # Turborepo 构建编排（可选加速）
+├── .gitattributes                   # Git 属性（换行符 / 二进制标记等）
 ├── .github/
 │   └── workflows/
-│       └── ci.yml                  # CI 流水线
-├── scripts/                        # 仓库辅助脚本
-│   ├── push-all.ps1                # Windows 一键推送
-│   ├── push-all.sh                 # Unix 一键推送
-│   └── dev-env.ps1                 # 开发环境初始化
+│       └── ci.yml                   # CI 流水线
+├── scripts/                         # 仓库辅助脚本
+│   ├── push-all.ps1                 # Windows 一键推送
+│   └── push-all.sh                  # Unix 一键推送
 ├── docs/
-│   ├── PRD.md
-│   ├── ARCHITECTURE.md             # 本文件
+│   ├── PRD.md                       # 产品需求（权威）
+│   ├── PRD-CHANGELOG.md             # PRD 变更记录
+│   ├── PRD-COVERAGE-MATRIX.md       # PRD 覆盖率矩阵
+│   ├── ARCHITECTURE.md              # 本文件（Canonical 唯一架构真相源）
 │   ├── ENVIRONMENT-SETUP.md
-│   ├── class-diagram.mermaid       # 类图（独立提取）
-│   └── sequence-diagram.mermaid    # 时序图（独立提取）
+│   ├── system_design.md             # 系统设计（团队工作流产出）
+│   ├── class-diagram.mermaid        # 类图（独立提取）
+│   ├── sequence-diagram.mermaid     # 时序图（独立提取）
+│   ├── adr/                         # 架构决策记录
+│   ├── archive/                     # 已归档文档（ARCHITECTURE-modules.md 等）
+│   ├── diagrams/                    # 图（含 class-diagram.mermaid，见 §5.1）
+│   └── …                            # 其余 incremental-*/pages-* 对齐记录
 ├── packages/
-│   ├── shared/                     # 共享类型与 API 契约（三端共用）
+│   ├── shared/                      # 共享类型与 API 契约（三端共用）
 │   │   ├── package.json
 │   │   ├── tsconfig.json
 │   │   └── src/
-│   │       ├── index.ts            # 统一导出
-│   │       ├── types.ts            # 类型汇总（re-export types/ 下各文件）
-│   │       ├── enums.ts            # 枚举汇总（CashFlowType / SecuritySide / SnapshotSource 等）
-│   │       ├── api-contracts.ts    # API 请求/响应契约汇总
-│   │       └── types/              # 核心数据类型定义（13 个类型文件）
-│   ├── finance-core/               # 零依赖纯金融算法库（XIRR / NAV 等纯函数，backend 依赖它）
+│   │       ├── index.ts             # 统一导出
+│   │       ├── types.ts             # 类型汇总（re-export types/ 下各文件）
+│   │       ├── enums.ts             # 枚举汇总（CashFlowType / SecuritySide / SnapshotSource 等）
+│   │       ├── api-contracts.ts     # API 请求/响应契约汇总
+│   │       └── types/               # 核心数据类型定义（15 个类型文件）
+│   │           ├── index.ts         # 汇总导出
+│   │           ├── user.ts          # User / UserPreference
+│   │           ├── portfolio.ts     # Portfolio 等
+│   │           ├── transaction.ts   # 交易类型（命名沿用 transaction，对应后端 cashflow 模块 §4.2.3）
+│   │           ├── snapshot.ts      # AssetSnapshot（每日唯一）
+│   │           ├── security.ts      # Security / SecurityType
+│   │           ├── nav.ts           # DailyNav
+│   │           ├── xirr.ts          # DailyXirr
+│   │           ├── query.ts         # 查询/统计契约
+│   │           ├── overview.ts      # 🆕 8 页对齐（概览契约）
+│   │           ├── preference.ts    # UserPreference
+│   │           ├── dividend.ts      # DividendRecord（阶段 C）
+│   │           ├── fee.ts           # FeeRecord（阶段 C）
+│   │           ├── data-transfer.ts # 🆕 8 页对齐（导入导出契约，见 §4.2.17）
+│   │           └── api.ts           # ApiResponse / Paginated 等通用契约
+│   ├── finance-core/                # 零依赖纯金融算法库（XIRR / NAV 等纯函数，backend 依赖它）
 │   │   ├── package.json
 │   │   ├── tsconfig.json
 │   │   └── src/
-│   ├── backend/                    # NestJS 后端
+│   │       ├── index.ts             # 统一导出
+│   │       ├── types.ts
+│   │       ├── nav.ts               # 净值份额法纯函数
+│   │       ├── xirr.ts              # XIRR Newton-Raphson 纯函数
+│   │       ├── testing/             # 测试基建（in-memory-prisma 等）
+│   │       └── __tests__/
+│   ├── backend/                     # NestJS 后端
 │   │   ├── package.json
 │   │   ├── tsconfig.json
 │   │   ├── nest-cli.json
 │   │   ├── .env.example
 │   │   ├── prisma/
-│   │   │   ├── schema.prisma       # Prisma schema（完整数据模型）
-│   │   │   ├── seed.ts             # 种子数据
-│   │   │   └── migrations/         # 自动生成的迁移
+│   │   │   ├── schema.prisma        # Prisma schema（完整数据模型）
+│   │   │   ├── seed.ts              # 种子数据
+│   │   │   └── migrations/          # 自动生成的迁移
 │   │   └── src/
-│   │       ├── main.ts             # 应用入口（Swagger 配置、全局管道）
-│   │       ├── app.module.ts       # 根模块
+│   │       ├── main.ts              # 应用入口（Swagger 配置、全局管道）
+│   │       ├── app.module.ts        # 根模块
 │   │       ├── prisma/
 │   │       │   ├── prisma.module.ts
-│   │       │   └── prisma.service.ts   # PrismaClient 封装
-│   │       ├── common/             # 通用基础设施
+│   │       │   └── prisma.service.ts    # PrismaClient 封装
+│   │       ├── common/              # 通用基础设施
 │   │       │   ├── decorators/
 │   │       │   │   ├── current-user.decorator.ts
-│   │       │   │   └── api-pagination.decorator.ts
+│   │       │   │   └── public.decorator.ts
 │   │       │   ├── guards/
 │   │       │   │   └── jwt-auth.guard.ts
 │   │       │   ├── filters/
 │   │       │   │   └── http-exception.filter.ts
-│   │       │   ├── pipes/
-│   │       │   │   └── validation.pipe.ts
+│   │       │   ├── interceptors/
+│   │       │   │   └── response.interceptor.ts    # 统一响应信封 {code,data,message}
 │   │       │   ├── dto/
 │   │       │   │   ├── pagination.dto.ts
 │   │       │   │   └── date-range.dto.ts
 │   │       │   └── utils/
-│   │       │       └── app-date.util.ts     # todayInAppTz / parseAppDate（UTC+8 感知）
-│   │       └── modules/
-│   │           ├── auth/           # 认证模块
-│   │           │   ├── auth.module.ts
-│   │           │   ├── auth.controller.ts
-│   │           │   ├── auth.service.ts
-│   │           │   ├── jwt.strategy.ts
-│   │           │   └── dto/
-│   │           │       ├── register.dto.ts
-│   │           │       └── login.dto.ts
-│   │           ├── portfolio/      # 组合管理模块
-│   │           │   ├── portfolio.module.ts
-│   │           │   ├── portfolio.controller.ts
-│   │           │   ├── portfolio.service.ts
-│   │           │   └── dto/
-│   │           │       ├── create-portfolio.dto.ts
-│   │           │       └── update-portfolio.dto.ts
-│   │           ├── transaction/    # 交易录入模块
-│   │           │   ├── transaction.module.ts
-│   │           │   ├── transaction.controller.ts
-│   │           │   ├── transaction.service.ts
-│   │           │   └── dto/
-│   │           │       ├── create-transaction.dto.ts
-│   │           │       └── update-transaction.dto.ts
-│   │           ├── snapshot/       # 资产快照模块
-│   │           │   ├── snapshot.module.ts
-│   │           │   ├── snapshot.controller.ts
-│   │           │   ├── snapshot.service.ts
-│   │           │   └── dto/
-│   │           │       ├── create-snapshot.dto.ts
-│   │           │       └── update-snapshot.dto.ts
-│   │           ├── calculation/    # 计算引擎模块（单日 NAV→XIRR 叶子单元）
-│   │           │   ├── calculation.module.ts
-│   │           │   ├── calculation.service.ts     # 单日编排：快照→净值→XIRR
-│   │           │   ├── xirr.service.ts            # XIRR Newton-Raphson 实现
-│   │           │   └── nav.service.ts             # 净值份额法实现
-│   │           ├── recalculation/  # 区间重建模块（T1~T4 区间重建 + T5 级联 + recalculateAll）
-│   │           │   ├── recalculation.module.ts
-│   │           │   └── recalculation.service.ts   # 唯一区间重建实现（CalculationModule 不再导出）
-│   │           ├── data-transfer/  # 🆕 数据导入导出模块（T05 · CSV/Excel，见 §4.2.17）
-│   │           │   ├── data-transfer.module.ts
-│   │           │   ├── data-transfer.controller.ts   # export / template / import-preview / import-commit
-│   │           │   ├── data-transfer.service.ts      # 解析 → 校验 → 单事务写入 → 单次重算
-│   │           │   ├── csv/
-│   │           │   │   ├── csv-serializer.ts          # 对象数组 → CSV（BOM + Decimal 字符串化）
-│   │           │   │   ├── csv-parser.ts              # CSV → 对象数组（papaparse 封装 + 行号保留）
-│   │           │   │   ├── xlsx-parser.ts             # XLSX → 同一行结构（xlsx 库）
-│   │           │   │   ├── xlsx-serializer.ts         # 行结构 → XLSX
-│   │           │   │   ├── export-schemas.ts          # 7 类导出的列定义
-│   │           │   │   └── import-schemas.ts          # 3 类导入的逐行校验 schema
-│   │           │   └── dto/
-│   │           │       ├── export-query.dto.ts        # type + format(csv|xlsx)
-│   │           │       ├── import-preview.dto.ts      # type（multipart file）
-│   │           │       ├── import-commit.dto.ts       # type + token
-│   │           │       └── template-query.dto.ts      # type + format
-│   │           └── query/          # 查询聚合模块
-│   │               ├── query.module.ts
-│   │               ├── query.controller.ts        # XIRR/净值 四维度查询
-│   │               ├── query.service.ts           # 聚合逻辑（期末值/均值）
-│   │               └── dto/
-│   │                   └── query.dto.ts
-│   └── web/                        # Web 前端
-│   │   ├── package.json
-│   │   ├── tsconfig.json
-│   │   ├── tsconfig.node.json
-│   │   ├── vite.config.ts
-│   │   ├── tailwind.config.ts
-│   │   ├── postcss.config.js
-│   │   ├── components.json         # shadcn/ui 配置
-│   │   ├── index.html
-│   │   └── src/
-│   │       ├── main.tsx            # React 入口
-│   │       ├── App.tsx             # 根组件 + 路由
-│   │       ├── index.css           # Tailwind 指令 + 全局样式
-│   │       ├── lib/
-│   │       │   ├── utils.ts        # cn() 等工具函数
-│   │       │   ├── api-client.ts   # Axios 实例 + 拦截器
-│   │       │   ├── format.ts       # 金额/百分比/日期格式化
-│   │       │   ├── url-query.ts    # 🆕 useUrlState<T>(schema) + codec 原语（URL query 持久化，见 §10.1.6）
-│   │       │   └── constants.ts    # 🆕 HOLDINGS/OVERVIEW QUERY KEYS、EXPORT_TYPE_OPTIONS、todayInAppTzIso()
-│   │       ├── api/                # API 请求层
-│   │       │   ├── auth.api.ts
-│   │       │   ├── portfolio.api.ts
-│   │       │   ├── transaction.api.ts
-│   │       │   ├── snapshot.api.ts
-│   │       │   ├── nav.api.ts
-│   │       │   ├── xirr.api.ts
-│   │       │   └── data-transfer.api.ts  # 🆕 export / preview / commit / template（T05）
-│   │       ├── stores/             # Zustand 全局状态
-│   │       │   ├── auth.store.ts
-│   │       │   └── portfolio.store.ts  # 当前选中组合
-│   │       ├── hooks/              # TanStack Query hooks
-│   │       │   ├── use-transactions.hook.ts
-│   │       │   ├── use-snapshots.hook.ts
-│   │       │   ├── use-nav.hook.ts
-│   │       │   ├── use-xirr.hook.ts
-│   │       │   ├── use-portfolios.hook.ts
-│   │       │   └── use-data-transfer.ts  # 🆕 useExportCsv / useImportPreview / useImportCommit（T05）
-│   │       ├── components/         # shadcn/ui 基础组件 + 通用组件
-│   │       │   └── ui/             # shadcn/ui 生成的基础组件
-│   │       │       ├── button.tsx
-│   │       │       ├── input.tsx
-│   │       │       ├── dialog.tsx
-│   │       │       ├── select.tsx
-│   │       │       ├── table.tsx
-│   │       │       ├── tabs.tsx
-│   │       │       ├── card.tsx
-│   │       │       ├── badge.tsx
-│   │       │       ├── toast.tsx
-│   │       │       ├── date-picker.tsx
-│   │       │       └── chart.tsx       # shadcn/ui chart 封装
-│   │       ├── features/           # 业务功能组件
-│   │       │   ├── auth/
-│   │       │   │   ├── login-form.tsx
-│   │       │   │   └── register-form.tsx
-│   │       │   ├── dashboard/
-│   │       │   │   ├── stat-cards.tsx       # 关键指标卡片
-│   │       │   │   ├── nav-trend-chart.tsx  # 净值趋势（ECharts）
-│   │       │   │   └── xirr-trend-chart.tsx # XIRR 趋势（ECharts）
-│   │       │   ├── transaction/
-│   │       │   │   ├── transaction-form.tsx
-│   │       │   │   └── transaction-table.tsx
-│   │       │   ├── snapshot/
-│   │       │   │   └── snapshot-form.tsx
-│   │       │   ├── analysis/
-│   │       │   │   ├── xirr-analysis.tsx         # XIRR 分析页
-│   │       │   │   ├── nav-analysis.tsx          # 净值分析页
-│   │       │   │   ├── yearly-bar-chart.tsx       # 年度收益柱状图
-│   │       │   │   └── monthly-heatmap.tsx        # 月度热力图（ECharts）
-│   │       │   ├── portfolio/
-│   │       │   │   ├── portfolio-selector.tsx
-│   │       │   │   └── portfolio-manager.tsx
-│   │       │   ├── settings/
-│   │       │   │   └── settings-page.tsx
-│   │       │   ├── holdings/
-│   │       │   │   ├── holdings-query-params.ts   # 🆕 URL schema（date/closed/types/sec，T02）
-│   │       │   │   └── holdings-toolbar.tsx       # 🆕 日期选择 + 已清仓开关 + 类型多选（T02）
-│   │       │   ├── overview/
-│   │       │   │   ├── overview-query-params.ts   # 🆕 URL schema（g/range/from/to，T03）
-│   │       │   │   └── freshness-banner.tsx       # 🆕 数据新鲜度提示条（DASH-P1-03，T03）
-│   │       │   ├── cashflow/
-│   │       │   │   └── cash-balance-history.tsx   # 🆕 现金余额变更历史展开器（CASH-P1-01，T04）
-│   │       │   └── data-transfer/
-│   │       │       ├── export-panel.tsx           # 🆕 7 类导出面板（csv/xlsx，T05）
-│   │       │       ├── import-dialog.tsx          # 🆕 导入对话框（preview/commit，T05）
-│   │       │       ├── import-template-buttons.tsx # 🆕 模板下载按钮（T05）
-│   │       │       └── csv-download.ts            # 🆕 Blob + BOM + a[download]（T05）
-│   │       └── pages/              # 页面组件
-│   │           ├── login.page.tsx
-│   │           ├── register.page.tsx
-│   │           ├── dashboard.page.tsx
-│   │           ├── transactions.page.tsx
-│   │           ├── snapshots.page.tsx
-│   │           ├── analysis-xirr.page.tsx
-│   │           ├── analysis-nav.page.tsx
-│   │           ├── settings.page.tsx
-│   │           └── not-found.page.tsx
+│   │       │       └── app-date.util.ts           # todayInAppTz / parseAppDate（UTC+8 感知）
+│   │           └── modules/         # 20 个业务模块（与 §4.2.x 对应）
+│   │               ├── auth/        # 认证（§4.2.1）
+│   │               │   ├── auth.module.ts
+│   │               │   ├── auth.controller.ts
+│   │               │   ├── auth.service.ts
+│   │               │   ├── jwt.strategy.ts
+│   │               │   ├── cleanup.service.ts             # 待删除账户清理
+│   │               │   ├── user-public.mapper.ts
+│   │               │   ├── exceptions/
+│   │               │   │   └── account-pending-deletion.exception.ts
+│   │               │   └── dto/                            # register/login/restore-account/update-email/update-password + password-policy
+│   │               ├── account/     # 账户（只读，§4.2.16）
+│   │               │   ├── account.module.ts
+│   │               │   ├── account.controller.ts
+│   │               │   └── account.service.ts
+│   │               ├── portfolio/   # 组合管理（§4.2.2）
+│   │               │   ├── portfolio.module.ts
+│   │               │   ├── portfolio.controller.ts
+│   │               │   ├── portfolio.service.ts
+│   │               │   └── dto/                            # create/update/archive/portfolio-summary
+│   │               ├── cashflow/    # 出入金（§4.2.3 · 原 transaction 更名，XIRR 现金流唯一来源）
+│   │               │   ├── cashflow.module.ts
+│   │               │   ├── cashflow.controller.ts
+│   │               │   ├── cashflow.service.ts
+│   │               │   └── cashflow.dto.ts
+│   │               ├── security/    # 标的（§4.2.5）
+│   │               │   ├── security.module.ts
+│   │               │   ├── security.controller.ts
+│   │               │   ├── security.service.ts
+│   │               │   └── dto/                            # create/update
+│   │               ├── security-trade/   # 证券买卖流水（§4.2.6 · §9 持仓推导数据源）
+│   │               │   ├── security-trade.module.ts
+│   │               │   ├── security-trade.controller.ts
+│   │               │   ├── security-trade.service.ts
+│   │               │   └── security-trade.dto.ts
+│   │               ├── security-price/   # 标的最新价（§4.2.7）
+│   │               │   ├── security-price.module.ts
+│   │               │   ├── security-price.controller.ts
+│   │               │   ├── security-price.service.ts
+│   │               │   └── security-price.dto.ts
+│   │               ├── cash-balance/     # 现金余额（§4.2.8 · 独立 · 零联动）
+│   │               │   ├── cash-balance.module.ts
+│   │               │   ├── cash-balance.controller.ts
+│   │               │   ├── cash-balance.service.ts
+│   │               │   └── cash-balance.dto.ts
+│   │               ├── holding/     # 持仓派生查询（§4.2.9 · §9 方案B 核心 · 只读）
+│   │               │   ├── holding.module.ts
+│   │               │   ├── holding.controller.ts
+│   │               │   └── holding-derivation.service.ts   # deriveBatch 批量派生
+│   │               ├── overview/    # 组合概览（§4.2.10 · Dashboard 落地页）
+│   │               │   ├── overview.module.ts
+│   │               │   ├── overview.controller.ts
+│   │               │   └── overview.service.ts             # buildFreshness
+│   │               ├── snapshot/    # 总资产记录（§4.2.4 · 每日唯一）
+│   │               │   ├── snapshot.module.ts
+│   │               │   ├── snapshot.controller.ts
+│   │               │   ├── snapshot.service.ts             # findAll/findOne/attachDerivedTotalAsset
+│   │               │   └── dto/                            # upsert-snapshot.dto.ts
+│   │               ├── calculation/ # 计算引擎（§7.1 XIRR / §7.2 净值）
+│   │               │   ├── calculation.module.ts
+│   │               │   ├── calculation.service.ts          # 单日编排：快照→净值→XIRR
+│   │               │   ├── xirr.service.ts                 # XIRR Newton-Raphson 实现
+│   │               │   └── nav.service.ts                  # 净值份额法实现
+│   │               ├── valuation/   # 总资产派生层（§8 方案B 核心）
+│   │               │   ├── valuation.module.ts
+│   │               │   └── asset-valuation.service.ts      # computeDerivedBatch / persistDerived / upsertManual
+│   │               ├── recalculation/   # 区间重建（§4.2.13 / §7.3 · recalculateNavRange 触发点）
+│   │               │   ├── recalculation.module.ts
+│   │               │   └── recalculation.service.ts
+│   │               ├── query/       # 统计/查询聚合（§4.2.11 / §4.2.12 / §4.2.14）
+│   │               │   ├── query.module.ts
+│   │               │   ├── query.controller.ts             # XIRR/净值 四维度查询
+│   │               │   ├── query.service.ts                # 聚合逻辑（期末值/均值）
+│   │               │   ├── query-enhanced.service.ts
+│   │               │   ├── summary.controller.ts           # Dashboard 统计摘要
+│   │               │   └── dto/                            # query / xirr-history / nav-history / transaction-query / query-ext
+│   │               ├── dividend/    # 分红记录（阶段 C 恢复）
+│   │               │   ├── dividend.module.ts
+│   │               │   ├── dividend.controller.ts
+│   │               │   ├── dividend.service.ts
+│   │               │   └── dto/
+│   │               │       └── create-dividend-record.dto.ts
+│   │               ├── fee/         # 费用记录（阶段 C 恢复）
+│   │               │   ├── fee.module.ts
+│   │               │   ├── fee.controller.ts
+│   │               │   ├── fee.service.ts
+│   │               │   └── dto/
+│   │               │       └── create-fee-record.dto.ts
+│   │               ├── preference/  # 用户偏好（UserPreference.staleDays/showLiquidated）
+│   │               │   ├── preference.module.ts
+│   │               │   ├── preference.controller.ts
+│   │               │   ├── preference.service.ts
+│   │               │   └── dto/
+│   │               │       └── update-preference.dto.ts
+│   │               ├── data-transfer/   # 🆕 数据导入导出模块（T05 · CSV/Excel，见 §4.2.17）
+│   │               │   ├── data-transfer.module.ts
+│   │               │   ├── data-transfer.controller.ts     # export / template / import-preview / import-commit
+│   │               │   ├── data-transfer.service.ts        # 解析 → 校验 → 单事务写入 → 单次重算
+│   │               │   ├── csv/
+│   │               │   │   ├── csv-serializer.ts           # 对象数组 → CSV（BOM + Decimal 字符串化）
+│   │               │   │   ├── csv-parser.ts               # CSV → 对象数组（papaparse 封装 + 行号保留）
+│   │               │   │   ├── xlsx-parser.ts              # XLSX → 同一行结构（xlsx 库）
+│   │               │   │   ├── xlsx-serializer.ts          # 行结构 → XLSX
+│   │               │   │   ├── export-schemas.ts           # 7 类导出的列定义
+│   │               │   │   └── import-schemas.ts           # 3 类导入的逐行校验 schema
+│   │               │   └── dto/
+│   │               │       ├── export-query.dto.ts         # type + format(csv|xlsx)
+│   │               │       ├── import-preview.dto.ts       # type（multipart file）
+│   │               │       ├── import-commit.dto.ts        # type + token
+│   │               │       └── template-query.dto.ts       # type + format
+│   │               └── upload/      # 头像上传（§19 附录 B）
+│   │                   ├── upload.module.ts
+│   │                   ├── upload.controller.ts            # FileInterceptor（multer memoryStorage）
+│   │                   ├── upload.service.ts
+│   │                   ├── upload.constants.ts
+│   │                   ├── upload.types.ts
+│   │                   ├── filters/                        # file-upload-exception.filter.ts
+│   │                   └── storage/                        # local-disk.storage.ts / storage.service.ts
+│   └── web/                         # Web 前端
+│       ├── package.json
+│       ├── tsconfig.json
+│       ├── tsconfig.node.json
+│       ├── vite.config.ts
+│       ├── tailwind.config.ts
+│       ├── postcss.config.js
+│       ├── components.json          # shadcn/ui 配置
+│       ├── index.html
+│       └── src/
+│           ├── main.tsx             # React 入口
+│           ├── App.tsx              # 根组件 + 路由
+│           ├── index.css            # Tailwind 指令 + 全局样式
+│           ├── lib/                 # 工具库
+│           │   ├── utils.ts         # cn() 等工具函数
+│           │   ├── api-client.ts    # Axios 实例 + 拦截器
+│           │   ├── url-query.ts     # 🆕 useUrlState<T>(schema) + codec 原语（URL query 持久化，见 §10.1.6）
+│           │   ├── constants.ts     # 🆕 HOLDINGS/OVERVIEW QUERY KEYS、EXPORT_TYPE_OPTIONS、todayInAppTzIso()
+│           │   └── __tests__/
+│           ├── api/                 # API 请求层（17 个 .api.ts + types.ts，对应后端模块）
+│           │   ├── types.ts
+│           │   ├── account.api.ts
+│           │   ├── auth.api.ts
+│           │   ├── cash-balance.api.ts
+│           │   ├── data-transfer.api.ts    # 🆕 export / preview / commit / template（T05）
+│           │   ├── dividend.api.ts
+│           │   ├── fee.api.ts
+│           │   ├── holding.api.ts
+│           │   ├── overview.api.ts
+│           │   ├── portfolio.api.ts
+│           │   ├── preference.api.ts
+│           │   ├── query.api.ts
+│           │   ├── security.api.ts
+│           │   ├── security-price.api.ts
+│           │   ├── security-trade.api.ts
+│           │   ├── snapshot.api.ts
+│           │   ├── transaction.api.ts      # 交易 API（命名沿用 transaction，对应后端 cashflow §4.2.3）
+│           │   ├── transaction.api.test.ts
+│           │   └── upload.api.ts
+│           ├── stores/              # Zustand 全局状态
+│           │   ├── auth.store.ts
+│           │   ├── portfolio.store.ts   # 当前选中组合
+│           │   └── preference.store.ts
+│           ├── hooks/               # TanStack Query hooks（15 个 + __tests__）
+│           │   ├── use-account.ts
+│           │   ├── use-auth.ts
+│           │   ├── use-cash-balances.ts
+│           │   ├── use-data-transfer.ts
+│           │   ├── use-dividends.ts
+│           │   ├── use-fees.ts
+│           │   ├── use-holdings.ts
+│           │   ├── use-portfolios.ts
+│           │   ├── use-preferences.ts
+│           │   ├── use-query-data.ts
+│           │   ├── use-securities.ts
+│           │   ├── use-security-prices.ts
+│           │   ├── use-security-trades.ts
+│           │   ├── use-snapshots.ts
+│           │   ├── use-transactions.ts
+│           │   └── __tests__/
+│           ├── components/          # 通用组件 + shadcn/ui 基础组件
+│           │   ├── auth-guard.tsx
+│           │   ├── EmptyState.tsx
+│           │   ├── LoadingSpinner.tsx
+│           │   ├── PageHeader.tsx
+│           │   ├── preference-bootstrap.tsx
+│           │   ├── theme-manager.tsx
+│           │   ├── user-avatar.tsx
+│           │   ├── charts/          # ECharts 图表
+│           │   │   ├── nav-trend-chart.tsx
+│           │   │   ├── xirr-trend-chart.tsx
+│           │   │   ├── yearly-bar-chart.tsx
+│           │   │   ├── monthly-heatmap.tsx
+│           │   │   ├── stat-card.tsx
+│           │   │   └── __tests__/
+│           │   ├── layout/
+│           │   │   ├── app-layout.tsx
+│           │   │   ├── sidebar.tsx
+│           │   │   └── __tests__/
+│           │   └── ui/              # shadcn/ui 基础组件（纯展示）
+│           │       ├── alert.tsx
+│           │       ├── alert-dialog.tsx
+│           │       ├── badge.tsx
+│           │       ├── button.tsx
+│           │       ├── card.tsx
+│           │       ├── dialog.tsx
+│           │       ├── dropdown-menu.tsx
+│           │       ├── input.tsx
+│           │       ├── label.tsx
+│           │       ├── progress.tsx
+│           │       ├── radio-group.tsx
+│           │       ├── select.tsx
+│           │       ├── skeleton.tsx
+│           │       ├── switch.tsx
+│           │       ├── table.tsx
+│           │       ├── tabs.tsx
+│           │       ├── textarea.tsx
+│           │       └── __tests__/
+│           ├── features/            # 业务功能组件（13 个目录）
+│           │   ├── auth/
+│           │   │   ├── login-form.tsx
+│           │   │   ├── register-form.tsx
+│           │   │   └── account-restore-prompt.tsx
+│           │   ├── account/
+│           │   │   ├── edit-profile-dialog.tsx
+│           │   │   ├── change-email-dialog.tsx
+│           │   │   └── change-password-dialog.tsx
+│           │   ├── cashflow/        # 出入金/现金余额（与 transaction 并存；后端 /cashflows §4.2.3）
+│           │   │   ├── cashflow-form.tsx
+│           │   │   ├── cashflow-list.tsx
+│           │   │   ├── cash-balance-history.tsx   # 🆕 现金余额变更历史展开器（CASH-P1-01，T04）
+│           │   │   ├── query-params.ts            # 🆕 URL schema（T04）
+│           │   │   └── __tests__/
+│           │   ├── transaction/     # 旧交易相关（与 cashflow 并存，命名沿用 transaction）
+│           │   │   ├── transaction-form.tsx
+│           │   │   ├── transaction-list.tsx
+│           │   │   └── __tests__/
+│           │   ├── holdings/        # 持仓页（8 页对齐新增）
+│           │   │   ├── holdings-query-params.ts   # 🆕 URL schema（date/closed/types/sec，T02）
+│           │   │   └── holdings-toolbar.tsx       # 🆕 日期选择 + 已清仓开关 + 类型多选（T02）
+│           │   ├── overview/        # 概览页（8 页对齐新增）
+│           │   │   ├── overview-query-params.ts   # 🆕 URL schema（g/range/from/to，T03）
+│           │   │   └── freshness-banner.tsx       # 🆕 数据新鲜度提示条（DASH-P1-03，T03）
+│           │   ├── portfolio/
+│           │   │   ├── portfolio-selector.tsx
+│           │   │   └── portfolio-dialog.tsx
+│           │   ├── query/
+│           │   │   ├── dimension-switcher.tsx
+│           │   │   └── __tests__/
+│           │   ├── security-income/ # 分红/费用（阶段 C）
+│           │   │   ├── dividend-fee-section.tsx
+│           │   │   ├── dividend-fee-form.tsx
+│           │   │   └── __tests__/
+│           │   ├── security-price/
+│           │   │   └── inline-price-editor.tsx
+│           │   ├── security-trade/
+│           │   │   ├── security-trade-form.tsx
+│           │   │   ├── security-trade-list.tsx
+│           │   │   └── __tests__/
+│           │   ├── snapshot/
+│           │   │   ├── snapshot-form.tsx
+│           │   │   └── snapshot-list.tsx
+│           │   └── data-transfer/   # 数据导入导出（8 页对齐新增，T05）
+│           │       ├── export-panel.tsx            # 🆕 7 类导出面板（csv/xlsx，T05）
+│           │       ├── import-dialog.tsx           # 🆕 导入对话框（preview/commit，T05）
+│           │       ├── import-template-buttons.tsx # 🆕 模板下载按钮（T05）
+│           │       └── csv-download.ts             # 🆕 Blob + BOM + a[download]（T05）
+│           └── pages/               # 页面组件
+│               ├── login.tsx
+│               ├── register.tsx
+│               ├── dashboard.tsx
+│               ├── HoldingsPage.tsx
+│               ├── transactions.tsx
+│               ├── snapshots.tsx
+│               ├── xirr-analysis.tsx
+│               ├── nav-analysis.tsx
+│               ├── AccountPage.tsx
+│               ├── settings.tsx
+│               ├── not-found.tsx
+│               └── __tests__/
 ```
 
 ---
