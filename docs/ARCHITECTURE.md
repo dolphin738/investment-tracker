@@ -1,9 +1,9 @@
 # 投资收益统计系统 — 架构设计文档（Canonical）
 
-> **版本**: v2.3
+> **版本**: v2.4
 > **架构师**: 高见远（Gao）
 > **日期**: 2026-08-03
-> **状态**: 重写发布（基于评审结论落地）+ **v2.1 修订：T5 手工总资产记录的计算层级联口径修正**（§6 / §7.3.1 / §7.3.2 / §8.1 / §13 REG-06；修复「快照层仅当日」被误写为「计算层也仅当日」导致的静默数据错误风险）+ **v2.2 修订：8 页对齐增量（T01–T05）落地同步**（新增 data-transfer 模块 §4.2.17、快照 A3 单条端点与 `derivedTotalAsset`、overview `freshness` 契约、`computeDerivedBatch`/`deriveBatch` 批量派生、URL query 持久化与前端新 feature、依赖 `xlsx`/`papaparse`；**Prisma schema 零变更**）+ **v2.3 修订：§1.3 目录树整体刷新，与代码结构对齐**（cashflow/data-transfer/dividend/fee/overview/holding/valuation 等模块落位、web features/api/hooks 对齐、shared types 补齐）
+> **状态**: 重写发布（基于评审结论落地）+ **v2.1 修订：T5 手工总资产记录的计算层级联口径修正**（§6 / §7.3.1 / §7.3.2 / §8.1 / §13 REG-06；修复「快照层仅当日」被误写为「计算层也仅当日」导致的静默数据错误风险）+ **v2.2 修订：8 页对齐增量（T01–T05）落地同步**（新增 data-transfer 模块 §4.2.17、快照 A3 单条端点与 `derivedTotalAsset`、overview `freshness` 契约、`computeDerivedBatch`/`deriveBatch` 批量派生、URL query 持久化与前端新 feature、依赖 `xlsx`/`papaparse`；**Prisma schema 零变更**）+ **v2.3 修订：§1.3 目录树整体刷新，与代码结构对齐**（cashflow/data-transfer/dividend/fee/overview/holding/valuation 等模块落位、web features/api/hooks 对齐、shared types 补齐）+ **v2.4 修订：§10.1.2 组件分层、§5.2 shared 路径、§14 补 T05、§4.2.18/19 新增分红/费用契约**
 > **依据**: PRD v3.1.9（Consolidated，单一权威）+ ENVIRONMENT-SETUP + 用户拍板决策（含 v2.3 方案B 数据架构）
 >
 > **⚠️ 本档为唯一架构真相源（Canonical）**：取代并吸收 `ARCHITECTURE-modules.md`（已归档至 `docs/archive/`）。任何工程实现以本档 + PRD v3.1.9 为准；二者冲突时以 PRD 金融口径（① 级）与数据架构口径（② 级）裁决优先级为最高依据（见 PRD §2.1–§2.3）。
@@ -1017,6 +1017,38 @@ User (1) ──< Portfolio (N)
 - **上传限制**：`.csv` / `.xlsx` / `.xls`（MIME + 后缀双校验）、≤ 5MB、行数 ≤ 10000。
 - **前端**：`ExportPanel` 7 类多选 + 格式选择（CSV/Excel），多类型**串行逐个下载**（间隔 300ms，不打包 zip）；`ImportDialog` 选类型 → 上传 → 预览 10 行 + 错误表（可导出错误 CSV）→ 确认导入；成功后 `invalidateQueries` 覆盖 `holdings / overview / nav / transactions / snapshots / cash-balances`。
 
+#### 4.2.18 分红记录（`/dividends` · 阶段 C 恢复 · HOLD-B-P0-10）
+
+> **模块定位**：持仓维度「分红/费用」信息记录（阶段 C · Q-1 A 恢复），与持仓页 `security-income/` 区块（分红/费用）对应。shared 契约见 `packages/shared/src/types/dividend.ts`。
+
+| Method | Path | 说明 | 请求体/参数 | 响应 data |
+|--------|------|------|------------|-----------|
+| GET | `/api/portfolios/:portfolioId/dividends` | 分红记录列表（可按标的过滤） | `?securityId` | `DividendRecordResponse[]`（含 `securityName`/`securityCode`，金额字符串） |
+| POST | `/api/portfolios/:portfolioId/dividends` | 新增分红记录 | `{ securityId, date, amount, type?, note? }` | `DividendRecordResponse` |
+| DELETE | `/api/portfolios/:portfolioId/dividends/:id` | 删除分红记录 | — | `null` |
+
+> **口径**：
+> - **分红类型（`DividendType`）**：`CASH`（现金分红）/ `STOCK_DIVIDEND`（红利再投，**v1 仅记录、无现金进出**）。
+> - **金额**：`NUMERIC(18,2)` 以字符串传输（DTO `IsDecimal` 0~2 位、> 0），响应 `amount` 原样字符串。
+> - **二级隔离**：`securityId` 必须属于同一组合（防跨组合挂载），与 `CashFlowService` 同范式做 `portfolio.userId` 归属校验。
+> - 🔴 **不参与收益计算（C-08 / D-02）**：分红**不进 CashFlow 表**（不参与 XIRR 现金流）、**不触发计算引擎**、不污染 `daily_nav`/`daily_xirr`；与持仓/XIRR 的关系仅为**信息记录**（红利再投 v1 仅记录）。
+
+#### 4.2.19 费用记录（`/fees` · 阶段 C 恢复 · HOLD-B-P0-10）
+
+> **模块定位**：持仓维度「分红/费用」信息记录（阶段 C · Q-1 A 恢复），与持仓页 `security-income/` 区块（分红/费用）对应。shared 契约见 `packages/shared/src/types/fee.ts`。
+
+| Method | Path | 说明 | 请求体/参数 | 响应 data |
+|--------|------|------|------------|-----------|
+| GET | `/api/portfolios/:portfolioId/fees` | 费用记录列表（可按标的过滤） | `?securityId` | `FeeRecordResponse[]`（含 `securityName`/`securityCode`/`transactionId`，金额字符串） |
+| POST | `/api/portfolios/:portfolioId/fees` | 新增费用记录 | `{ securityId, date, amount, type?, transactionId?, note? }` | `FeeRecordResponse` |
+| DELETE | `/api/portfolios/:portfolioId/fees/:id` | 删除费用记录 | — | `null` |
+
+> **口径**：
+> - **费用类型（`FeeType`）**：`COMMISSION`（佣金）/ `STAMP_TAX`（印花税）/ `OTHER`（其他，默认）。
+> - **金额**：`NUMERIC(18,2)` 以字符串传输（DTO `IsDecimal` 0~2 位、> 0），响应 `amount` 原样字符串。
+> - **二级隔离**：`securityId` 必须属于同一组合（防跨组合挂载），与 `CashFlowService` 同范式做 `portfolio.userId` 归属校验。
+> - 🔴 **与 `SecurityTrade.fee` 互不影响（C-09 / D-03）**：`SecurityTrade.fee` 计入持仓成本；本表**仅信息记录、不回冲成本**；**不进 CashFlow 表**、**不触发计算引擎**。`transactionId` 可选关联证券买卖流水（仅信息关联）。
+
 ---
 
 ## 5. 核心数据结构
@@ -1036,7 +1068,7 @@ User (1) ──< Portfolio (N)
 ### 5.2 Shared 包 TypeScript 类型定义
 
 ```typescript
-// packages/shared/src/types/common.ts
+// packages/shared/src/types/api.ts（ApiResponse / Paginated / DateRangeQuery）
 export interface ApiResponse<T> {
   code: number;
   data: T;
@@ -1055,32 +1087,32 @@ export interface DateRangeQuery {
   endDate?: string;
 }
 
-// packages/shared/src/enums/cashflow-type.ts
+// packages/shared/src/enums.ts（CashFlowType）
 export enum CashFlowType {
   BUY = 'BUY',   // 存入（现金流为负）
   SELL = 'SELL', // 取出（现金流为正）
 }
 
-// packages/shared/src/enums/security-side.ts（严禁复用 CashFlowType，C-10）
+// packages/shared/src/enums.ts（SecuritySide · 严禁复用 CashFlowType，C-10）
 export enum SecuritySide {
   BUY_SEC = 'BUY_SEC',
   SELL_SEC = 'SELL_SEC',
 }
 
-// packages/shared/src/enums/snapshot-source.ts
+// packages/shared/src/enums.ts（SnapshotSource / SnapshotValuation）
 export enum SnapshotSource { DERIVED = 'DERIVED', MANUAL = 'MANUAL' }
 export enum SnapshotValuation {
   EXACT = 'EXACT', CARRIED_FORWARD = 'CARRIED_FORWARD',
   COST_BASED = 'COST_BASED', MANUAL_INPUT = 'MANUAL_INPUT',
 }
 
-// packages/shared/src/enums/query-granularity.ts
+// packages/shared/src/enums.ts（QueryGranularity / AggregationMethod）
 export enum QueryGranularity {
   DAY = 'day', WEEK = 'week', MONTH = 'month', YEAR = 'year',
 }
 export enum AggregationMethod { LAST = 'last', AVG = 'avg' }
 
-// packages/shared/src/types/cashflow.ts（XIRR 现金流唯一来源）
+// packages/shared/src/types.ts（CashFlow · XIRR 现金流唯一来源）
 export interface CashFlow {
   id: string;
   portfolioId: string;
@@ -1092,7 +1124,7 @@ export interface CashFlow {
   updatedAt: string;
 }
 
-// packages/shared/src/types/security-trade.ts（方案B 持仓推导唯一来源）
+// packages/shared/src/types.ts（SecurityTrade · 方案B 持仓推导唯一来源）
 export interface SecurityTrade {
   id: string;
   portfolioId: string;
@@ -1107,7 +1139,7 @@ export interface SecurityTrade {
   updatedAt: string;
 }
 
-// packages/shared/src/types/security-price.ts（向前沿用）
+// packages/shared/src/types.ts（SecurityPrice · 向前沿用）
 export interface SecurityPrice {
   id: string;
   portfolioId: string;
@@ -1117,7 +1149,7 @@ export interface SecurityPrice {
   createdAt: string;
 }
 
-// packages/shared/src/types/cash-balance.ts（独立 · 零联动）
+// packages/shared/src/types.ts（CashBalance · 独立 · 零联动）
 export interface CashBalance {
   id: string;
   portfolioId: string;
@@ -1745,7 +1777,7 @@ ON CONFLICT (portfolio_id, date) DO UPDATE
 | **hooks** | `src/hooks/` | TanStack Query hooks，封装数据获取/变更/缓存逻辑 |
 | **api** | `src/api/` | API 请求层，Axios 封装，对应后端接口 |
 | **stores** | `src/stores/` | Zustand 全局状态（auth token、当前选中组合） |
-| **lib** | `src/lib/` | 工具函数（cn, format, api-client） |
+| **lib** | `src/lib/` | 工具函数（cn/utils、api-client、url-query、constants） |
 
 #### 10.1.3 状态管理分工
 
@@ -1876,11 +1908,13 @@ graph LR
     T01 --> T03[T03: 计算引擎 + 派生层<br/>+ 查询 API]
     T02 --> T04[T04: Web 前端]
     T03 --> T04
+    T01 --> T05[T05: 数据导入导出<br/>CSV/Excel · P1]
 
     style T01 fill:#3b82f6,color:#fff
     style T02 fill:#10b981,color:#fff
     style T03 fill:#10b981,color:#fff
     style T04 fill:#f59e0b,color:#fff
+    style T05 fill:#a855f7,color:#fff
 ```
 
 ### T01: 项目基础设施 + 数据层
@@ -1924,6 +1958,18 @@ graph LR
 | **交付标准** | ① 登录/注册 ② Dashboard 指标卡片 + 净值/XIRR 趋势 ③ 出入金（/cashflows）录入/编辑/删除 ④ 持仓（/holdings）列表 + 买卖流水 ⑤ 历史总资产记录（/snapshots）手工 CRUD + 重置 ⑥ 分析页四维度切换 + 图表 ⑦ 账户页（/account 只读）+ 设置页（/settings 全站唯一修改入口）⑧ 响应式 ⑨ Axios 拦截器注入 JWT |
 
 > **不在 P0 交付**：HarmonyOS APP（§18 附录A，P2 交互基线，按需独立排期）。
+
+### T05: 数据导入导出（CSV/Excel）
+
+| 项 | 内容 |
+|----|------|
+| **任务名称** | 实现 `data-transfer` 模块：CSV/XLSX 解析序列化 + export/template/import-preview/import-commit 四端点（🆕 v2.2 增量，见 §4.2.17） |
+| **优先级** | P1 |
+| **依赖** | T01 |
+| **涉及文件** | `packages/backend/src/modules/data-transfer/**`（module/controller/service + csv/ 解析序列化 + dto）、`packages/web/src/{api/data-transfer.api.ts,hooks/use-data-transfer.ts,features/data-transfer/**,pages/settings.tsx}` |
+| **交付标准** | ① 导出 7 类（CSV 前置 UTF-8 BOM、Decimal 字符串原样、文件名 `{组合名}-{类型}-{YYYYMMDD}.csv`）② 模板 3 类 ③ import-preview 不落库（9 种错误码 + 前 10 行样例 + token）④ import-commit 单事务写入 + 🔴 **单次重算铁律**：全流程仅调用 1 次 `recalculateNavRange(portfolioId, minDate)`（单测断言调用次数 === 1）⑤ 跨组合安全 + 上传限制（≤5MB / ≤10000 行） |
+
+> 🔴 **完整任务分解见 [`docs/incremental-pages-alignment-v1.md`](./incremental-pages-alignment-v1.md) §5 T05**（8 页对齐增量设计：文件清单 / 契约 / 验收标准 / 依赖包 `papaparse`）。
 
 ---
 
