@@ -9,6 +9,7 @@
  */
 
 import { Injectable, NotFoundException } from '@nestjs/common';
+import type { SnapshotSource } from '@investment-tracker/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 import { HoldingDerivationService } from '../holding/holding-derivation.service';
 
@@ -30,6 +31,14 @@ export interface OverviewResponse {
   yearReturnRate: string;
   /** 数据截止日期 */
   latestDate: string;
+  /**
+   * 最新总资产快照的来源（Q-2 乙 · 供概览页「✋手工」徽标 / 数据新鲜度提示）
+   *
+   * - 'MANUAL'：该日总资产为用户手工录入（前端展示「✋手工」徽标）
+   * - 'DERIVED'：系统按持仓市值 + 现金余额自动派生
+   * - null：该组合尚无任何 AssetSnapshot（此时 latestDate 也为空或取自 DailyNav）
+   */
+  latestSource: SnapshotSource | null;
   /** 持仓汇总 */
   holdingsSummary: {
     totalMarketValue: string;
@@ -89,7 +98,8 @@ export class OverviewService {
       this.prisma.assetSnapshot.findFirst({
         where: { portfolioId },
         orderBy: { date: 'desc' },
-        select: { totalAsset: true, date: true },
+        // source 供前端「✋手工」徽标判定（Q-2 乙），避免额外打一次 snapshots 请求
+        select: { totalAsset: true, date: true, source: true },
       }),
       // 最新净值
       this.prisma.dailyNav.findFirst({
@@ -181,6 +191,7 @@ export class OverviewService {
       totalReturnRate: totalReturnRate.toFixed(8),
       yearReturnRate: yearReturnRate.toFixed(8),
       latestDate,
+      latestSource: latestSnapshot?.source ?? null,
       holdingsSummary,
       recentTransactions: recentTransactions.map((t) => ({
         id: t.id,

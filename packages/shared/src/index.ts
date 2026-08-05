@@ -36,6 +36,12 @@ export type { UserPublic } from './types/user.ts';
 export { NavMetric } from './types/query.ts';
 export { TransactionType } from './types/transaction.ts';
 
+// 标的类型（Q-3 乙）：唯一定义于 types/security.ts，前后端共用。
+// as const 对象 + 同名派生类型，一次 export 同时导出「值」与「类型」两种含义：
+// - 后端 holding.controller 用其做 types 查询参数的白名单校验
+// - 前端 api/types.ts re-export 后供表单/筛选渲染选项
+export { SecurityType } from './types/security.ts';
+
 // ── API 契约 ──
 export type {
   ApiResponse,

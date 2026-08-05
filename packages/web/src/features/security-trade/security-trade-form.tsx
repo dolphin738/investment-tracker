@@ -25,8 +25,8 @@ import {
 import { useCreateSecurityTrade, useUpdateSecurityTrade } from '@/hooks/use-security-trades';
 import { useSecurities, useCreateSecurity } from '@/hooks/use-securities';
 import { toIsoDate } from '@/lib/constants';
-import { SecuritySide } from '@investment-tracker/shared';
-import { SecurityType } from '@/api/types';
+// SecurityType 与 SecuritySide 同源：唯一定义在 shared，前后端共用（Q-3）
+import { SecuritySide, SecurityType } from '@investment-tracker/shared';
 import { formatCurrency } from '@/lib/utils';
 import type { SecurityTradeResponse } from '@/api/types';
 
@@ -87,7 +87,13 @@ export function SecurityTradeForm({
   const [submitting, setSubmitting] = useState(false);
   // 新建标的折叠表单状态
   const [showNewSecurity, setShowNewSecurity] = useState(false);
-  const [newSecurity, setNewSecurity] = useState({
+  // 显式标注 type 为 SecurityType（shared 的 as const 联合类型），
+  // 否则会被推断成字面量 'STOCK'，下拉切换其他类型时赋值失败
+  const [newSecurity, setNewSecurity] = useState<{
+    code: string;
+    name: string;
+    type: SecurityType;
+  }>({
     code: '',
     name: '',
     type: SecurityType.STOCK,

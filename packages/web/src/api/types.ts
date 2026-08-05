@@ -19,24 +19,19 @@ import type {
   UserPublic,
   NavMetric,
 } from '@investment-tracker/shared';
+// SecurityType 唯一定义在 shared（as const 对象 + 同名类型），此处按值 import 供本文件类型标注使用
+import { SecurityType } from '@investment-tracker/shared';
 
 // NavMetric 既是值（as const 对象）又是类型（字符串联合），需 re-export 供消费处按值/类型分别 import
 export { NavMetric } from '@investment-tracker/shared';
 // UserPublic 已在 shared 定义，re-export 供全项目统一引用
 export type { UserPublic } from '@investment-tracker/shared';
+// SecurityType 同样既是值又是类型；re-export 保持 `@/api/types` 旧引用点可用（前后端共用同一定义，Q-3）
+export { SecurityType } from '@investment-tracker/shared';
 
 // ============================================================================
 // 本地枚举（shared 包中不存在的 UI 层枚举）
 // ============================================================================
-
-/** 标的产品类型 */
-export enum SecurityType {
-  STOCK = 'STOCK',
-  FUND = 'FUND',
-  BOND = 'BOND',
-  CASH = 'CASH',
-  OTHER = 'OTHER',
-}
 
 /** 分红类型 */
 export enum DividendType {
@@ -481,6 +476,13 @@ export interface OverviewResponse {
   /** 当年收益率（后端 toFixed(8) 字符串，比率非百分数） */
   yearReturnRate: string;
   latestDate: string;
+  /**
+   * 最新总资产快照来源（Q-2 乙 · 后端 overview.service 已透出）：
+   * 'MANUAL' = 手工录入（概览页展示「✋手工」徽标）/ 'DERIVED' = 系统派生 / null = 尚无快照。
+   *
+   * 声明为可选：兼容尚未升级的后端（运行时 undefined），前端一律用 `=== 'MANUAL'` 判定。
+   */
+  latestSource?: SnapshotSource | null;
   /** 持仓汇总（后端 OverviewService 返回） */
   holdingsSummary: {
     totalMarketValue: string;
@@ -527,10 +529,20 @@ export interface PortfolioSummary {
   cumulativeNav: string | null;
   /** 当年收益率（比率，非百分数）= yearNav - 1，8 位小数字符串；null = 尚无 DailyNav */
   yearReturnRate: string | null;
-  /** 累计收益率（比率，非百分数）；后端 summary 当前不返回，概览页旧消费端兼容保留（运行时 undefined，!= null 判空跳过） */
-  cumulativeReturnRate?: number | null;
-  /** XIRR（比率，非百分数）；后端 summary 当前不返回，概览页旧消费端兼容保留（运行时 undefined，!= null 判空跳过） */
-  xirr?: number | null;
+  /**
+   * 累计收益率（**比率**，非百分数）= cumulativeNav - 1，后端 toFixed(8) 字符串。
+   *
+   * Q-4 甲 已由后端 /portfolios/summary 返回；null = 尚无 DailyNav。
+   * 仍标为可选以兼容尚未升级的后端（运行时 undefined），消费端保持 `!= null` 判空。
+   */
+  cumulativeReturnRate?: string | null;
+  /**
+   * 年化收益率 XIRR（**比率**，非百分数），后端 toFixed(8) 字符串。
+   *
+   * Q-4 甲 已由后端 /portfolios/summary 返回；null = 尚无 DailyXirr 或数据不足。
+   * 仍标为可选以兼容尚未升级的后端（运行时 undefined），消费端保持 `!= null` 判空。
+   */
+  xirr?: string | null;
   /** 净投入 = Σ存入 - Σ取出，2 位小数字符串（必填；无出入金为 '0.00'） */
   netInvested: string;
   /** 浮动盈亏 = totalAsset - netInvested，2 位小数字符串；null = 无总资产记录 */

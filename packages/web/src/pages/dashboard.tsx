@@ -583,13 +583,14 @@ export default function DashboardPage(): JSX.Element {
                           {formatCurrency(p.totalAsset, 2, { thousands: amountThousands, abbreviate: amountAbbrev })}
                         </span>
                         {/* 用 `!= null` 同时排除 null 与 undefined：
-                            后端 /portfolios/summary 当前不返回该字段（见 api/types.ts 缺口注），
+                            Q-4 甲 后端已返回该字段（8 位小数比率字符串），
+                            但仍可能为 null（尚无 DailyNav）或 undefined（旧后端），
                             旧写法 `!== null` 会放行 undefined 并渲染出 NaN%。 */}
                         {p.cumulativeReturnRate != null && (
                           <span
                             className={cn(
                               'tabular-nums',
-                              p.cumulativeReturnRate >= 0
+                              Number(p.cumulativeReturnRate) >= 0
                                 ? 'text-up'
                                 : 'text-down',
                             )}

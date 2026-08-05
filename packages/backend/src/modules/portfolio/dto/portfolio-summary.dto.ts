@@ -36,6 +36,22 @@ export interface PortfolioSummaryDto {
   cumulativeNav: string | null;
   /** 当年收益率（**比率**，非百分数）= yearNav - 1，8 位小数字符串；null = 尚无 DailyNav */
   yearReturnRate: string | null;
+
+  // ===== Q-4 甲 新增（DASH-P1-01 组合表现对比补 2 列）=====
+  /**
+   * 累计收益率（**比率**，非百分数）= cumulativeNav - 1，8 位小数字符串
+   *
+   * 与 overview.service 的 `totalReturnRate` 同口径同精度（净值派生，计算留在后端 · C-01）。
+   * null = 尚无 DailyNav（前端渲染「—」，禁止渲染成 0）。
+   */
+  cumulativeReturnRate: string | null;
+  /**
+   * 年化收益率 XIRR（**比率**，非百分数），8 位小数字符串
+   *
+   * 取该组合最新一条 DailyXirr 的 xirrValue（Decimal(20,8)）。
+   * null = 尚无 DailyXirr 记录，或最新记录的 xirrValue 为 null（数据不足无法求解）。
+   */
+  xirr: string | null;
   /** 净投入 = Σ存入(BUY) - Σ取出(SELL)，2 位小数字符串；无出入金记录 = '0.00' */
   netInvested: string;
   /** 浮动盈亏 = totalAsset - netInvested，2 位小数字符串；null = 无总资产快照 */

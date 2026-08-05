@@ -307,6 +307,19 @@ export class PortfolioService {
         : [];
     const navMap = new Map(latestNavs.map((n) => [n.portfolioId, n]));
 
+    // 每组合最新一条 XIRR（Q-4 甲：组合对比「年化 XIRR」列）
+    // 复刻上面 latestNavs 的 distinct 范式：一条 SQL（DISTINCT ON）拿全部组合，不引入 N+1。
+    const latestXirrs =
+      portfolioIds.length > 0
+        ? await this.prisma.dailyXirr.findMany({
+            where: { portfolioId: { in: portfolioIds } },
+            orderBy: [{ portfolioId: 'asc' }, { date: 'desc' }],
+            distinct: ['portfolioId'],
+            select: { portfolioId: true, xirrValue: true },
+          })
+        : [];
+    const xirrMap = new Map(latestXirrs.map((x) => [x.portfolioId, x]));
+
     // 净投入 = Σ存入(BUY) - Σ取出(SELL)，按 (组合, 类型) 一次聚合完
     const cashflowSums =
       portfolioIds.length > 0
@@ -345,6 +358,8 @@ export class PortfolioService {
 
       // Gap A：净值 / 收益率 / 净投入 / 浮动盈亏
       const nav = navMap.get(p.id) ?? null;
+      // Q-4 甲：最新 XIRR（xirrValue 可为 null → 数据不足，前端渲染「—」）
+      const latestXirrValue = xirrMap.get(p.id)?.xirrValue ?? null;
       const netInvestedDec = netInvestedMap.get(p.id) ?? new Prisma.Decimal(0);
       // 无快照时 totalAsset 兜底为 '0'，此时相减会得到一个大幅为负的**假亏损**，
       // 因此 floatingProfit 必须回 null 而不是算出来的负数。
@@ -361,6 +376,11 @@ export class PortfolioService {
         createdAt: p.createdAt.toISOString(),
         cumulativeNav: nav ? nav.cumulativeNav.toFixed(6) : null,
         yearReturnRate: nav ? nav.yearNav.minus(1).toFixed(8) : null,
+        // Q-4 甲：累计收益率 = cumulativeNav - 1（与 overview.service.totalReturnRate 同口径）
+        cumulativeReturnRate: nav ? nav.cumulativeNav.minus(1).toFixed(8) : null,
+        // Q-4 甲：年化 XIRR（比率），8 位小数与其他收益率字段对齐
+        // 用 != null 而非真值判断：XIRR 恰为 0 时必须返回 '0.00000000'，不能塌成 null
+        xirr: latestXirrValue != null ? latestXirrValue.toFixed(8) : null,
         netInvested: netInvestedDec.toFixed(2),
         floatingProfit: totalAssetDec
           ? totalAssetDec.minus(netInvestedDec).toFixed(2)
