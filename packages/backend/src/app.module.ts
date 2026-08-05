@@ -23,6 +23,7 @@ import { OverviewModule } from './modules/overview/overview.module';
 import { QueryModule } from './modules/query/query.module';
 import { UploadModule } from './modules/upload/upload.module';
 import { PreferenceModule } from './modules/preference/preference.module';
+import { DataTransferModule } from './modules/data-transfer/data-transfer.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 
 @Module({
@@ -52,6 +53,8 @@ import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
     UploadModule,
     // 用户偏好模块
     PreferenceModule,
+    // 数据导入导出模块（T05 · CSV/Excel）
+    DataTransferModule,
   ],
   controllers: [],
   providers: [

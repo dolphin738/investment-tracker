@@ -67,6 +67,9 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Skeleton } from '@/components/ui/skeleton';
 import { PortfolioDialog } from '@/features/portfolio/portfolio-dialog';
+import { ExportPanel } from '@/features/data-transfer/export-panel';
+import { ImportDialog } from '@/features/data-transfer/import-dialog';
+import { ImportTemplateButtons } from '@/features/data-transfer/import-template-buttons';
 import { ChangeEmailDialog } from '@/features/account/change-email-dialog';
 import { ChangePasswordDialog } from '@/features/account/change-password-dialog';
 import { EditProfileDialog } from '@/features/account/edit-profile-dialog';
@@ -157,6 +160,9 @@ export default function SettingsPage(): JSX.Element {
   const archiveMutation = useArchivePortfolio();
   const currentPortfolioId = usePortfolioStore((s) => s.currentPortfolioId);
   const setCurrentPortfolio = usePortfolioStore((s) => s.setCurrentPortfolio);
+
+  // 数据管理：导入对话框开关（T05）
+  const [importOpen, setImportOpen] = useState(false);
 
   // 偏好 hooks
   const { data: serverPrefs, isLoading: prefsLoading } = usePreferences();
@@ -734,82 +740,58 @@ export default function SettingsPage(): JSX.Element {
         </CardContent>
       </Card>
 
-      {/*
-        数据管理（§7.8 ③ · SET-P0-03 导出 / SET-P0-04 导入）
-        本轮**仅视觉对齐草图**，导出/导入逻辑不实现：所有控件保持 disabled 占位。
-      */}
+      {/* 数据管理（T05 · SET-P0-03 导出 / SET-P0-04 导入 / FLOW-P1-01） */}
       <Card>
         <CardHeader>
           <CardTitle className="text-base">数据管理</CardTitle>
-          <CardDescription>导入导出（v1 暂未开放，列入 P1）</CardDescription>
+          <CardDescription>
+            CSV / Excel 导出与导入（导入支持 .csv / .xlsx / .xls）
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {/* 导出（SET-P0-03） */}
+          {/* 导出（SET-P0-03）：7 类多选 + 格式 + 串行下载 */}
           <div className="space-y-2">
             <Label className="text-sm">导出</Label>
-            <div className="flex flex-wrap items-center gap-x-6 gap-y-2 opacity-60">
-              {[
-                { id: 'exp-cashflow', label: '出入金', checked: true },
-                { id: 'exp-trade', label: '证券买卖', checked: true },
-                { id: 'exp-price', label: '现价', checked: true },
-                { id: 'exp-cash', label: '现金余额', checked: true },
-                { id: 'exp-snapshot', label: '总资产记录', checked: true },
-                { id: 'exp-nav', label: '每日净值', checked: false },
-                { id: 'exp-xirr', label: '每日 XIRR', checked: false },
-              ].map((item) => (
-                <label
-                  key={item.id}
-                  htmlFor={item.id}
-                  className="inline-flex items-center gap-2 text-sm text-muted-foreground"
-                >
-                  <input
-                    id={item.id}
-                    type="checkbox"
-                    className="h-4 w-4 rounded border-input accent-primary"
-                    defaultChecked={item.checked}
-                    disabled
-                  />
-                  {item.label}
-                </label>
-              ))}
-            </div>
-            <Button variant="outline" size="sm" disabled>
-              导出 CSV
-            </Button>
+            {currentPortfolio ? (
+              <ExportPanel
+                portfolioId={currentPortfolio.id}
+                portfolioName={currentPortfolio.name}
+              />
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                请先在顶部选择一个投资组合
+              </p>
+            )}
           </div>
 
-          {/* 导入（SET-P0-04） */}
+          {/* 导入（SET-P0-04 / FLOW-P1-01）：预览 → 提交 */}
           <div className="space-y-2">
             <Label className="text-sm">导入</Label>
-            <div className="flex flex-wrap gap-2">
-              <Button variant="outline" size="sm" disabled>
-                下载模板：出入金
-              </Button>
-              <Button variant="outline" size="sm" disabled>
-                下载模板：证券买卖
-              </Button>
-              <Button variant="outline" size="sm" disabled>
-                下载模板：总资产记录
-              </Button>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Button variant="outline" size="sm" disabled>
-                选择文件…
-              </Button>
-              <Button variant="outline" size="sm" disabled>
-                预览前 10 行
-              </Button>
-              <Button size="sm" disabled>
-                开始导入
+            <div className="flex flex-wrap items-center gap-2">
+              <ImportTemplateButtons />
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={!currentPortfolio}
+                onClick={() => setImportOpen(true)}
+              >
+                选择文件并导入…
               </Button>
             </div>
           </div>
 
           <p className="text-xs text-muted-foreground">
-            ⓘ 导出 / 导入功能 v1 暂未开放，以上控件仅为界面占位（SET-P0-03 / SET-P0-04）
+            ⓘ 导入前建议先「导出」备份；证券买卖 / 出入金为追加写入，资产快照按日期覆盖。
           </p>
         </CardContent>
       </Card>
+
+      {/* 导入对话框 */}
+      <ImportDialog
+        portfolioId={currentPortfolioId ?? ''}
+        open={importOpen}
+        onOpenChange={setImportOpen}
+      />
 
       {/* 组合管理 */}
       <Card>
