@@ -81,3 +81,22 @@ export function todayInAppTzIso(): string {
   const appNow = new Date(now.getTime() + 8 * 60 * 60 * 1000);
   return appNow.toISOString().slice(0, 10);
 }
+
+/**
+ * 返回北京时间（UTC+8）当前「日期 + 时间」的 YYYY-MM-DD HH:mm:ss 字符串。
+ *
+ * ⚠️ 位移 +8h 仅配 `toISOString()`（UTC 渲染）使用，绝不能混入
+ * `getTimezoneOffset()`。getTimezoneOffset() 是给本地 getter（如 toIsoDate）
+ * 用的本地偏移量，与 UTC 渲染混用会产生净误差，导致北京 00:00–08:00 显示
+ * 「昨天」（这正是 backend/app-date.util.ts 注释明确警告的坑）。
+ *
+ * 中国无夏令时，恒定 +8h，故位移量与本地时区无关，结果只由 UTC 时间戳决定。
+ * 此函数与 todayInAppTzIso() 共用同一不变式：同一物理时刻，任意本地时区下
+ * 返回值恒为该时刻对应的北京时间。
+ */
+export function nowInAppTzIso(): string {
+  // 与后端 todayInAppTz() 同理：+8h 后取 UTC 日历日（恒定 +8h，无夏令时）
+  const appNow = new Date(Date.now() + 8 * 60 * 60 * 1000);
+  const s = appNow.toISOString();
+  return `${s.slice(0, 10)} ${s.slice(11, 19)}`;
+}

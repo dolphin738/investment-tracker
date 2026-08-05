@@ -5,7 +5,7 @@
  * 响应式：桌面侧栏常驻，移动端折叠为汉堡菜单。
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Outlet, useNavigate } from 'react-router-dom';
 import { CalendarDays, LogOut, Menu, Settings, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -22,7 +22,38 @@ import { Sidebar } from './sidebar';
 import { PortfolioSelector } from '@/features/portfolio/portfolio-selector';
 import { PortfolioDialog } from '@/features/portfolio/portfolio-dialog';
 import { useAuthStore } from '@/stores/auth.store';
-import { ROUTE_PATH, todayInAppTzIso } from '@/lib/constants';
+import { ROUTE_PATH, nowInAppTzIso } from '@/lib/constants';
+
+/**
+ * BaselineClock — 顶栏「项目基准时间」实时时钟。
+ *
+ * 显示北京时间（UTC+8）的「日期 + 时间」(YYYY-MM-DD HH:mm:ss)，
+ * 每秒刷新一次。使用独立 useState/useEffect，仅重渲该 span，
+ * 不波及其它顶栏组件，避免不必要的全局重渲。
+ * 复用 lib/constants.nowInAppTzIso()（位移 +8h 仅配 toISOString，绝不混
+ * 入 getTimezoneOffset），保证时区鲁棒性。
+ */
+function BaselineClock(): JSX.Element {
+  const [now, setNow] = useState<string>(() => nowInAppTzIso());
+
+  useEffect(() => {
+    setNow(nowInAppTzIso());
+    const timer = window.setInterval(() => {
+      setNow(nowInAppTzIso());
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  return (
+    <span
+      className="hidden items-center gap-1 font-mono text-xs tabular-nums text-muted-foreground sm:flex"
+      title="项目基准日期时间（北京时间 UTC+8）"
+    >
+      <CalendarDays className="h-3.5 w-3.5" />
+      {now}
+    </span>
+  );
+}
 
 export function AppLayout(): JSX.Element {
   const navigate = useNavigate();
@@ -55,13 +86,7 @@ export function AppLayout(): JSX.Element {
         </div>
 
         <div className="flex items-center gap-2">
-          <span
-            className="hidden items-center gap-1 text-xs text-muted-foreground sm:flex"
-            title="项目基准日期（北京时间 UTC+8）"
-          >
-            <CalendarDays className="h-3.5 w-3.5" />
-            {todayInAppTzIso()}
-          </span>
+          <BaselineClock />
           <PortfolioSelector onCreateClick={() => setPortfolioDialogOpen(true)} />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
