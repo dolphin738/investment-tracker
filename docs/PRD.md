@@ -771,7 +771,7 @@ totalAsset(D) = marketValue(D) + cashBalance(D)          // 自动派生口径
 | HOLD-B-P0-07 | P0 | 买卖流水列表与编辑删除 | 按标的/日期/方向筛选，可编辑删除 | 1) 编辑删除后从该日起级联重算（沿用 `recalculation.service`）；2) toast 提示影响范围 |
 | HOLD-B-P0-08 | P0 | 卖出数量硬校验 | 卖出数量 > 该日持仓数量时**拒绝保存** | 1) 明确提示"当前持有 X，最多可卖 X"；2) 插入历史日期流水时需校验后续日期不会出现负持仓 |
 | HOLD-B-P0-09 | P0 | 标的（`Security`）管理 | `Security` CRUD：`id/portfolioId/code/name/type/currency` | 1) 同一组合内 `code` 唯一；2) `name` 必填 ≤ 50 字；3) 删除标的时若存在买卖流水，需二次确认并级联删除；4) 新建/编辑下拉**不出现「现金」（CASH 已弃用，见 CASH-P0-04）** |
-| HOLD-B-P0-10 | P0 | 分红 / 费用独立记录 | `DividendRecord`（日期/标的/金额/类型（现金分红·红利再投）/备注）与 `FeeRecord`（日期/标的/金额/费用类型（佣金·印花税·其他）/关联流水 ID 可选）。**两表均不参与 XIRR 与净值计算**（D-02 / D-03）。⚠️ **后端 NestJS 模块（`DividendModule` / `FeeModule`）已移除，schema 表保留待将来复用**；待重新实现后端模块时恢复 CRUD 能力 | 1) ~~两表 CRUD + 权限隔离（`user_id` 过滤）~~ **后端模块已移除，CRUD 暂不可用**；2) 可在持仓模块按标的查看累计分红与累计费用（待后端模块恢复）；3) **红利再投不录入**（无现金进出，其价值自然体现在持仓市值上升中）；4) 集成验证：分红/费用数据**不污染** `daily_nav` / `daily_xirr` |
+| HOLD-B-P0-10 | P0 | 分红 / 费用独立记录 | `DividendRecord`（日期/标的/金额/类型（现金分红·红利再投）/备注）与 `FeeRecord`（日期/标的/金额/费用类型（佣金·印花税·其他）/关联流水 ID 可选）。**两表均不参与 XIRR 与净值计算**（D-02 / D-03）。✅ **后端 NestJS 模块（`DividendModule` / `FeeModule`）已于阶段 C 恢复**（Q-1 决策 A），提供 6 个端点：`GET/POST /portfolios/:id/dividends`、`DELETE /portfolios/:id/dividends/:recordId`，费用同构 | 1) 两表 CRUD + 权限隔离（`user_id` 过滤，经 `portfolio.userId` 校验，另含标的归属二级校验）；2) 可在持仓模块按标的查看累计分红与累计费用（持仓页【E】「分红/费用」Tab）；3) **红利再投不录入**（无现金进出，其价值自然体现在持仓市值上升中）；4) 集成验证：分红/费用数据**不污染** `daily_nav` / `daily_xirr` |
 | HOLD-B-P0-11 | P0 | 筛选与历史日期切换 | 顶部组合选择器（复用 `portfolio-selector`）+ 标的类型多选筛选 + **持仓日期选择（可选任意历史日期，默认今日）** | 1) 切换组合后列表与合计同步刷新；2) 类型筛选支持多选；3) 日期可选**首笔流水日之后的任意日期**（方案 B 下任意日期均可精确推导，不再限制"仅有数据的日期"） |
 | HOLD-B-P1-01 | P1 | 买卖流水 CSV 导入 | 模板 + 行级报错 + 一次性重算 | 1) 提供模板下载；2) 逐行校验并报错到行号 + 字段 + 原因；3) 导入后一次性触发全量重算 |
 | HOLD-B-P1-02 | P1 | 持仓历史回看 | 选择历史日期查看当时持仓结构 + 堆叠面积图 | 1) 日期限定在首笔流水之后；2) 堆叠图按标的着色，图例可点选 |
@@ -1994,7 +1994,7 @@ price(s, date)   = SecurityPrice 中 asOf ≤ date 的最后一条（向前沿�
 | `SecurityPrice` | v2.3 | 标的最新价，`asOf` 向前沿用 |
 | `CashBalance` | v2.3 | 现金余额独立表，`asOf` 向前沿用，多行 |
 | `AssetSnapshot` | v2.3 §9.1 | `UNIQUE(portfolioId, date)`（不含 source）；字段见 §5.4 |
-| `DividendRecord` / `FeeRecord` | PRD-modules | 持仓模块独立建表，不参与计算（C-08）。⚠️ **后端 NestJS 模块（`DividendModule` / `FeeModule`）已移除，schema 表保留待将来复用** |
+| `DividendRecord` / `FeeRecord` | PRD-modules | 持仓模块独立建表，不参与计算（C-08）。✅ **后端 NestJS 模块（`DividendModule` / `FeeModule`）已于阶段 C 恢复**（Q-1 决策 A），表结构沿用 `20260804000000_init_schema_b`，无需新增 migration |
 | `UserPreference` | PRD-modules §7.4 | 用户偏好服务端化（SET-P0-02） |
 | `daily_nav` / `daily_xirr` | PRD.md | 收益计算结果序列，读 `AssetSnapshot` |
 

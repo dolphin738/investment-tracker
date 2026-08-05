@@ -1,0 +1,57 @@
+/**
+ * hooks/use-dividends.ts — 分红记录 TanStack Query hooks（HOLD-B-P0-10 / 阶段 C）
+ *
+ * ⚠️ 与 use-security-trades 的关键差异：
+ * 分红**不参与 XIRR / 净值 / 持仓推导**（D-02 / C-08），因此写入后
+ * **只失效 ['dividends'] 自身缓存**，绝不连带失效 holdings / nav / xirr /
+ * snapshots / overview —— 连带失效会造成「分红污染收益计算」的错觉。
+ */
+
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
+import {
+  createDividend as createApi,
+  deleteDividend as deleteApi,
+  listDividends as listApi,
+} from '@/api/dividend.api';
+import type { CreateDividendRecordDto, DividendRecord } from '@/api/types';
+
+/** 分红列表 query key 前缀 */
+export const DIVIDENDS_KEY = ['dividends'] as const;
+
+/** 分红记录列表 */
+export function useDividends(portfolioId: string | null) {
+  return useQuery<DividendRecord[]>({
+    queryKey: portfolioId
+      ? ['dividends', 'list', portfolioId]
+      : ['dividends', 'disabled'],
+    queryFn: () => listApi(portfolioId!),
+    enabled: Boolean(portfolioId),
+    staleTime: 30 * 1000,
+  });
+}
+
+/** 新增分红记录 */
+export function useCreateDividend(portfolioId: string | null) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: CreateDividendRecordDto) =>
+      createApi(portfolioId!, payload),
+    onSuccess: () => {
+      toast.success('分红记录已保存');
+      queryClient.invalidateQueries({ queryKey: ['dividends'] });
+    },
+  });
+}
+
+/** 删除分红记录 */
+export function useDeleteDividend(portfolioId: string | null) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => deleteApi(portfolioId!, id),
+    onSuccess: () => {
+      toast.success('分红记录已删除');
+      queryClient.invalidateQueries({ queryKey: ['dividends'] });
+    },
+  });
+}

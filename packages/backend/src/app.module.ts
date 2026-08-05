@@ -16,6 +16,8 @@ import { SecurityTradeModule } from './modules/security-trade/security-trade.mod
 import { SecurityPriceModule } from './modules/security-price/security-price.module';
 import { CashBalanceModule } from './modules/cash-balance/cash-balance.module';
 import { SnapshotModule } from './modules/snapshot/snapshot.module';
+import { DividendModule } from './modules/dividend/dividend.module';
+import { FeeModule } from './modules/fee/fee.module';
 import { AccountModule } from './modules/account/account.module';
 import { OverviewModule } from './modules/overview/overview.module';
 import { QueryModule } from './modules/query/query.module';
@@ -39,6 +41,9 @@ import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
     SecurityPriceModule,
     CashBalanceModule,
     SnapshotModule,
+    // 分红 / 费用记录模块（HOLD-B-P0-10，不参与 XIRR/净值计算 D-02/D-03）
+    DividendModule,
+    FeeModule,
     // 只读聚合 / 账户统计模块
     AccountModule,
     OverviewModule,

@@ -7,9 +7,14 @@
  *   标的/代码/类型/数量/成本价/现价/成本额/市值/浮动盈亏/盈亏率/占比
  *   （HOLD-B-P0-03 / P0-04；现价支持内联编辑，占比带横向进度条）
  * - 【C】证券买卖明细流水：列表 + 筛选（标的/日期/方向）+ 编辑/删除
+ * - 【E】分红 / 费用记录：按标的累计分红与累计费用 + 明细 CRUD（HOLD-B-P0-10）
  * - 空态引导按钮 → 打开录入弹窗（与出入金页完全解耦）
  *
  * 排序（决策 Q-5 甲）：列表在前端按市值降序展示，不依赖后端排序参数。
+ *
+ * 版式说明（阶段 C）：草图把【E】画作页面末尾的独立区块，但本页自阶段 A 起
+ * 已把【C】收敛为 Tab；【E】沿用同一模式作为第三个 Tab，与【C】保持一致，
+ * 同时避免与【B】持仓表并列造成长页滚动。功能验收（按标的查看累计分红/费用）不变。
  */
 
 import { useMemo, useState } from 'react';
@@ -48,6 +53,7 @@ import { PageHeader } from '@/components/PageHeader';
 import { SecurityTradeForm } from '@/features/security-trade/security-trade-form';
 import { SecurityTradeList } from '@/features/security-trade/security-trade-list';
 import { InlinePriceEditor } from '@/features/security-price/inline-price-editor';
+import { DividendFeeSection } from '@/features/security-income/dividend-fee-section';
 import { usePortfolioStore } from '@/stores/portfolio.store';
 import { usePreferenceStore } from '@/stores/preference.store';
 import { usePortfolios } from '@/hooks/use-portfolios';
@@ -186,6 +192,8 @@ export default function HoldingsPage(): JSX.Element {
         <TabsList>
           <TabsTrigger value="holdings">持仓</TabsTrigger>
           <TabsTrigger value="trades">买卖明细</TabsTrigger>
+          {/* 【E】HOLD-B-P0-10：分红 / 费用独立记录，不参与收益计算 */}
+          <TabsTrigger value="income">分红/费用</TabsTrigger>
         </TabsList>
 
         {/* ============ 持仓 Tab ============ */}
@@ -476,6 +484,11 @@ export default function HoldingsPage(): JSX.Element {
             query={tradeQuery}
             sideFilter={filterSide}
           />
+        </TabsContent>
+
+        {/* ============ 【E】分红 / 费用 Tab（HOLD-B-P0-10） ============ */}
+        <TabsContent value="income" className="mt-4">
+          <DividendFeeSection portfolioId={currentPortfolioId} />
         </TabsContent>
       </Tabs>
 

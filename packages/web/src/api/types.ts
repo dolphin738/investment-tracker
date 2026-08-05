@@ -172,7 +172,12 @@ export interface HoldingsAggregate {
 }
 
 // ============================================================================
-// 分红/费用相关
+// 分红/费用相关（HOLD-B-P0-10 · 不参与 XIRR/净值计算 D-02/D-03）
+//
+// ⚠️ 与后端 DividendService/FeeService 响应逐字段对齐：
+// - 两表**无 updatedAt 列**（schema.prisma:230/247 只有 createdAt），故此处不得声明
+// - 后端 include security 后回填 securityName / securityCode，前端无需再映射
+// - amount 为 NUMERIC(18,2) 字符串，避免 JS 浮点丢精，展示前用 Number() 转换
 // ============================================================================
 
 /** 分红记录 */
@@ -180,19 +185,20 @@ export interface DividendRecord {
   id: string;
   portfolioId: string;
   securityId: string;
+  securityName: string;
+  securityCode: string;
   date: string;
   type: DividendType;
   amount: string;
   note: string | null;
   createdAt: string;
-  updatedAt: string;
 }
 
-/** 创建分红 DTO */
+/** 创建分红 DTO（type 可选，后端缺省 CASH） */
 export interface CreateDividendRecordDto {
   securityId: string;
   date: string;
-  type: DividendType;
+  type?: DividendType;
   amount: string;
   note?: string;
 }
@@ -202,20 +208,24 @@ export interface FeeRecord {
   id: string;
   portfolioId: string;
   securityId: string;
+  securityName: string;
+  securityCode: string;
   date: string;
   type: FeeType;
   amount: string;
+  /** 关联证券买卖流水 ID（可选） */
+  transactionId: string | null;
   note: string | null;
   createdAt: string;
-  updatedAt: string;
 }
 
-/** 创建费用 DTO */
+/** 创建费用 DTO（type 可选，后端缺省 OTHER） */
 export interface CreateFeeRecordDto {
   securityId: string;
   date: string;
-  type: FeeType;
+  type?: FeeType;
   amount: string;
+  transactionId?: string;
   note?: string;
 }
 
