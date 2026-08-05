@@ -12,6 +12,7 @@
 import { Controller, Get, Param } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { OverviewService } from './overview.service';
+import type { OverviewResponse } from './overview.service';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../../common/decorators/current-user.decorator';
 
@@ -22,11 +23,15 @@ export class OverviewController {
   constructor(private readonly overviewService: OverviewService) {}
 
   @Get()
-  @ApiOperation({ summary: '获取组合概览数据（总资产/净值/XIRR/持仓汇总/近期交易）' })
+  @ApiOperation({
+    summary: '获取组合概览数据（总资产/净值/XIRR/持仓汇总/近期交易/数据新鲜度）',
+    description:
+      '响应含 freshness（数据新鲜度，决策 O-6）：口径＝持仓标的行情 / 现金余额的 asOf 滞后，非快照 latestDate。',
+  })
   async getOverview(
     @CurrentUser() user: AuthenticatedUser,
     @Param('portfolioId') portfolioId: string,
-  ) {
+  ): Promise<OverviewResponse> {
     return this.overviewService.getOverview(portfolioId, user.userId);
   }
 }

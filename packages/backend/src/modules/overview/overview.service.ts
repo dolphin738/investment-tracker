@@ -8,10 +8,24 @@
  * 组合调用现有 service，不依赖 CalculationModule。
  */
 
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import type { SnapshotSource } from '@investment-tracker/shared';
+import { FreshnessKind } from '@investment-tracker/shared';
+import type { FreshnessInfo, FreshnessReason } from '@investment-tracker/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 import { HoldingDerivationService } from '../holding/holding-derivation.service';
+import { todayInAppTz } from '../../common/utils/app-date.util';
+
+/**
+ * 计算 asOf（YYYY-MM-DD）到 today（UTC+8 当天 UTC 午夜）的自然日差。
+ *
+ * 两者均为 UTC 午夜 Date，相减再整除 86_400_000 即精确整数天数。
+ * 调用方已用 `asOf <= today` 过滤，故结果恒 ≥ 0。
+ */
+function diffDaysInAppTz(today: Date, asOf: string): number {
+  const asOfDate = new Date(`${asOf}T00:00:00.000Z`);
+  return Math.floor((today.getTime() - asOfDate.getTime()) / 86_400_000);
+}
 
 /** 概览响应 */
 export interface OverviewResponse {
@@ -39,6 +53,14 @@ export interface OverviewResponse {
    * - null：该组合尚无任何 AssetSnapshot（此时 latestDate 也为空或取自 DailyNav）
    */
   latestSource: SnapshotSource | null;
+  /**
+   * 数据新鲜度（PRD DASH-P1-03 / AL-015 · 决策 O-6）
+   *
+   * 🔴 判定**只在后端做**（阈值比较 / 滞后天数 / 文案），前端只渲染。
+   * 口径＝行情 / 现金实际数据的 asOf 滞后，**不是**快照 latestDate。
+   * 详见 `packages/shared/src/types/overview.ts` 的 `FreshnessInfo`。
+   */
+  freshness: FreshnessInfo;
   /** 持仓汇总 */
   holdingsSummary: {
     totalMarketValue: string;
@@ -58,6 +80,8 @@ export interface OverviewResponse {
 
 @Injectable()
 export class OverviewService {
+  private readonly logger = new Logger(OverviewService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly holdingDerivationService: HoldingDerivationService,
@@ -182,6 +206,35 @@ export class OverviewService {
       select: { id: true, date: true, type: true, amount: true, note: true },
     });
 
+    // 数据新鲜度（PRD DASH-P1-03 / AL-015 · 决策 O-6）
+    // 口径＝当前持仓标的的行情 / 现金 asOf 滞后，非快照 latestDate。
+    // 🔴 新鲜度是**增强信息**：计算失败一律降级为空 freshness（staleDays 取默认 3），
+    // 绝不因此影响主响应（主响应字段照常返回）。
+    const heldSecurityIds = holdings
+      .filter((h) => h.quantity > 0)
+      .map((h) => h.securityId);
+    let freshness: FreshnessInfo = {
+      staleDays: 3,
+      isStale: false,
+      latestPriceAsOf: null,
+      latestPriceLagDays: null,
+      latestCashAsOf: null,
+      latestCashLagDays: null,
+      reasons: [],
+    };
+    try {
+      freshness = await this.buildFreshness(
+        portfolioId,
+        userId,
+        heldSecurityIds,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.warn(
+        `新鲜度计算失败，降级为空 freshness：portfolioId=${portfolioId} reason=${message}`,
+      );
+    }
+
     return {
       totalAsset: latestSnapshot ? latestSnapshot.totalAsset.toString() : '0',
       cumulativeNav: cumulativeNav.toFixed(6),
@@ -192,6 +245,7 @@ export class OverviewService {
       yearReturnRate: yearReturnRate.toFixed(8),
       latestDate,
       latestSource: latestSnapshot?.source ?? null,
+      freshness,
       holdingsSummary,
       recentTransactions: recentTransactions.map((t) => ({
         id: t.id,
@@ -201,5 +255,135 @@ export class OverviewService {
         note: t.note,
       })),
     };
+  }
+
+  /**
+   * 构建数据新鲜度信息（PRD DASH-P1-03 / AL-015 · 决策 O-6）
+   *
+   * 判定口径（🔴 全部在后端完成，前端只渲染）：
+   * - `staleDays`：取自 `UserPreference.staleDays`，缺省 3。
+   * - 行情维度：在当前持仓标的（qty>0）中，取**每只最落后行情**`MIN(MAX(SecurityPrice.asOf))`。
+   *   只要有一只持仓标的**无任何行情记录**，即视为最陈旧（asOf=null）。
+   * - 现金维度：`MAX(CashBalance.asOf)`。
+   * - 滞后天数 = asOf → 今天（`todayInAppTz()`，UTC+8）的自然日差。
+   * - `isStale` / `reasons`：任一维度滞后超过 `staleDays`（或持仓标的缺行情）即 stale。
+   *
+   * @param portfolioId 组合 ID
+   * @param userId 用户 ID（读 staleDays）
+   * @param heldSecurityIds 当前持仓标的 ID（qty>0）；空数组 → 行情维度直接为 null
+   * @returns FreshnessInfo
+   */
+  private async buildFreshness(
+    portfolioId: string,
+    userId: string,
+    heldSecurityIds: string[],
+  ): Promise<FreshnessInfo> {
+    const staleDays = await this.getStaleDays(userId);
+    const today = todayInAppTz();
+
+    // ── 行情维度 ──
+    let latestPriceAsOf: string | null = null;
+    let latestPriceLagDays: number | null = null;
+    const heldCount = heldSecurityIds.length;
+
+    if (heldCount > 0) {
+      const grouped = await this.prisma.securityPrice.groupBy({
+        by: ['securityId'],
+        where: {
+          portfolioId,
+          securityId: { in: heldSecurityIds },
+          asOf: { lte: today },
+        },
+        _max: { asOf: true },
+      });
+
+      // 每只持仓标的的最迟行情日期；缺失行情的标的不会出现在结果里
+      const maxAsOfList = grouped
+        .map((g) => g._max.asOf)
+        .filter((d): d is Date => d !== null);
+
+      if (maxAsOfList.length < heldCount) {
+        // 至少一只持仓标的**完全无行情记录** → 视为最陈旧（asOf=null）
+        latestPriceAsOf = null;
+        latestPriceLagDays = null;
+      } else if (maxAsOfList.length > 0) {
+        // 最落后的那只 = MIN(MAX(asOf))（YYYY-MM-DD 字符串序＝时间序）
+        const minAsOf = maxAsOfList
+          .map((d) => d.toISOString().split('T')[0])
+          .reduce((min, s) => (s < min ? s : min));
+        latestPriceAsOf = minAsOf;
+        latestPriceLagDays = diffDaysInAppTz(today, minAsOf);
+      }
+    }
+
+    // ── 现金维度 ──
+    let latestCashAsOf: string | null = null;
+    let latestCashLagDays: number | null = null;
+    const cashAgg = await this.prisma.cashBalance.aggregate({
+      where: { portfolioId, asOf: { lte: today } },
+      _max: { asOf: true },
+    });
+    if (cashAgg._max.asOf) {
+      const asOf = cashAgg._max.asOf.toISOString().split('T')[0];
+      latestCashAsOf = asOf;
+      latestCashLagDays = diffDaysInAppTz(today, asOf);
+    }
+
+    // ── 阈值比较 + 文案 ──
+    const priceStale =
+      (latestPriceAsOf === null && heldCount > 0) ||
+      (latestPriceLagDays !== null && latestPriceLagDays > staleDays);
+    const cashStale =
+      latestCashAsOf !== null &&
+      latestCashLagDays !== null &&
+      latestCashLagDays > staleDays;
+
+    const reasons: FreshnessReason[] = [];
+    if (priceStale) {
+      reasons.push({
+        kind: FreshnessKind.PRICE,
+        asOf: latestPriceAsOf,
+        lagDays: latestPriceLagDays,
+        label:
+          latestPriceAsOf === null
+            ? '部分持仓标的无行情数据，请更新现价'
+            : `行情已 ${latestPriceLagDays} 天未更新`,
+      });
+    }
+    if (cashStale) {
+      reasons.push({
+        kind: FreshnessKind.CASH,
+        asOf: latestCashAsOf,
+        lagDays: latestCashLagDays,
+        label: `现金余额已 ${latestCashLagDays} 天未更新`,
+      });
+    }
+
+    return {
+      staleDays,
+      isStale: priceStale || cashStale,
+      latestPriceAsOf,
+      latestPriceLagDays,
+      latestCashAsOf,
+      latestCashLagDays,
+      reasons,
+    };
+  }
+
+  /**
+   * 读取用户陈旧阈值（天）。
+   *
+   * 取自 `UserPreference.staleDays`；记录缺失或查询异常一律回落默认 3。
+   */
+  private async getStaleDays(userId: string): Promise<number> {
+    try {
+      const pref = await this.prisma.userPreference.findUnique({
+        where: { userId },
+        select: { staleDays: true },
+      });
+      return pref?.staleDays ?? 3;
+    } catch {
+      return 3;
+    }
   }
 }

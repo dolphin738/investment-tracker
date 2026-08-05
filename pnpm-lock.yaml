@@ -62,6 +62,9 @@ importers:
       class-validator:
         specifier: ^0.14.1
         version: 0.14.4
+      papaparse:
+        specifier: ^5.4.1
+        version: 5.5.4
       passport:
         specifier: ^0.7.0
         version: 0.7.0
@@ -87,6 +90,9 @@ importers:
       '@types/node':
         specifier: ^20.11.0
         version: 20.19.43
+      '@types/papaparse':
+        specifier: ^5.3.14
+        version: 5.5.2
       '@types/passport-jwt':
         specifier: ^4.0.1
         version: 4.0.1
@@ -192,6 +198,9 @@ importers:
       lucide-react:
         specifier: ^0.330.0
         version: 0.330.0(react@18.3.1)
+      papaparse:
+        specifier: ^5.4.1
+        version: 5.5.4
       react:
         specifier: ^18.2.0
         version: 18.3.1
@@ -223,6 +232,9 @@ importers:
       '@testing-library/react':
         specifier: ^14.2.1
         version: 14.3.1(@types/react@18.3.31)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@types/papaparse':
+        specifier: ^5.3.14
+        version: 5.5.2
       '@types/react':
         specifier: ^18.2.55
         version: 18.3.31
@@ -1617,6 +1629,9 @@ packages:
 
   '@types/node@20.19.43':
     resolution: {integrity: sha512-6oYBAi5ikg4Pl+kGsoYtawUMBT2zZMCvPNF7pVLnHZfd1zf38DRiWn/gT01RYCdUqkv7Fhr+C9ot4/tb+2sVvA==}
+
+  '@types/papaparse@5.5.2':
+    resolution: {integrity: sha512-gFnFp/JMzLHCwRf7tQHrNnfhN4eYBVYYI897CGX4MY1tzY9l2aLkVyx2IlKZ/SAqDbB3I1AOZW5gTMGGsqWliA==}
 
   '@types/passport-jwt@4.0.1':
     resolution: {integrity: sha512-Y0Ykz6nWP4jpxgEUYq8NoVZeCQPo1ZndJLfapI249g1jHChvRfZRO/LS3tqu26YgAS/laI1qx98sYGz0IalRXQ==}
@@ -3484,6 +3499,9 @@ packages:
 
   package-json-from-dist@1.0.1:
     resolution: {integrity: sha512-UEZIS3/by4OC8vL3P2dTXRETpebLI2NiI5vIrjaD/5UtrkFX/tNbwjTSRAGC/+7CAo2pIcBaRgWmcBBHcsaCIw==}
+
+  papaparse@5.5.4:
+    resolution: {integrity: sha512-SwzWD9gl/ElwYLCI0nUja1mFJzjq2D8ziShfNBa7zCHzkOozeOGDwHWQ+tvCzEZcewecWZ5U7kUopDnG+DFYEQ==}
 
   parent-module@1.0.1:
     resolution: {integrity: sha512-GQ2EWRpQV8/o+Aw8YqtfZZPfNRWZYkbidE9k5rpl/hC3vtHHBfGm2Ifi6qWV+coDGkrUKZAxE3Lot5kcsRlh+g==}
@@ -6118,6 +6136,10 @@ snapshots:
     dependencies:
       undici-types: 6.21.0
 
+  '@types/papaparse@5.5.2':
+    dependencies:
+      '@types/node': 20.19.43
+
   '@types/passport-jwt@4.0.1':
     dependencies:
       '@types/jsonwebtoken': 9.0.10
@@ -8333,6 +8355,8 @@ snapshots:
   p-try@2.2.0: {}
 
   package-json-from-dist@1.0.1: {}
+
+  papaparse@5.5.4: {}
 
   parent-module@1.0.1:
     dependencies:

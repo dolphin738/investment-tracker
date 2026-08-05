@@ -9,6 +9,7 @@
  */
 
 import { http } from '@/lib/api-client';
+import { SecurityType } from '@investment-tracker/shared';
 import type { HoldingResponse, HoldingsAggregate } from './types';
 
 export interface HoldingQueryParams {
@@ -18,6 +19,8 @@ export interface HoldingQueryParams {
   securityId?: string;
   /** 是否包含已清仓标的 */
   includeClosed?: boolean;
+  /** 按标的类型筛选（后端 holding.controller 白名单校验） */
+  types?: SecurityType[];
 }
 
 /** 获取持仓列表（含汇总） */

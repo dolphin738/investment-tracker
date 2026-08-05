@@ -13,7 +13,7 @@
  * - 手工行差异列：系统自动计算值 + 差异金额 +（差异%）
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ChevronLeft,
   ChevronRight,
@@ -46,7 +46,6 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useSnapshots, useDeleteSnapshot, useResetSnapshot } from '@/hooks/use-snapshots';
-import { useNavTotalAssetMap } from '@/hooks/use-query-data';
 import { usePreferenceStore } from '@/stores/preference.store';
 import {
   computeManualDiffStats,
@@ -54,7 +53,7 @@ import {
   formatCurrency,
   formatDate,
 } from '@/lib/utils';
-import type { SnapshotQuery } from '@/api/types';
+import type { SnapshotQuery, SnapshotResponse } from '@/api/types';
 import {
   SnapshotSource,
   type AssetSnapshot,
@@ -82,8 +81,8 @@ export function SnapshotList({
   emptyText = '暂无资产记录',
 }: SnapshotListProps): JSX.Element {
   const [page, setPage] = useState(1);
-  const [deleting, setDeleting] = useState<AssetSnapshot | null>(null);
-  const [resetting, setResetting] = useState<AssetSnapshot | null>(null);
+  const [deleting, setDeleting] = useState<SnapshotResponse | null>(null);
+  const [resetting, setResetting] = useState<SnapshotResponse | null>(null);
 
   // 筛选行本地状态（日期起止 + 来源 checkbox；「重置」清空）
   const [filterStart, setFilterStart] = useState('');
@@ -121,21 +120,32 @@ export function SnapshotList({
   });
   const deleteMutation = useDeleteSnapshot();
   const resetMutation = useResetSnapshot();
-  const navMapQuery = useNavTotalAssetMap(portfolioId);
-  const navMap = navMapQuery.data;
 
   const items = data?.items ?? [];
   const total = data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
-  const isManual = (s: AssetSnapshot): boolean => s.source === 'MANUAL';
+  const isManual = (s: SnapshotResponse): boolean => s.source === 'MANUAL';
 
-  // 系统自动计算值（date → 值）。近似：NAV×份额；待后端 derivedTotalAsset（F5，Part B-3）
-  const systemValOf = (s: AssetSnapshot): number | null =>
-    navMap ? (navMap.get(s.date) ?? null) : null;
+  // 系统自动计算值（AL-054 · Q-1甲）：直接读列表行内 derivedTotalAsset（后端已实时回填）
+  const systemValOf = (s: SnapshotResponse): number | null => {
+    if (s.derivedTotalAsset == null) return null;
+    const n = Number(s.derivedTotalAsset);
+    return Number.isFinite(n) ? n : null;
+  };
 
   // 差异提示条统计（SNAP-P0-07 / F5）：以当前列表行为准（分页 20 条/页），
-  // 系统值为 NAV×份额近似；全量/精确统计待后端 derivedTotalAsset。
+  // 系统值取行内 derivedTotalAsset（后端实时值，非 NAV×份额近似）。
+  const navMap = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const s of items) {
+      if (s.derivedTotalAsset != null) {
+        const n = Number(s.derivedTotalAsset);
+        if (Number.isFinite(n)) m.set(s.date, n);
+      }
+    }
+    return m;
+  }, [items]);
   const manualStats = computeManualDiffStats(items, navMap);
 
   const resetFilters = () => {
@@ -283,7 +293,7 @@ export function SnapshotList({
             <TableBody>
               {items.map((s) => {
                 const manual = isManual(s);
-                // 近似：NAV×份额；待后端 derivedTotalAsset（F5）
+                // 系统自动计算值（后端已实时回填 derivedTotalAsset）
                 const systemVal = systemValOf(s);
                 const totalAssetNum = Number(s.totalAsset) || 0;
                 const diffRate =

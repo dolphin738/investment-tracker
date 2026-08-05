@@ -42,6 +42,29 @@ export { TransactionType } from './types/transaction.ts';
 // - 前端 api/types.ts re-export 后供表单/筛选渲染选项
 export { SecurityType } from './types/security.ts';
 
+// ── 概览数据新鲜度（DASH-P1-03 / AL-015）──
+// FreshnessKind 既是值（as const 对象）又是类型：前端 banner 用其判定跳转目标。
+// 🔴 判定全部在后端完成，前端只渲染 —— 禁止用 latestDate（快照日期）二次判定。
+export { FreshnessKind } from './types/overview.ts';
+export type { FreshnessInfo, FreshnessReason } from './types/overview.ts';
+
+// ── CSV 导入 / 导出契约（AL-042 / AL-079 / AL-080，T05 实现）──
+// ExportType / ImportType / ImportErrorCode 同为「值 + 类型」双重身份。
+export {
+  ExportType,
+  EXPORT_TYPES,
+  ImportType,
+  IMPORT_TYPES,
+  ImportErrorCode,
+} from './types/data-transfer.ts';
+export type {
+  ImportRow,
+  ImportRowError,
+  ImportPreviewResult,
+  ImportCommitResult,
+  RecalcSummary,
+} from './types/data-transfer.ts';
+
 // ── API 契约 ──
 export type {
   ApiResponse,

@@ -40,6 +40,11 @@ export interface ManualPayload {
   note?: string | null;
 }
 
+/** 将 Date 归一化为 YYYY-MM-DD（DB @db.Date 一律 UTC 午夜，故按 UTC 取） */
+function toDateKey(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
 @Injectable()
 export class AssetValuationService {
   private readonly logger = new Logger(AssetValuationService.name);
@@ -65,39 +70,106 @@ export class AssetValuationService {
     portfolioId: string,
     date: Date,
   ): Promise<DerivedResult> {
-    // 1. 持仓市值
-    const holdings = await this.holdingDerivation.derive(portfolioId, date);
-    const marketValue = holdings.reduce((sum, h) => sum + h.marketValue, 0);
+    const batch = await this.computeDerivedBatch(portfolioId, [date]);
+    // computeDerivedBatch 保证入参日期必有条目，此处的兜底仅为类型收敛
+    return (
+      batch.get(toDateKey(date)) ?? {
+        totalAsset: 0,
+        marketValue: 0,
+        cashBalance: 0,
+        valuationFlag: SnapshotValuation.EXACT,
+      }
+    );
+  }
 
-    // 2. 现金余额（asOf ≤ date 的最后一条，向前沿用）
-    const cashRow = await this.prisma.cashBalance.findFirst({
-      where: { portfolioId, asOf: { lte: date } },
-      orderBy: { asOf: 'desc' },
-      select: { amount: true },
-    });
-    const cashBalance = cashRow ? Number(cashRow.amount) : 0;
-
-    // 3. 估值标识
-    let valuationFlag: SnapshotValuation;
-    if (holdings.length === 0) {
-      valuationFlag = SnapshotValuation.EXACT;
-    } else if (holdings.every((h) => h.flag === 'EXACT')) {
-      valuationFlag = SnapshotValuation.EXACT;
-    } else if (holdings.every((h) => h.flag === 'COST_BASED')) {
-      valuationFlag = SnapshotValuation.COST_BASED;
-    } else {
-      // 混合：部分有现价部分回退成本
-      valuationFlag = SnapshotValuation.CARRIED_FORWARD;
+  /**
+   * 【批量】一次预取、多日复用地计算派生总资产（不落库）
+   *
+   * 🔴 存在意义：快照列表要为 N 条 MANUAL 记录各算一个「派生值」。
+   * 若逐条调 {@link computeDerived}，查库次数是 3N（交易 + 价格 + 现金），
+   * 即典型的 N+1。本方法把查询提到循环之外，**查库次数恒为 3**：
+   *   1) SecurityTrade（由 `deriveBatch` 发起）
+   *   2) SecurityPrice（由 `deriveBatch` 发起）
+   *   3) CashBalance（本方法发起，一次取 ≤max(dates) 的全部记录）
+   * 无论 dates.length 是 1 还是 1000，查询次数不变。
+   *
+   * 单日结果与 {@link computeDerived} **逐位一致**（同一份回放算法 +
+   * 同一套「向前沿用」语义），因此可安全互换。
+   *
+   * @param portfolioId 组合 ID
+   * @param dates 目标日期数组（可乱序、可重复，内部去重并升序处理）
+   * @returns Map<YYYY-MM-DD, DerivedResult>；每个入参日期都必有条目
+   * @throws BadRequestException 交易回放中出现卖出量超过持仓量（由调用方决定是否降级）
+   */
+  async computeDerivedBatch(
+    portfolioId: string,
+    dates: readonly Date[],
+  ): Promise<Map<string, DerivedResult>> {
+    const result = new Map<string, DerivedResult>();
+    if (dates.length === 0) {
+      return result;
     }
 
-    const totalAsset = marketValue + cashBalance;
+    // 去重 + 升序（现金游标单调推进的前提）
+    const sortedKeys = Array.from(new Set(dates.map(toDateKey))).sort();
+    const maxDate = new Date(
+      `${sortedKeys[sortedKeys.length - 1]}T00:00:00.000Z`,
+    );
 
-    return {
-      totalAsset: Math.round(totalAsset * 100) / 100,
-      marketValue: Math.round(marketValue * 100) / 100,
-      cashBalance: Math.round(cashBalance * 100) / 100,
-      valuationFlag,
-    };
+    // 1. 持仓市值（批量：2 次查询，与日期数量无关）
+    const holdingsByDate = await this.holdingDerivation.deriveBatch(
+      portfolioId,
+      sortedKeys.map((k) => new Date(`${k}T00:00:00.000Z`)),
+    );
+
+    // 2. 现金余额（批量：1 次查询取全，内存里按日期「向前沿用」）
+    const cashRows = await this.prisma.cashBalance.findMany({
+      where: { portfolioId, asOf: { lte: maxDate } },
+      orderBy: { asOf: 'asc' },
+      select: { asOf: true, amount: true },
+    });
+
+    let cashCursor = 0;
+    let currentCash = 0;
+
+    for (const dateKey of sortedKeys) {
+      // 推进现金游标到「最后一条 asOf ≤ dateKey」
+      while (
+        cashCursor < cashRows.length &&
+        toDateKey(cashRows[cashCursor].asOf) <= dateKey
+      ) {
+        currentCash = Number(cashRows[cashCursor].amount);
+        cashCursor += 1;
+      }
+
+      const holdings = holdingsByDate.get(dateKey) ?? [];
+      const marketValue = holdings.reduce((sum, h) => sum + h.marketValue, 0);
+      const cashBalance = currentCash;
+
+      // 3. 估值标识
+      let valuationFlag: SnapshotValuation;
+      if (holdings.length === 0) {
+        valuationFlag = SnapshotValuation.EXACT;
+      } else if (holdings.every((h) => h.flag === 'EXACT')) {
+        valuationFlag = SnapshotValuation.EXACT;
+      } else if (holdings.every((h) => h.flag === 'COST_BASED')) {
+        valuationFlag = SnapshotValuation.COST_BASED;
+      } else {
+        // 混合：部分有现价部分回退成本
+        valuationFlag = SnapshotValuation.CARRIED_FORWARD;
+      }
+
+      const totalAsset = marketValue + cashBalance;
+
+      result.set(dateKey, {
+        totalAsset: Math.round(totalAsset * 100) / 100,
+        marketValue: Math.round(marketValue * 100) / 100,
+        cashBalance: Math.round(cashBalance * 100) / 100,
+        valuationFlag,
+      });
+    }
+
+    return result;
   }
 
   /**

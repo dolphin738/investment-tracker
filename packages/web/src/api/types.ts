@@ -18,9 +18,17 @@ import type {
   SecuritySide,
   UserPublic,
   NavMetric,
+  FreshnessInfo,
+  ImportRow,
+  ImportRowError,
+  ImportPreviewResult,
+  ImportCommitResult,
+  RecalcSummary,
 } from '@investment-tracker/shared';
 // SecurityType 唯一定义在 shared（as const 对象 + 同名类型），此处按值 import 供本文件类型标注使用
 import { SecurityType } from '@investment-tracker/shared';
+// CSV 导入 / 导出类别与错误码（shared 中同为「值 + 类型」双重身份），按值 re-export 供表单 / 下拉使用
+import { ExportType, ImportType, ImportErrorCode } from '@investment-tracker/shared';
 
 // NavMetric 既是值（as const 对象）又是类型（字符串联合），需 re-export 供消费处按值/类型分别 import
 export { NavMetric } from '@investment-tracker/shared';
@@ -28,6 +36,24 @@ export { NavMetric } from '@investment-tracker/shared';
 export type { UserPublic } from '@investment-tracker/shared';
 // SecurityType 同样既是值又是类型；re-export 保持 `@/api/types` 旧引用点可用（前后端共用同一定义，Q-3）
 export { SecurityType } from '@investment-tracker/shared';
+
+// ── 概览数据新鲜度（DASH-P1-03 / AL-015）──
+// 后端 OverviewService.buildFreshness 已透出；前端只渲染，不二次判定。
+export type { FreshnessInfo } from '@investment-tracker/shared';
+
+// ── CSV 导入 / 导出契约（AL-042 / AL-079 / AL-080，T05 实现，T01 落契约）──
+export {
+  ExportType,
+  ImportType,
+  ImportErrorCode,
+} from '@investment-tracker/shared';
+export type {
+  ImportRow,
+  ImportRowError,
+  ImportPreviewResult,
+  ImportCommitResult,
+  RecalcSummary,
+} from '@investment-tracker/shared';
 
 // ============================================================================
 // 本地枚举（shared 包中不存在的 UI 层枚举）
@@ -426,14 +452,16 @@ export interface UpsertSnapshotRequest {
 /**
  * 快照列表/保存响应。
  *
- * 预留字段 `derivedTotalAsset`（F5 待后端）：该日系统自动计算值
- * （computeDerived = marketValue + cashBalance，不受手工覆盖影响）。
- * 后端 list 接口补齐该字段前，前端一律用 NAV×份额近似（见 useNavTotalAssetMap），
- * 不依赖本字段（运行时 undefined，!= null 判空跳过）。
+ * `derivedTotalAsset`：该日**系统自动计算值**（Decimal 字符串），由后端
+ * `SnapshotService` 实时回填（AL-054 / 决策 Q-1 甲）：
+ * - `source === 'DERIVED'` → 等于 `totalAsset`（不重复计算）；
+ * - `source === 'MANUAL'`  → `computeDerived(date)` 的实时结果；
+ * - 计算失败 / 数据缺失     → `null`（列表仍返回 200）。
+ * 运行时计算字段，不落库（Prisma schema 零变更）。
  */
 export interface SnapshotResponse extends AssetSnapshot {
-  /** 该日系统自动计算值（Decimal 字符串）；DERIVED 行为 null；待后端实现（F5） */
-  derivedTotalAsset?: string | null;
+  /** 该日系统自动计算值（Decimal 字符串）；计算失败 / 数据缺失 → null */
+  derivedTotalAsset: string | null;
 }
 
 export interface SnapshotQuery {
@@ -493,6 +521,14 @@ export interface OverviewResponse {
    * 声明为可选：兼容尚未升级的后端（运行时 undefined），前端一律用 `=== 'MANUAL'` 判定。
    */
   latestSource?: SnapshotSource | null;
+  /**
+   * 数据新鲜度（PRD DASH-P1-03 / AL-015 · 决策 O-6）。
+   * 后端判定（阈值 / 滞后天数 / 文案），前端只渲染。口径＝行情 / 现金 asOf 滞后，非 latestDate。
+   *
+   * 声明为可选：兼容尚未升级的后端（运行时 undefined），前端一律判空后渲染；
+   * 已升级后端必然返回（见 backend OverviewService.buildFreshness）。
+   */
+  freshness?: FreshnessInfo;
   /** 持仓汇总（后端 OverviewService 返回） */
   holdingsSummary: {
     totalMarketValue: string;

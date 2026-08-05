@@ -39,6 +39,16 @@ export function listSnapshots(
   );
 }
 
+/** 获取指定日期单条快照（A3 · GET /snapshots/:date） */
+export function getSnapshotByDate(
+  portfolioId: string,
+  date: string,
+): Promise<SnapshotResponse> {
+  return http.get<SnapshotResponse>(
+    `/portfolios/${portfolioId}/snapshots/${date}`,
+  );
+}
+
 /** 删除快照 */
 export function deleteSnapshot(
   portfolioId: string,

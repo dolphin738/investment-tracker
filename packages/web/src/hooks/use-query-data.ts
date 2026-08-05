@@ -14,6 +14,7 @@ import {
   getNavSeries,
   getXirrSeries,
 } from '@/api/query.api';
+import { listSnapshots } from '@/api/snapshot.api';
 import type { NavQueryParams, XirrQueryParams } from '@/api/types';
 import { QueryGranularity } from '@investment-tracker/shared';
 
@@ -64,39 +65,37 @@ export function useLatestNav(portfolioId: string | null) {
 }
 
 /**
- * 系统自动计算的总资产映射（date → cumulativeNav × shares）
+ * 指定日期的系统自动计算总资产（AL-054 / 决策 Q-1 甲）
  *
- * 供资产记录页展示「该日系统自动计算值」与「差异%」：
- * 系统口径下 总资产 = 累计净值 × 份额，与后端 recalculateNavRange 口径一致。
- * 采用日维度全量查询（startDate=2000-01-01 覆盖成立日至今）。
+ * 供资产记录录入表单的「覆盖提示」使用：按 date 精确查单条快照
+ * （`startDate=endDate=date, pageSize=1` —— 合法且 ≤ 后端 `@Max(200)`），
+ * 取该行 `derivedTotalAsset`（后端实时回填：DERIVED 行 == totalAsset；
+ * MANUAL 行为 computeDerived 结果；计算失败 → null）。
  *
- * ⚠️ 近似口径（Part B-3 / F5）：NAV 计算读当日快照行（含手工值），数学上
- * cumulativeNav×shares = 当日快照值，故手工日此值 ≈ 手工值（失真）、无快照日缺失。
- * PRD 要求「该日系统自动计算值」= computeDerived(date)（实时算 marketValue+cashBalance，
- * 不受手工覆盖影响），后端 list 补齐 derivedTotalAsset 前一律以本近似为准。
+ * 🔴 不再拉全量：旧实现 `pageSize:1000` 触发后端 400（SnapshotQueryDto
+ * `@Max(200)` + 全局 ValidationPipe），且只取第 1 页会丢老数据（BUG-1/2）。
+ * 快照列表页自身的派生值直接读列表行内 `derivedTotalAsset`，不经过本 hook。
+ *
+ * 金额为 string 透传（非计算），符合「Decimal 以 string 传输」铁律。
  */
-export function useNavTotalAssetMap(portfolioId: string | null) {
+export function useNavTotalAssetMap(
+  portfolioId: string | null,
+  date: string | null,
+) {
   return useQuery({
-    queryKey: ['nav', 'total-asset-map', portfolioId],
+    queryKey: ['nav', 'total-asset-map', portfolioId, date],
     queryFn: async () => {
-      const points = await getNavSeries(portfolioId!, {
-        granularity: QueryGranularity.DAY,
-        startDate: '2000-01-01',
+      const res = await listSnapshots(portfolioId!, {
+        startDate: date!,
+        endDate: date!,
+        pageSize: 1,
       });
-      const map = new Map<string, number>();
-      for (const p of points) {
-        if (
-          p.cumulativeNav !== null &&
-          p.shares !== null &&
-          Number.isFinite(p.cumulativeNav) &&
-          Number.isFinite(p.shares)
-        ) {
-          map.set(p.date, p.cumulativeNav * p.shares);
-        }
-      }
-      return map;
+      const row = res.items[0];
+      if (!row || row.derivedTotalAsset == null) return null;
+      const n = Number(row.derivedTotalAsset);
+      return Number.isFinite(n) ? n : null;
     },
-    enabled: Boolean(portfolioId),
+    enabled: Boolean(portfolioId && date),
     staleTime: 60 * 1000,
   });
 }

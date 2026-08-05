@@ -29,4 +29,19 @@ export interface AssetSnapshot {
   createdAt: string;
   /** 更新时间 ISO 8601 */
   updatedAt: string;
+  /**
+   * 该日**系统派生**的总资产（Decimal 字符串），用于快照页
+   * 「手工值 vs 派生值 vs 差异」三列对比（AL-054 / 决策 Q-1 甲）。
+   *
+   * 语义 = 「若该日不使用手工快照，系统按 持仓×行情 + 现金 推导出的总资产」，
+   * 即 `AssetValuationService.computeDerived(portfolioId, date).totalAsset`。
+   *
+   * 取值规则（后端 `SnapshotService.attachDerivedTotalAsset`）：
+   * - `source === 'DERIVED'` → 直接等于 `totalAsset`（不重复计算）；
+   * - `source === 'MANUAL'`  → 实时派生计算的结果；
+   * - 计算失败 / 数据缺失   → `null`（**列表仍返回 200，绝不因此抛错**）。
+   *
+   * 🔴 本字段是**运行时计算的响应字段，不落库**（Prisma schema 零变更）。
+   */
+  derivedTotalAsset?: string | null;
 }

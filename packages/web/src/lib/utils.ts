@@ -218,10 +218,10 @@ export interface ManualDiffStats {
  *
  * 供资产记录页差异提示条「当前有 N 条手工记录，其中 M 条与自动值差异 > 1%」使用。
  * 口径：source === 'MANUAL' 计入 N；系统值存在且 |(手工-系统)/系统| > threshold 计入 M。
- * 系统值为前端近似（NAV×份额），精确性待后端 derivedTotalAsset（F5）。
+ * 系统值取后端 `derivedTotalAsset`（AL-054 · 决策 Q-1甲，实时回填，非 NAV×份额近似）。
  *
  * @param items 快照行（可为当前页列表；分页场景统计口径为当前页，注释见调用处）
- * @param systemValueMap date → 系统自动计算值 映射（useNavTotalAssetMap）
+ * @param systemValueMap date → 系统自动计算值 映射（取自各行 derivedTotalAsset）
  * @param threshold 差异率阈值，默认 0.01（Part E-2）
  */
 export function computeManualDiffStats(

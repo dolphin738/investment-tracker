@@ -8,7 +8,7 @@
  *   - 自动记录（source=DERIVED）或无记录 → POST upsert（保存即变手工）
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -102,15 +102,12 @@ export function SnapshotForm({
     }
   }, [snapshot, reset, today]);
 
-  // 系统自动计算值映射（用于覆盖提示）。
-  // 近似：NAV×份额；待后端 derivedTotalAsset（F5，Part B-3）——手工日此值≈手工值，仅作提示口径
-  const navMapQuery = useNavTotalAssetMap(portfolioId);
-  const navMap = navMapQuery.data;
+  // 系统自动计算值（用于覆盖提示）：按当前日期精确查单条（AL-054 · Q-1甲）。
+  // 后端在响应里实时回填 derivedTotalAsset（DERIVED 行 == totalAsset；MANUAL 行为
+  // computeDerived 结果；计算失败 → null）。精确单日查询 pageSize=1（≤ 后端 @Max(200)）。
   const dateValue = watch('date');
-  const systemValue = useMemo(
-    () => (dateValue && navMap ? navMap.get(dateValue) ?? null : null),
-    [dateValue, navMap],
-  );
+  const systemValueQuery = useNavTotalAssetMap(portfolioId, dateValue);
+  const systemValue = systemValueQuery.data ?? null;
 
   const onSubmit = (values: SnapshotFormValues) => {
     setSubmitting(true);
@@ -176,7 +173,7 @@ export function SnapshotForm({
           <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
             <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             <span>
-              {`该日系统自动计算值为 ${formatCurrency(systemValue)}（前端近似值）。保存后，您填写的值将取代该日的自动记录（每天只保留一条），并用于净值/XIRR 重算。`}
+              {`该日系统自动计算值为 ${formatCurrency(systemValue)}。保存后，您填写的值将取代该日的自动记录（每天只保留一条），并用于净值/XIRR 重算。`}
             </span>
           </div>
         )}

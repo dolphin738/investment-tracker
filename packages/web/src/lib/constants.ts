@@ -7,6 +7,8 @@
  * - 本地存储键名
  */
 
+import { ExportType } from '@investment-tracker/shared';
+
 // ===== API 路径前缀 =====
 export const API_PREFIX = '/api';
 export const API_BASE_URL = '/api';
@@ -41,6 +43,30 @@ export const GRANULARITY_OPTIONS = [
 export const AGGREGATION_OPTIONS = [
   { value: 'last', label: '期末值' },
   { value: 'avg', label: '平均值' },
+] as const;
+
+// ===== 持仓页 URL 状态白名单 key（对齐后端 HoldingQueryDto）=====
+// 供 useUrlState(schema) 的 key 集合使用，确保只持久化白名单内的查询参数。
+export const HOLDINGS_QUERY_KEYS = [
+  'date',
+  'securityId',
+  'includeClosed',
+  'types',
+] as const;
+
+// ===== 概览页 URL 状态白名单 key =====
+// 当前仅含新鲜度提示条的「已忽略」状态（前端本地持久化，不影响后端口径）。
+export const OVERVIEW_QUERY_KEYS = ['freshnessDismissed'] as const;
+
+// ===== CSV 导出类别选项（对齐 shared ExportType，供导出下拉渲染）=====
+export const EXPORT_TYPE_OPTIONS = [
+  { value: ExportType.SECURITIES, label: '标的主数据' },
+  { value: ExportType.SECURITY_TRADES, label: '证券买卖流水' },
+  { value: ExportType.CASH_FLOWS, label: '出入金流水' },
+  { value: ExportType.CASH_BALANCES, label: '现金余额记录' },
+  { value: ExportType.SECURITY_PRICES, label: '证券价格记录' },
+  { value: ExportType.ASSET_SNAPSHOTS, label: '资产快照' },
+  { value: ExportType.NAV_SERIES, label: '净值序列' },
 ] as const;
 
 // ===== 默认分页参数 =====
