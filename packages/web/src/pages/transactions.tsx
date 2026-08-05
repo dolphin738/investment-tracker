@@ -46,6 +46,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { CashflowForm } from '@/features/cashflow/cashflow-form';
 import { CashflowList } from '@/features/cashflow/cashflow-list';
+import { CashBalanceHistory } from '@/features/cashflow/cash-balance-history';
 import {
   parseTransactionSearchParams,
   SORT_OPTIONS,
@@ -468,7 +469,8 @@ export default function TransactionsPage(): JSX.Element {
             </li>
           </ul>
 
-          {/* CASH-P1-01「查看变更历史 ▾」为 P1 项，本轮不做（后端列表接口与 useCashBalances 已就绪，后续可复用） */}
+          {/* CASH-P1-01 / T04：现金余额变更历史展开器（默认收起，不写 URL） */}
+          <CashBalanceHistory portfolioId={currentPortfolioId} className="mb-3" />
 
           <div className="flex flex-wrap items-end gap-3">
             <div className="space-y-1.5">

@@ -11,6 +11,9 @@
  * - `pageSize` 仅接受 20/50/100，非法回落默认 20
  */
 import type { TransactionQuery } from '@/api/types';
+// 复用 lib/url-query 的 codec 原语（arrayCodec / numberCodec），与 useUrlState 同一套语义，
+// 避免出入金页与持仓/概览页各写一套 URL 编解码（T04 去重，外部行为不变）。
+import { arrayCodec, numberCodec } from '@/lib/url-query';
 
 /** 类型多选可选值（存入 BUY / 取出 SELL） */
 export const TRANSACTION_TYPE_OPTIONS = ['BUY', 'SELL'] as const;
@@ -30,8 +33,9 @@ export const SORT_OPTIONS = [
 
 /** 解析 URL 的 types 参数（逗号分隔）→ 多选数组；缺失/非法 → 全部（[]） */
 export function parseTypesParam(raw: string | null): TransactionTypeOption[] {
-  if (!raw) return [];
-  return raw.split(',').filter((v): v is TransactionTypeOption =>
+  // 复用 lib/url-query arrayCodec（逗号分隔 + 空串剔除），再按白名单过滤
+  const parsed = arrayCodec<string>([]).parse(raw);
+  return parsed.filter((v): v is TransactionTypeOption =>
     (TRANSACTION_TYPE_OPTIONS as readonly string[]).includes(v),
   );
 }
@@ -48,10 +52,9 @@ export function parsePageSizeParam(raw: string | null): number {
   return (PAGE_SIZE_OPTIONS as readonly number[]).includes(n) ? n : DEFAULT_PAGE_SIZE;
 }
 
-/** 解析 URL page：正整数有效，非法回落 1 */
+/** 解析 URL page：正整数有效，非法回落 1（复用 numberCodec 数值解析） */
 export function parsePageParam(raw: string | null): number {
-  if (raw === null) return 1;
-  const n = Number(raw);
+  const n = numberCodec(1).parse(raw);
   return Number.isInteger(n) && n >= 1 ? n : 1;
 }
 

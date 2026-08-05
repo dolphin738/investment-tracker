@@ -21,14 +21,24 @@ import type {
   UpsertCashBalanceRequest,
 } from '@/api/types';
 
-/** 余额变更影响的所有 query key 前缀 */
+/** 余额变更影响的所有 query key 前缀（T04 验收 4：含 holdings） */
 const AFFECTED_QUERY_KEYS = [
   ['cash-balances'],
+  ['overview'],
   ['nav'],
   ['xirr'],
   ['snapshots'],
-  ['overview'],
+  ['holdings'],
 ] as const;
+
+/**
+ * 重算反馈文案（CASH-P0-03 / T04 验收 3）：
+ * 后端暂未在响应中返回重算天数 → 降级「已重算（自 {asOf} 起）」，不报错。
+ * 后端补齐 recalculation 后可在调用处拼接「已重算 {fromDate} 起 {N} 天」。
+ */
+function buildRecalcSuffix(asOf: string): string {
+  return `已重算（自 ${asOf} 起）`;
+}
 
 /** 现金余额列表 */
 export function useCashBalances(
@@ -66,10 +76,9 @@ export function useUpsertCashBalance() {
       portfolioId: string;
       payload: UpsertCashBalanceRequest;
     }) => upsertApi(portfolioId, payload),
-    onSuccess: () => {
-      // CASH-P0-03 重算范围反馈：依赖后端 recalc 并入响应（与 F3 通用修复联动），
-      // 当前保持「现金余额已保存」；后端透出 recalculation 后可在此拼接「已重算自 {asOf} 起」。
-      toast.success('现金余额已保存');
+    onSuccess: (_data, variables) => {
+      // CASH-P0-03 重算反馈：后端未返回天数 → 降级「已重算（自 asOf 起）」（T04 验收 3）
+      toast.success(`现金余额已保存；${buildRecalcSuffix(variables.payload.asOf)}`);
       AFFECTED_QUERY_KEYS.forEach((key) =>
         queryClient.invalidateQueries({ queryKey: [...key] }),
       );
@@ -77,7 +86,7 @@ export function useUpsertCashBalance() {
   });
 }
 
-/** 删除现金余额记录 */
+/** 删除现金余额记录（asOf 可选：用于重算反馈 toast 文案） */
 export function useDeleteCashBalance() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -87,9 +96,15 @@ export function useDeleteCashBalance() {
     }: {
       portfolioId: string;
       id: string;
+      /** 被删除记录的生效日（仅用于重算反馈 toast） */
+      asOf?: string;
     }) => deleteApi(portfolioId, id),
-    onSuccess: () => {
-      toast.success('现金余额记录已删除');
+    onSuccess: (_data, variables) => {
+      toast.success(
+        variables.asOf
+          ? `现金余额记录已删除；${buildRecalcSuffix(variables.asOf)}`
+          : '现金余额记录已删除',
+      );
       AFFECTED_QUERY_KEYS.forEach((key) =>
         queryClient.invalidateQueries({ queryKey: [...key] }),
       );
