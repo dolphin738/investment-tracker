@@ -93,6 +93,11 @@ export class UpdatePreferenceDto {
   @Max(30)
   staleDays?: number;
 
+  @ApiPropertyOptional({ description: '持仓页「显示已清仓」初值（HOLD-B-P0-04）' })
+  @IsOptional()
+  @IsBoolean()
+  showLiquidated?: boolean;
+
   // ===== Gap C 新增：软提示 / 金额格式（SET-P0-07 / SET-P1-03）=====
   // main.ts 的 ValidationPipe 开了 forbidNonWhitelisted，
   // 这 4 项不在 DTO 白名单里前端一提交就 400 —— 是解锁前端持久化的关键。

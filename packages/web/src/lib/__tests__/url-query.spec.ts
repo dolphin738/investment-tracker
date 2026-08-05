@@ -38,7 +38,7 @@ function makeSchema(): UrlStateSchema<TestState> {
     type: enumCodec(['a', 'b'] as const, 'a'),
     flag: booleanCodec(false),
     date: dateCodec(''),
-    tags: arrayCodec([]),
+    tags: arrayCodec<string>([]),
   };
 }
 

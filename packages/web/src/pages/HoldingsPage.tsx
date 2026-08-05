@@ -17,7 +17,7 @@
  * 同时避免与【B】持仓表并列造成长页滚动。功能验收（按标的查看累计分红/费用）不变。
  */
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { PackageOpen, Plus, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -54,12 +54,17 @@ import { SecurityTradeForm } from '@/features/security-trade/security-trade-form
 import { SecurityTradeList } from '@/features/security-trade/security-trade-list';
 import { InlinePriceEditor } from '@/features/security-price/inline-price-editor';
 import { DividendFeeSection } from '@/features/security-income/dividend-fee-section';
+import { HoldingsToolbar } from '@/features/holdings/holdings-toolbar';
+import { createHoldingsSchema } from '@/features/holdings/holdings-query-params';
+import type { HoldingsQueryState } from '@/features/holdings/holdings-query-params';
 import { usePortfolioStore } from '@/stores/portfolio.store';
 import { usePreferenceStore } from '@/stores/preference.store';
 import { usePortfolios } from '@/hooks/use-portfolios';
 import { useHoldings } from '@/hooks/use-holdings';
 import { useSecurities } from '@/hooks/use-securities';
-import { toIsoDate } from '@/lib/constants';
+import { useTransactions } from '@/hooks/use-transactions';
+import { todayInAppTzIso, toIsoDate } from '@/lib/constants';
+import { useUrlState } from '@/lib/url-query';
 import { formatCurrency, formatPercent, cn } from '@/lib/utils';
 
 // ===== 常量 =====
@@ -70,15 +75,6 @@ const SECURITY_TYPE_LABEL: Record<string, string> = {
   CASH: '现金',
   OTHER: '其他',
 };
-
-/** 当前日期 YYYY-MM-DD（本地时区） */
-function todayIso(): string {
-  const now = new Date();
-  const yyyy = now.getFullYear();
-  const mm = String(now.getMonth() + 1).padStart(2, '0');
-  const dd = String(now.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
-}
 
 export default function HoldingsPage(): JSX.Element {
   const currentPortfolioId = usePortfolioStore((s) => s.currentPortfolioId);
@@ -102,7 +98,50 @@ export default function HoldingsPage(): JSX.Element {
     endDate?: string;
   }>({});
 
-  const holdings = useHoldings(currentPortfolioId, { date: todayIso() });
+  // ===== 持仓查询状态（T02 · URL 持久化）=====
+  // date / closed / types / sec 四个 key 全部走 useUrlState（lib/url-query）：
+  // 默认值不写入 URL、非法值降级、白名单外 key 保留；刷新/复制链接可还原。
+  const today = todayInAppTzIso();
+  const prefShowLiquidated = getPreference('showLiquidated');
+  const [holdingsQuery, setHoldingsQuery] = useUrlState<HoldingsQueryState>(
+    createHoldingsSchema(today, prefShowLiquidated),
+  );
+
+  // 「显示已清仓」初值 = UserPreference.showLiquidated；URL 参数优先级更高。
+  // useUrlState 的默认值在首帧固化，偏好异步到达后需主动对齐一次（URL 无 closed 时）。
+  const hasClosedParam = useMemo(
+    () => new URLSearchParams(window.location.search).has('closed'),
+    [],
+  );
+  useEffect(() => {
+    if (!hasClosedParam && prefShowLiquidated && !holdingsQuery.closed) {
+      setHoldingsQuery({ closed: true });
+    }
+  }, [prefShowLiquidated, hasClosedParam, holdingsQuery.closed, setHoldingsQuery]);
+
+  // 日期选择器下限（O-4 方案甲，零后端改动）：首个交易日（useTransactions 首条）；
+  // 无交易 → 组合创建日；恒 ≤ 今天。
+  const firstTradeQuery = useTransactions(currentPortfolioId, {
+    page: 1,
+    pageSize: 1,
+    sortBy: 'date',
+    sortOrder: 'asc',
+  });
+  const currentPortfolio = portfolios.find((p) => p.id === currentPortfolioId);
+  const minDate = useMemo(() => {
+    const firstTradeDate = firstTradeQuery.data?.items?.[0]?.date;
+    if (firstTradeDate) return firstTradeDate;
+    return currentPortfolio?.createdAt
+      ? toIsoDate(new Date(currentPortfolio.createdAt))
+      : today;
+  }, [firstTradeQuery.data, currentPortfolio, today]);
+
+  const holdings = useHoldings(currentPortfolioId, {
+    date: holdingsQuery.date,
+    includeClosed: holdingsQuery.closed,
+    types: holdingsQuery.types.length > 0 ? holdingsQuery.types : undefined,
+    securityId: holdingsQuery.sec || undefined,
+  });
   const securities = useSecurities(currentPortfolioId);
 
   /**
@@ -111,12 +150,16 @@ export default function HoldingsPage(): JSX.Element {
    * - 必须放在所有早退分支之前，遵守 Hooks 调用顺序恒定的规则。
    * - 复制后再 sort，避免原地修改 react-query 缓存数组。
    * - 占比权重基于 aggregate.totalMarketValue 计算，排序不影响权重。
+   * - T02 追加：正常持仓（qty>0）恒排在已清仓（qty=0）之前；同组内市值降序。
    */
   const sortedItems = useMemo(
     () =>
-      [...(holdings.data?.items ?? [])].sort(
-        (a, b) => b.marketValue - a.marketValue,
-      ),
+      [...(holdings.data?.items ?? [])].sort((a, b) => {
+        const aOpen = a.quantity > 0 ? 0 : 1;
+        const bOpen = b.quantity > 0 ? 0 : 1;
+        if (aOpen !== bOpen) return aOpen - bOpen;
+        return b.marketValue - a.marketValue;
+      }),
     [holdings.data?.items],
   );
 
@@ -186,6 +229,17 @@ export default function HoldingsPage(): JSX.Element {
             录入买卖
           </Button>
         }
+      />
+
+      {/* T02 工具栏：日期选择器 + 显示已清仓 + 类型多选（URL 持久化） */}
+      <HoldingsToolbar
+        date={holdingsQuery.date}
+        minDate={minDate}
+        includeClosed={holdingsQuery.closed}
+        types={holdingsQuery.types}
+        onDateChange={(v) => setHoldingsQuery({ date: v })}
+        onClosedChange={(v) => setHoldingsQuery({ closed: v })}
+        onTypesChange={(v) => setHoldingsQuery({ types: v })}
       />
 
       <Tabs defaultValue="holdings">
@@ -327,6 +381,15 @@ export default function HoldingsPage(): JSX.Element {
                           <TableCell className="font-medium">
                             <div className="flex items-center gap-2">
                               {h.securityName}
+                              {h.quantity === 0 && (
+                                <Badge
+                                  variant="outline"
+                                  className="text-[10px] text-muted-foreground"
+                                  title="已清仓标的（数量为 0）"
+                                >
+                                  已清仓
+                                </Badge>
+                              )}
                               {h.flag === 'COST_BASED' && (
                                 <Badge
                                   variant="outline"

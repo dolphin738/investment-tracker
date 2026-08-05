@@ -89,6 +89,8 @@ export interface UserPreference {
   xirrDecimals: number;
   theme: string;
   staleDays: number;
+  /** 持仓页「显示已清仓」初值（HOLD-B-P0-04 · URL 参数优先级更高） */
+  showLiquidated: boolean;
   /** 出入金后现金余额软提示开关（SET-P0-07） */
   cashHintOnCashflow: boolean;
   /** 证券买卖后现金余额软提示开关（SET-P0-07） */
@@ -112,6 +114,8 @@ export interface UpdatePreferenceDto {
   xirrDecimals?: number;
   theme?: string;
   staleDays?: number;
+  /** 持仓页「显示已清仓」初值（HOLD-B-P0-04） */
+  showLiquidated?: boolean;
   cashHintOnCashflow?: boolean;
   cashHintOnTrade?: boolean;
   amountThousands?: boolean;

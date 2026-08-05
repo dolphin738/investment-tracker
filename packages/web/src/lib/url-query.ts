@@ -104,13 +104,13 @@ export function dateCodec(defaultValue: string): UrlCodec<string> {
 }
 
 /** 逗号数组 codec：URL 中以逗号分隔；空数组 → 不写入 */
-export function arrayCodec(defaultValue: string[]): UrlCodec<string[]> {
+export function arrayCodec<T extends string>(defaultValue: T[]): UrlCodec<T[]> {
   return {
     defaultValue,
     parse: (raw) =>
       raw === null || raw === ''
         ? []
-        : raw.split(',').filter((s) => s.length > 0),
+        : (raw.split(',').filter((s) => s.length > 0) as T[]),
     serialize: (value) => (value.length > 0 ? value.join(',') : null),
   };
 }

@@ -5,7 +5,7 @@
  * 方案A 的 upsert/delete/dates/sync-snapshot mutation 已删除。
  */
 
-import { useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { listHoldings, type HoldingQueryParams } from '@/api/holding.api';
 
 /** 持仓列表（含汇总） */
@@ -18,5 +18,8 @@ export function useHoldings(
     queryFn: () => listHoldings(portfolioId!, params),
     enabled: Boolean(portfolioId),
     staleTime: 30 * 1000,
+    // 组合切换 / 日期 / 已清仓 / 类型变化时保留上一份数据，
+    // 避免 loading 闪烁与「旧响应覆盖新响应」的请求竞态（T02 验收 7）
+    placeholderData: keepPreviousData,
   });
 }

@@ -50,6 +50,7 @@ const fixtures = vi.hoisted(() => {
     xirrDecimals: 2,
     theme: 'system',
     staleDays: 3,
+    showLiquidated: false,
     cashHintOnCashflow: true,
     cashHintOnTrade: true,
     amountThousands: true,
