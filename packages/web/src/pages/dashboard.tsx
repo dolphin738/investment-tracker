@@ -42,6 +42,9 @@ import { EmptyState } from '@/components/EmptyState';
 import { PageHeader } from '@/components/PageHeader';
 import { CashflowForm } from '@/features/cashflow/cashflow-form';
 import { SecurityTradeForm } from '@/features/security-trade/security-trade-form';
+import { FreshnessBanner } from '@/features/overview/freshness-banner';
+import { createOverviewSchema } from '@/features/overview/overview-query-params';
+import type { OverviewQueryState } from '@/features/overview/overview-query-params';
 import {
   QUICK_RANGE_OPTIONS,
   resolveQuickRange,
@@ -59,12 +62,12 @@ import { useQuery } from '@tanstack/react-query';
 import { getOverview, getPortfoliosSummary } from '@/api/overview.api';
 import { listTransactions } from '@/api/transaction.api';
 import { CashFlowType } from '@investment-tracker/shared';
+import { useUrlState } from '@/lib/url-query';
 import {
   formatPercent,
   formatDecimal,
   formatCurrency,
   formatDate,
-  isStale,
   cn,
 } from '@/lib/utils';
 import {
@@ -206,17 +209,25 @@ export default function DashboardPage(): JSX.Element {
   const xirrDecimals = getPreference('xirrDecimals');
   const amountThousands = getPreference('amountThousands');
   const amountAbbrev = getPreference('amountAbbrev');
-  const staleDays = getPreference('staleDays');
-  const [granularity, setGranularity] = useState<string>(
-    getPreference('defaultGranularity'),
+  // 查询维度 / 范围状态（T03 · URL 持久化，AL-014）：
+  // g / range / from / to 走 useUrlState —— 默认值不写入 URL、刷新/分享/前进后退可还原。
+  const [overviewQuery, setOverviewQuery] = useUrlState<OverviewQueryState>(
+    createOverviewSchema(
+      getPreference('defaultGranularity'),
+      getPreference('defaultDateRange'),
+    ),
   );
-  const [dateRange, setDateRange] = useState<string>(
-    getPreference('defaultDateRange'),
-  );
-  const { startDate, endDate } = useMemo(
-    () => resolveQuickRange(dateRange),
-    [dateRange],
-  );
+  const { startDate, endDate } = useMemo(() => {
+    // range=custom（分享链接）时直接采用 from/to；否则按快捷范围解析（Q-6 乙）
+    if (
+      overviewQuery.range === 'custom' &&
+      overviewQuery.from &&
+      overviewQuery.to
+    ) {
+      return { startDate: overviewQuery.from, endDate: overviewQuery.to };
+    }
+    return resolveQuickRange(overviewQuery.range);
+  }, [overviewQuery.range, overviewQuery.from, overviewQuery.to]);
 
   // 概览聚合数据
   const overview = useQuery({
@@ -228,13 +239,13 @@ export default function DashboardPage(): JSX.Element {
 
   // 净值/XIRR 序列（接入维度）
   const xirrSeries = useXirrSeries(currentPortfolioId, {
-    granularity: granularity as QueryGranularity,
+    granularity: overviewQuery.g as QueryGranularity,
     startDate,
     endDate,
     aggregation: AggregationMethod.LAST,
   });
   const navSeries = useNavSeries(currentPortfolioId, {
-    granularity: granularity as QueryGranularity,
+    granularity: overviewQuery.g as QueryGranularity,
     startDate,
     endDate,
     aggregation: AggregationMethod.LAST,
@@ -357,9 +368,7 @@ export default function DashboardPage(): JSX.Element {
       <PageHeader
         title="概览"
         description={
-          ov?.latestDate
-            ? `数据截止 ${ov.latestDate}${isStale(ov.latestDate, staleDays) ? '（数据陈旧）' : ''}`
-            : '最近 12 个月收益概览'
+          ov?.latestDate ? `数据截止 ${ov.latestDate}` : '最近 12 个月收益概览'
         }
         actions={
           <div className="flex gap-2">
@@ -378,6 +387,14 @@ export default function DashboardPage(): JSX.Element {
           </div>
         }
       />
+
+      {/* ===== 数据新鲜度提示条（DASH-P1-03 · 后端判定，isStale=false 不渲染） ===== */}
+      {ov?.freshness && (
+        <FreshnessBanner
+          portfolioId={currentPortfolioId}
+          freshness={ov.freshness}
+        />
+      )}
 
       {/* ===== 6 指标卡片 ===== */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -445,7 +462,13 @@ export default function DashboardPage(): JSX.Element {
 
       {/* ===== 维度切换 + 范围下拉 ===== */}
       <div className="flex flex-wrap items-center gap-3">
-        <Tabs value={granularity} onValueChange={setGranularity} className="w-auto">
+        <Tabs
+          value={overviewQuery.g}
+          onValueChange={(v) =>
+            setOverviewQuery({ g: v as OverviewQueryState['g'] })
+          }
+          className="w-auto"
+        >
           <TabsList>
             {GRANULARITY_TABS.map((tab) => (
               <TabsTrigger key={tab.value} value={tab.value}>
@@ -454,7 +477,12 @@ export default function DashboardPage(): JSX.Element {
             ))}
           </TabsList>
         </Tabs>
-        <Select value={dateRange} onValueChange={setDateRange}>
+        <Select
+          value={overviewQuery.range}
+          onValueChange={(v) =>
+            setOverviewQuery({ range: v as OverviewQueryState['range'] })
+          }
+        >
           <SelectTrigger className="w-[120px]">
             <SelectValue />
           </SelectTrigger>

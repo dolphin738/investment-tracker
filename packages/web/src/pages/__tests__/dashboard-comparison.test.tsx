@@ -118,6 +118,15 @@ const OVERVIEW: OverviewResponse = {
   yearReturnRate: '0.05000000',
   latestDate: '2026-06-15',
   latestSource: 'MANUAL',
+  freshness: {
+    staleDays: 3,
+    isStale: false,
+    latestPriceAsOf: '2026-06-15',
+    latestPriceLagDays: 0,
+    latestCashAsOf: '2026-06-15',
+    latestCashLagDays: 0,
+    reasons: [],
+  },
   holdingsSummary: {
     totalMarketValue: '123456.78',
     totalCost: '100000.00',

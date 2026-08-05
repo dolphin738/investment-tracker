@@ -529,10 +529,9 @@ export interface OverviewResponse {
    * 数据新鲜度（PRD DASH-P1-03 / AL-015 · 决策 O-6）。
    * 后端判定（阈值 / 滞后天数 / 文案），前端只渲染。口径＝行情 / 现金 asOf 滞后，非 latestDate。
    *
-   * 声明为可选：兼容尚未升级的后端（运行时 undefined），前端一律判空后渲染；
-   * 已升级后端必然返回（见 backend OverviewService.buildFreshness）。
+   * 必填：后端 overview 接口必然返回（见 backend OverviewService.buildFreshness）。
    */
-  freshness?: FreshnessInfo;
+  freshness: FreshnessInfo;
   /** 持仓汇总（后端 OverviewService 返回） */
   holdingsSummary: {
     totalMarketValue: string;

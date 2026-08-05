@@ -45,6 +45,9 @@ export function useUpdatePreferences() {
     onSuccess: (_data, payload) => {
       toast.success('偏好已保存');
       queryClient.invalidateQueries({ queryKey: PREFERENCE_KEY });
+      // staleDays 等偏好会影响后端 freshness 判定（O-6）：
+      // 保存后让概览页即时重拉，新鲜度提示条随之更新（T03 验收 7）。
+      queryClient.invalidateQueries({ queryKey: ['overview'] });
       // 同步本地 store：把增量 payload 合并进现有偏好，
       // 保证概览页 / 分析页即使不重新请求也能立即读到新默认值。
       const state = usePreferenceStore.getState();
