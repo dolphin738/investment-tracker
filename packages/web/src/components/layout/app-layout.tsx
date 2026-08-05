@@ -7,7 +7,7 @@
 
 import { useState } from 'react';
 import { Outlet, useNavigate } from 'react-router-dom';
-import { LogOut, Menu, Settings, X } from 'lucide-react';
+import { CalendarDays, LogOut, Menu, Settings, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { UserAvatar } from '@/components/user-avatar';
 import {
@@ -22,7 +22,7 @@ import { Sidebar } from './sidebar';
 import { PortfolioSelector } from '@/features/portfolio/portfolio-selector';
 import { PortfolioDialog } from '@/features/portfolio/portfolio-dialog';
 import { useAuthStore } from '@/stores/auth.store';
-import { ROUTE_PATH } from '@/lib/constants';
+import { ROUTE_PATH, todayInAppTzIso } from '@/lib/constants';
 
 export function AppLayout(): JSX.Element {
   const navigate = useNavigate();
@@ -55,6 +55,13 @@ export function AppLayout(): JSX.Element {
         </div>
 
         <div className="flex items-center gap-2">
+          <span
+            className="hidden items-center gap-1 text-xs text-muted-foreground sm:flex"
+            title="项目基准日期（北京时间 UTC+8）"
+          >
+            <CalendarDays className="h-3.5 w-3.5" />
+            {todayInAppTzIso()}
+          </span>
           <PortfolioSelector onCreateClick={() => setPortfolioDialogOpen(true)} />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>

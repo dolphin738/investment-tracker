@@ -64,3 +64,20 @@ export function toIsoDate(date: Date): string {
   const dd = date.getDate().toString().padStart(2, '0');
   return `${yyyy}-${MM}-${dd}`;
 }
+
+/**
+ * 返回北京时间（UTC+8）当前日期的 YYYY-MM-DD 字符串。
+ *
+ * 与后端 `app-date.util.ts` 的 `todayInAppTz()` 口径完全一致：
+ * 先按「应用时区 +8h」做位移，再取 UTC 日历日（`toISOString().slice(0,10)`）。
+ * 位移方式与渲染方式必须配套——这里统一用 UTC 渲染，故位移量就是恒定的
+ * `8h`，绝不混入 `getTimezoneOffset()`（本地偏移量），否则会与 UTC 渲染叠加
+ * 产生净误差，导致跨午夜漂移（这正是后端注释明确警告要避免的坑）。
+ * （中国无夏令时，恒定 +8h。）
+ */
+export function todayInAppTzIso(): string {
+  const now = new Date();
+  // 与后端 todayInAppTz() 完全一致：+8h 后取 UTC 日历日（中国无夏令时，恒定 +8h）
+  const appNow = new Date(now.getTime() + 8 * 60 * 60 * 1000);
+  return appNow.toISOString().slice(0, 10);
+}
