@@ -528,7 +528,7 @@ export default function DashboardPage(): JSX.Element {
           移动端纵向堆叠（Tabs 与日期选择器各占一行，避免挤成两行半），
           ≥640px 回到一行且日期选择器靠右（justify-between）。
         */}
-        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between">
           <Tabs
             value={overviewQuery.g}
             onValueChange={(v) =>
