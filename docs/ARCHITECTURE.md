@@ -1,10 +1,10 @@
 # 投资收益统计系统 — 架构设计文档（Canonical）
 
-> **版本**: v2.6
+> **版本**: v2.7
 > **架构师**: 高见远（Gao）
 > **日期**: 2026-08-06
-> **修订史（完整版）**：各版变更说明已迁出至 **[docs/ARCHITECTURE-CHANGELOG.md](./ARCHITECTURE-CHANGELOG.md)**（最新为 v2.6）。
-> **近期修订（v2.6）**：总资产概览融合到概览页 —— 出入金页【A】总资产块彻底移除，概览页新增 `features/overview/asset-metrics.ts` 与 `total-asset-trend-chart.tsx`（§1.3 目录树同步），走势图接入日期筛选（复用既有 `overview-query-params` 的 `custom/from/to`）。**后端零改动、§10.1.2 组件分层约定零改动**。增量设计见 [`docs/designs/overview-fusion-2026-08-06.md`](./designs/overview-fusion-2026-08-06.md)。
+> **修订史（完整版）**：各版变更说明已迁出至 **[docs/ARCHITECTURE-CHANGELOG.md](./ARCHITECTURE-CHANGELOG.md)**（最新为 v2.7）。
+> **近期修订（v2.7）**：概览融合收口 —— 走势图卡头合并为**单一 `/snapshots` 入口**（移除 `?manage=1` 深链），`snapshot-list.tsx` 移除 `manageMode`；`features/overview/asset-metrics.ts` 纯函数指标构造（含 `buildOverviewMetrics`/`formatAmountOrEmpty`，修金额 `0` 被 falsy 误判为「暂无数据」）；`date-range-quick-picker` 支持可选受控 `quick` prop（受控/非受控双模）；布局打磨（筛选栏底边对齐 `sm:items-end`）与陈旧注释清理。**后端零改动、URL schema 零改动**。增量设计见 [`docs/designs/overview-fusion-2026-08-06.md`](./designs/overview-fusion-2026-08-06.md) 及 CHANGELOG v2.7。
 > **依据**: PRD v3.1.9（Consolidated，单一权威）+ ENVIRONMENT-SETUP + 用户拍板决策（含 v2.3 方案B 数据架构）
 >
 > **⚠️ 本档为唯一架构真相源（Canonical）**：取代并吸收 `ARCHITECTURE-modules.md`（已归档至 `docs/archive/`）。任何工程实现以本档 + PRD v3.1.9 为准；二者冲突时以 PRD 金融口径（① 级）与数据架构口径（② 级）裁决优先级为最高依据（见 PRD §2.1–§2.3）。
@@ -386,6 +386,7 @@ graph TB
 │           │       ├── progress.tsx
 │           │       ├── radio-group.tsx
 │           │       ├── select.tsx
+│           │       ├── section.tsx              # 🆕 轻量分区外壳 Section/SectionTitle（v2.7 融合）
 │           │       ├── skeleton.tsx
 │           │       ├── switch.tsx
 │           │       ├── table.tsx
@@ -1782,6 +1783,8 @@ ON CONFLICT (portfolio_id, date) DO UPDATE
 | **stores** | `src/stores/` | Zustand 全局状态（auth token、当前选中组合） |
 | **lib** | `src/lib/` | 工具函数（cn/utils、api-client、url-query、constants） |
 
+> **v2.7 收口（概览融合组件分层）**：走势图卡头已合并为**单一 `/snapshots` 入口**（移除 `?manage=1` 深链）；走势图日期筛选**复用 `overview-query-params.ts` 的 `custom/from/to`**，URL schema 不变。新增组件均落在 `features/overview/`（概览页专属零件）与 `components/ui/`（通用展示），分层方向不变。
+
 #### 10.1.3 状态管理分工
 
 | 状态类型 | 管理方案 | 示例 |
@@ -1824,6 +1827,14 @@ ON CONFLICT (portfolio_id, date) DO UPDATE
 | 概览 `/` | `g` / `range` / `from` / `to` | `OverviewQueryState`（`features/overview/overview-query-params.ts`） | `range` = `1w/1m/3m/6m/1y/ytd/all/custom`；`from`/`to` 仅 `range=custom` 生效 |
 
 **🆕 新增 feature（均已在 §1.3 目录树落位）**：`HoldingsToolbar`（日期选择 + 已清仓开关 + 类型多选，T02）、`FreshnessBanner`（数据新鲜度提示条，T03；`isStale` 才渲染、三按钮 + sessionStorage 静默）、`CashBalanceHistory`（现金余额变更历史展开器，T04）、`ExportPanel` / `ImportDialog` / `ImportTemplateButtons` / `CsvDownload`（数据导入导出，T05）。
+
+#### 10.1.7 🆕 概览融合组件细节（v2.7 收口）
+
+- **指标构造（纯函数）** `features/overview/asset-metrics.ts`：`buildOverviewMetrics(input)` 固定顺序产出 8 项指标（`group` 分 `asset` 资产构成 / `return` 收益表现），`formatAmountOrEmpty(value)` 将 `null/undefined/''` 映射为「暂无数据」但**保留 `0` 与 `'0'` 的数值格式化**（修复金额 `0` 被 falsy 误判为「暂无数据」的缺陷）。
+- **走势图** `features/overview/total-asset-trend-chart.tsx`：总资产口径 `totalAsset(t) = cumulativeNav(t) × shares(t)`，**仅 `aggregation = LAST`（期末值）成立**（概览页硬编码 `LAST`；若未来加 `AVG` 开关须改为后端直出总资产序列，见设计稿 §4.2 / K-5）。
+- **日期选择器** `components/date/date-range-quick-picker.tsx`：新增**可选受控 `quick` prop**（`isControlled = quick !== undefined`），受控/非受控双模，既有 3 个调用方零影响；概览页以受控模式替换原快捷范围 `Select`，保持页面单 combobox（守住 `dashboard-alignment` A8 用例）。
+- **快照列表** `features/snapshot/snapshot-list.tsx`：**已移除 `manageMode` prop 及管理模式提示条**（死代码）；`/snapshots` 仅单一浏览模式，管理态统一在页内操作。
+- **Hooks 约束（已知约定）**：`pages/dashboard.tsx` 的 `overviewMetrics` 中 `useMemo` 及派生变量计算**须位于所有提前 `return` 之前**（曾因违反导致冷启动白屏，见 commit `5f6ae54`）；新增 hooks 时须同样遵守顺序。
 
 ---
 
