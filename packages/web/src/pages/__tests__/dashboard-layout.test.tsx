@@ -580,9 +580,33 @@ describe('DashboardPage 布局打磨（f1013f3）', () => {
       const cls = sectionBody(sectionByTitle('趋势分析'))[0].className;
       expect(cls).toContain('flex-col');
       expect(cls).toContain('sm:flex-row');
+      // ≥sm 允许换行，且各控件底边对齐（d99c8a8：items-center→items-end 的核心行为，
+      //  此前无任何用例锁定，改动二又恰好重写了这串 class → 补锁防回归）
+      expect(cls).toContain('sm:flex-wrap');
+      expect(cls).toContain('sm:items-end');
       // 改动二：删除 sm:justify-between，维度 Tabs 与日期选择器靠左紧凑排列
       expect(cls).not.toContain('sm:justify-between');
       expect(cls).toContain('gap-4');
+      expect(cls).not.toContain('gap-3');
+    });
+
+    it('筛选栏内维度 Tabs 在前、日期选择器紧随其后，且全页仅一个范围选择器', async () => {
+      renderDashboard();
+      await screen.findByTestId('nav-chart');
+
+      const bar = sectionBody(sectionByTitle('趋势分析'))[0];
+      const children = Array.from(bar.children) as HTMLElement[];
+      expect(children).toHaveLength(2);
+
+      // 第 0 个：维度 Tabs（[日][周][月][年]）
+      expect(children[0].textContent).toContain('日');
+      expect(children[0].querySelector('[role="tablist"]')).not.toBeNull();
+
+      // 第 1 个：DateRangeQuickPicker（范围下拉 + 起止日期）
+      expect(children[1].querySelector('[role="combobox"]')).not.toBeNull();
+
+      // 删除 justify-between 后不得引入第二个选择器（A8 单数断言的前提）
+      expect(screen.getAllByRole('combobox')).toHaveLength(1);
     });
 
     it('三张时序图（hero + 净值 + XIRR）收在同一个「趋势分析」区内', async () => {
