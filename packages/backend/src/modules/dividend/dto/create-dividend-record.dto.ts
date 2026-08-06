@@ -36,6 +36,14 @@ export class CreateDividendRecordDto {
   amount!: string;
 
   @ApiPropertyOptional({
+    description: '所得税（≥ 0，最多 2 位小数；缺省 0，净额 = amount − tax 必须 ≥ 0）',
+    example: '60.00',
+  })
+  @IsOptional()
+  @IsDecimal({ decimal_digits: '0,2' })
+  tax?: string;
+
+  @ApiPropertyOptional({
     description: '分红类型：CASH 现金分红 / STOCK_DIVIDEND 红利再投',
     enum: DividendType,
     default: DividendType.CASH,

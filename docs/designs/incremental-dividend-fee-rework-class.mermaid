@@ -1,0 +1,166 @@
+classDiagram
+    direction LR
+
+    class DividendRecord {
+        +string id
+        +string portfolioId
+        +string securityId
+        +string date
+        +string amount   «税前»
+        +string tax      «所得税,18,2,默认0»
+        +DividendType type
+        +string note
+        +string securityName
+        +string securityCode
+        +string createdAt
+        +string netAmount  «派生=amount−tax»
+    }
+
+    class CreateDividendRecordDto {
+        +string securityId
+        +string date
+        +string amount
+        +string tax?
+        +DividendType type?
+        +string note?
+    }
+
+    class UpdateDividendRecordDto {
+        +string securityId?
+        +string date?
+        +string amount?
+        +string tax?
+        +string note?
+    }
+
+    class DividendController {
+        +findAll(portfolioId, securityId?)
+        +create(portfolioId, dto)
+        +update(portfolioId, id, dto)
+        +remove(portfolioId, id)
+    }
+
+    class DividendService {
+        +create(portfolioId, userId, dto) DividendRecordResponse
+        +findAll(portfolioId, userId, securityId?) DividendRecordResponse[]
+        +update(portfolioId, id, userId, dto) DividendRecordResponse
+        +remove(portfolioId, id, userId) null
+        -parseAmount(raw) Decimal
+        -parseTax(raw) Decimal
+        -validateNetAmount(amount, tax) void
+        -validatePortfolioOwnership(portfolioId, userId) void
+        -validateSecurityInPortfolio(portfolioId, securityId) void
+        -toResponse(record) DividendRecordResponse
+    }
+
+    class FeeRecord {
+        +string id
+        +string portfolioId
+        +string securityId
+        +string date
+        +string amount
+        +FeeType type
+        +string transactionId
+        +string note
+        +string securityName
+        +string securityCode
+    }
+
+    class CreateFeeRecordDto {
+        +string securityId
+        +string date
+        +string amount
+        +FeeType type?
+        +string transactionId?
+        +string note?
+    }
+
+    class FeeService {
+        +create(portfolioId, userId, dto) FeeRecordResponse
+        +findAll(portfolioId, userId, securityId?) FeeRecordResponse[]
+        +remove(portfolioId, id, userId) null
+    }
+
+    class SecurityTrade {
+        +string id
+        +string portfolioId
+        +string securityId
+        +string date
+        +SecuritySide side
+        +string quantity
+        +string price  «含费单价,18,6»
+        +string fee    «新口径恒0»
+        +string note
+    }
+
+    class CreateSecurityTradeDto {
+        +string securityId
+        +string date
+        +SecuritySide side
+        +number quantity
+        +number price    «含费单价»
+        +number fee?     «服务层强制0»
+        +string note?
+    }
+
+    class SecurityTradeService {
+        +create(userId, portfolioId, dto) SecurityTradeResponse «fee强制0»
+        +findAll(userId, portfolioId, query)
+        +findOne(userId, portfolioId, id)
+        +update(userId, portfolioId, id, dto) «忽略fee字段»
+        +remove(userId, portfolioId, id)
+        -validateSellQuantity(portfolioId, securityId, date, quantity) void
+    }
+
+    class RecalculationService {
+        +recalculateRange(portfolioId, date)
+    }
+
+    class HoldingDerivationService {
+        +derive(portfolioId, date) HoldingView[]
+        «costTotal += qty×price+fee — fee=0后自动等价含费口径，零改动»
+    }
+
+    class MoneyUtils {
+        +isMoneyString(v, opts) boolean
+        +computeNetAmount(amount, tax) string
+        +sumMoney(values) string
+    }
+
+    class DividendFeeForm {
+        +IncomeRecordKind kind
+        +DividendRecord? record «编辑态预填»
+        +onSuccess?()
+    }
+
+    class DividendFeeSection {
+        +string portfolioId
+        +aggregateBySecurity(dividends, fees) SecurityIncomeRow[]
+        +sumNetAmount(records) number
+    }
+
+    class SecurityTradeForm {
+        +string tradeAmount  «成交额,用户输入»
+        +string commission
+        +string stampTax
+        +string other
+        +string feeTotal «自动Σ»
+        +number derivedPrice «含费单价=(成交额±费用)/数量»
+        +SecurityTradeResponse? trade «编辑态»
+    }
+
+    DividendController --> DividendService
+    DividendService --> CreateDividendRecordDto
+    DividendService --> UpdateDividendRecordDto
+    DividendService ..> DividendRecord : toResponse(含netAmount)
+    FeeService --> CreateFeeRecordDto
+    FeeService ..> FeeRecord : toResponse
+    SecurityTradeService --> CreateSecurityTradeDto
+    SecurityTradeService --> RecalculationService
+    HoldingDerivationService ..> SecurityTrade : 推导读取
+    DividendFeeForm --> MoneyUtils
+    DividendFeeSection --> MoneyUtils
+    SecurityTradeForm --> MoneyUtils
+    DividendFeeSection --> DividendFeeForm
+    SecurityTradeForm ..> FeeService : POST /fees (transactionId)
+    DividendFeeSection ..> DividendService : PATCH /dividends/:id

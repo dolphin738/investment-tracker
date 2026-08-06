@@ -1,17 +1,19 @@
 /**
- * 阶段 C 验收补充测试（QA 严过关 · Q-1 A 恢复 Dividend/Fee 两模块）
+ * 阶段 C 验收补充测试（QA 严过关 · Q-1 A 恢复 Dividend/Fee 两模块 + 增量 R-2/R-5）
  *
  * 工程师自带的 dividend.service.spec / fee.service.spec 覆盖的是 **service 层**；
  * 本文件补齐三处覆盖缺口，均为主理人点名的高优先级验收项：
  *
- * 1. **6 个端点逐个 404**（验收 1）：走真实 Controller → 真实 Service → mock Prisma，
- *    验证 GET/POST/DELETE × dividends/fees 在越权时抛 404（而非 403/200），
- *    避免通过状态码泄露「该 portfolioId 是否存在」。
+ * 1. **7 个端点逐个 404**（验收 1）：走真实 Controller → 真实 Service → mock Prisma，
+ *    验证 GET/POST/PATCH/DELETE × dividends + GET/POST/DELETE × fees 在越权时抛 404
+ *    （而非 403/200），避免通过状态码泄露「该 portfolioId 是否存在」。
  * 2. **三张表零触碰**（验收 2 / D-02 / D-03）：原 spec 只断言了 create 路径的 cashFlow，
  *    此处把 daily_nav / daily_xirr / cash_flows 三张表 × create/delete 两条路径
  *    × dividend/fee 两个模块全部铺满，并从依赖注入层实锤未引入 RecalculationService。
  * 3. **金额精度双闸**（验收 4）：DTO 层（class-validator）+ Service 层（Decimal）
  *    对「≤ 0」「> 2 位小数」的拒绝，以及 NUMERIC(18,2) 字符串链路的无损传输。
+ * 4. **增量税/净额**（R-2/R-5）：tax ≥ 0 双闸、netAmount = amount − tax ≥ 0、
+ *    PATCH 越权 404、响应统一带 tax/netAmount。
  *
  * 说明：prisma 全量 mock，不触库；不依赖 Nest 容器，直接 new 出被测类。
  */
@@ -26,6 +28,7 @@ import { DividendService } from './dividend.service';
 import { DividendController } from './dividend.controller';
 import { DividendModule } from './dividend.module';
 import { CreateDividendRecordDto } from './dto/create-dividend-record.dto';
+import { UpdateDividendRecordDto } from './dto/update-dividend-record.dto';
 
 import { FeeService } from '../fee/fee.service';
 import { FeeController } from '../fee/fee.controller';
@@ -65,6 +68,7 @@ function createPrismaMock() {
       create: jest.fn(),
       findMany: jest.fn().mockResolvedValue([]),
       findFirst: jest.fn().mockResolvedValue({ id: RECORD_ID }),
+      update: jest.fn(),
       delete: jest.fn().mockResolvedValue({ id: RECORD_ID }),
     },
     feeRecord: {
@@ -119,6 +123,16 @@ const DIVIDEND_DTO: CreateDividendRecordDto = {
   note: '中期分红',
 };
 
+/** 带税的分红 DTO（增量 R-2：tax=60 → netAmount=260） */
+const DIVIDEND_TAX_DTO: CreateDividendRecordDto = {
+  securityId: SECURITY_ID,
+  date: '2025-07-15',
+  amount: '320.00',
+  tax: '60.00',
+  type: DividendType.CASH,
+  note: '中期分红',
+};
+
 const FEE_DTO: CreateFeeRecordDto = {
   securityId: SECURITY_ID,
   date: '2025-08-01',
@@ -126,13 +140,14 @@ const FEE_DTO: CreateFeeRecordDto = {
   type: FeeType.COMMISSION,
 };
 
-function makeDividendRecord(amount = '320.00') {
+function makeDividendRecord(amount = '320.00', tax = '0') {
   return {
     id: RECORD_ID,
     portfolioId: PORTFOLIO_OF_A,
     securityId: SECURITY_ID,
     date: new Date('2025-07-15T00:00:00.000Z'),
     amount: new Prisma.Decimal(amount),
+    tax: new Prisma.Decimal(tax),
     type: DividendType.CASH,
     note: null,
     createdAt: new Date('2025-07-16T08:30:00.000Z'),
@@ -175,9 +190,9 @@ function expectIncomeTablesUntouched(prisma: PrismaMock): void {
 }
 
 // ===========================================================================
-// 验收 1：user_id 隔离 —— 6 个端点逐个 404
+// 验收 1：user_id 隔离 —— 7 个端点逐个 404
 // ===========================================================================
-describe('[验收1] user_id 隔离：6 个端点越权访问一律 404', () => {
+describe('[验收1] user_id 隔离：7 个端点越权访问一律 404', () => {
   let prisma: PrismaMock;
   let dividendController: DividendController;
   let feeController: FeeController;
@@ -195,7 +210,7 @@ describe('[验收1] user_id 隔离：6 个端点越权访问一律 404', () => {
     );
   });
 
-  /** 6 个端点的调用器（在 beforeEach 之后取控制器实例，故用惰性函数） */
+  /** 7 个端点的调用器（在 beforeEach 之后取控制器实例，故用惰性函数） */
   const ENDPOINTS: Array<[name: string, invoke: () => Promise<unknown>]> = [
     [
       'GET /portfolios/:id/dividends',
@@ -204,6 +219,13 @@ describe('[验收1] user_id 隔离：6 个端点越权访问一律 404', () => {
     [
       'POST /portfolios/:id/dividends',
       () => dividendController.create(USER_A, PORTFOLIO_OF_B, DIVIDEND_DTO),
+    ],
+    [
+      'PATCH /portfolios/:id/dividends/:recordId',
+      () =>
+        dividendController.update(USER_A, PORTFOLIO_OF_B, RECORD_ID, {
+          amount: '320.00',
+        }),
     ],
     [
       'DELETE /portfolios/:id/dividends/:recordId',
@@ -546,10 +568,13 @@ describe('[验收4] 金额精度：NUMERIC(18,2) 双闸校验', () => {
 
       for (const item of list) {
         expect(typeof item.amount).toBe('string');
+        expect(typeof item.tax).toBe('string');
+        expect(typeof item.netAmount).toBe('string');
       }
       // 前端 formatCurrency(…, 2) 会补齐两位小数，此处只保证数值等价
       expect(Number(list[0].amount)).toBeCloseTo(0.1, 10);
       expect(Number(list[1].amount)).toBeCloseTo(0.2, 10);
+      expect(Number(list[0].netAmount)).toBeCloseTo(0.1, 10);
     });
 
     it('大额金额不丢精（18 位整数部分）', async () => {
@@ -558,6 +583,169 @@ describe('[验收4] 金额精度：NUMERIC(18,2) 双闸校验', () => {
       ]);
       const list = await feeService.findAll(PORTFOLIO_OF_A, USER_A.userId);
       expect(list[0].amount).toBe('9999999999999999.99');
+    });
+  });
+});
+
+// ===========================================================================
+// 增量验收：分红所得税 + 净额 + PATCH（R-2 / R-5 / K-1 / K-2）
+// ===========================================================================
+describe('[增量] 分红所得税 / 净额 / PATCH 端点', () => {
+  let prisma: PrismaMock;
+  let dividendService: DividendService;
+  let dividendController: DividendController;
+
+  beforeEach(() => {
+    prisma = createPrismaMock();
+    prisma.portfolio.findFirst.mockResolvedValue({ id: PORTFOLIO_OF_A });
+    prisma.dividendRecord.create.mockResolvedValue(makeDividendRecord('320.00', '60.00'));
+    prisma.dividendRecord.findFirst.mockResolvedValue(makeDividendRecord('320.00', '60.00'));
+    prisma.dividendRecord.update.mockResolvedValue(makeDividendRecord('500.00', '100.00'));
+    dividendService = new DividendService(prisma as unknown as PrismaService);
+    dividendController = new DividendController(dividendService);
+  });
+
+  describe('DTO 层：tax 字段（class-validator）', () => {
+    /** 跑一遍 class-validator，返回 tax 字段的报错数量（创建 DTO） */
+    async function validateCreateTax(tax: string): Promise<number> {
+      const instance = plainToInstance(CreateDividendRecordDto, {
+        ...DIVIDEND_DTO,
+        tax,
+      });
+      const errors = await validate(instance);
+      return errors.filter((e) => e.property === 'tax').length;
+    }
+
+    it('tax 缺省合法（0 报错）', async () => {
+      const instance = plainToInstance(CreateDividendRecordDto, DIVIDEND_DTO);
+      const errors = await validate(instance);
+      expect(errors.filter((e) => e.property === 'tax')).toHaveLength(0);
+    });
+
+    it.each(['0', '0.00', '60.00', '100'])('合法 tax 通过：%s', async (tax) => {
+      expect(await validateCreateTax(tax)).toBe(0);
+    });
+
+    it.each(['1.234', '0.001', '99.999'])(
+      '超过 2 位小数被拒：%s',
+      async (tax) => {
+        expect(await validateCreateTax(tax)).toBe(1);
+      },
+    );
+
+    it('非数字字符串被拒', async () => {
+      expect(await validateCreateTax('abc')).toBe(1);
+    });
+
+    it('更新 DTO 同样校验 tax 精度', async () => {
+      const instance = plainToInstance(UpdateDividendRecordDto, { tax: '1.234' });
+      const errors = await validate(instance);
+      expect(errors.filter((e) => e.property === 'tax')).toHaveLength(1);
+    });
+  });
+
+  describe('Service 层：tax / netAmount', () => {
+    it('create 带 tax 返回 {amount, tax, netAmount}（净额 = 税前 − 税）', async () => {
+      const result = await dividendService.create(
+        PORTFOLIO_OF_A,
+        USER_A.userId,
+        DIVIDEND_TAX_DTO,
+      );
+      expect(result.amount).toBe('320.00');
+      expect(result.tax).toBe('60.00');
+      expect(result.netAmount).toBe('260.00');
+    });
+
+    it.each(['-0.01', '-100.00'])(
+      'tax %s（< 0）→ 400，且不写入',
+      async (tax) => {
+        await expect(
+          dividendService.create(PORTFOLIO_OF_A, USER_A.userId, {
+            ...DIVIDEND_TAX_DTO,
+            tax,
+          }),
+        ).rejects.toBeInstanceOf(BadRequestException);
+        expect(prisma.dividendRecord.create).not.toHaveBeenCalled();
+      },
+    );
+
+    it('tax > amount → 400「净额不能为负」，且不写入', async () => {
+      await expect(
+        dividendService.create(PORTFOLIO_OF_A, USER_A.userId, {
+          ...DIVIDEND_TAX_DTO,
+          amount: '100.00',
+          tax: '150.00',
+        }),
+      ).rejects.toThrow('净额不能为负');
+      expect(prisma.dividendRecord.create).not.toHaveBeenCalled();
+    });
+
+    it('tax 与 amount 相等（净额 0）合法', async () => {
+      prisma.dividendRecord.create.mockResolvedValue(
+        makeDividendRecord('100.00', '100.00'),
+      );
+      const result = await dividendService.create(
+        PORTFOLIO_OF_A,
+        USER_A.userId,
+        { ...DIVIDEND_TAX_DTO, amount: '100.00', tax: '100.00' },
+      );
+      expect(result.netAmount).toBe('0.00');
+    });
+  });
+
+  describe('PATCH /dividends/:id', () => {
+    it('合法更新：走 service.update，返回含 tax/netAmount 的新响应', async () => {
+      const result = await dividendController.update(
+        USER_A,
+        PORTFOLIO_OF_A,
+        RECORD_ID,
+        { amount: '500.00', tax: '100.00' },
+      );
+      expect(prisma.dividendRecord.update).toHaveBeenCalledTimes(1);
+      expect(result.amount).toBe('500.00');
+      expect(result.tax).toBe('100.00');
+      expect(result.netAmount).toBe('400.00');
+    });
+
+    it('更新后净额 < 0 → 400（amount 100、tax 150）', async () => {
+      prisma.dividendRecord.findFirst.mockResolvedValue(
+        makeDividendRecord('100.00', '60.00'),
+      );
+      await expect(
+        dividendController.update(USER_A, PORTFOLIO_OF_A, RECORD_ID, {
+          tax: '150.00',
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.dividendRecord.update).not.toHaveBeenCalled();
+    });
+
+    it('记录不存在 → 404，不更新', async () => {
+      prisma.dividendRecord.findFirst.mockResolvedValue(null);
+      await expect(
+        dividendController.update(USER_A, PORTFOLIO_OF_A, RECORD_ID, {
+          note: 'x',
+        }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(prisma.dividendRecord.update).not.toHaveBeenCalled();
+    });
+
+    it('越权（他人组合）→ 404，不触达记录表', async () => {
+      prisma.portfolio.findFirst.mockResolvedValue(null);
+      await expect(
+        dividendController.update(USER_A, PORTFOLIO_OF_B, RECORD_ID, {
+          amount: '320.00',
+        }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(prisma.dividendRecord.findFirst).not.toHaveBeenCalled();
+      expect(prisma.dividendRecord.update).not.toHaveBeenCalled();
+    });
+
+    it('PATCH 更新不触发重算（不触碰三张收益表）', async () => {
+      await dividendController.update(USER_A, PORTFOLIO_OF_A, RECORD_ID, {
+        amount: '500.00',
+        tax: '100.00',
+      });
+      expectIncomeTablesUntouched(prisma);
     });
   });
 });

@@ -38,8 +38,16 @@ vi.mock('@/hooks/use-securities', () => ({
 }));
 
 vi.mock('@/hooks/use-security-trades', () => ({
-  useCreateSecurityTrade: () => ({ mutate: mocks.createTrade, isPending: false }),
-  useUpdateSecurityTrade: () => ({ mutate: mocks.updateTrade, isPending: false }),
+  useCreateSecurityTrade: () => ({
+    mutate: mocks.createTrade,
+    mutateAsync: mocks.createTrade,
+    isPending: false,
+  }),
+  useUpdateSecurityTrade: () => ({
+    mutate: mocks.updateTrade,
+    mutateAsync: mocks.updateTrade,
+    isPending: false,
+  }),
 }));
 
 /**

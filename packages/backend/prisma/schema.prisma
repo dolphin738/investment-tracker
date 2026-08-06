@@ -233,6 +233,8 @@ model DividendRecord {
   securityId  String       @map("security_id")
   date        DateTime     @db.Date
   amount      Decimal      @db.Decimal(18, 2)
+  // 所得税（增量设计 C-2/K-1：净额 = amount − tax，存量迁移默认 0）
+  tax         Decimal      @default(0) @map("tax") @db.Decimal(18, 2)
   type        DividendType @default(CASH)
   note        String?
   createdAt   DateTime     @default(now()) @map("created_at")

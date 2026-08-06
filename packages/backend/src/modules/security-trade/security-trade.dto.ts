@@ -42,19 +42,29 @@ export class CreateSecurityTradeDto {
   @Max(1e15)
   quantity!: number;
 
-  @ApiProperty({ description: '成交单价（> 0）', example: 150.50, minimum: 0.000001 })
+  @ApiProperty({
+    description: '成交单价（> 0）——新口径为「含费单价」，example: 1500.45, minimum: 0.000001',
+    example: 1500.45,
+    minimum: 0.000001,
+  })
   @Type(() => Number)
   @IsNumber()
   @Min(0.000001)
   @Max(1e15)
   price!: number;
 
-  @ApiProperty({ description: '手续费（≥ 0）', example: 5.0, default: 0 })
+  @ApiPropertyOptional({
+    description:
+      '手续费（≥ 0）——增量设计 C-5：该字段已被废弃，服务层 create 强制落 0、update 忽略；费用拆分请 POST /fees（transactionId 关联）',
+    example: 0,
+    default: 0,
+  })
+  @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(0)
   @Max(1e15)
-  fee!: number;
+  fee?: number;
 
   @ApiPropertyOptional({ description: '备注' })
   @IsOptional()

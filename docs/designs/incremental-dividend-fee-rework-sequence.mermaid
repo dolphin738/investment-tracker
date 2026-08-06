@@ -1,0 +1,89 @@
+%% ===== 流程 A：分红新增 / 编辑（tax + netAmount） =====
+sequenceDiagram
+    autonumber
+    actor U as 用户
+    participant F as DividendFeeForm
+    participant S as DividendFeeSection
+    participant H as useDividends
+    participant API as /api/portfolios/:pid/dividends
+    participant BE as DividendService
+    participant DB as Prisma
+
+    alt 新增（formKind='dividend'）
+        U->>F: 录入 标的/日期/税前金额/所得税/备注
+        F->>F: 净额=computeNetAmount(amount,tax) 实时展示
+        F->>F: zod校验：tax≥0 且 netAmount≥0
+        F->>H: useCreateDividend.mutateAsync({..., amount, tax})
+    else 编辑（record 预填）
+        S->>S: 点击明细行「编辑」→ setEditing(record)
+        S->>F: 传入 record（securityId/date/amount/tax/note 预填）
+        U->>F: 修改字段
+        F->>F: 净额实时重算 + 校验
+        F->>H: useUpdateDividend.mutateAsync({id, payload})
+    end
+    H->>API: POST /dividends 或 PATCH /dividends/:id（tax 字符串）
+    API->>BE: 校验 portfolio.userId（404）→ security 归属（404）
+    BE->>BE: parseAmount>0 / parseTax≥0 / validateNetAmount(amount−tax≥0)
+    BE->>DB: create/update（tax 落库）
+    DB-->>BE: record
+    BE-->>API: DividendRecordResponse{amount,tax,netAmount,...}
+    API-->>H: 200
+    H->>H: invalidateQueries(['dividends'])  ← 只失效自身，不触发重算(K-6/D-02)
+    H-->>F: 成功
+    F-->>U: toast「分红记录已保存/已更新」
+    S->>H: useDividends 重取
+    S->>S: 明细三列(金额/所得税/净额) + 汇总 Σ(amount−tax)
+
+%% ===== 流程 B：买卖录入（含费单价 + 费用拆分落 FeeRecord） =====
+sequenceDiagram
+    autonumber
+    actor U as 用户
+    participant T as SecurityTradeForm
+    participant TAPI as /api/portfolios/:pid/security-trades
+    participant TS as SecurityTradeService
+    participant FAPI as /api/portfolios/:pid/fees
+    participant FS as FeeService
+    participant DB as Prisma
+    participant Q as react-query 缓存
+
+    U->>T: 录入 方向/日期/标的/数量/成交额/佣金/印花税/其他
+    T->>T: feeTotal = sumMoney([佣金,印花税,其他])
+    alt 买入
+        T->>T: price = (成交额+feeTotal)/数量
+    else 卖出
+        T->>T: feeTotal>成交额 ? 阻止提交并提示 : price=(成交额−feeTotal)/数量
+    end
+    T->>T: price = Number(price.toFixed(6))  ← 收敛单价精度(18,6)
+    T->>TAPI: POST {securityId,date,side,quantity,price,fee:0,note}
+    TAPI->>TS: verifyOwnership → validateSellQuantity(卖出) → price>0(DTO)
+    TS->>DB: create SecurityTrade(fee=0, price=含费单价)
+    DB-->>TS: trade
+    TS->>TS: recalculateRange(portfolioId, date)  ← 交易写入触发重算(T2)
+    TS-->>T: SecurityTradeResponse（含 id）
+    T->>Q: invalidate [security-trades,holdings,nav,xirr,snapshots,overview]
+    loop 每个 amount>0 的费用类型（COMMISSION/STAMP_TAX/OTHER）
+        T->>FAPI: POST {securityId,date,amount,type,transactionId:trade.id}
+        FAPI->>FS: verifyOwnership → security 归属 → amount>0
+        FS->>DB: create FeeRecord(transactionId=trade.id)
+        DB-->>FS: fee
+        FS-->>T: FeeRecordResponse
+        T->>Q: invalidateQueries(['fees'])  ← 只失效自身(K-6/D-03)
+    end
+    T-->>U: toast「买卖流水已录入」(含费成本价已生效)
+
+%% ===== 流程 C：删除分红 / 删除费用（既有能力保留） =====
+sequenceDiagram
+    autonumber
+    actor U as 用户
+    participant S as DividendFeeSection
+    participant H as useDividends / useFees
+    participant API as /dividends/:id 或 /fees/:id
+    participant BE as DividendService / FeeService
+
+    U->>S: 点击行内删除 → AlertDialog 确认
+    S->>H: deleteDividend.mutateAsync(id) / deleteFee.mutateAsync(id)
+    H->>API: DELETE
+    API->>BE: ownership 校验 → findFirst({id,portfolioId}) → 404 兜底
+    BE->>BE: delete
+    H->>H: invalidateQueries(['dividends']) / ['fees'])
+    S-->>U: 列表刷新

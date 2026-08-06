@@ -26,6 +26,7 @@ vi.mock('sonner', () => ({
 vi.mock('@/api/dividend.api', () => ({
   listDividends: vi.fn().mockResolvedValue([]),
   createDividend: vi.fn().mockResolvedValue({ id: 'd1' }),
+  updateDividend: vi.fn().mockResolvedValue({ id: 'd1' }),
   deleteDividend: vi.fn().mockResolvedValue(null),
 }));
 
@@ -37,6 +38,7 @@ vi.mock('@/api/fee.api', () => ({
 
 import {
   useCreateDividend,
+  useUpdateDividend,
   useDeleteDividend,
 } from '@/hooks/use-dividends';
 import { useCreateFee, useDeleteFee } from '@/hooks/use-fees';
@@ -112,6 +114,18 @@ describe('[验收2] 分红/费用写入不失效任何收益类缓存（D-02 / D
     const { result } = renderHook(() => useDeleteDividend('pf-1'), { wrapper });
 
     await result.current.mutateAsync('d1');
+
+    await waitFor(() => expect(invalidateSpy).toHaveBeenCalled());
+    expect(invalidatedPrefixes()).toEqual(['dividends']);
+  });
+
+  it('编辑分红（增量 R-5/K-6）：只失效 ["dividends"]，不触碰收益类缓存', async () => {
+    const { result } = renderHook(() => useUpdateDividend('pf-1'), { wrapper });
+
+    await result.current.mutateAsync({
+      id: 'd1',
+      payload: { amount: '500.00', tax: '100.00' },
+    });
 
     await waitFor(() => expect(invalidateSpy).toHaveBeenCalled());
     expect(invalidatedPrefixes()).toEqual(['dividends']);

@@ -15,7 +15,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { Portfolio } from '@investment-tracker/shared';
@@ -685,6 +685,31 @@ describe('HoldingsPage 阶段 A', () => {
       expect(document.querySelector('tbody')).toBeNull();
       // 关键：错误态不得退化成「暂无持仓数据」空态
       expect(screen.queryByText('暂无持仓数据')).toBeNull();
+    });
+  });
+
+  // ===== 增量回归：撤销融合（R-1 / K-8） =====
+  describe('增量回归：撤销分红融合（R-1）', () => {
+    it('「录入买卖」弹窗只含买卖表单，无「买入/卖出 | 分红」Tab', () => {
+      renderHoldingsPage();
+
+      fireEvent.click(screen.getAllByRole('button', { name: /录入买卖/ })[0]);
+
+      const dialog = screen.getByRole('dialog');
+      expect(within(dialog).getByText('录入买卖')).toBeDefined();
+      expect(within(dialog).getByTestId('trade-form')).toBeDefined();
+      // 无融合 Tab（K-8：任何后续改动不得复活 Tab）
+      expect(within(dialog).queryByRole('tab', { name: '分红' })).toBeNull();
+      expect(within(dialog).queryByRole('tab', { name: '买入 / 卖出' })).toBeNull();
+      // 无 DividendFeeForm 渲染（分红提示文案不存在）
+      expect(within(dialog).queryByText(/红利再投无需录入/)).toBeNull();
+    });
+
+    it('分红入口仅【E】区块「录入分红」', () => {
+      renderHoldingsPage();
+
+      activateTab('分红/费用');
+      expect(screen.getByRole('button', { name: /录入分红/ })).toBeDefined();
     });
   });
 });

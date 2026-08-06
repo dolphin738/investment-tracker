@@ -70,6 +70,7 @@ vi.mock('@/hooks/use-dividends', () => ({
   DIVIDENDS_KEY: ['dividends'],
   useDividends: () => state.dividends,
   useCreateDividend: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useUpdateDividend: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useDeleteDividend: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
@@ -167,6 +168,8 @@ const DIVIDENDS: DividendRecord[] = [
     date: '2025-07-15',
     type: 'CASH',
     amount: '320.00',
+    tax: '0.00',
+    netAmount: '320.00',
     note: '中期分红',
     createdAt: '2025-07-16T00:00:00.000Z',
   },
@@ -179,6 +182,8 @@ const DIVIDENDS: DividendRecord[] = [
     date: '2025-01-10',
     type: 'CASH',
     amount: '80.00',
+    tax: '0.00',
+    netAmount: '80.00',
     note: null,
     createdAt: '2025-01-11T00:00:00.000Z',
   },
@@ -191,6 +196,8 @@ const DIVIDENDS: DividendRecord[] = [
     date: '2025-06-01',
     type: 'STOCK_DIVIDEND',
     amount: '150.00',
+    tax: '0.00',
+    netAmount: '150.00',
     note: null,
     createdAt: '2025-06-02T00:00:00.000Z',
   },
@@ -370,7 +377,7 @@ describe('HoldingsPage 阶段 C —【E】分红 / 费用区', () => {
 
   // ===== E3 按标的汇总（验收 2） =====
   describe('E3 按标的累计分红 / 累计费用（HOLD-B-P0-10 验收 2）', () => {
-    it('汇总表 4 列：标的 / 代码 / 累计分红 / 累计费用', () => {
+    it('汇总表 4 列：标的 / 代码 / 累计分红（净额） / 累计费用', () => {
       openIncomeTab();
 
       const headers = Array.from(
@@ -379,7 +386,7 @@ describe('HoldingsPage 阶段 C —【E】分红 / 费用区', () => {
           .querySelectorAll('thead th'),
       ).map((th) => th.textContent?.trim());
 
-      expect(headers).toEqual(['标的', '代码', '累计分红', '累计费用']);
+      expect(headers).toEqual(['标的', '代码', '累计分红（净额）', '累计费用']);
     });
 
     it('同标的多笔分红累加（甲股票 320+80=400），并按分红降序排列', () => {
@@ -611,5 +618,156 @@ describe('aggregateBySecurity 聚合口径', () => {
 
     expect(rows[0].dividendTotal).toBe(0);
     expect(Number.isNaN(rows[0].dividendTotal)).toBe(false);
+  });
+});
+
+// ===========================================================================
+// 增量回归（R-3 / R-4 / R-5 / R-6）：净额口径 / 三列明细 / 编辑入口 / 费用入口移除
+// ===========================================================================
+describe('增量：分红净额口径 / 三列 / 编辑入口 / 费用入口移除', () => {
+  /** 带所得税的分红夹具（按 date desc 与后端一致）：甲 1500−300=1200、甲 1000−200=800 → 汇总 2000（非 2500） */
+  const TAXED_DIVIDENDS = [
+    {
+      id: 't2',
+      portfolioId: 'pf-1',
+      securityId: 's-a',
+      securityName: '甲股票',
+      securityCode: '600000',
+      date: '2026-08-05',
+      type: 'CASH',
+      amount: '1500.00',
+      tax: '300.00',
+      netAmount: '1200.00',
+      note: '中期',
+      createdAt: '2026-08-06T00:00:00.000Z',
+    },
+    {
+      id: 't1',
+      portfolioId: 'pf-1',
+      securityId: 's-a',
+      securityName: '甲股票',
+      securityCode: '600000',
+      date: '2026-05-01',
+      type: 'CASH',
+      amount: '1000.00',
+      tax: '200.00',
+      netAmount: '800.00',
+      note: 'Q1',
+      createdAt: '2026-05-02T00:00:00.000Z',
+    },
+  ] as DividendRecord[];
+
+  beforeEach(() => {
+    installJsdomPolyfills();
+    state.dividends = {
+      data: TAXED_DIVIDENDS,
+      isLoading: false,
+      isError: false,
+      refetch: () => {},
+    };
+    state.fees = {
+      data: [],
+      isLoading: false,
+      isError: false,
+      refetch: () => {},
+    };
+    usePortfolioStore.setState({
+      portfolios: [PORTFOLIO_FIXTURE],
+      currentPortfolioId: 'pf-1',
+    });
+    usePreferenceStore.setState({ preferences: BASE_PREF, loaded: true });
+  });
+
+  afterEach(() => {
+    cleanup();
+    usePreferenceStore.setState({ preferences: null, loaded: false });
+    usePortfolioStore.setState({ portfolios: [], currentPortfolioId: null });
+    vi.clearAllMocks();
+  });
+
+  it('汇总卡「累计分红（净额）」= Σ(amount−tax) = 2000（非税前 2500）', () => {
+    openIncomeTab();
+
+    const total = screen.getByTestId('dividend-total');
+    expect(total.textContent).toBe('¥2,000.00');
+    expect(total.textContent).not.toBe('¥2,500.00');
+  });
+
+  it('按标的汇总列同样按净额（甲股票 800+1200=2000）', () => {
+    openIncomeTab();
+
+    const rows = getSummaryRows();
+    expect(rows).toHaveLength(1);
+    expect(cellAt(rows[0], 0).textContent).toBe('甲股票');
+    expect(cellAt(rows[0], 2).textContent).toBe('¥2,000.00');
+  });
+
+  it('分红明细三列：金额 / 所得税 / 净额（逐行 1000/200/800、1500/300/1200）', () => {
+    openIncomeTab();
+    fireEvent.click(screen.getByRole('button', { name: /分红记录/ }));
+
+    const headers = Array.from(
+      screen
+        .getByTestId('dividend-detail-table')
+        .querySelectorAll('thead th'),
+    ).map((th) => th.textContent?.trim());
+    expect(headers).toContain('金额');
+    expect(headers).toContain('所得税');
+    expect(headers).toContain('净额');
+
+    const rows = Array.from(
+      screen
+        .getByTestId('dividend-detail-table')
+        .querySelectorAll('tbody tr'),
+    );
+    // 日期倒序：1500 行在前
+    const first = rows[0].querySelectorAll('td');
+    expect(first[3].textContent).toBe('¥1,500.00'); // 金额
+    expect(first[4].textContent).toBe('¥300.00'); // 所得税
+    expect(first[5].textContent).toBe('¥1,200.00'); // 净额
+
+    const second = rows[1].querySelectorAll('td');
+    expect(second[3].textContent).toBe('¥1,000.00');
+    expect(second[4].textContent).toBe('¥200.00');
+    expect(second[5].textContent).toBe('¥800.00');
+  });
+
+  it('行内「编辑」入口存在，点击弹出预填表单（编辑分红）', () => {
+    openIncomeTab();
+    fireEvent.click(screen.getByRole('button', { name: /分红记录/ }));
+
+    const editButtons = screen.getAllByRole('button', { name: '编辑分红记录' });
+    expect(editButtons).toHaveLength(2);
+
+    fireEvent.click(editButtons[0]);
+
+    // 弹窗标题 + 预填金额/税（record 传入）
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.textContent).toContain('编辑分红');
+    const amountInput = dialog.querySelector('#income-amount') as HTMLInputElement;
+    expect(amountInput.value).toBe('1500.00');
+    const taxInput = dialog.querySelector('#income-tax') as HTMLInputElement;
+    expect(taxInput.value).toBe('300.00');
+  });
+
+  it('【E】区块无「录入费用」按钮（R-6）；费用明细展示保留', () => {
+    openIncomeTab();
+
+    expect(screen.queryByRole('button', { name: /录入费用/ })).toBeNull();
+    expect(screen.getByRole('button', { name: /录入分红/ })).toBeDefined();
+    // 费用明细折叠标题保留
+    expect(screen.getByRole('button', { name: /费用记录/ })).toBeDefined();
+  });
+
+  it('无分红时汇总卡显示 ¥0.00（净额口径空集边界）', () => {
+    state.dividends = {
+      data: [],
+      isLoading: false,
+      isError: false,
+      refetch: () => {},
+    };
+    openIncomeTab();
+
+    expect(screen.getByTestId('dividend-total').textContent).toBe('¥0.00');
   });
 });

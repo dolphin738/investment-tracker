@@ -4,6 +4,10 @@
  * 两端（backend / web）共用的类型、枚举与 API 契约。
  */
 
+// ── 金额工具（增量设计 C-8：前后端共用，整数分运算防浮点）──
+export { MONEY_RE, isMoneyString, computeNetAmount, sumMoney } from './money.ts';
+export type { MoneyOptions } from './money.ts';
+
 // ── 枚举 ──
 export {
   CashFlowType,

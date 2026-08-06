@@ -78,6 +78,7 @@ vi.mock('@/hooks/use-dividends', () => ({
     mutateAsync: state.createDividend,
     isPending: false,
   }),
+  useUpdateDividend: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useDeleteDividend: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
@@ -452,7 +453,7 @@ describe('【E】阶段 C 验收补充', () => {
       async (amount) => {
         renderForm('dividend');
 
-        fireEvent.change(screen.getByLabelText('分红金额 *'), {
+        fireEvent.change(screen.getByLabelText('分红额（税前）*'), {
           target: { value: amount },
         });
         fireEvent.click(screen.getByRole('button', { name: '保存' }));
@@ -469,7 +470,7 @@ describe('【E】阶段 C 验收补充', () => {
       async (amount) => {
         renderForm('dividend');
 
-        fireEvent.change(screen.getByLabelText('分红金额 *'), {
+        fireEvent.change(screen.getByLabelText('分红额（税前）*'), {
           target: { value: amount },
         });
         fireEvent.click(screen.getByRole('button', { name: '保存' }));
@@ -509,7 +510,7 @@ describe('【E】阶段 C 验收补充', () => {
     it('合法两位小数金额不产生金额报错（0.30）', async () => {
       renderForm('dividend');
 
-      fireEvent.change(screen.getByLabelText('分红金额 *'), {
+      fireEvent.change(screen.getByLabelText('分红额（税前）*'), {
         target: { value: '0.30' },
       });
       fireEvent.click(screen.getByRole('button', { name: '保存' }));

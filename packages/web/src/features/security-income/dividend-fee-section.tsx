@@ -1,16 +1,18 @@
 /**
  * features/security-income/dividend-fee-section.tsx — 【E】分红 / 费用记录区
  *
- * PRD §7.2【E】+ HOLD-B-P0-10 验收 2：
+ * PRD §7.2【E】+ HOLD-B-P0-10 验收 2 + 增量 R-3/R-4/R-6：
  * 「可在持仓模块按标的查看累计分红与累计费用」
  *
  * 区块构成：
- * - 汇总卡：累计分红 / 累计费用（§9.5 红涨绿跌：分红为收入=红，费用为支出=绿）
- * - 按标的汇总表：标的 / 代码 / 累计分红 / 累计费用（验收 2 的核心载体）
- * - [分红记录 ▾] / [费用记录 ▾] 两个可折叠明细表（对应草图两个下拉）
+ * - 汇总卡：累计分红（净额）/ 累计费用（§9.5 红涨绿跌：分红为收入=红，费用为支出=绿）
+ * - 按标的汇总表：标的 / 代码 / 累计分红（净额）/ 累计费用（验收 2 的核心载体）
+ * - [分红记录 ▾] 明细：日期/标的/类型/金额/所得税/净额/备注 + 编辑/删除（增量 R-3/R-5）
+ * - [费用记录 ▾] 明细：日期/标的/费用类型/金额/备注 + 删除
  *
- * ⚠️ 口径：两表均**不参与 XIRR 与净值计算**（D-02 / D-03），
- *    区块顶部固定展示该提示，避免用户误解为收益来源。
+ * ⚠️ 净额口径（K-2）：累计分红 = Σ(amount − tax)，明细逐行展示 金额/所得税/净额。
+ * ⚠️ 入口（R-6）：已移除「录入费用」按钮（费用录入并入买卖弹窗）；仅保留「录入分红」。
+ * ⚠️ 两表均**不参与 XIRR 与净值计算**（D-02 / D-03），区块顶部固定展示该提示。
  */
 
 import { useMemo, useState } from 'react';
@@ -20,6 +22,7 @@ import {
   ChevronRight,
   Coins,
   Info,
+  Pencil,
   Plus,
   Receipt,
   Trash2,
@@ -70,13 +73,20 @@ export interface SecurityIncomeRow {
   securityId: string;
   securityName: string;
   securityCode: string;
+  /** 累计分红（净额口径，K-2） */
   dividendTotal: number;
   feeTotal: number;
 }
 
+/** 单条分红净额（税缺省按 0 处理，兼容存量数据） */
+function netAmountOf(item: { amount: string; tax?: string | null }): number {
+  return Number(item.amount) - Number(item.tax ?? 0) || 0;
+}
+
 /**
- * 按标的聚合累计分红与累计费用（HOLD-B-P0-10 验收 2）
+ * 按标的聚合累计分红与累计费用（HOLD-B-P0-10 验收 2 + 增量 R-4）
  *
+ * - 分红累计按**净额**（amount − tax）累加，与明细 Σ 口径一致
  * - 金额为 NUMERIC(18,2) 字符串，逐条 Number() 后累加
  * - 只出现在其中一侧的标的也必须成行（分红有/费用无，反之亦然）
  * - 排序：累计分红降序 → 累计费用降序 → 代码升序（保证渲染稳定）
@@ -109,7 +119,7 @@ export function aggregateBySecurity(
 
   for (const item of dividends) {
     const row = ensureRow(item.securityId, item.securityName, item.securityCode);
-    row.dividendTotal += Number(item.amount) || 0;
+    row.dividendTotal += netAmountOf(item);
   }
   for (const item of fees) {
     const row = ensureRow(item.securityId, item.securityName, item.securityCode);
@@ -127,6 +137,13 @@ export function aggregateBySecurity(
 /** 求和：字符串金额列表 → number */
 function sumAmount(records: Array<{ amount: string }>): number {
   return records.reduce((acc, r) => acc + (Number(r.amount) || 0), 0);
+}
+
+/** 分红净额求和（K-2：Σ(amount − tax)） */
+export function sumNetAmount(
+  records: Array<{ amount: string; tax?: string | null }>,
+): number {
+  return records.reduce((acc, r) => acc + netAmountOf(r), 0);
 }
 
 export interface DividendFeeSectionProps {
@@ -148,8 +165,10 @@ export function DividendFeeSection({
   const amountAbbrev = getPreference('amountAbbrev');
   const moneyOpts = { thousands: amountThousands, abbreviate: amountAbbrev };
 
-  // 录入弹窗（分红 / 费用共用）
+  // 录入弹窗（R-6 后仅分红入口；编辑复用同一表单）
   const [formKind, setFormKind] = useState<IncomeRecordKind | null>(null);
+  // 编辑态：被编辑的分红记录（增量 R-5）
+  const [editing, setEditing] = useState<DividendRecord | null>(null);
   // 明细折叠状态（对应草图 [分红记录 ▾] / [费用记录 ▾]）
   const [dividendOpen, setDividendOpen] = useState(false);
   const [feeOpen, setFeeOpen] = useState(false);
@@ -159,6 +178,12 @@ export function DividendFeeSection({
     id: string;
   } | null>(null);
 
+  const dialogOpen = formKind !== null || editing !== null;
+  const closeDialog = (): void => {
+    setFormKind(null);
+    setEditing(null);
+  };
+
   const dividendList = useMemo(() => dividends.data ?? [], [dividends.data]);
   const feeList = useMemo(() => fees.data ?? [], [fees.data]);
 
@@ -166,7 +191,10 @@ export function DividendFeeSection({
     () => aggregateBySecurity(dividendList, feeList),
     [dividendList, feeList],
   );
-  const dividendTotal = useMemo(() => sumAmount(dividendList), [dividendList]);
+  const dividendTotal = useMemo(
+    () => sumNetAmount(dividendList),
+    [dividendList],
+  );
   const feeTotal = useMemo(() => sumAmount(feeList), [feeList]);
 
   const isLoading = dividends.isLoading || fees.isLoading;
@@ -189,7 +217,7 @@ export function DividendFeeSection({
 
   return (
     <div className={cn('space-y-4', className)} data-testid="dividend-fee-section">
-      {/* 区块标题 + 录入入口 */}
+      {/* 区块标题 + 录入入口（R-6：仅保留分红录入） */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h3 className="text-base font-semibold">分红 / 费用记录</h3>
@@ -198,16 +226,10 @@ export function DividendFeeSection({
             独立记录，不参与 XIRR 与净值计算
           </p>
         </div>
-        <div className="flex gap-2">
-          <Button size="sm" variant="outline" onClick={() => setFormKind('dividend')}>
-            <Plus className="mr-1.5 h-4 w-4" />
-            录入分红
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => setFormKind('fee')}>
-            <Plus className="mr-1.5 h-4 w-4" />
-            录入费用
-          </Button>
-        </div>
+        <Button size="sm" variant="outline" onClick={() => setFormKind('dividend')}>
+          <Plus className="mr-1.5 h-4 w-4" />
+          录入分红
+        </Button>
       </div>
 
       {/* 加载态 */}
@@ -236,13 +258,13 @@ export function DividendFeeSection({
 
       {!isLoading && !isError && (
         <>
-          {/* 汇总卡：§9.5 分红=收入=红（text-up），费用=支出=绿（text-down） */}
+          {/* 汇总卡：分红=收入=红（text-up），费用=支出=绿（text-down）；分红按净额（K-2） */}
           <div className="grid grid-cols-2 gap-3">
             <Card>
               <CardContent className="py-3">
                 <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
                   <Coins className="h-3.5 w-3.5" />
-                  累计分红
+                  累计分红（净额）
                 </p>
                 <p
                   className="text-lg font-bold tabular-nums text-up"
@@ -283,7 +305,7 @@ export function DividendFeeSection({
             />
           )}
 
-          {/* 按标的汇总（HOLD-B-P0-10 验收 2） */}
+          {/* 按标的汇总（HOLD-B-P0-10 验收 2；分红列按净额 K-2） */}
           {rows.length > 0 && (
             <Card>
               <div className="overflow-x-auto">
@@ -292,7 +314,7 @@ export function DividendFeeSection({
                     <TableRow>
                       <TableHead>标的</TableHead>
                       <TableHead>代码</TableHead>
-                      <TableHead className="text-right">累计分红</TableHead>
+                      <TableHead className="text-right">累计分红（净额）</TableHead>
                       <TableHead className="text-right">累计费用</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -329,7 +351,7 @@ export function DividendFeeSection({
             </Card>
           )}
 
-          {/* [分红记录 ▾] 明细 */}
+          {/* [分红记录 ▾] 明细（增量 R-3：三列 金额/所得税/净额 + 编辑入口） */}
           <Card>
             <CardContent className="p-0">
               <button
@@ -365,8 +387,10 @@ export function DividendFeeSection({
                           <TableHead>标的</TableHead>
                           <TableHead>类型</TableHead>
                           <TableHead className="text-right">金额</TableHead>
+                          <TableHead className="text-right">所得税</TableHead>
+                          <TableHead className="text-right">净额</TableHead>
                           <TableHead>备注</TableHead>
-                          <TableHead className="w-16 text-right">操作</TableHead>
+                          <TableHead className="w-24 text-right">操作</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -389,20 +413,42 @@ export function DividendFeeSection({
                             <TableCell className="text-right tabular-nums text-up">
                               {formatCurrency(item.amount, 2, moneyOpts)}
                             </TableCell>
+                            <TableCell className="text-right tabular-nums text-muted-foreground">
+                              {formatCurrency(item.tax ?? '0', 2, moneyOpts)}
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums text-up">
+                              {formatCurrency(
+                                Number(item.amount) - Number(item.tax ?? 0),
+                                2,
+                                moneyOpts,
+                              )}
+                            </TableCell>
                             <TableCell className="max-w-[200px] truncate text-muted-foreground">
                               {item.note ?? '-'}
                             </TableCell>
                             <TableCell className="text-right">
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                aria-label="删除分红记录"
-                                onClick={() =>
-                                  setDeleting({ kind: 'dividend', id: item.id })
-                                }
-                              >
-                                <Trash2 className="h-4 w-4 text-destructive" />
-                              </Button>
+                              <div className="flex justify-end gap-0.5">
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  aria-label="编辑分红记录"
+                                  title="编辑"
+                                  onClick={() => setEditing(item)}
+                                >
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  aria-label="删除分红记录"
+                                  title="删除"
+                                  onClick={() =>
+                                    setDeleting({ kind: 'dividend', id: item.id })
+                                  }
+                                >
+                                  <Trash2 className="h-4 w-4 text-destructive" />
+                                </Button>
+                              </div>
                             </TableCell>
                           </TableRow>
                         ))}
@@ -414,7 +460,7 @@ export function DividendFeeSection({
             </CardContent>
           </Card>
 
-          {/* [费用记录 ▾] 明细 */}
+          {/* [费用记录 ▾] 明细（展示保留，独立录入入口已移除 R-6） */}
           <Card>
             <CardContent className="p-0">
               <button
@@ -501,22 +547,19 @@ export function DividendFeeSection({
         </>
       )}
 
-      {/* 录入弹窗 */}
-      <Dialog
-        open={formKind !== null}
-        onOpenChange={(open) => !open && setFormKind(null)}
-      >
+      {/* 录入 / 编辑分红弹窗（R-6：仅分红；R-5：编辑态复用同一表单） */}
+      <Dialog open={dialogOpen} onOpenChange={(open) => !open && closeDialog()}>
         <DialogContent className="max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>
-              {formKind === 'fee' ? '录入费用' : '录入分红'}
-            </DialogTitle>
+            <DialogTitle>{editing ? '编辑分红' : '录入分红'}</DialogTitle>
           </DialogHeader>
-          {formKind !== null && (
+          {dialogOpen && (
             <DividendFeeForm
+              key={editing ? editing.id : 'create'}
               portfolioId={portfolioId}
-              kind={formKind}
-              onSuccess={() => setFormKind(null)}
+              kind="dividend"
+              record={editing}
+              onSuccess={closeDialog}
             />
           )}
         </DialogContent>

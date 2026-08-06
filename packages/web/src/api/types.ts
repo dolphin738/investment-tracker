@@ -219,17 +219,32 @@ export interface DividendRecord {
   securityCode: string;
   date: string;
   type: DividendType;
+  /** 分红金额（税前，NUMERIC(18,2) 字符串） */
   amount: string;
+  /** 所得税（NUMERIC(18,2) 字符串，默认 '0.00'；存量数据迁移后为 0） */
+  tax: string;
+  /** 净额 = amount − tax（NUMERIC(18,2) 字符串，后端统一计算，前端不自行二次计算 K-2） */
+  netAmount: string;
   note: string | null;
   createdAt: string;
 }
 
-/** 创建分红 DTO（type 可选，后端缺省 CASH） */
+/** 创建分红 DTO（type 可选，后端缺省 CASH；tax 可选，后端缺省 0） */
 export interface CreateDividendRecordDto {
   securityId: string;
   date: string;
   type?: DividendType;
   amount: string;
+  tax?: string;
+  note?: string;
+}
+
+/** 更新分红 DTO（全部可选，PATCH /dividends/:id） */
+export interface UpdateDividendRecordDto {
+  securityId?: string;
+  date?: string;
+  amount?: string;
+  tax?: string;
   note?: string;
 }
 
@@ -641,7 +656,9 @@ export interface SecurityTradeResponse {
   updatedAt: string;
 }
 
-/** 创建证券买卖流水 DTO（数量/单价/费用为 number，后端 DTO 要求 IsNumber） */
+/** 创建证券买卖流水 DTO（数量/单价/费用为 number，后端 DTO 要求 IsNumber）
+ * ⚠️ fee 新口径恒为 0（增量设计 C-5/K-4）：后端 create 强制落 0、update 忽略；
+ *    含费单价存入 price，费用拆分落 FeeRecord（transactionId 关联本交易）。 */
 export interface CreateSecurityTradeRequest {
   securityId: string;
   date: string;
@@ -652,7 +669,7 @@ export interface CreateSecurityTradeRequest {
   note?: string;
 }
 
-/** 更新证券买卖流水 DTO（全部可选） */
+/** 更新证券买卖流水 DTO（全部可选；fee 字段被后端忽略，保留现值） */
 export interface UpdateSecurityTradeRequest {
   securityId?: string;
   date?: string;

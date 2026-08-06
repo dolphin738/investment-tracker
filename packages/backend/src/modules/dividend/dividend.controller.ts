@@ -20,6 +20,7 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  Patch,
   Post,
   Query,
 } from '@nestjs/common';
@@ -27,6 +28,7 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { DividendService } from './dividend.service';
 import type { DividendRecordResponse } from './dividend.service';
 import { CreateDividendRecordDto } from './dto/create-dividend-record.dto';
+import { UpdateDividendRecordDto } from './dto/update-dividend-record.dto';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../../common/decorators/current-user.decorator';
 
@@ -54,6 +56,17 @@ export class DividendController {
     @Body() dto: CreateDividendRecordDto,
   ): Promise<DividendRecordResponse> {
     return this.dividendService.create(portfolioId, user.userId, dto);
+  }
+
+  @Patch(':id')
+  @ApiOperation({ summary: '编辑分红记录（可改 标的/日期/税前金额/所得税/备注）' })
+  async update(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('portfolioId') portfolioId: string,
+    @Param('id') id: string,
+    @Body() dto: UpdateDividendRecordDto,
+  ): Promise<DividendRecordResponse> {
+    return this.dividendService.update(portfolioId, id, user.userId, dto);
   }
 
   @Delete(':id')

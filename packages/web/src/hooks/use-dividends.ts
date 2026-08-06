@@ -13,8 +13,13 @@ import {
   createDividend as createApi,
   deleteDividend as deleteApi,
   listDividends as listApi,
+  updateDividend as updateApi,
 } from '@/api/dividend.api';
-import type { CreateDividendRecordDto, DividendRecord } from '@/api/types';
+import type {
+  CreateDividendRecordDto,
+  DividendRecord,
+  UpdateDividendRecordDto,
+} from '@/api/types';
 
 /** 分红列表 query key 前缀 */
 export const DIVIDENDS_KEY = ['dividends'] as const;
@@ -39,6 +44,30 @@ export function useCreateDividend(portfolioId: string | null) {
       createApi(portfolioId!, payload),
     onSuccess: () => {
       toast.success('分红记录已保存');
+      queryClient.invalidateQueries({ queryKey: ['dividends'] });
+    },
+  });
+}
+
+/**
+ * 编辑分红记录（增量设计 R-5 / K-6）
+ *
+ * ⚠️ 只失效 ['dividends'] 自身缓存，绝不连带失效 holdings / nav / xirr /
+ * snapshots / overview —— 分红编辑不参与收益计算，连带失效会造成
+ * 「改了分红 → 收益变了」的错觉。
+ */
+export function useUpdateDividend(portfolioId: string | null) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      payload,
+    }: {
+      id: string;
+      payload: UpdateDividendRecordDto;
+    }) => updateApi(portfolioId!, id, payload),
+    onSuccess: () => {
+      toast.success('分红记录已更新');
       queryClient.invalidateQueries({ queryKey: ['dividends'] });
     },
   });

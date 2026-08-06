@@ -190,7 +190,9 @@ export class SecurityTradeService {
         side: dto.side,
         quantity: dto.quantity,
         price: dto.price,
-        fee: dto.fee,
+        // 增量设计 C-5/K-4：trade.fee 新口径恒为 0（含费单价存入 price，
+        // 费用拆分落 FeeRecord 由前端编排 POST /fees 完成）；忽略 DTO.fee
+        fee: 0,
         note: dto.note,
       },
     });
@@ -309,7 +311,7 @@ export class SecurityTradeService {
         ...(dto.side !== undefined && { side: dto.side }),
         ...(dto.quantity !== undefined && { quantity: dto.quantity }),
         ...(dto.price !== undefined && { price: dto.price }),
-        ...(dto.fee !== undefined && { fee: dto.fee }),
+        // 增量设计 C-5/U-1：update 忽略 fee 字段（保留现值，存量 fee≠0 不丢失）
         ...(dto.note !== undefined && { note: dto.note }),
       },
     });
