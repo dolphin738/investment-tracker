@@ -1,8 +1,8 @@
 /**
  * pages/transactions.tsx — 出入金管理页（PRD §7.1）
  *
- * 注：原【A】总资产展示卡片（当前总资产 / 持仓市值 / 近30日走势图 / 手工记录标记 +
- * 两个 /snapshots 入口）已按 docs/designs/overview-fusion-2026-08-06.md 整体
+ * 注：原【A】总资产展示卡片（当前总资产 / 持仓市值 / 近30日走势图 / 手工记录标记）
+ * 已按 docs/designs/overview-fusion-2026-08-06.md 整体
  * 迁移至概览页（dashboard），本页不再展示总资产。
  * 【B】现金余额（手工维护）：当前余额展示行 + ⓘ 提示 + 金额/生效日期/保存（调 cash-balance API）
  * 【C】出入金流水列表：类型多选 checkbox（全不勾=全部）+ 日期范围 + 排序 + 分页（20/50/100）

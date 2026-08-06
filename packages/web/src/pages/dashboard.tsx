@@ -11,8 +11,8 @@
  *   ⚠️ 分组只是 `filter(m => m.group === …)` 的展示切分，值与涨跌方向仍由
  *   buildOverviewMetrics 统一构造，页面不参与任何计算。
  * - 区二「趋势分析」：筛选栏（维度 [日][周][月][年] + 共享 DateRangeQuickPicker，
- *   受控回显 URL range）置顶 → 总资产走势图作为 hero 图（含手工记录标记 + manage
- *   深链，融合自出入金页【A】）→ 四宫格：净值趋势（累计+当年双线）/ XIRR 趋势 /
+ *   受控回显 URL range）置顶 → 总资产走势图作为 hero 图（含手工记录标记，
+ *   融合自出入金页【A】）→ 四宫格：净值趋势（累计+当年双线）/ XIRR 趋势 /
  *   近期出入金最近5笔（带「查看全部」，DASH-P0-05）/ 组合表现对比。
  *   三张时序图收进同一区，避免走势图孤立在卡片与四宫格之间的割裂感。
  * - 有组合但无数据时，四宫格位置渲染三步引导卡（DASH-P0-06）
@@ -559,7 +559,7 @@ export default function DashboardPage(): JSX.Element {
           />
         </div>
 
-        {/* hero 图：总资产走势（融合自出入金页【A】，含手工记录标记 + manage 深链） */}
+        {/* hero 图：总资产走势（融合自出入金页【A】，含手工记录标记） */}
         <TotalAssetTrendChart
           data={navSeries.data ?? []}
           loading={navSeries.isLoading}
