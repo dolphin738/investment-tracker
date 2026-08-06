@@ -323,11 +323,11 @@ const manualSnapshots = useSnapshots(portfolioId, {
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│ 总资产走势            查看全部历史 →   ⚙ 管理历史记录 → │
+│ 总资产走势                        查看全部历史 → │
 └──────────────────────────────────────────────────────────┘
 ```
 
-分别跳 `/snapshots` 与 `/snapshots?manage=1`（沿用 `ROUTE_PATH.SNAPSHOTS`），把从出入金页删掉的两个入口原样补回，`manage=1` 深链不失联。
+单一入口跳 `/snapshots`（沿用 `ROUTE_PATH.SNAPSHOTS`），把从出入金页删掉的入口补回；**`?manage=1` 深链在收口时移除**（`/snapshots` 仅单一浏览模式，管理态统一在页内操作，见 ARCHITECTURE v2.7 §10.1.2 / §10.1.7）。
 
 **空/载入态**：沿用旧实现三态 —— `loading` → `<Skeleton className="h-[260px]" />`；`data` 为空 → 「当前范围暂无资产数据」；否则渲染图表。
 
@@ -528,7 +528,7 @@ L1–10 的模块 JSDoc 删除【A】段落（L4–6），并把摘要改为「�
 | Δ1 | 出入金页不再有总资产视图 | 用户在出入金页看不到当前总资产 | ✅ 用户拍板接受（D-1）。概览页是唯一入口，侧边栏一键可达 |
 | Δ2 | 走势图默认区间 30 天 → **跟随页面 `range`（偏好 `defaultDateRange`，通常近 1 年）** | 首屏曲线更长、点更密 | ✅ 见 §8 默认区间论证 |
 | Δ3 | 走势图粒度 固定日 → **跟随页面 `g`（偏好 `defaultGranularity`，通常月）** | 月粒度下点更稀疏、曲线更平滑 | ✅ 与同页「净值趋势」口径统一，反而消除了原先两图粒度打架的问题；用户可用 [日] Tab 切回 |
-| Δ4 | 「查看全部历史 / 管理历史记录」入口位置迁移 | 从出入金页 → 概览页走势图卡头 | ✅ 功能不丢（§4.2），`?manage=1` 深链保活 |
+| Δ4 | 「查看全部历史」入口位置迁移 | 从出入金页 → 概览页走势图卡头 | ✅ 功能不丢（§4.2）；`?manage=1` 深链与「管理历史记录」入口在收口时一并移除，管理态改在 `/snapshots` 页内操作 |
 | Δ5 | 3 卡视觉 muted 色块 → **`StatCard` 卡片** | 观感统一为概览页风格 | ✅ 页内一致性优先 |
 | Δ6 | 手工记录标记查询口径变更 | `pageSize:60` 无筛选 → `source=MANUAL` + `pageSize:200` | ✅ 属**缺陷修复**（长区间不再截断），非退化 |
 
@@ -587,7 +587,7 @@ const [overviewQuery, setOverviewQuery] = useUrlState<OverviewQueryState>(
 | `docs/ARCHITECTURE.md` §1.3 目录树（L417–419 附近） | `features/overview/` 下补 `asset-metrics.ts`、`total-asset-trend-chart.tsx`、`__tests__/` 三行 |
 | `docs/ARCHITECTURE.md` 版本行（L3–L6） | v2.5 → **v2.6**，「近期修订」改写 |
 | `docs/ARCHITECTURE-CHANGELOG.md` | 追加 `## v2.6` 条目 |
-| `docs/ARCHITECTURE.md` §10.1.2 | ❌ **不改**（理由见 §3.2） |
+| `docs/ARCHITECTURE.md` §10.1.2 | ✅ **更新为单入口**（收口后走势图卡头仅单一 `/snapshots` 入口、移除 `?manage=1` 深链与 `snapshot-list` 的 `manageMode`；分层方向不变，见 ARCHITECTURE v2.7 §10.1.2/§10.1.7） |
 
 ---
 
@@ -704,7 +704,7 @@ graph LR
 | N-18 | 区间内无数据 | 显示「当前范围暂无资产数据」，不显示空白图表 |
 | N-19 | 加载中 | 显示 Skeleton |
 | N-20 | 末位日期标签 | 完整可见不被裁切（`chartGrid()` right:40 生效） |
-| N-21 | 卡头链接 | 「查看全部历史 →」跳 `/snapshots`；「⚙ 管理历史记录 →」跳 `/snapshots?manage=1` 且进入管理态 |
+| N-21 | 卡头链接 | 「查看全部历史 →」跳 `/snapshots`（单一入口，无 `?manage=1`） |
 | N-22 | 网络请求数 | 走势图**不额外**发起 nav-series 请求（复用页面查询） |
 
 ### 11.4 回归 — 概览页现有能力
@@ -758,7 +758,7 @@ pnpm -w turbo run lint           # 无 no-unused-vars
 | K-3 | 删【A】块误删【B】仍在用的 `latestBalance` / `cashBalance` | 中 | §6.4 保留清单逐条核对；R-10 专项回归；tsc 会捕获引用缺失 |
 | K-4 | 长区间手工标记被 `pageSize` 截断 | 中 | 改用服务端 `source=MANUAL` + `pageSize:200`；N-17 专项验收；超 200 时给灰字提示 |
 | K-5 | `cumulativeNav × shares` 在 `AVG` 聚合下口径错误 | 低 | 概览页硬编码 `LAST`；组件 JSDoc 显式声明前提；如未来加 AVG 开关须改为后端直出总资产序列 |
-| K-6 | `?manage=1` 深链入口随【A】删除而失联 | 中 | 迁到走势图卡头（§4.2）；N-21 验收 |
+| K-6 | `?manage=1` 深链入口随【A】删除而失联 | 中 | 收口后改为**单一 `/snapshots` 入口**（§4.2），深链与 `manageMode` 一并移除；管理态统一在页内操作 |
 | K-7 | 8 卡在中屏（640–1024px）显 2 列 → 4 行，页面偏长 | 低 | 可接受；筛选栏与图表仍在首屏下方一屏内。若反馈强烈可改 `md:grid-cols-3`（8 卡 → 3/3/2，观感略碎，故不作首选） |
 
 ---
