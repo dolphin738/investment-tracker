@@ -95,12 +95,21 @@ export default function XirrAnalysisPage(): JSX.Element {
         </p>
       </div>
 
-      <DimensionSwitcher
-        value={dimension}
-        onChange={setDimension}
-        quickRanges={QUICK_RANGE_OPTIONS}
-        allRangeStart={baseDate}
-      />
+      {/*
+        问题③：与净值分析页（nav-analysis）保持同一外层结构。
+        DimensionSwitcher 内部是 `md:justify-between`——作为**全宽块级元素**时会把
+        起止日期推到最右端，与净值页的左对齐观感不一致。包一层 flex 容器后它变成
+        「按内容收缩」的 flex item，justify-between 失去多余空间从而不再生效，
+        日期控件紧跟维度 Tabs 左对齐。
+      */}
+      <div className="flex flex-wrap items-end gap-4">
+        <DimensionSwitcher
+          value={dimension}
+          onChange={setDimension}
+          quickRanges={QUICK_RANGE_OPTIONS}
+          allRangeStart={baseDate}
+        />
+      </div>
 
       {/* 当前累计 XIRR + 较年初 */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
