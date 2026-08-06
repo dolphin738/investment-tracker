@@ -32,7 +32,10 @@ import { DimensionSwitcher, QUICK_RANGE_OPTIONS } from '@/features/query/dimensi
 import type { DimensionSwitcherValue } from '@/features/query/dimension-switcher';
 import { NavTrendChart } from '@/components/charts/nav-trend-chart';
 import { MonthlyHeatmap } from '@/components/charts/monthly-heatmap';
-import { usePortfolioStore } from '@/stores/portfolio.store';
+import {
+  usePortfolioBaseDate,
+  usePortfolioStore,
+} from '@/stores/portfolio.store';
 import { usePreferenceStore } from '@/stores/preference.store';
 import { useNavSeries, useLatestNav } from '@/hooks/use-query-data';
 import { formatDecimal, formatPercent, formatCurrency, formatDate } from '@/lib/utils';
@@ -105,6 +108,8 @@ function computeDailyDetails(data: NavSeriesPoint[]): DailyDetailRow[] {
 
 export default function NavAnalysisPage(): JSX.Element {
   const currentPortfolioId = usePortfolioStore((s) => s.currentPortfolioId);
+  // 「全部」快捷项的起点 = 组合首个交易日（问题②）
+  const baseDate = usePortfolioBaseDate();
   const { startDate, endDate } = getDefaultDateRange();
 
   // 维度初始值（SET-P0-02 验收 4：读取偏好 defaultGranularity 作为默认维度）
@@ -185,6 +190,7 @@ export default function NavAnalysisPage(): JSX.Element {
           value={dimension}
           onChange={setDimension}
           quickRanges={QUICK_RANGE_OPTIONS}
+          allRangeStart={baseDate}
         />
         <div className="space-y-1.5">
           <Label className="text-xs text-muted-foreground">指标</Label>

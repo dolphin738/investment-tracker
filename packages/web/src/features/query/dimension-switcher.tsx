@@ -66,6 +66,11 @@ export interface DimensionSwitcherProps {
    * 缺省不渲染；选中后按预设计算起止日期并回调 onChange。
    */
   quickRanges?: ReadonlyArray<QuickRangeOption>;
+  /**
+   * 「全部」快捷项的起始日 —— 传当前组合首个交易日（`Portfolio.baseDate`，问题②）。
+   * 缺省或为 null 时回落 {@link ALL_RANGE_FALLBACK_START}。
+   */
+  allRangeStart?: string | null;
   className?: string;
 }
 
@@ -146,6 +151,7 @@ export function DimensionSwitcher({
   onChange,
   showAggregation = true,
   quickRanges,
+  allRangeStart,
   className,
 }: DimensionSwitcherProps): JSX.Element {
   // 最近一次选中的快捷项（仅作 Select 回显；用户手动改日期后不回退，仍显示上次预设）
@@ -211,7 +217,10 @@ export function DimensionSwitcher({
               onValueChange={(v) => {
                 setQuickRange(v);
                 // resolveQuickRange 恒返回具体起止日期，直接覆盖即可
-                const range = resolveQuickRange(v);
+                // 「全部」以组合首个交易日为起点（问题②），未传则回落兜底值
+                const range = resolveQuickRange(v, {
+                  allRangeStart: allRangeStart ?? undefined,
+                });
                 onChange({
                   ...value,
                   startDate: range.startDate,

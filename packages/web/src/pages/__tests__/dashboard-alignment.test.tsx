@@ -489,7 +489,27 @@ describe('DashboardPage 阶段 A', () => {
       expect(last.startDate).toBe(resolveQuickRange('1w').startDate);
     });
 
-    it('all 解析为 2000-01-01 并下发查询参数', async () => {
+    it('all 解析为组合首个交易日 baseDate 并下发查询参数（问题②）', async () => {
+      usePreferenceStore.setState({
+        preferences: { ...BASE_PREF, defaultDateRange: 'all' },
+        loaded: true,
+      });
+
+      renderDashboard();
+      await screen.findByTestId('nav-chart');
+
+      const last = state.seriesParams[state.seriesParams.length - 1];
+      // PORTFOLIO.baseDate = '2024-01-01'：不再是历史兜底值 2000-01-01
+      expect(last.startDate).toBe('2024-01-01');
+      expect(last.startDate).not.toBe('2000-01-01');
+      expect(last.endDate).toBe(daysAgoIso(0));
+    });
+
+    it('all 且组合无 baseDate（尚无首笔买入）时回落 2000-01-01', async () => {
+      usePortfolioStore.setState({
+        portfolios: [{ ...PORTFOLIO, baseDate: null }],
+        currentPortfolioId: 'pf-1',
+      });
       usePreferenceStore.setState({
         preferences: { ...BASE_PREF, defaultDateRange: 'all' },
         loaded: true,

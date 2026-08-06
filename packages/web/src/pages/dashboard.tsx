@@ -49,7 +49,10 @@ import {
   QUICK_RANGE_OPTIONS,
   resolveQuickRange,
 } from '@/features/query/dimension-switcher';
-import { usePortfolioStore } from '@/stores/portfolio.store';
+import {
+  usePortfolioBaseDate,
+  usePortfolioStore,
+} from '@/stores/portfolio.store';
 import { usePreferenceStore } from '@/stores/preference.store';
 import { usePortfolios } from '@/hooks/use-portfolios';
 import {
@@ -196,6 +199,8 @@ function OnboardingGuide({
 
 export default function DashboardPage(): JSX.Element {
   const currentPortfolioId = usePortfolioStore((s) => s.currentPortfolioId);
+  // 「全部」快捷项的起点 = 组合首个交易日（问题②）
+  const baseDate = usePortfolioBaseDate();
   const { data: portfolios = [], isLoading: portfoliosLoading } = usePortfolios();
 
   // 录入弹窗状态
@@ -226,8 +231,11 @@ export default function DashboardPage(): JSX.Element {
     ) {
       return { startDate: overviewQuery.from, endDate: overviewQuery.to };
     }
-    return resolveQuickRange(overviewQuery.range);
-  }, [overviewQuery.range, overviewQuery.from, overviewQuery.to]);
+    // 「全部」以组合首个交易日为起点（问题②）；组合尚无首笔买入时回落兜底值
+    return resolveQuickRange(overviewQuery.range, {
+      allRangeStart: baseDate ?? undefined,
+    });
+  }, [overviewQuery.range, overviewQuery.from, overviewQuery.to, baseDate]);
 
   // 概览聚合数据
   const overview = useQuery({

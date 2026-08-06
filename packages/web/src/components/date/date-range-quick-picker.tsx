@@ -62,10 +62,10 @@ export interface DateRangeQuickPickerProps {
   /** 区间变更回调 */
   onChange: (range: DateRangeValue) => void;
   /**
-   * 「全部」的起始日 —— 传 `usePortfolioStore().currentPortfolio()?.baseDate`。
-   * 缺省回落 2000-01-01（问题②）。
+   * 「全部」的起始日 —— 传 `usePortfolioBaseDate()`（组合首个交易日）。
+   * 缺省 / null 回落 2000-01-01（问题②）。
    */
-  allRangeStart?: string;
+  allRangeStart?: string | null;
   /** 快捷范围选项（缺省 = 共享的 7 项 QUICK_RANGE_OPTIONS） */
   quickRanges?: ReadonlyArray<QuickRangeOption>;
   /** 起始日期输入的 label（缺省「起始日期」） */
@@ -94,7 +94,9 @@ export function DateRangeQuickPicker({
   /** 选中快捷项：一次性覆盖起止日期 */
   const handleQuickChange = (v: string): void => {
     setQuickRange(v);
-    const range = resolveQuickRange(v, { allRangeStart });
+    const range = resolveQuickRange(v, {
+      allRangeStart: allRangeStart ?? undefined,
+    });
     onChange({
       startDate: range.startDate,
       endDate: range.endDate,

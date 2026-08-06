@@ -29,7 +29,10 @@ import { DimensionSwitcher, QUICK_RANGE_OPTIONS } from '@/features/query/dimensi
 import type { DimensionSwitcherValue } from '@/features/query/dimension-switcher';
 import { XirrTrendChart } from '@/components/charts/xirr-trend-chart';
 import { YearlyBarChart } from '@/components/charts/yearly-bar-chart';
-import { usePortfolioStore } from '@/stores/portfolio.store';
+import {
+  usePortfolioBaseDate,
+  usePortfolioStore,
+} from '@/stores/portfolio.store';
 import { usePreferenceStore } from '@/stores/preference.store';
 import { useXirrSeries, useLatestXirr, useYearStartXirr } from '@/hooks/use-query-data';
 import { formatPercent, formatChange, formatDate } from '@/lib/utils';
@@ -42,6 +45,8 @@ import {
 
 export default function XirrAnalysisPage(): JSX.Element {
   const currentPortfolioId = usePortfolioStore((s) => s.currentPortfolioId);
+  // 「全部」快捷项的起点 = 组合首个交易日（问题②）
+  const baseDate = usePortfolioBaseDate();
   const { startDate, endDate } = getDefaultDateRange();
 
   // 维度初始值（SET-P0-02 验收 4：读取偏好 defaultGranularity 作为默认维度）
@@ -94,6 +99,7 @@ export default function XirrAnalysisPage(): JSX.Element {
         value={dimension}
         onChange={setDimension}
         quickRanges={QUICK_RANGE_OPTIONS}
+        allRangeStart={baseDate}
       />
 
       {/* 当前累计 XIRR + 较年初 */}

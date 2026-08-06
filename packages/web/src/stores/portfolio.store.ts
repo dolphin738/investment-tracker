@@ -85,3 +85,19 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
     set({ portfolios: [], currentPortfolioId: null });
   },
 }));
+
+/**
+ * 当前组合的首个交易日（`Portfolio.baseDate`，问题②）。
+ *
+ * 为什么不用 `currentPortfolio()`：它是 store 里的普通方法，
+ * `useStore((s) => s.currentPortfolio())` 每次渲染都会新建对象引用，
+ * 触发无谓重渲染。这里直接选出**原始字符串**，引用天然稳定。
+ *
+ * @returns ISO 日期串（YYYY-MM-DD）；组合未选中或尚无首笔买入时为 `null`
+ */
+export function usePortfolioBaseDate(): string | null {
+  return usePortfolioStore(
+    (s) =>
+      s.portfolios.find((p) => p.id === s.currentPortfolioId)?.baseDate ?? null,
+  );
+}
