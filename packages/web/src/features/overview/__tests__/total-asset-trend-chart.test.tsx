@@ -64,6 +64,8 @@ import {
   buildManualScatter,
   buildTrendPoints,
   collectManualDates,
+  formatAxisTooltip,
+  formatAxisTooltipLine,
   MANUAL_MARK_PAGE_SIZE,
   TotalAssetTrendChart,
 } from '@/features/overview/total-asset-trend-chart';
@@ -209,6 +211,101 @@ describe('collectManualDates / buildManualScatter', () => {
     expect(scatter).toHaveLength(1);
     expect(scatter[0][0]).toBe(1); // 走势点下标（null 点已被剔除，索引重排）
     expect(scatter[0][1]).toBeCloseTo(1.25 * 120000, 6);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// axis tooltip formatter（Bug：手工记录散点数组值显示为 -）
+// ---------------------------------------------------------------------------
+describe('formatAxisTooltip — 兼容散点数组值（Bug 修复回归）', () => {
+  const money = (v: number): string => `¥${v.toFixed(2)}`;
+
+  it('折线 series 数值为 number → 直接格式化金额', () => {
+    const line = formatAxisTooltipLine(
+      { marker: '■', seriesName: '总资产', value: 150000, dataIndex: 0 },
+      money,
+    );
+    expect(line).toBe('■总资产: ¥150000.00');
+  });
+
+  it('🔴 散点 series 数值为 [idx, totalAsset] 数组 → 取 [1] 格式化（不再显示 -）', () => {
+    const line = formatAxisTooltipLine(
+      { marker: '●', seriesName: '手工记录', value: [1, 150000], dataIndex: 1 },
+      money,
+    );
+    expect(line).toBe('●手工记录: ¥150000.00');
+  });
+
+  it('null / undefined → 保持「数据不足」分支', () => {
+    expect(
+      formatAxisTooltipLine(
+        { marker: '■', seriesName: '总资产', value: null, dataIndex: 0 },
+        money,
+      ),
+    ).toBe('■总资产: 数据不足');
+    expect(
+      formatAxisTooltipLine(
+        { marker: '■', seriesName: '总资产', value: undefined, dataIndex: 0 },
+        money,
+      ),
+    ).toBe('■总资产: 数据不足');
+  });
+
+  it('整体 formatter：头部日期 + 每系列一行，<br/> 分隔（格式不变）', () => {
+    const html = formatAxisTooltip(
+      [
+        {
+          axisValueLabel: '2026-06',
+          marker: '■',
+          seriesName: '总资产',
+          value: 150000,
+          dataIndex: 0,
+        },
+        {
+          axisValueLabel: '2026-06',
+          marker: '●',
+          seriesName: '手工记录',
+          value: [1, 150000],
+          dataIndex: 1,
+        },
+      ],
+      money,
+    );
+    expect(html).toBe('2026-06<br/>■总资产: ¥150000.00<br/>●手工记录: ¥150000.00');
+  });
+
+  it('🔴 渲染产物回归：axis tooltip formatter 对散点数组值输出金额而非 -', () => {
+    snapshotSpy.result = {
+      data: snapshotPage([{ date: '2026-06-30', source: 'MANUAL' }]),
+      isLoading: false,
+      isError: false,
+    };
+
+    renderChart();
+
+    const option = lastOption() as unknown as {
+      tooltip: { formatter: (params: unknown) => string };
+    };
+    const html = option.tooltip.formatter([
+      {
+        axisValueLabel: '2026-06',
+        marker: '■',
+        seriesName: '总资产',
+        value: 150000,
+        dataIndex: 0,
+      },
+      {
+        axisValueLabel: '2026-06',
+        marker: '●',
+        seriesName: '手工记录',
+        value: [1, 150000],
+        dataIndex: 1,
+      },
+    ]);
+
+    // formatCurrency 默认千分位
+    expect(html).toContain('手工记录: ¥150,000.00');
+    expect(html).not.toContain('手工记录: -');
   });
 });
 

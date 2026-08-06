@@ -69,8 +69,54 @@ interface AxisTooltipParam {
   axisValueLabel?: string;
   seriesName?: string;
   marker?: string;
-  value?: number | null;
+  /** 折线 series 是 number；散点 series 是 [走势点下标, 总资产] 数组 */
+  value?: number | [number, number] | null;
   dataIndex: number;
+}
+
+/** tooltip 行渲染依赖的金额格式器（组件内用 formatCurrency 闭包注入） */
+export type TooltipMoneyFormatter = (v: number) => string;
+
+/**
+ * 渲染 axis tooltip 单行文本：`marker系列名: 值`。
+ *
+ * 🔴 兼容散点 series 的数组值：折线 series 的 `value` 是 number，散点 series 的
+ * `value` 是 `[走势点下标, 总资产]`，必须取 `[1]` 才是金额 —— 直接把数组交给
+ * `formatCurrency` 会对非有限值返回 `'-'`（Bug 修复点，原散点自带 formatter 在
+ * `trigger:'axis'` 下被忽略）。
+ *
+ * @param p tooltip 行入参
+ * @param money 金额格式器（组件内注入，测试可传桩）
+ * @returns 单行 HTML 文本
+ */
+export function formatAxisTooltipLine(
+  p: AxisTooltipParam,
+  money: TooltipMoneyFormatter,
+): string {
+  const raw = p.value;
+  const v = Array.isArray(raw) ? raw[1] : raw;
+  const text = v === null || v === undefined ? '数据不足' : money(v);
+  return `${p.marker ?? ''}${p.seriesName ?? ''}: ${text}`;
+}
+
+/**
+ * 渲染 axis tooltip 完整 HTML：头部 `axisValueLabel` + 每系列一行，`<br/>` 分隔。
+ *
+ * 输出格式与修复前保持一致：`[头部]<br/>marker系列名: 值<br/>…`。
+ * 抽成可测导出，便于锁「散点数组值 → 金额」与「null → 数据不足」两条行为。
+ *
+ * @param params ECharts 回调入参（单条或数组）
+ * @param money 金额格式器
+ * @returns tooltip HTML 文本
+ */
+export function formatAxisTooltip(
+  params: AxisTooltipParam | AxisTooltipParam[],
+  money: TooltipMoneyFormatter,
+): string {
+  const arr = Array.isArray(params) ? params : [params];
+  const head = arr[0]?.axisValueLabel ?? '';
+  const lines = arr.map((p) => formatAxisTooltipLine(p, money));
+  return [head, ...lines].join('<br/>');
 }
 
 /**
@@ -209,16 +255,8 @@ export function TotalAssetTrendChart({
     return {
       tooltip: {
         trigger: 'axis',
-        formatter: (params: AxisTooltipParam | AxisTooltipParam[]): string => {
-          const arr = Array.isArray(params) ? params : [params];
-          const head = arr[0]?.axisValueLabel ?? '';
-          const lines = arr.map((p) => {
-            const v = p.value;
-            const text = v === null || v === undefined ? '数据不足' : money(v);
-            return `${p.marker ?? ''}${p.seriesName ?? ''}: ${text}`;
-          });
-          return [head, ...lines].join('<br/>');
-        },
+        formatter: (params: AxisTooltipParam | AxisTooltipParam[]): string =>
+          formatAxisTooltip(params, money),
       },
       legend: { bottom: 0, textStyle: { fontSize: 12 } },
       // 右侧留白由 chart-grid 统一给足，避免末位日期被裁切（问题①）
