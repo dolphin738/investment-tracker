@@ -4,6 +4,13 @@ on:
   push:
     branches: [main]
   pull_request:
+  # 手动触发，支持开启调试模式
+  workflow_dispatch:
+    inputs:
+      debug:
+        description: '开启调试模式（输出详细环境信息与诊断数据）'
+        type: boolean
+        default: false
 
 # Cancel in-progress runs for the same ref (saves CI minutes)
 concurrency:
@@ -30,6 +37,26 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: 调试 — 环境信息
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.debug == true }}
+        run: |
+          echo "========== GitHub Actions 触发上下文 =========="
+          echo "触发方式: ${{ github.event_name }}"
+          echo "分支/引用: ${{ github.ref }}"
+          echo "提交 SHA: ${{ github.sha }}"
+          echo "触发者: ${{ github.actor }}"
+          echo "调试模式: ${{ inputs.debug }}"
+          echo ""
+          echo "========== 运行器信息 =========="
+          echo "操作系统: ${{ runner.os }} ${{ runner.arch }}"
+          echo "工作目录: ${{ runner.workspace }}"
+          echo ""
+          echo "========== 磁盘空间 =========="
+          df -h /
+          echo ""
+          echo "========== 内存信息 =========="
+          free -h
+
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         # version 省略，自动读 package.json 的 packageManager: pnpm@9.0.0
@@ -39,6 +66,15 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
           cache: pnpm
+
+      - name: 工具版本
+        run: |
+          echo "========== 工具版本 =========="
+          echo "Node: $(node --version)"
+          echo "pnpm: $(pnpm --version)"
+          echo ""
+          echo "========== workspace 包列表 =========="
+          pnpm list --depth -1 --format tree 2>/dev/null || true
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -51,3 +87,53 @@ jobs:
 
       - name: Build
         run: pnpm run build
+
+      - name: 构建产物摘要
+        if: ${{ always() }}
+        run: |
+          echo "## CI 构建产物摘要 (Node ${{ matrix.node-version }})" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| 包 | 路径 | 大小 |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|---|" >> $GITHUB_STEP_SUMMARY
+          for pkg in backend web finance-core; do
+            DIR="packages/$pkg/dist"
+            if [ -d "$DIR" ]; then
+              SIZE=$(du -sh "$DIR" | cut -f1)
+              echo "| $pkg | \`$DIR\` | $SIZE |" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
+          echo "" >> $GITHUB_STEP_SUMMARY
+          # Web 产物明细（按大小排序，取前 10）
+          if [ -d "packages/web/dist/assets" ]; then
+            echo "### Web 产物明细（前 10 大文件）" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            ls -lhS packages/web/dist/assets/ | head -11 >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: 失败时输出调试诊断
+        if: ${{ failure() }}
+        run: |
+          echo "========== CI 失败诊断 =========="
+          echo "Node: $(node --version)"
+          echo "pnpm: $(pnpm --version)"
+          echo "分支: ${{ github.ref }}"
+          echo "提交: ${{ github.sha }}"
+          echo ""
+          echo "========== pnpm store 状态 =========="
+          pnpm store path 2>/dev/null || echo "无法获取 store 路径"
+          echo ""
+          echo "========== turbo 缓存状态 =========="
+          ls -la .turbo 2>/dev/null || echo "无 .turbo 目录"
+          ls -la node_modules/.cache/turbo 2>/dev/null || echo "无 turbo 缓存"
+          echo ""
+          echo "========== 各包 dist 产物 =========="
+          for pkg in backend web finance-core shared; do
+            DIR="packages/$pkg/dist"
+            if [ -d "$DIR" ]; then
+              echo "[$pkg] 已构建: $(du -sh $DIR | cut -f1)"
+            else
+              echo "[$pkg] 未构建（dist 不存在）"
+            fi
+          done
