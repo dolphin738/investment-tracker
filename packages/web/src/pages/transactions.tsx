@@ -1,24 +1,21 @@
 /**
  * pages/transactions.tsx — 出入金管理页（PRD §7.1）
  *
- * 【A】总资产展示卡片（纯展示，不得出现输入框）：
- *   当前总资产 / 持仓市值 / 现金余额 + 近30日走势图 + 手工记录标记
- *   「[查看全部历史 →]」「[⚙ 管理历史记录 →]」均跳 /snapshots（后者带可编辑态参数）
+ * 注：原【A】总资产展示卡片（当前总资产 / 持仓市值 / 近30日走势图 / 手工记录标记 +
+ * 两个 /snapshots 入口）已按 docs/designs/overview-fusion-2026-08-06.md 整体
+ * 迁移至概览页（dashboard），本页不再展示总资产。
  * 【B】现金余额（手工维护）：当前余额展示行 + ⓘ 提示 + 金额/生效日期/保存（调 cash-balance API）
  * 【C】出入金流水列表：类型多选 checkbox（全不勾=全部）+ 日期范围 + 排序 + 分页（20/50/100）
  *   —— 筛选/排序/分页全部写入 URL query（FLOW-P0-02 验收2：刷新/分享保持）
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
-import ReactECharts from 'echarts-for-react';
+import { useSearchParams } from 'react-router-dom';
 import {
   Camera,
-  ChevronRight,
   Info,
   Plus,
   RotateCcw,
-  Settings2,
 } from 'lucide-react';
 import {
   Card,
@@ -61,37 +58,13 @@ import {
 } from '@/stores/portfolio.store';
 import { usePreferenceStore } from '@/stores/preference.store';
 import { usePortfolios } from '@/hooks/use-portfolios';
-import { useQuery } from '@tanstack/react-query';
-import { getOverview } from '@/api/overview.api';
 import { useLatestCashBalance, useUpsertCashBalance } from '@/hooks/use-cash-balances';
-import { useNavSeries } from '@/hooks/use-query-data';
-import { useSnapshots } from '@/hooks/use-snapshots';
 import { DateRangeQuickPicker } from '@/components/date/date-range-quick-picker';
-import { chartGrid } from '@/components/charts/chart-grid';
 import { toIsoDate } from '@/lib/constants';
-import { ROUTE_PATH } from '@/lib/constants';
 import { formatCurrency, formatDate } from '@/lib/utils';
-import { QueryGranularity } from '@investment-tracker/shared';
 import type { TransactionQuery } from '@/api/types';
 
-/** 30 天前日期 YYYY-MM-DD */
-function daysAgoIso(days: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() - days);
-  return toIsoDate(d);
-}
-
-/** ECharts tooltip 入参（仅声明用到的字段） */
-interface AxisTooltipParam {
-  axisValueLabel?: string;
-  seriesName?: string;
-  marker?: string;
-  value?: number | null;
-  dataIndex: number;
-}
-
 export default function TransactionsPage(): JSX.Element {
-  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const currentPortfolioId = usePortfolioStore((s) => s.currentPortfolioId);
   // 「全部」快捷项的起点 = 组合首个交易日（问题②）
@@ -175,27 +148,7 @@ export default function TransactionsPage(): JSX.Element {
     return q;
   }, [filterStartDate, filterEndDate, sortBy, sortOrder]);
 
-  // ── 【A】总资产展示数据 ──
-  const overview = useQuery({
-    queryKey: ['overview', currentPortfolioId],
-    queryFn: () => getOverview(currentPortfolioId!),
-    enabled: Boolean(currentPortfolioId),
-    staleTime: 30 * 1000,
-  });
   const latestBalance = useLatestCashBalance(currentPortfolioId);
-  const todayIso = toIsoDate(new Date());
-  const start30 = daysAgoIso(30);
-  const nav30 = useNavSeries(currentPortfolioId, {
-    granularity: QueryGranularity.DAY,
-    startDate: start30,
-    endDate: todayIso,
-  });
-  const snapshots30 = useSnapshots(currentPortfolioId, {
-    startDate: start30,
-    endDate: todayIso,
-    page: 1,
-    pageSize: 60,
-  });
 
   // ── 【B】现金余额维护 ──
   const [balanceAmount, setBalanceAmount] = useState('');
@@ -214,96 +167,6 @@ export default function TransactionsPage(): JSX.Element {
     return () => window.removeEventListener(CASH_BALANCE_FOCUS_EVENT, handler);
   }, []);
 
-  // ── 近30日走势数据 ──
-  const trendData = useMemo(() => {
-    const points = nav30.data ?? [];
-    return points
-      .map((p) => {
-        if (p.cumulativeNav === null || p.shares === null) return null;
-        return {
-          date: p.date,
-          label: p.label,
-          totalAsset: p.cumulativeNav * p.shares,
-        };
-      })
-      .filter((v): v is { date: string; label: string; totalAsset: number } => v !== null);
-  }, [nav30.data]);
-
-  const manualDates = useMemo(() => {
-    const set = new Set<string>();
-    for (const s of snapshots30.data?.items ?? []) {
-      if (s.source === 'MANUAL') set.add(s.date);
-    }
-    return set;
-  }, [snapshots30.data]);
-
-  const chartOption = useMemo(() => {
-    const labels = trendData.map((d) => d.label);
-    const values = trendData.map((d) => d.totalAsset);
-    const manualPoints: [number, number][] = [];
-    trendData.forEach((d, idx) => {
-      if (manualDates.has(d.date)) manualPoints.push([idx, d.totalAsset]);
-    });
-    return {
-      tooltip: {
-        trigger: 'axis',
-        formatter: (params: AxisTooltipParam | AxisTooltipParam[]): string => {
-          const arr = Array.isArray(params) ? params : [params];
-          const head = arr[0]?.axisValueLabel ?? '';
-          const lines = arr.map((p) => {
-            const v = p.value;
-            const text =
-              v === null || v === undefined
-                ? '数据不足'
-                : formatCurrency(v, 2, { thousands: amountThousands, abbreviate: amountAbbrev });
-            return `${p.marker ?? ''}${p.seriesName ?? ''}: ${text}`;
-          });
-          return [head, ...lines].join('<br/>');
-        },
-      },
-      legend: { bottom: 0, textStyle: { fontSize: 12 } },
-      // 右侧留白由 chart-grid 统一给足，避免末位日期被裁切（问题①）
-      grid: chartGrid(),
-      xAxis: {
-        type: 'category',
-        boundaryGap: false,
-        data: labels,
-        axisLabel: { fontSize: 11, color: '#666' },
-      },
-      yAxis: {
-        type: 'value',
-        axisLabel: {
-          fontSize: 11,
-          color: '#666',
-          formatter: (v: number): string => `${(v / 10000).toFixed(1)}万`,
-        },
-        splitLine: { show: true, lineStyle: { type: [3, 3], color: '#ccc' } },
-      },
-      series: [
-        {
-          name: '总资产',
-          type: 'line',
-          smooth: true,
-          connectNulls: true,
-          showSymbol: false,
-          lineStyle: { width: 2, color: 'hsl(217, 91%, 60%)' },
-          itemStyle: { color: 'hsl(217, 91%, 60%)' },
-          data: values,
-        },
-        {
-          name: '手工记录',
-          type: 'scatter',
-          symbolSize: 8,
-          itemStyle: { color: 'hsl(0, 84%, 48%)' },
-          data: manualPoints,
-          tooltip: { formatter: (p: { value: [number, number] }) => `手工记录：${formatCurrency(p.value[1], 2, { thousands: amountThousands, abbreviate: amountAbbrev })}` },
-        },
-      ],
-    };
-  }, [trendData, manualDates, amountThousands, amountAbbrev]);
-
-  const totalAsset = overview.data?.totalAsset;
-  const marketValue = overview.data?.holdingsSummary?.totalMarketValue;
   const cashBalance = latestBalance.data?.amount;
 
   const handleSaveBalance = () => {
@@ -368,78 +231,6 @@ export default function TransactionsPage(): JSX.Element {
           新增出入金
         </Button>
       </div>
-
-      {/* 【A】总资产展示卡片（纯展示） */}
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
-          <div>
-            <CardTitle className="text-base">总资产概览</CardTitle>
-            <CardDescription>纯展示 · 近 30 日走势与手工记录标记</CardDescription>
-          </div>
-          <div className="flex items-center gap-1 text-sm">
-            <Button variant="link" size="sm" onClick={() => navigate(ROUTE_PATH.SNAPSHOTS)}>
-              查看全部历史 <ChevronRight className="h-3.5 w-3.5" />
-            </Button>
-            <Button
-              variant="link"
-              size="sm"
-              onClick={() => navigate(`${ROUTE_PATH.SNAPSHOTS}?manage=1`)}
-            >
-              <Settings2 className="mr-1 h-3.5 w-3.5" />
-              管理历史记录 <ChevronRight className="h-3.5 w-3.5" />
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <div className="rounded-lg bg-muted/40 p-4">
-              <p className="text-xs text-muted-foreground">当前总资产</p>
-              <p className="mt-1 text-2xl font-bold tabular-nums">
-                {totalAsset ? formatCurrency(totalAsset, 2, { thousands: amountThousands, abbreviate: amountAbbrev }) : '暂无数据'}
-              </p>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                {overview.data?.latestDate
-                  ? `截至 ${overview.data.latestDate}`
-                  : '数据截止日未知'}
-              </p>
-            </div>
-            <div className="rounded-lg bg-muted/40 p-4">
-              <p className="text-xs text-muted-foreground">持仓市值</p>
-              <p className="mt-1 text-2xl font-bold tabular-nums">
-                {marketValue ? formatCurrency(marketValue, 2, { thousands: amountThousands, abbreviate: amountAbbrev }) : '暂无数据'}
-              </p>
-              <p className="mt-0.5 text-xs text-muted-foreground">由买卖流水推导</p>
-            </div>
-            <div className="rounded-lg bg-muted/40 p-4">
-              <p className="text-xs text-muted-foreground">现金余额</p>
-              <p className="mt-1 text-2xl font-bold tabular-nums">
-                {cashBalance !== undefined && cashBalance !== null
-                  ? formatCurrency(cashBalance, 2, { thousands: amountThousands, abbreviate: amountAbbrev })
-                  : '暂无数据'}
-              </p>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                {latestBalance.data
-                  ? `生效日 ${formatDate(latestBalance.data.asOf)}`
-                  : '未维护，可在下方录入'}
-              </p>
-            </div>
-          </div>
-
-          {/* 近30日走势图 */}
-          {nav30.isLoading ? (
-            <Skeleton className="h-[220px] w-full" />
-          ) : trendData.length === 0 ? (
-            <div className="flex h-[220px] items-center justify-center text-sm text-muted-foreground">
-              近 30 日暂无资产数据
-            </div>
-          ) : (
-            <ReactECharts
-              option={chartOption}
-              style={{ height: 220, width: '100%' }}
-            />
-          )}
-        </CardContent>
-      </Card>
 
       {/* 【B】现金余额（手工维护） */}
       <Card>

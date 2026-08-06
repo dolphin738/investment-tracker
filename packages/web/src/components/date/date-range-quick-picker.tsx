@@ -11,6 +11,8 @@
  *   `resolveQuickRange`，口径唯一真相源仍在 dimension-switcher.tsx。
  *
  * 【受控】startDate / endDate 由父级持有；任何变更都通过 onChange 回传。
+ * 快捷范围下拉支持**双模**：传 `quick` = 受控（父级驱动回显，如概览页的 URL
+ * `range` 状态）；不传 = 沿用内部 useState（列表页既有行为，零影响）。
  *
  * 【交互契约】
  * - 选中快捷项 → 按 `resolveQuickRange(v, { allRangeStart })` 覆盖起止日期，
@@ -73,6 +75,16 @@ export interface DateRangeQuickPickerProps {
   /** 结束日期输入的 label（缺省「结束日期」） */
   endLabel?: string;
   className?: string;
+  /**
+   * 受控的快捷范围值（如 '1m' / 'all'）。
+   *
+   * - **传入时**：下拉回显完全由父级驱动（受控），内部 state 不再参与；
+   *   传入不在 `quickRanges` 中的值（如 `'custom'`）→ 渲染占位「选择范围」。
+   *   用户仍可正常选择快捷项，选中结果通过 `onChange({ quick })` 交由父级写回。
+   * - **不传（undefined）时**：维持原有内部 useState 行为 —— 既有调用方
+   *   （transactions / snapshot-list / cash-balance-history）**零影响**。
+   */
+  quick?: string;
 }
 
 /** Select 占位值（Radix Select 不允许空字符串 value，用哨兵值渲染占位） */
@@ -87,13 +99,30 @@ export function DateRangeQuickPicker({
   startLabel = '起始日期',
   endLabel = '结束日期',
   className,
+  quick,
 }: DateRangeQuickPickerProps): JSX.Element {
-  // 下拉回显值：选中预设后显示该预设；手动改日期后回落占位
-  const [quickRange, setQuickRange] = useState<string>(QUICK_RANGE_PLACEHOLDER);
+  // 下拉回显值（非受控模式）：选中预设后显示该预设；手动改日期后回落占位
+  const [innerQuick, setInnerQuick] = useState<string>(QUICK_RANGE_PLACEHOLDER);
+
+  /** 受控判定：`quick` 显式传入（含空串）即视为受控 */
+  const isControlled = quick !== undefined;
+
+  /**
+   * 实际回显值。
+   * 受控：父级值命中 quickRanges 才回显，否则（如 'custom' / 未知值）落占位。
+   * 非受控：用内部 state，逐字节保持改造前行为。
+   */
+  const shownQuick =
+    quick === undefined
+      ? innerQuick
+      : quickRanges.some((opt) => opt.value === quick)
+        ? quick
+        : QUICK_RANGE_PLACEHOLDER;
 
   /** 选中快捷项：一次性覆盖起止日期 */
   const handleQuickChange = (v: string): void => {
-    setQuickRange(v);
+    // 受控模式下回显由父级 quick 驱动，内部 state 不再参与（避免双源）
+    if (!isControlled) setInnerQuick(v);
     const range = resolveQuickRange(v, {
       allRangeStart: allRangeStart ?? undefined,
     });
@@ -106,13 +135,13 @@ export function DateRangeQuickPicker({
 
   /** 手动改起始日：下拉回落占位，quick 置空 */
   const handleStartChange = (v: string): void => {
-    setQuickRange(QUICK_RANGE_PLACEHOLDER);
+    if (!isControlled) setInnerQuick(QUICK_RANGE_PLACEHOLDER);
     onChange({ startDate: v, endDate, quick: undefined });
   };
 
   /** 手动改结束日：下拉回落占位，quick 置空 */
   const handleEndChange = (v: string): void => {
-    setQuickRange(QUICK_RANGE_PLACEHOLDER);
+    if (!isControlled) setInnerQuick(QUICK_RANGE_PLACEHOLDER);
     onChange({ startDate, endDate: v, quick: undefined });
   };
 
@@ -121,7 +150,7 @@ export function DateRangeQuickPicker({
       {quickRanges.length > 0 && (
         <div className="space-y-1.5">
           <Label className="text-xs text-muted-foreground">快捷范围</Label>
-          <Select value={quickRange} onValueChange={handleQuickChange}>
+          <Select value={shownQuick} onValueChange={handleQuickChange}>
             <SelectTrigger className="w-[130px]">
               <SelectValue placeholder="选择范围" />
             </SelectTrigger>

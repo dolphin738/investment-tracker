@@ -1,8 +1,11 @@
 /**
  * pages/dashboard.tsx — 概览页（PRD §7.4）
  *
- * - 6 指标卡片：当前总资产 / 累计收益率 / 当年收益率 / 年化XIRR / 累计净值 / 净投入
- * - 维度切换 [日][周][月][年] + 范围下拉（共享 7 项快捷范围，DASH-P0-02 / 决策 Q-6 乙）
+ * - 8 指标卡片（融合总资产概览，见 docs/designs/overview-fusion-2026-08-06.md）：
+ *   资产构成 4（当前总资产 / 持仓市值 / 现金余额 / 净投入）+ 收益表现 4
+ *   （累计收益率 / 当年收益率 / 年化XIRR / 累计净值），由 buildOverviewMetrics 统一构造
+ * - 总资产走势图（含手工记录标记 + manage 深链，融合自出入金页【A】）
+ * - 维度切换 [日][周][月][年] + 共享范围筛选 DateRangeQuickPicker（受控回显 URL range）
  * - 四宫格：净值趋势（累计+当年双线）/ XIRR 趋势 / 近期出入金最近5笔（带「查看全部」，
  *   DASH-P0-05）/ 组合表现对比
  * - 有组合但无数据时，四宫格位置渲染三步引导卡（DASH-P0-06）
@@ -22,13 +25,6 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import {
   Dialog,
   DialogContent,
   DialogHeader,
@@ -37,18 +33,18 @@ import {
 import { StatCard } from '@/components/charts/stat-card';
 import { XirrTrendChart } from '@/components/charts/xirr-trend-chart';
 import { NavTrendChart } from '@/components/charts/nav-trend-chart';
+import { DateRangeQuickPicker } from '@/components/date/date-range-quick-picker';
 import { TableSkeleton } from '@/components/LoadingSpinner';
 import { EmptyState } from '@/components/EmptyState';
 import { PageHeader } from '@/components/PageHeader';
 import { CashflowForm } from '@/features/cashflow/cashflow-form';
 import { SecurityTradeForm } from '@/features/security-trade/security-trade-form';
 import { FreshnessBanner } from '@/features/overview/freshness-banner';
+import { buildOverviewMetrics } from '@/features/overview/asset-metrics';
+import { TotalAssetTrendChart } from '@/features/overview/total-asset-trend-chart';
 import { createOverviewSchema } from '@/features/overview/overview-query-params';
 import type { OverviewQueryState } from '@/features/overview/overview-query-params';
-import {
-  QUICK_RANGE_OPTIONS,
-  resolveQuickRange,
-} from '@/features/query/dimension-switcher';
+import { resolveQuickRange } from '@/features/query/dimension-switcher';
 import {
   usePortfolioBaseDate,
   usePortfolioStore,
@@ -61,6 +57,7 @@ import {
   useXirrSeries,
   useNavSeries,
 } from '@/hooks/use-query-data';
+import { useLatestCashBalance } from '@/hooks/use-cash-balances';
 import { useQuery } from '@tanstack/react-query';
 import { getOverview, getPortfoliosSummary } from '@/api/overview.api';
 import { listTransactions } from '@/api/transaction.api';
@@ -68,7 +65,6 @@ import { CashFlowType } from '@investment-tracker/shared';
 import { useUrlState } from '@/lib/url-query';
 import {
   formatPercent,
-  formatDecimal,
   formatCurrency,
   formatDate,
   cn,
@@ -262,6 +258,8 @@ export default function DashboardPage(): JSX.Element {
   // 最新净值/XIRR
   const latestXirr = useLatestXirr(currentPortfolioId);
   const latestNav = useLatestNav(currentPortfolioId);
+  // 最新现金余额（概览 8 卡之「现金余额」卡，融合自出入金页【A】）
+  const latestBalance = useLatestCashBalance(currentPortfolioId);
 
   // 近期出入金（最新 5 笔）
   const recentTransactions = useQuery({
@@ -321,6 +319,52 @@ export default function DashboardPage(): JSX.Element {
   );
   const yearReturnRate = ov?.yearReturnRate ?? (
     yearNav !== null ? Number(yearNav) - 1 : null
+  );
+
+  /**
+   * 概览 8 指标卡展示模型（融合总资产概览后由 buildOverviewMetrics 统一构造）。
+   *
+   * 资产构成 4（当前总资产 / 持仓市值 / 现金余额 / 净投入）+ 收益表现 4
+   * （累计收益率 / 当年收益率 / 年化XIRR / 累计净值）。金额/比率/涨跌方向/空态口径
+   * 全部收敛到 asset-metrics.ts，页面只负责喂原始值，避免 8 套私有实现漂移。
+   */
+  const overviewMetrics = useMemo(
+    () =>
+      buildOverviewMetrics({
+        totalAsset,
+        latestDate: ov?.latestDate ?? null,
+        latestSource: ov?.latestSource ?? null,
+        marketValue: ov?.holdingsSummary?.totalMarketValue ?? null,
+        cashBalance: latestBalance.data?.amount ?? null,
+        cashAsOf: latestBalance.data?.asOf ?? null,
+        netInvested,
+        totalReturnRate,
+        yearReturnRate,
+        xirr: cumulativeXirr,
+        cumulativeNav,
+        yearNav,
+        format: { thousands: amountThousands, abbreviate: amountAbbrev },
+        navDecimals,
+        xirrDecimals,
+      }),
+    [
+      totalAsset,
+      ov?.latestDate,
+      ov?.latestSource,
+      ov?.holdingsSummary?.totalMarketValue,
+      latestBalance.data?.amount,
+      latestBalance.data?.asOf,
+      netInvested,
+      totalReturnRate,
+      yearReturnRate,
+      cumulativeXirr,
+      cumulativeNav,
+      yearNav,
+      amountThousands,
+      amountAbbrev,
+      navDecimals,
+      xirrDecimals,
+    ],
   );
 
   /**
@@ -404,72 +448,21 @@ export default function DashboardPage(): JSX.Element {
         />
       )}
 
-      {/* ===== 6 指标卡片 ===== */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <StatCard
-          title="当前总资产"
-          value={totalAsset ? formatCurrency(totalAsset, 2, { thousands: amountThousands, abbreviate: amountAbbrev }) : '暂无数据'}
-          description={ov?.latestDate ? `截至 ${ov.latestDate}` : undefined}
-          trend="neutral"
-        />
-        <StatCard
-          title="累计收益率"
-          value={formatPercent(totalReturnRate, 2, { decimals: xirrDecimals })}
-          description={cumulativeNav ? `净值 ${formatDecimal(cumulativeNav, navDecimals)}` : '暂无数据'}
-          trend={
-            totalReturnRate !== null
-              ? Number(totalReturnRate) >= 0
-                ? 'up'
-                : 'down'
-              : 'neutral'
-          }
-        />
-        <StatCard
-          title="当年收益率"
-          value={formatPercent(yearReturnRate, 2, { decimals: xirrDecimals })}
-          description={yearNav ? `净值 ${formatDecimal(yearNav, navDecimals)}` : '暂无数据'}
-          trend={
-            yearReturnRate !== null
-              ? Number(yearReturnRate) >= 0
-                ? 'up'
-                : 'down'
-              : 'neutral'
-          }
-        />
-        <StatCard
-          title="年化 XIRR"
-          value={formatPercent(cumulativeXirr, 2, { decimals: xirrDecimals })}
-          description="累计年化"
-          trend={
-            cumulativeXirr !== null
-              ? Number(cumulativeXirr) >= 0
-                ? 'up'
-                : 'down'
-              : 'neutral'
-          }
-        />
-        <StatCard
-          title="累计净值"
-          value={cumulativeNav !== null ? formatDecimal(cumulativeNav, navDecimals) : '暂无数据'}
-          description="单位净值"
-          trend={
-            cumulativeNav !== null
-              ? Number(cumulativeNav) >= 1
-                ? 'up'
-                : 'down'
-              : 'neutral'
-          }
-        />
-        <StatCard
-          title="净投入"
-          value={netInvested ? formatCurrency(netInvested, 2, { thousands: amountThousands, abbreviate: amountAbbrev }) : '暂无数据'}
-          description="存入 - 取出"
-          trend="neutral"
-        />
+      {/* ===== 概览 8 指标卡片（资产构成 4 + 收益表现 4，融合总资产概览） ===== */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {overviewMetrics.map((m) => (
+          <StatCard
+            key={m.key}
+            title={m.title}
+            value={m.value}
+            description={m.description}
+            trend={m.trend}
+          />
+        ))}
       </div>
 
-      {/* ===== 维度切换 + 范围下拉 ===== */}
-      <div className="flex flex-wrap items-center gap-3">
+      {/* ===== 维度切换 + 范围筛选（共享 DateRangeQuickPicker，受控回显 URL range） ===== */}
+      <div className="flex flex-wrap items-end gap-3">
         <Tabs
           value={overviewQuery.g}
           onValueChange={(v) =>
@@ -485,24 +478,31 @@ export default function DashboardPage(): JSX.Element {
             ))}
           </TabsList>
         </Tabs>
-        <Select
-          value={overviewQuery.range}
-          onValueChange={(v) =>
-            setOverviewQuery({ range: v as OverviewQueryState['range'] })
+        <DateRangeQuickPicker
+          quick={overviewQuery.range === 'custom' ? undefined : overviewQuery.range}
+          startDate={startDate}
+          endDate={endDate}
+          allRangeStart={baseDate}
+          onChange={(r) =>
+            setOverviewQuery(
+              r.quick
+                ? { range: r.quick as OverviewQueryState['range'], from: '', to: '' }
+                : { range: 'custom', from: r.startDate, to: r.endDate },
+            )
           }
-        >
-          <SelectTrigger className="w-[120px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {QUICK_RANGE_OPTIONS.map((opt) => (
-              <SelectItem key={opt.value} value={opt.value}>
-                {opt.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        />
       </div>
+
+      {/* ===== 总资产走势图（融合自出入金页【A】，跟随上方范围筛选，含手工记录标记 + manage 深链） ===== */}
+      <TotalAssetTrendChart
+        data={navSeries.data ?? []}
+        loading={navSeries.isLoading}
+        portfolioId={currentPortfolioId}
+        startDate={startDate}
+        endDate={endDate}
+        amountThousands={amountThousands}
+        amountAbbrev={amountAbbrev}
+      />
 
       {/* ===== 有组合但无数据：三步引导（DASH-P0-06） ===== */}
       {hasNoData && (
