@@ -12,7 +12,9 @@
 | `pages-alignment-task-order-v1.md` | 8 页对齐·执行任务书（T01 修复 + T02–T06 四段连打 + Excel 扩展） | 同上批（T01–T05 已落地，**状态：已执行完毕**） |
 | `pages-prd-alignment.md` | 前端 8 页面 × PRD 需求/草图 全量对齐分析（纯分析） | `00b4b45`（Q 决策回填）+ `3bb89ff`（AL-082/083 回填） |
 | `holdings-overview-alignment.md` | 概览页 + 持仓页 对齐分析（46 项 + 决策 Q-1~Q-8） | `d0b132d` / `3af48e8` / `465582b`（阶段 A/B/C） |
+| `overview-fusion-2026-08-06.md` | 总资产概览融合到概览页：出入金页【A】块彻底移除 + 走势图接日期筛选 + 概览页 8 卡重排（T01–T05，**后端零改动**） | 待回填（**状态：设计完成，待工程实现**） |
 
 ## 未决项
 
 - `incremental-account-v2.md` **E7「formatCurrency 全站接入」**为**独立 P1 排期项**（本轮未实施，待主理人排期）。
+- `overview-fusion-2026-08-06.md` §13 U-1「持仓市值 / 现金余额两张新卡的 PRD 条目号」、U-3「手工标记 >200 的提示文案」待主理人定稿（不阻塞实现）。

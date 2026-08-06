@@ -3,6 +3,9 @@
 > 本文件合并自 `docs/ARCHITECTURE.md` 顶部的「状态 / 修订」块。主 ARCHITECTURE 仅保留版本行 + 指针 + 一条「近期修订」，完整历史在此维护。
 > 规则：每次 ARCHITECTURE 修订，本文件追加一条 `## vX.Y` 条目（变更说明）；主文档头部「近期修订」仅保留最新一条。
 
+## v2.6（2026-08-06）
+**变更说明（总资产概览融合到概览页）**：用户拍板「出入金页【A】总资产概览块彻底移除、总资产概览只存在于概览页、走势图加日期筛选」。§1.3 目录树 `features/overview/` 补 3 项：`asset-metrics.ts`（8 指标卡构造 + `formatAmountOrEmpty`，修「金额 `0` 被误判为『暂无数据』」）、`total-asset-trend-chart.tsx`（总资产走势图 + 手工记录标记，改用 `source=MANUAL` 服务端筛选替代旧 `pageSize:60` 前端过滤，修长区间标记截断）、`__tests__/`。日期筛选**复用既有 `overview-query-params.ts` 的 `custom/from/to`**（该 schema 早已就绪、仅 UI 未接线），URL schema 零改动；`DateRangeQuickPicker` 新增**可选受控 `quick` prop**（受控/非受控双模，既有 3 个调用方零影响），并**替换**（非并列）概览页原快捷范围 `Select`，保持页面单 combobox 以守住 `dashboard-alignment` A8 用例。概览页指标卡由 6 张扩为 **8 张并去重「当前总资产」**（资产构成 4 / 收益表现 4，`lg:grid-cols-4`）；`/snapshots?manage=1` 深链入口从出入金页迁至概览页走势图卡头，避免失联。**后端零改动**（已查证 `NavQueryDto extends DateRangeDto` + `buildDateRange` 原生支持任意起止区间，「近 30 天」限制仅存在于前端 `transactions.tsx` 的本地硬编码）；**§10.1.2 组件分层表零改动**（新增件均为概览页专属 features 零件，无跨领域复用，旧方案的分层纠结点随「两页共用」前提消失而消解）。增量设计与任务分解（T01–T05）见 `docs/designs/overview-fusion-2026-08-06.md`。
+
 ## v2.5（2026-08-06）
 **变更说明（docs 整理）**：增量设计移入 `docs/designs/`（7 份已落地增量文档 + README 索引，含落地 commit 对照）；被取代产物 `system_design.md` 与账户域两份 mermaid 入 `docs/archive/`（改名 `*-account-v2.mermaid` 避免覆盖 archive 既有文件）；§1.3 目录树整体刷新后的引用同步、`docs/designs/README.md` 新建；**零删除、全 `git mv` 保留历史**。
 

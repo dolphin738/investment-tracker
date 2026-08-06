@@ -1,10 +1,10 @@
 # 投资收益统计系统 — 架构设计文档（Canonical）
 
-> **版本**: v2.5
+> **版本**: v2.6
 > **架构师**: 高见远（Gao）
-> **日期**: 2026-08-03
-> **修订史（完整版）**：各版变更说明已迁出至 **[docs/ARCHITECTURE-CHANGELOG.md](./ARCHITECTURE-CHANGELOG.md)**（最新为 v2.5）。
-> **近期修订（v2.5）**：docs 整理 —— 增量设计移入 `docs/designs/`、被取代产物（`system_design.md`、账户域两份 mermaid）入 `docs/archive/`、ARCHITECTURE §1.3 目录树与 §4.x 引用同步、新增 `docs/designs/README.md` 索引（含落地 commit 对照）。**零删除、全 git mv 保留历史**。
+> **日期**: 2026-08-06
+> **修订史（完整版）**：各版变更说明已迁出至 **[docs/ARCHITECTURE-CHANGELOG.md](./ARCHITECTURE-CHANGELOG.md)**（最新为 v2.6）。
+> **近期修订（v2.6）**：总资产概览融合到概览页 —— 出入金页【A】总资产块彻底移除，概览页新增 `features/overview/asset-metrics.ts` 与 `total-asset-trend-chart.tsx`（§1.3 目录树同步），走势图接入日期筛选（复用既有 `overview-query-params` 的 `custom/from/to`）。**后端零改动、§10.1.2 组件分层约定零改动**。增量设计见 [`docs/designs/overview-fusion-2026-08-06.md`](./designs/overview-fusion-2026-08-06.md)。
 > **依据**: PRD v3.1.9（Consolidated，单一权威）+ ENVIRONMENT-SETUP + 用户拍板决策（含 v2.3 方案B 数据架构）
 >
 > **⚠️ 本档为唯一架构真相源（Canonical）**：取代并吸收 `ARCHITECTURE-modules.md`（已归档至 `docs/archive/`）。任何工程实现以本档 + PRD v3.1.9 为准；二者冲突时以 PRD 金融口径（① 级）与数据架构口径（② 级）裁决优先级为最高依据（见 PRD §2.1–§2.3）。
@@ -415,8 +415,11 @@ graph TB
 │           │   │   ├── holdings-query-params.ts   # 🆕 URL schema（date/closed/types/sec，T02）
 │           │   │   └── holdings-toolbar.tsx       # 🆕 日期选择 + 已清仓开关 + 类型多选（T02）
 │           │   ├── overview/        # 概览页（8 页对齐新增）
-│           │   │   ├── overview-query-params.ts   # 🆕 URL schema（g/range/from/to，T03）
-│           │   │   └── freshness-banner.tsx       # 🆕 数据新鲜度提示条（DASH-P1-03，T03）
+│           │   │   ├── overview-query-params.ts   # URL schema（g/range/from/to，T03）
+│           │   │   ├── freshness-banner.tsx       # 数据新鲜度提示条（DASH-P1-03，T03）
+│           │   │   ├── asset-metrics.ts           # 🆕 8 指标卡构造 + formatAmountOrEmpty（纯函数，v2.6 融合）
+│           │   │   ├── total-asset-trend-chart.tsx # 🆕 总资产走势图 + 手工记录标记（v2.6 融合）
+│           │   │   └── __tests__/                 # 🆕 asset-metrics / total-asset-trend-chart
 │           │   ├── portfolio/
 │           │   │   ├── portfolio-selector.tsx
 │           │   │   └── portfolio-dialog.tsx
