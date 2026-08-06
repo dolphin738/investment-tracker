@@ -23,8 +23,9 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
+import { DateRangeQuickPicker } from '@/components/date/date-range-quick-picker';
+import { usePortfolioBaseDate } from '@/stores/portfolio.store';
 import {
   Table,
   TableBody,
@@ -59,6 +60,11 @@ export function CashBalanceHistory({
   const [editing, setEditing] = useState<CashBalanceResponse | null>(null);
   const [editAmount, setEditAmount] = useState('');
   const [editNote, setEditNote] = useState('');
+  // 日期范围筛选（问题⑦）：空串 = 不限，不下发对应查询参数
+  const [filterStart, setFilterStart] = useState('');
+  const [filterEnd, setFilterEnd] = useState('');
+  // 「全部」快捷项的起点 = 组合首个交易日（问题②）
+  const baseDate = usePortfolioBaseDate();
 
   const getPreference = usePreferenceStore((s) => s.getPreference);
   const amountThousands = getPreference('amountThousands');
@@ -68,6 +74,9 @@ export function CashBalanceHistory({
   const { data, isLoading, isError } = useCashBalances(portfolioId, {
     page,
     pageSize: HISTORY_PAGE_SIZE,
+    // 空串不下发，避免 queryKey 里出现无意义的 '' 造成多余缓存分片
+    ...(filterStart ? { startDate: filterStart } : {}),
+    ...(filterEnd ? { endDate: filterEnd } : {}),
   });
   const upsertMutation = useUpsertCashBalance();
   const deleteMutation = useDeleteCashBalance();
@@ -132,7 +141,38 @@ export function CashBalanceHistory({
       </Button>
 
       {open && (
-        <div className="mt-2">
+        <div className="mt-2 space-y-3">
+          {/*
+            问题⑦：变更历史支持日期范围 + 快捷范围筛选。
+            筛选栏放在三态分支之外 —— 否则一旦筛出空结果就会连同筛选器一起
+            被空态替换，用户无法改回条件（死锁）。
+          */}
+          <div className="flex flex-wrap items-end gap-3 rounded-md border border-border p-3">
+            <DateRangeQuickPicker
+              startDate={filterStart}
+              endDate={filterEnd}
+              allRangeStart={baseDate}
+              onChange={(r) => {
+                setFilterStart(r.startDate);
+                setFilterEnd(r.endDate);
+                setPage(1); // 换范围后回到第 1 页，避免停留在越界页码
+              }}
+            />
+            {(filterStart || filterEnd) && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setFilterStart('');
+                  setFilterEnd('');
+                  setPage(1);
+                }}
+              >
+                重置
+              </Button>
+            )}
+          </div>
+
           {isLoading ? (
             <Skeleton className="h-24 w-full" />
           ) : isError ? (
@@ -141,7 +181,9 @@ export function CashBalanceHistory({
             </p>
           ) : items.length === 0 ? (
             <p className="py-4 text-center text-xs text-muted-foreground">
-              暂无现金余额变更记录
+              {filterStart || filterEnd
+                ? '所选日期范围内暂无现金余额变更记录'
+                : '暂无现金余额变更记录'}
             </p>
           ) : (
             <>
