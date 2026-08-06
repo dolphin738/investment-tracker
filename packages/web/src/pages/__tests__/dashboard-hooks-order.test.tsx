@@ -235,6 +235,8 @@ describe('DashboardPage Hooks 调用顺序（融合回归）', () => {
 
   beforeEach(() => {
     installJsdomPolyfills();
+    // useUrlState 直接读写 window.location，跨用例会泄漏，逐例复位
+    window.history.replaceState(null, '', '/');
     state.portfolios = [PORTFOLIO];
     state.portfoliosLoading = true;
     apiMocks.getOverview.mockReset().mockResolvedValue(OVERVIEW);
