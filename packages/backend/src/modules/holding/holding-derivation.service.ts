@@ -154,7 +154,7 @@ export class HoldingDerivationService {
       `SELECT sp.security_id, sp.price::text, sp."asOf"::text
          FROM security_prices sp
         WHERE sp.portfolio_id = $1
-          AND sp.security_id = ANY($2::uuid[])
+          AND sp.security_id = ANY($2::text[])
           AND sp."asOf" <= $3::date
         ORDER BY sp.security_id, sp."asOf" ASC`,
       portfolioId,
