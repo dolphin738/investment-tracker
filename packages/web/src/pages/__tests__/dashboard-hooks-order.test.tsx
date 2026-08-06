@@ -229,9 +229,13 @@ function renderDashboard() {
 // ---------------------------------------------------------------------------
 // 用例
 // ---------------------------------------------------------------------------
+/** console.error 间谍工厂 —— 用它反推类型，避免 vi.spyOn 泛型默认值不匹配 */
+const spyOnConsoleError = () =>
+  vi.spyOn(console, 'error').mockImplementation(() => {});
+
 describe('DashboardPage Hooks 调用顺序（融合回归）', () => {
   /** 捕获 React 抛出的错误（React 会 console.error 后再冒泡） */
-  let errorSpy: ReturnType<typeof vi.spyOn>;
+  let errorSpy: ReturnType<typeof spyOnConsoleError>;
 
   beforeEach(() => {
     installJsdomPolyfills();
@@ -249,7 +253,7 @@ describe('DashboardPage Hooks 调用顺序（融合回归）', () => {
       currentPortfolioId: 'pf-1',
     });
     usePreferenceStore.setState({ preferences: BASE_PREF, loaded: true });
-    errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    errorSpy = spyOnConsoleError();
   });
 
   afterEach(() => {
