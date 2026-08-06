@@ -277,37 +277,9 @@ export default function DashboardPage(): JSX.Element {
     staleTime: 60 * 1000,
   });
 
-  // ===== 加载态 =====
-  if (portfoliosLoading) {
-    return (
-      <div className="space-y-6">
-        <PageHeader title="概览" description="加载中…" />
-        <Skeleton className="h-40 w-full" />
-      </div>
-    );
-  }
-
-  // ===== 无组合 =====
-  if (portfolios.length === 0) {
-    return (
-      <EmptyState
-        title="欢迎，先创建您的第一个投资组合"
-        description="创建组合后即可开始录入出入金和买卖数据。"
-      />
-    );
-  }
-
-  // ===== 未选组合 =====
-  if (!currentPortfolioId) {
-    return (
-      <Card className="mx-auto max-w-md">
-        <CardContent className="py-10 text-center text-sm text-muted-foreground">
-          请先在顶部选择一个投资组合
-        </CardContent>
-      </Card>
-    );
-  }
-
+  // ===== 概览 8 指标卡原始值（必须位于所有早退之前，遵守 Hooks 规则） =====
+  // 这些均为纯计算：ov 为 undefined 时各值自然落 null，
+  // buildOverviewMetrics 已有完整空值兜底，上移不改变任何展示语义。
   const ov = overview.data;
   const cumulativeXirr = ov?.xirr ?? latestXirr.data?.xirrValue ?? null;
   const totalAsset = ov?.totalAsset ?? null;
@@ -366,6 +338,37 @@ export default function DashboardPage(): JSX.Element {
       xirrDecimals,
     ],
   );
+
+  // ===== 加载态 =====
+  if (portfoliosLoading) {
+    return (
+      <div className="space-y-6">
+        <PageHeader title="概览" description="加载中…" />
+        <Skeleton className="h-40 w-full" />
+      </div>
+    );
+  }
+
+  // ===== 无组合 =====
+  if (portfolios.length === 0) {
+    return (
+      <EmptyState
+        title="欢迎，先创建您的第一个投资组合"
+        description="创建组合后即可开始录入出入金和买卖数据。"
+      />
+    );
+  }
+
+  // ===== 未选组合 =====
+  if (!currentPortfolioId) {
+    return (
+      <Card className="mx-auto max-w-md">
+        <CardContent className="py-10 text-center text-sm text-muted-foreground">
+          请先在顶部选择一个投资组合
+        </CardContent>
+      </Card>
+    );
+  }
 
   /**
    * DASH-P0-06：「有组合但无数据」判定。
