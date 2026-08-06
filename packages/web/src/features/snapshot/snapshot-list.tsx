@@ -32,8 +32,9 @@ import {
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { DateRangeQuickPicker } from '@/components/date/date-range-quick-picker';
+import { usePortfolioBaseDate } from '@/stores/portfolio.store';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -87,6 +88,8 @@ export function SnapshotList({
   // 筛选行本地状态（日期起止 + 来源 checkbox；「重置」清空）
   const [filterStart, setFilterStart] = useState('');
   const [filterEnd, setFilterEnd] = useState('');
+  // 「全部」快捷项的起点 = 组合首个交易日（问题②）
+  const baseDate = usePortfolioBaseDate();
   const [autoChecked, setAutoChecked] = useState(true);
   const [manualChecked, setManualChecked] = useState(true);
 
@@ -212,27 +215,18 @@ export function SnapshotList({
         </div>
       )}
 
-      {/* 筛选行（SNAP-P0-04b 验收 2）：日期范围 + 来源 checkbox + [重置] */}
+      {/* 筛选行（SNAP-P0-04b 验收 2）：快捷范围 + 日期范围 + 来源 checkbox + [重置] */}
       <div className="mb-3 flex flex-wrap items-end gap-3 rounded-md border border-border p-3">
-        <div className="space-y-1.5">
-          <Label className="text-xs text-muted-foreground">起始日期</Label>
-          <Input
-            type="date"
-            value={filterStart}
-            onChange={(e) => setFilterStart(e.target.value)}
-            className="w-[160px]"
-          />
-        </div>
-        <span className="pb-2 text-muted-foreground">~</span>
-        <div className="space-y-1.5">
-          <Label className="text-xs text-muted-foreground">结束日期</Label>
-          <Input
-            type="date"
-            value={filterEnd}
-            onChange={(e) => setFilterEnd(e.target.value)}
-            className="w-[160px]"
-          />
-        </div>
+        {/* 问题⑤：接入共享快捷范围控件，与出入金页同一实现、同一高度 */}
+        <DateRangeQuickPicker
+          startDate={filterStart}
+          endDate={filterEnd}
+          allRangeStart={baseDate}
+          onChange={(r) => {
+            setFilterStart(r.startDate);
+            setFilterEnd(r.endDate);
+          }}
+        />
         <div className="space-y-1.5">
           <Label className="text-xs text-muted-foreground">来源</Label>
           <div className="flex items-center gap-4 pb-1">

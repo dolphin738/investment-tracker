@@ -55,7 +55,10 @@ import {
   type TransactionTypeOption,
 } from '@/features/cashflow/query-params';
 import { CASH_BALANCE_FOCUS_EVENT } from '@/hooks/use-transactions';
-import { usePortfolioStore } from '@/stores/portfolio.store';
+import {
+  usePortfolioBaseDate,
+  usePortfolioStore,
+} from '@/stores/portfolio.store';
 import { usePreferenceStore } from '@/stores/preference.store';
 import { usePortfolios } from '@/hooks/use-portfolios';
 import { useQuery } from '@tanstack/react-query';
@@ -63,6 +66,7 @@ import { getOverview } from '@/api/overview.api';
 import { useLatestCashBalance, useUpsertCashBalance } from '@/hooks/use-cash-balances';
 import { useNavSeries } from '@/hooks/use-query-data';
 import { useSnapshots } from '@/hooks/use-snapshots';
+import { DateRangeQuickPicker } from '@/components/date/date-range-quick-picker';
 import { chartGrid } from '@/components/charts/chart-grid';
 import { toIsoDate } from '@/lib/constants';
 import { ROUTE_PATH } from '@/lib/constants';
@@ -90,6 +94,8 @@ export default function TransactionsPage(): JSX.Element {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const currentPortfolioId = usePortfolioStore((s) => s.currentPortfolioId);
+  // 「全部」快捷项的起点 = 组合首个交易日（问题②）
+  const baseDate = usePortfolioBaseDate();
   const { data: portfolios = [], isLoading: portfoliosLoading } = usePortfolios();
   const getPreference = usePreferenceStore((s) => s.getPreference);
   const amountThousands = getPreference('amountThousands');
@@ -529,8 +535,14 @@ export default function TransactionsPage(): JSX.Element {
         <CardContent className="space-y-4">
           {/* 筛选栏（变更即写入 URL query，FLOW-P0-02 验收2） */}
           <div className="flex flex-wrap items-end gap-3">
+            {/*
+              问题⑥：把「不勾选 = 全部」并入 Label。原先它是控件下方独立的 <p>，
+              使「类型」这一列比其它列高出一行；在 items-end 下各列按底边对齐，
+              类型框就会整体上浮、与日期/排序控件错位。并入 Label 后，每一列
+              都是「Label + h-9 控件」的等高结构，天然对齐。
+            */}
             <div className="space-y-1.5">
-              <Label className="text-xs">类型</Label>
+              <Label className="text-xs">类型（不勾选 = 全部）</Label>
               <div className="flex h-9 items-center gap-4 rounded-md border border-input px-3">
                 {TRANSACTION_TYPE_OPTIONS.map((t) => (
                   <label
@@ -549,30 +561,21 @@ export default function TransactionsPage(): JSX.Element {
                   </label>
                 ))}
               </div>
-              <p className="text-xs text-muted-foreground">不勾选 = 全部</p>
             </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs">起始日期</Label>
-              <Input
-                type="date"
-                className="w-[150px]"
-                value={filterStartDate}
-                onChange={(e) =>
-                  updateParams({ startDate: e.target.value || null, page: 1 })
-                }
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs">截止日期</Label>
-              <Input
-                type="date"
-                className="w-[150px]"
-                value={filterEndDate}
-                onChange={(e) =>
-                  updateParams({ endDate: e.target.value || null, page: 1 })
-                }
-              />
-            </div>
+            {/* 问题⑤⑥：接入共享快捷范围控件，与资产记录页同一实现 */}
+            <DateRangeQuickPicker
+              startDate={filterStartDate}
+              endDate={filterEndDate}
+              endLabel="截止日期"
+              allRangeStart={baseDate}
+              onChange={(r) =>
+                updateParams({
+                  startDate: r.startDate || null,
+                  endDate: r.endDate || null,
+                  page: 1,
+                })
+              }
+            />
             <div className="space-y-1.5">
               <Label className="text-xs">排序</Label>
               <Select value={`${sortBy}:${sortOrder}`} onValueChange={handleSortChange}>
