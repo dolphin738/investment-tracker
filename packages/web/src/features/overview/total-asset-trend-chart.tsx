@@ -40,10 +40,11 @@ import type { NavSeriesPoint } from '@investment-tracker/shared';
 export const MANUAL_MARK_PAGE_SIZE = 200;
 
 /**
- * 图表高度 px（概览页全宽单栏，比出入金页旧版 220px 略高）。
- * ⚠️ 骨架屏/空态的 `h-[260px]` 是 Tailwind 字面量类，改这里须同步改那两处。
+ * 图表高度 px（概览页「趋势分析」区的 hero 图，比四宫格里的 260px 更高，
+ * 以确立「主图 vs 辅图」的层次；出入金页旧版为 220px）。
+ * ⚠️ 骨架屏/空态的 `h-[300px]` 是 Tailwind 字面量类，改这里须同步改那两处。
  */
-const CHART_HEIGHT = 260;
+const CHART_HEIGHT = 300;
 
 /** 主线色（与「净值趋势」累计线同色系） */
 const COLOR_LINE = 'hsl(217, 91%, 60%)';
@@ -290,9 +291,9 @@ export function TotalAssetTrendChart({
       <CardContent className="space-y-2">
         {/* 高度类必须是字面量 —— Tailwind 静态扫描不认模板串拼接的任意值类 */}
         {loading ? (
-          <Skeleton className="h-[260px] w-full" />
+          <Skeleton className="h-[300px] w-full" />
         ) : trendPoints.length === 0 ? (
-          <div className="flex h-[260px] items-center justify-center text-sm text-muted-foreground">
+          <div className="flex h-[300px] items-center justify-center text-sm text-muted-foreground">
             当前范围暂无资产数据
           </div>
         ) : (

@@ -1,15 +1,26 @@
 /**
  * pages/dashboard.tsx — 概览页（PRD §7.4）
  *
- * - 8 指标卡片（融合总资产概览，见 docs/designs/overview-fusion-2026-08-06.md）：
- *   资产构成 4（当前总资产 / 持仓市值 / 现金余额 / 净投入）+ 收益表现 4
- *   （累计收益率 / 当年收益率 / 年化XIRR / 累计净值），由 buildOverviewMetrics 统一构造
- * - 总资产走势图（含手工记录标记 + manage 深链，融合自出入金页【A】）
- * - 维度切换 [日][周][月][年] + 共享范围筛选 DateRangeQuickPicker（受控回显 URL range）
- * - 四宫格：净值趋势（累计+当年双线）/ XIRR 趋势 / 近期出入金最近5笔（带「查看全部」，
- *   DASH-P0-05）/ 组合表现对比
+ * 【版面骨架（纯展示分区，不含任何数据逻辑）】
+ * 页头 + 新鲜度提示 → 区一「关键指标」→ 区二「趋势分析」，区间距 `space-y-8`。
+ *
+ * - 区一「关键指标」：8 指标卡（融合总资产概览，见
+ *   docs/designs/overview-fusion-2026-08-06.md）按 `group` 拆成两个带小标题的分组 ——
+ *   「资产构成」4（当前总资产 / 持仓市值 / 现金余额 / 净投入）+「收益表现」4
+ *   （累计收益率 / 当年收益率 / 年化XIRR / 累计净值），回答「我有多少 vs 赚了多少」。
+ *   ⚠️ 分组只是 `filter(m => m.group === …)` 的展示切分，值与涨跌方向仍由
+ *   buildOverviewMetrics 统一构造，页面不参与任何计算。
+ * - 区二「趋势分析」：筛选栏（维度 [日][周][月][年] + 共享 DateRangeQuickPicker，
+ *   受控回显 URL range）置顶 → 总资产走势图作为 hero 图（含手工记录标记 + manage
+ *   深链，融合自出入金页【A】）→ 四宫格：净值趋势（累计+当年双线）/ XIRR 趋势 /
+ *   近期出入金最近5笔（带「查看全部」，DASH-P0-05）/ 组合表现对比。
+ *   三张时序图收进同一区，避免走势图孤立在卡片与四宫格之间的割裂感。
  * - 有组合但无数据时，四宫格位置渲染三步引导卡（DASH-P0-06）
  * - 按钮「+录入出入金」「+录入买卖」→ 分别打开出入金/买卖弹窗
+ *
+ * 🔴【Hooks 顺序】`overviewMetrics` 的 useMemo 及其派生变量必须始终位于所有提前
+ * `return` 之前（曾因违反此约束导致冷启动白屏，见 5f6ae54）。新增展示层 section
+ * 包裹时严禁把任何 hook 挪到早退分支之后。
  */
 
 import { useMemo, useState } from 'react';
@@ -30,6 +41,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { Section, SectionTitle } from '@/components/ui/section';
 import { StatCard } from '@/components/charts/stat-card';
 import { XirrTrendChart } from '@/components/charts/xirr-trend-chart';
 import { NavTrendChart } from '@/components/charts/nav-trend-chart';
@@ -88,6 +100,14 @@ const GRANULARITY_TABS = [
  * 本页不再维护本地副本（原 DATE_RANGE_OPTIONS / resolveDateRange 已移除）。
  * 新 7 项已覆盖偏好 defaultDateRange 的全部取值（1m/3m/1y/ytd/all），无需回落。
  */
+
+/**
+ * 指标卡网格断点（两个分组共用，保证两行卡片列宽严格对齐）。
+ *
+ * 移动端强制 1 列：「当前总资产 ¥1,234,567.89」在 2 列窄栏里会溢出/换行；
+ * ≥640px 两列、≥768px 起四列，8 张卡稳定排成两行。
+ */
+const METRIC_GRID_CLASS = 'grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-4';
 
 /** 出入金类型中文映射（BUY=存入，SELL=取出） */
 const TYPE_LABEL: Record<string, string> = {
@@ -339,6 +359,17 @@ export default function DashboardPage(): JSX.Element {
     ],
   );
 
+  /**
+   * 展示层分组：8 卡按 `group` 切成「资产构成 / 收益表现」两组。
+   *
+   * 纯 filter，不改任何值与涨跌方向 —— 顺序仍由 buildOverviewMetrics 决定，
+   * 两组拼起来恰是原来的 8 张卡。放在这里（早退之前、紧邻 overviewMetrics）
+   * 是刻意为之：派生变量与其来源相邻，后人重构时不易把它连同 useMemo
+   * 一起挪到早退分支之后（那会重演冷启动白屏）。
+   */
+  const assetMetrics = overviewMetrics.filter((m) => m.group === 'asset');
+  const returnMetrics = overviewMetrics.filter((m) => m.group === 'return');
+
   // ===== 加载态 =====
   if (portfoliosLoading) {
     return (
@@ -419,242 +450,275 @@ export default function DashboardPage(): JSX.Element {
   }
 
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title="概览"
-        description={
-          ov?.latestDate ? `数据截止 ${ov.latestDate}` : '最近 12 个月收益概览'
-        }
-        actions={
-          <div className="flex gap-2">
-            <Button
-              onClick={() => setCashflowOpen(true)}
-              variant="outline"
-              size="sm"
-            >
-              <Plus className="mr-2 h-4 w-4" />
-              录入出入金
-            </Button>
-            <Button onClick={() => setTradeOpen(true)} size="sm">
-              <Plus className="mr-2 h-4 w-4" />
-              录入买卖
-            </Button>
-          </div>
-        }
-      />
-
-      {/* ===== 数据新鲜度提示条（DASH-P1-03 · 后端判定，isStale=false 不渲染） ===== */}
-      {ov?.freshness && (
-        <FreshnessBanner
-          portfolioId={currentPortfolioId}
-          freshness={ov.freshness}
+    <div className="space-y-8">
+      {/* ===== 页头 + 新鲜度提示（同属「页面级信息」，内部用 space-y-4 收紧） ===== */}
+      <div className="space-y-4">
+        <PageHeader
+          title="概览"
+          description={
+            ov?.latestDate ? `数据截止 ${ov.latestDate}` : '最近 12 个月收益概览'
+          }
+          actions={
+            <div className="flex gap-2">
+              <Button
+                onClick={() => setCashflowOpen(true)}
+                variant="outline"
+                size="sm"
+              >
+                <Plus className="mr-2 h-4 w-4" />
+                录入出入金
+              </Button>
+              <Button onClick={() => setTradeOpen(true)} size="sm">
+                <Plus className="mr-2 h-4 w-4" />
+                录入买卖
+              </Button>
+            </div>
+          }
         />
-      )}
 
-      {/* ===== 概览 8 指标卡片（资产构成 4 + 收益表现 4，融合总资产概览） ===== */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {overviewMetrics.map((m) => (
-          <StatCard
-            key={m.key}
-            title={m.title}
-            value={m.value}
-            description={m.description}
-            trend={m.trend}
+        {/* 数据新鲜度提示条（DASH-P1-03 · 后端判定，isStale=false 不渲染） */}
+        {ov?.freshness && (
+          <FreshnessBanner
+            portfolioId={currentPortfolioId}
+            freshness={ov.freshness}
           />
-        ))}
+        )}
       </div>
 
-      {/* ===== 维度切换 + 范围筛选（共享 DateRangeQuickPicker，受控回显 URL range） ===== */}
-      <div className="flex flex-wrap items-end gap-3">
-        <Tabs
-          value={overviewQuery.g}
-          onValueChange={(v) =>
-            setOverviewQuery({ g: v as OverviewQueryState['g'] })
-          }
-          className="w-auto"
-        >
-          <TabsList>
-            {GRANULARITY_TABS.map((tab) => (
-              <TabsTrigger key={tab.value} value={tab.value}>
-                {tab.label}
-              </TabsTrigger>
+      {/* ===== 区一「关键指标」：8 卡按 group 分两组（我有多少 vs 赚了多少） ===== */}
+      <Section title="关键指标" description="资产家底与收益表现一眼看全">
+        {/* 资产构成 4 —— 首张「当前总资产」用极轻描边点题，不做其它强调 */}
+        <div className="space-y-3">
+          <SectionTitle>资产构成</SectionTitle>
+          <div className={METRIC_GRID_CLASS}>
+            {assetMetrics.map((m) => (
+              <StatCard
+                key={m.key}
+                title={m.title}
+                value={m.value}
+                description={m.description}
+                trend={m.trend}
+                className={m.key === 'total-asset' ? 'border-primary/30' : undefined}
+              />
             ))}
-          </TabsList>
-        </Tabs>
-        <DateRangeQuickPicker
-          quick={overviewQuery.range === 'custom' ? undefined : overviewQuery.range}
+          </div>
+        </div>
+
+        {/* 收益表现 4 */}
+        <div className="space-y-3">
+          <SectionTitle>收益表现</SectionTitle>
+          <div className={METRIC_GRID_CLASS}>
+            {returnMetrics.map((m) => (
+              <StatCard
+                key={m.key}
+                title={m.title}
+                value={m.value}
+                description={m.description}
+                trend={m.trend}
+              />
+            ))}
+          </div>
+        </div>
+      </Section>
+
+      {/* ===== 区二「趋势分析」：筛选栏 → hero 走势图 → 四宫格（三张时序图同区） ===== */}
+      <Section title="趋势分析" description="维度与区间对本区所有图表统一生效">
+        {/*
+          维度切换 + 范围筛选（共享 DateRangeQuickPicker，受控回显 URL range）。
+          移动端纵向堆叠（Tabs 与日期选择器各占一行，避免挤成两行半），
+          ≥640px 回到一行且日期选择器靠右（justify-between）。
+        */}
+        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+          <Tabs
+            value={overviewQuery.g}
+            onValueChange={(v) =>
+              setOverviewQuery({ g: v as OverviewQueryState['g'] })
+            }
+            className="w-auto"
+          >
+            <TabsList>
+              {GRANULARITY_TABS.map((tab) => (
+                <TabsTrigger key={tab.value} value={tab.value}>
+                  {tab.label}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
+          <DateRangeQuickPicker
+            quick={overviewQuery.range === 'custom' ? undefined : overviewQuery.range}
+            startDate={startDate}
+            endDate={endDate}
+            allRangeStart={baseDate}
+            onChange={(r) =>
+              setOverviewQuery(
+                r.quick
+                  ? { range: r.quick as OverviewQueryState['range'], from: '', to: '' }
+                  : { range: 'custom', from: r.startDate, to: r.endDate },
+              )
+            }
+          />
+        </div>
+
+        {/* hero 图：总资产走势（融合自出入金页【A】，含手工记录标记 + manage 深链） */}
+        <TotalAssetTrendChart
+          data={navSeries.data ?? []}
+          loading={navSeries.isLoading}
+          portfolioId={currentPortfolioId}
           startDate={startDate}
           endDate={endDate}
-          allRangeStart={baseDate}
-          onChange={(r) =>
-            setOverviewQuery(
-              r.quick
-                ? { range: r.quick as OverviewQueryState['range'], from: '', to: '' }
-                : { range: 'custom', from: r.startDate, to: r.endDate },
-            )
-          }
+          amountThousands={amountThousands}
+          amountAbbrev={amountAbbrev}
         />
-      </div>
 
-      {/* ===== 总资产走势图（融合自出入金页【A】，跟随上方范围筛选，含手工记录标记 + manage 深链） ===== */}
-      <TotalAssetTrendChart
-        data={navSeries.data ?? []}
-        loading={navSeries.isLoading}
-        portfolioId={currentPortfolioId}
-        startDate={startDate}
-        endDate={endDate}
-        amountThousands={amountThousands}
-        amountAbbrev={amountAbbrev}
-      />
-
-      {/* ===== 有组合但无数据：三步引导（DASH-P0-06） ===== */}
-      {hasNoData && (
-        <OnboardingGuide
-          onOpenCashflow={() => setCashflowOpen(true)}
-          onOpenTrade={() => setTradeOpen(true)}
-        />
-      )}
-
-      {/* ===== 四宫格（仅在有数据时渲染） ===== */}
-      {!hasNoData && (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <NavTrendChart
-            data={navSeries.data ?? []}
-            loading={navSeries.isLoading}
-            title="净值趋势（累计 + 当年）"
+        {/* 有组合但无数据：三步引导（DASH-P0-06） */}
+        {hasNoData && (
+          <OnboardingGuide
+            onOpenCashflow={() => setCashflowOpen(true)}
+            onOpenTrade={() => setTradeOpen(true)}
           />
-          <XirrTrendChart
-            data={xirrSeries.data ?? []}
-            loading={xirrSeries.isLoading}
-            title="XIRR 趋势"
-            connectNulls={false}
-          />
+        )}
 
-          {/* 近期出入金（最近5笔） */}
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle className="text-base">近期出入金</CardTitle>
-              {/* DASH-P0-05：跳转出入金页查看完整流水 */}
-              <div className="flex items-center gap-3">
-                <Link
-                  to="/cashflows"
-                  className="text-xs text-muted-foreground hover:underline"
-                >
-                  查看全部
-                </Link>
-                <ArrowLeftRight className="h-4 w-4 text-muted-foreground" />
-              </div>
-            </CardHeader>
-            <CardContent>
-              {recentTransactions.isLoading ? (
-                <TableSkeleton rows={3} cols={3} />
-              ) : recentTransactions.data &&
-                recentTransactions.data.items.length > 0 ? (
-                <div className="space-y-3">
-                  {recentTransactions.data.items.map((tx) => (
-                    <div
-                      key={tx.id}
-                      className="flex items-center justify-between border-b pb-2 last:border-0 last:pb-0"
-                    >
-                      <div className="flex items-center gap-3">
-                        <span className="text-sm text-muted-foreground">
-                          {formatDate(tx.date, 'MM-dd')}
-                        </span>
-                        <span
-                          className={cn(
-                            'text-xs font-medium',
-                            tx.type === CashFlowType.BUY
-                              ? 'text-up'
-                              : 'text-down',
-                          )}
-                        >
-                          {TYPE_LABEL[tx.type] || tx.type}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <span className="text-sm font-medium tabular-nums">
-                          {tx.type === CashFlowType.BUY ? '+' : '-'}
-                          {formatCurrency(tx.amount, 2, { thousands: amountThousands, abbreviate: amountAbbrev })}
-                        </span>
-                        {tx.note && (
-                          <span className="max-w-[120px] truncate text-xs text-muted-foreground">
-                            {tx.note}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  ))}
+        {/* 四宫格（仅在有数据时渲染） */}
+        {!hasNoData && (
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <NavTrendChart
+              data={navSeries.data ?? []}
+              loading={navSeries.isLoading}
+              title="净值趋势（累计 + 当年）"
+            />
+            <XirrTrendChart
+              data={xirrSeries.data ?? []}
+              loading={xirrSeries.isLoading}
+              title="XIRR 趋势"
+              connectNulls={false}
+            />
+
+            {/* 近期出入金（最近5笔） */}
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between">
+                <CardTitle className="text-base">近期出入金</CardTitle>
+                {/* DASH-P0-05：跳转出入金页查看完整流水 */}
+                <div className="flex items-center gap-3">
+                  <Link
+                    to="/cashflows"
+                    className="text-xs text-muted-foreground hover:underline"
+                  >
+                    查看全部
+                  </Link>
+                  <ArrowLeftRight className="h-4 w-4 text-muted-foreground" />
                 </div>
-              ) : (
-                <EmptyState
-                  title="还没有出入金记录"
-                  description="录入第一笔出入金开始跟踪收益"
-                  action={
-                    <Button size="sm" onClick={() => setCashflowOpen(true)}>
-                      <ArrowDownToLine className="mr-2 h-4 w-4" />
-                      录入出入金
-                    </Button>
-                  }
-                />
-              )}
-            </CardContent>
-          </Card>
-
-          {/* 组合表现对比 */}
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle className="text-base">组合表现对比</CardTitle>
-              <ArrowUpFromLine className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              {portfolioSummary.isLoading ? (
-                <TableSkeleton rows={3} cols={4} />
-              ) : portfolioSummary.data && portfolioSummary.data.length > 0 ? (
-                <div className="space-y-2">
-                  {portfolioSummary.data.map((p) => (
-                    <div
-                      key={p.id}
-                      className="flex items-center justify-between rounded-lg bg-muted/40 px-3 py-2 text-sm"
-                    >
-                      <span className="font-medium">{p.name}</span>
-                      <div className="flex items-center gap-4">
-                        <span className="tabular-nums">
-                          {formatCurrency(p.totalAsset, 2, { thousands: amountThousands, abbreviate: amountAbbrev })}
-                        </span>
-                        {/* 用 `!= null` 同时排除 null 与 undefined：
-                            Q-4 甲 后端已返回该字段（8 位小数比率字符串），
-                            但仍可能为 null（尚无 DailyNav）或 undefined（旧后端），
-                            旧写法 `!== null` 会放行 undefined 并渲染出 NaN%。 */}
-                        {p.cumulativeReturnRate != null && (
+              </CardHeader>
+              <CardContent>
+                {recentTransactions.isLoading ? (
+                  <TableSkeleton rows={3} cols={3} />
+                ) : recentTransactions.data &&
+                  recentTransactions.data.items.length > 0 ? (
+                  <div className="space-y-3">
+                    {recentTransactions.data.items.map((tx) => (
+                      <div
+                        key={tx.id}
+                        className="flex items-center justify-between border-b pb-2 last:border-0 last:pb-0"
+                      >
+                        <div className="flex items-center gap-3">
+                          <span className="text-sm text-muted-foreground">
+                            {formatDate(tx.date, 'MM-dd')}
+                          </span>
                           <span
                             className={cn(
-                              'tabular-nums',
-                              Number(p.cumulativeReturnRate) >= 0
+                              'text-xs font-medium',
+                              tx.type === CashFlowType.BUY
                                 ? 'text-up'
                                 : 'text-down',
                             )}
                           >
-                            {formatPercent(p.cumulativeReturnRate, 2, { decimals: xirrDecimals })}
+                            {TYPE_LABEL[tx.type] || tx.type}
                           </span>
-                        )}
-                        {p.xirr != null && (
-                          <span className="text-xs text-muted-foreground">
-                            XIRR {formatPercent(p.xirr, 2, { decimals: xirrDecimals })}
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <span className="text-sm font-medium tabular-nums">
+                            {tx.type === CashFlowType.BUY ? '+' : '-'}
+                            {formatCurrency(tx.amount, 2, { thousands: amountThousands, abbreviate: amountAbbrev })}
                           </span>
-                        )}
+                          {tx.note && (
+                            <span className="max-w-[120px] truncate text-xs text-muted-foreground">
+                              {tx.note}
+                            </span>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="py-10 text-center text-sm text-muted-foreground">
-                  暂无组合数据
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-      )}
+                    ))}
+                  </div>
+                ) : (
+                  <EmptyState
+                    title="还没有出入金记录"
+                    description="录入第一笔出入金开始跟踪收益"
+                    action={
+                      <Button size="sm" onClick={() => setCashflowOpen(true)}>
+                        <ArrowDownToLine className="mr-2 h-4 w-4" />
+                        录入出入金
+                      </Button>
+                    }
+                  />
+                )}
+              </CardContent>
+            </Card>
+
+            {/* 组合表现对比 */}
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between">
+                <CardTitle className="text-base">组合表现对比</CardTitle>
+                <ArrowUpFromLine className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                {portfolioSummary.isLoading ? (
+                  <TableSkeleton rows={3} cols={4} />
+                ) : portfolioSummary.data && portfolioSummary.data.length > 0 ? (
+                  <div className="space-y-2">
+                    {portfolioSummary.data.map((p) => (
+                      <div
+                        key={p.id}
+                        className="flex items-center justify-between rounded-lg bg-muted/40 px-3 py-2 text-sm"
+                      >
+                        <span className="font-medium">{p.name}</span>
+                        <div className="flex items-center gap-4">
+                          <span className="tabular-nums">
+                            {formatCurrency(p.totalAsset, 2, { thousands: amountThousands, abbreviate: amountAbbrev })}
+                          </span>
+                          {/* 用 `!= null` 同时排除 null 与 undefined：
+                              Q-4 甲 后端已返回该字段（8 位小数比率字符串），
+                              但仍可能为 null（尚无 DailyNav）或 undefined（旧后端），
+                              旧写法 `!== null` 会放行 undefined 并渲染出 NaN%。 */}
+                          {p.cumulativeReturnRate != null && (
+                            <span
+                              className={cn(
+                                'tabular-nums',
+                                Number(p.cumulativeReturnRate) >= 0
+                                  ? 'text-up'
+                                  : 'text-down',
+                              )}
+                            >
+                              {formatPercent(p.cumulativeReturnRate, 2, { decimals: xirrDecimals })}
+                            </span>
+                          )}
+                          {p.xirr != null && (
+                            <span className="text-xs text-muted-foreground">
+                              XIRR {formatPercent(p.xirr, 2, { decimals: xirrDecimals })}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="py-10 text-center text-sm text-muted-foreground">
+                    暂无组合数据
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        )}
+      </Section>
 
       {/* 录入出入金弹窗 */}
       <Dialog open={cashflowOpen} onOpenChange={setCashflowOpen}>

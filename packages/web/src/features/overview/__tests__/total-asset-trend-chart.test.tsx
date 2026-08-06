@@ -207,12 +207,14 @@ describe('collectManualDates / buildManualScatter', () => {
 // 渲染三态
 // ---------------------------------------------------------------------------
 describe('TotalAssetTrendChart — 三态渲染', () => {
-  it('loading → Skeleton（h-[260px]），图表不在 DOM', () => {
+  // 高度 260→300：概览页布局打磨后本图升为「趋势分析」区的 hero 图，
+  // 比四宫格里的辅图（仍 260px）更高，骨架屏须与 CHART_HEIGHT 保持一致。
+  it('loading → Skeleton（h-[300px]），图表不在 DOM', () => {
     const { container } = renderChart({ loading: true });
 
     const skeleton = container.querySelector<HTMLElement>('.animate-pulse');
     expect(skeleton).not.toBeNull();
-    expect(skeleton?.classList.contains('h-[260px]')).toBe(true);
+    expect(skeleton?.classList.contains('h-[300px]')).toBe(true);
     expect(screen.queryByTestId('echarts-mock')).toBeNull();
   });
 
