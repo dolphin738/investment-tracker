@@ -40,11 +40,11 @@ export class UpdatePreferenceDto {
   defaultGranularity?: string;
 
   @ApiPropertyOptional({
-    description: '默认日期范围快捷项',
-    enum: ['3m', '1y', 'ytd', 'all'],
+    description: '默认日期范围快捷项（I-04：与 QUICK_RANGE_OPTIONS 7 项一致）',
+    enum: ['1w', '1m', '3m', '6m', '1y', 'ytd', 'all'],
   })
   @IsOptional()
-  @IsIn(['3m', '1y', 'ytd', 'all'])
+  @IsIn(['1w', '1m', '3m', '6m', '1y', 'ytd', 'all'])
   defaultDateRange?: string;
 
   @ApiPropertyOptional({

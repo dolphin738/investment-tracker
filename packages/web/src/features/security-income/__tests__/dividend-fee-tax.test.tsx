@@ -69,6 +69,7 @@ vi.mock('@/hooks/use-fees', () => ({
     refetch: () => {},
   }),
   useCreateFee: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useUpdateFee: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useDeleteFee: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
@@ -262,7 +263,7 @@ describe('分红表单增量（所得税 + 净额 + 编辑态）', () => {
       renderForm();
 
       expect(screen.getByLabelText('分红额（税前）*')).toBeDefined();
-      expect(screen.getByLabelText('所得税 *')).toBeDefined();
+      expect(screen.getByLabelText('所得税（可选）')).toBeDefined();
       expect(screen.getByText('净额（自动）')).toBeDefined();
     });
 
@@ -270,7 +271,7 @@ describe('分红表单增量（所得税 + 净额 + 编辑态）', () => {
       renderForm();
       fillDividendBasics();
 
-      fireEvent.change(screen.getByLabelText('所得税 *'), {
+      fireEvent.change(screen.getByLabelText('所得税（可选）'), {
         target: { value: '300' },
       });
 
@@ -292,7 +293,7 @@ describe('分红表单增量（所得税 + 净额 + 编辑态）', () => {
       fireEvent.change(screen.getByLabelText('分红额（税前）*'), {
         target: { value: '0.30' },
       });
-      fireEvent.change(screen.getByLabelText('所得税 *'), {
+      fireEvent.change(screen.getByLabelText('所得税（可选）'), {
         target: { value: '0.20' },
       });
 
@@ -310,7 +311,7 @@ describe('分红表单增量（所得税 + 净额 + 编辑态）', () => {
       renderForm();
       fillDividendBasics();
 
-      fireEvent.change(screen.getByLabelText('所得税 *'), {
+      fireEvent.change(screen.getByLabelText('所得税（可选）'), {
         target: { value: '1600' },
       });
       fireEvent.click(screen.getByRole('button', { name: '保存' }));
@@ -325,7 +326,7 @@ describe('分红表单增量（所得税 + 净额 + 编辑态）', () => {
       renderForm();
       fillDividendBasics();
 
-      fireEvent.change(screen.getByLabelText('所得税 *'), {
+      fireEvent.change(screen.getByLabelText('所得税（可选）'), {
         target: { value: '-1' },
       });
       fireEvent.click(screen.getByRole('button', { name: '保存' }));
@@ -340,7 +341,7 @@ describe('分红表单增量（所得税 + 净额 + 编辑态）', () => {
       renderForm();
       fillDividendBasics();
 
-      fireEvent.change(screen.getByLabelText('所得税 *'), {
+      fireEvent.change(screen.getByLabelText('所得税（可选）'), {
         target: { value: '1.234' },
       });
       fireEvent.click(screen.getByRole('button', { name: '保存' }));
@@ -355,7 +356,7 @@ describe('分红表单增量（所得税 + 净额 + 编辑态）', () => {
       renderForm();
       fillDividendBasics();
 
-      fireEvent.change(screen.getByLabelText('所得税 *'), {
+      fireEvent.change(screen.getByLabelText('所得税（可选）'), {
         target: { value: '300' },
       });
       fireEvent.click(screen.getByRole('button', { name: '保存' }));
@@ -387,7 +388,7 @@ describe('分红表单增量（所得税 + 净额 + 编辑态）', () => {
         (screen.getByLabelText('分红额（税前）*') as HTMLInputElement).value,
       ).toBe('1500.00');
       expect(
-        (screen.getByLabelText('所得税 *') as HTMLInputElement).value,
+        (screen.getByLabelText('所得税（可选）') as HTMLInputElement).value,
       ).toBe('300.00');
       expect(
         (document.getElementById('income-security') as HTMLSelectElement).value,
@@ -403,7 +404,7 @@ describe('分红表单增量（所得税 + 净额 + 编辑态）', () => {
       fireEvent.change(screen.getByLabelText('分红额（税前）*'), {
         target: { value: '1800' },
       });
-      fireEvent.change(screen.getByLabelText('所得税 *'), {
+      fireEvent.change(screen.getByLabelText('所得税（可选）'), {
         target: { value: '360' },
       });
       fireEvent.click(screen.getByRole('button', { name: '保存' }));
@@ -429,7 +430,7 @@ describe('分红表单增量（所得税 + 净额 + 编辑态）', () => {
       fireEvent.change(screen.getByLabelText('分红额（税前）*'), {
         target: { value: '1800' },
       });
-      fireEvent.change(screen.getByLabelText('所得税 *'), {
+      fireEvent.change(screen.getByLabelText('所得税（可选）'), {
         target: { value: '360' },
       });
 

@@ -15,6 +15,7 @@ import {
   listDividends as listApi,
   updateDividend as updateApi,
 } from '@/api/dividend.api';
+import type { DividendQuery } from '@/api/dividend.api';
 import type {
   CreateDividendRecordDto,
   DividendRecord,
@@ -24,13 +25,18 @@ import type {
 /** 分红列表 query key 前缀 */
 export const DIVIDENDS_KEY = ['dividends'] as const;
 
-/** 分红记录列表 */
-export function useDividends(portfolioId: string | null) {
+/**
+ * 分红记录列表（I-05：支持 securityId 多值 / 日期范围过滤）
+ */
+export function useDividends(
+  portfolioId: string | null,
+  query: DividendQuery = {},
+) {
   return useQuery<DividendRecord[]>({
     queryKey: portfolioId
-      ? ['dividends', 'list', portfolioId]
+      ? ['dividends', 'list', portfolioId, query]
       : ['dividends', 'disabled'],
-    queryFn: () => listApi(portfolioId!),
+    queryFn: () => listApi(portfolioId!, query),
     enabled: Boolean(portfolioId),
     staleTime: 30 * 1000,
   });

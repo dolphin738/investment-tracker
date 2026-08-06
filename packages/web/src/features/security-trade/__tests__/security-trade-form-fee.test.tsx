@@ -26,6 +26,8 @@ const mocks = vi.hoisted(() => ({
   createTrade: vi.fn(),
   updateTrade: vi.fn(),
   createFee: vi.fn(),
+  // 稳定引用：避免每次渲染新数组 → useMemo/effect 依赖不稳 → reset 无限循环
+  feesData: [] as unknown[],
 }));
 
 vi.mock('sonner', () => ({
@@ -65,6 +67,20 @@ vi.mock('@/api/fee.api', () => ({
   listFees: vi.fn().mockResolvedValue([]),
   createFee: mocks.createFee,
   deleteFee: vi.fn().mockResolvedValue(null),
+}));
+
+// I-01：表单新增 useFees（编辑态费用三框回填），mock 返回稳定空数组引用
+vi.mock('@/hooks/use-fees', () => ({
+  FEES_KEY: ['fees'],
+  useFees: () => ({
+    data: mocks.feesData,
+    isLoading: false,
+    isError: false,
+    refetch: () => {},
+  }),
+  useCreateFee: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useUpdateFee: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useDeleteFee: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
 /**
@@ -472,27 +488,35 @@ describe('买卖表单增量（成交额 + 三费用 → 含费单价 + 先 trad
   });
 
   // =========================================================================
-  // 编辑态（U-4 / C-10）
+  // 编辑态（I-01：录入/编辑共用同一 schema + 布局；编辑态费用三框回填 + 重建 FeeRecord）
   // =========================================================================
-  describe('编辑态：无费用三框 + 存量口径提示', () => {
-    it('编辑态不渲染费用三框与成交额输入，改为 含费单价 直编 + 只读成交额', () => {
+  describe('编辑态（I-01 界面统一）', () => {
+    it('编辑态与录入态共用同一布局：成交额 + 费用三框 + 含费单价只读预览', () => {
       renderForm({ trade: TRADE_RESPONSE });
 
-      expect(screen.queryByLabelText('佣金')).toBeNull();
-      expect(screen.queryByLabelText('印花税')).toBeNull();
-      expect(screen.queryByLabelText('其他')).toBeNull();
-      expect(screen.queryByLabelText('成交额（元）*')).toBeNull();
-      expect(screen.getByLabelText('含费单价（元）*')).toBeDefined();
-      expect(screen.getByText(/成交额（只读换算/)).toBeDefined();
+      expect(screen.getByLabelText('成交额（元）*')).toBeDefined();
+      expect(screen.getByLabelText('佣金')).toBeDefined();
+      expect(screen.getByLabelText('印花税')).toBeDefined();
+      expect(screen.getByLabelText('其他')).toBeDefined();
+      expect(screen.getByText(/成本价（自动，含费）/)).toBeDefined();
+      // 编辑态回填：fee=0 无关联费用 → 成交额 = q×price = 150045，费用三框空
+      expect(
+        (screen.getByLabelText('成交额（元）*') as HTMLInputElement).value,
+      ).toBe('150045');
+      expect(
+        (screen.getByLabelText('其他') as HTMLInputElement).value,
+      ).toBe('');
     });
 
-    it('存量 fee≠0 显示口径提示（U-1/C-10）', () => {
+    it('存量 fee≠0 显示口径提示（I-01：费用回填「其他」+ 保存时并入含费单价）', () => {
       renderForm({ trade: LEGACY_TRADE });
 
+      expect(screen.getByText(/旧口径记录/)).toBeDefined();
+      expect(screen.getByText(/保存时将自动并入含费单价/)).toBeDefined();
+      // 旧口径费用回填到「其他」栏
       expect(
-        screen.getByText(/旧口径记录/),
-      ).toBeDefined();
-      expect(screen.getByText(/编辑不改成本口径/)).toBeDefined();
+        (screen.getByLabelText('其他') as HTMLInputElement).value,
+      ).toBe('45.00');
     });
 
     it('新口径（fee=0）不显示口径提示', () => {
@@ -501,12 +525,12 @@ describe('买卖表单增量（成交额 + 三费用 → 含费单价 + 先 trad
       expect(screen.queryByText(/旧口径记录/)).toBeNull();
     });
 
-    it('编辑保存走 updateTrade（payload 无 fee 字段）', async () => {
+    it('编辑保存走 updateTrade（payload 含 fee=0 统一口径）；无费用则不重建 FeeRecord', async () => {
       mocks.updateTrade.mockResolvedValue(TRADE_RESPONSE);
       renderForm({ trade: TRADE_RESPONSE });
 
-      fireEvent.change(screen.getByLabelText('含费单价（元）*'), {
-        target: { value: '1600' },
+      fireEvent.change(screen.getByLabelText('成交额（元）*'), {
+        target: { value: '160000' },
       });
       fireEvent.click(screen.getByRole('button', { name: '保存' }));
 
@@ -518,9 +542,11 @@ describe('买卖表单增量（成交额 + 三费用 → 含费单价 + 先 trad
         payload: { price: number; fee?: number };
       };
       expect(arg.id).toBe('trade-1');
+      // 成交额 160000 + 费用 0 → 含费单价 = 160000/100 = 1600
       expect(arg.payload.price).toBe(1600);
-      expect(arg.payload).not.toHaveProperty('fee');
-      // 编辑不触发 FeeRecord 写入（U-4）
+      // I-01：前端按统一口径提交 fee=0（含费单价入 price、费用拆分落 FeeRecord）
+      expect(arg.payload.fee).toBe(0);
+      // 无关联费用 + 费用三框为空 → 不创建 FeeRecord
       expect(mocks.createFee).not.toHaveBeenCalled();
     });
   });

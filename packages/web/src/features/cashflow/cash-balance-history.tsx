@@ -11,7 +11,7 @@
  * 🔴 不新增审计表、不改 Prisma：变更历史 = 多行 `asOf` 列表（复用 `useCashBalances`）。
  */
 
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ChevronDown,
   ChevronUp,
@@ -25,6 +25,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { DateRangeQuickPicker } from '@/components/date/date-range-quick-picker';
+import { resolveQuickRange } from '@/features/query/dimension-switcher';
+import { useDefaultDateRange } from '@/features/query/use-default-date-range';
 import { usePortfolioBaseDate } from '@/stores/portfolio.store';
 import {
   Table,
@@ -61,10 +63,25 @@ export function CashBalanceHistory({
   const [editAmount, setEditAmount] = useState('');
   const [editNote, setEditNote] = useState('');
   // 日期范围筛选（问题⑦）：空串 = 不限，不下发对应查询参数
-  const [filterStart, setFilterStart] = useState('');
-  const [filterEnd, setFilterEnd] = useState('');
+  // I-04：默认日期范围 = 偏好（URL 无参数时），非法/空回落 '1y'
   // 「全部」快捷项的起点 = 组合首个交易日（问题②）
   const baseDate = usePortfolioBaseDate();
+  const defaultRange = useDefaultDateRange();
+  const defaultRangeValue = useMemo(
+    () =>
+      resolveQuickRange(defaultRange, {
+        allRangeStart: baseDate ?? undefined,
+      }),
+    [defaultRange, baseDate],
+  );
+  const [filterStart, setFilterStart] = useState(defaultRangeValue.startDate);
+  const [filterEnd, setFilterEnd] = useState(defaultRangeValue.endDate);
+  // 偏好对齐 effect（架构 §8）：偏好异步到达后对齐一次默认范围
+  useEffect(() => {
+    setFilterStart(defaultRangeValue.startDate);
+    setFilterEnd(defaultRangeValue.endDate);
+    setPage(1);
+  }, [defaultRangeValue.startDate, defaultRangeValue.endDate]);
 
   const getPreference = usePreferenceStore((s) => s.getPreference);
   const amountThousands = getPreference('amountThousands');

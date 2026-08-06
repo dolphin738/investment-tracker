@@ -17,7 +17,7 @@ import {
   IsUUID,
   MaxLength,
 } from 'class-validator';
-import { FeeType } from '@prisma/client';
+import { FeeType, FeeScenario } from '@prisma/client';
 
 export class CreateFeeRecordDto {
   @ApiProperty({ description: '关联标的 ID（必须属于同一组合）' })
@@ -43,6 +43,17 @@ export class CreateFeeRecordDto {
   @IsOptional()
   @IsEnum(FeeType)
   type?: FeeType;
+
+  // 🆕 I-03：费用场景（BUY=买入时 / SELL=卖出时）。
+  // 服务层推断优先：dto.scenario ?? (transactionId → SecurityTrade.side) ?? BUY
+  @ApiPropertyOptional({
+    description: '费用场景：BUY 买入时 / SELL 卖出时（缺省按 transactionId 推断，无法推断默认 BUY）',
+    enum: FeeScenario,
+    default: FeeScenario.BUY,
+  })
+  @IsOptional()
+  @IsEnum(FeeScenario)
+  scenario?: FeeScenario;
 
   @ApiPropertyOptional({ description: '关联证券买卖流水 ID（可选）' })
   @IsOptional()

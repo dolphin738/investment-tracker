@@ -6,7 +6,7 @@
  * - 新建/编辑弹窗：日期（不可未来）/总资产（必填）/持仓/现金/备注 + 系统自动值覆盖提示
  */
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Plus } from 'lucide-react';
 import {
   Card,
@@ -25,11 +25,24 @@ import {
 } from '@/components/ui/dialog';
 import { SnapshotForm } from '@/features/snapshot/snapshot-form';
 import { SnapshotList } from '@/features/snapshot/snapshot-list';
-import { usePortfolioStore } from '@/stores/portfolio.store';
+import { resolveQuickRange } from '@/features/query/dimension-switcher';
+import { useDefaultDateRange } from '@/features/query/use-default-date-range';
+import { usePortfolioBaseDate, usePortfolioStore } from '@/stores/portfolio.store';
 import type { AssetSnapshot } from '@investment-tracker/shared';
 
 export default function SnapshotsPage(): JSX.Element {
   const currentPortfolioId = usePortfolioStore((s) => s.currentPortfolioId);
+  // 「全部」快捷项的起点 = 组合首个交易日（问题②）
+  const baseDate = usePortfolioBaseDate();
+  // I-04：默认日期范围 = 偏好（URL 无参数时），非法/空回落 '1y'
+  const defaultRange = useDefaultDateRange();
+  const defaultRangeValue = useMemo(
+    () =>
+      resolveQuickRange(defaultRange, {
+        allRangeStart: baseDate ?? undefined,
+      }),
+    [defaultRange, baseDate],
+  );
 
   const [createOpen, setCreateOpen] = useState(false);
   const [editing, setEditing] = useState<AssetSnapshot | null>(null);
@@ -86,7 +99,12 @@ export default function SnapshotsPage(): JSX.Element {
         <CardContent>
           <SnapshotList
             portfolioId={currentPortfolioId}
-            query={{ pageSize: 20 }}
+            query={{
+              pageSize: 20,
+              // I-04：列表默认日期范围 = 偏好默认（无 URL 参数时）
+              startDate: defaultRangeValue.startDate,
+              endDate: defaultRangeValue.endDate,
+            }}
             onEdit={handleEdit}
           />
         </CardContent>

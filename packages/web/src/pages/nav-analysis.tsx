@@ -9,7 +9,7 @@
  *   （每日收益 =（当日累计净值 − 前日累计净值）× 前日份额；正红负绿）
  */
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Card,
   CardContent,
@@ -28,8 +28,13 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Label } from '@/components/ui/label';
-import { DimensionSwitcher, QUICK_RANGE_OPTIONS } from '@/features/query/dimension-switcher';
+import {
+  DimensionSwitcher,
+  QUICK_RANGE_OPTIONS,
+  resolveQuickRange,
+} from '@/features/query/dimension-switcher';
 import type { DimensionSwitcherValue } from '@/features/query/dimension-switcher';
+import { useDefaultDateRange } from '@/features/query/use-default-date-range';
 import { NavTrendChart } from '@/components/charts/nav-trend-chart';
 import { MonthlyHeatmap } from '@/components/charts/monthly-heatmap';
 import {
@@ -39,7 +44,6 @@ import {
 import { usePreferenceStore } from '@/stores/preference.store';
 import { useNavSeries, useLatestNav } from '@/hooks/use-query-data';
 import { formatDecimal, formatPercent, formatCurrency, formatDate } from '@/lib/utils';
-import { getDefaultDateRange } from '@/lib/constants';
 import { NavMetric as NavMetricEnum, type NavMetric } from '@/api/types';
 import {
   AggregationMethod,
@@ -110,7 +114,15 @@ export default function NavAnalysisPage(): JSX.Element {
   const currentPortfolioId = usePortfolioStore((s) => s.currentPortfolioId);
   // 「全部」快捷项的起点 = 组合首个交易日（问题②）
   const baseDate = usePortfolioBaseDate();
-  const { startDate, endDate } = getDefaultDateRange();
+  // I-04：默认日期范围 = 偏好（URL 无 range 参数时），非法/空回落 '1y'
+  const defaultRange = useDefaultDateRange();
+  const initialRange = useMemo(
+    () =>
+      resolveQuickRange(defaultRange, {
+        allRangeStart: baseDate ?? undefined,
+      }),
+    [defaultRange, baseDate],
+  );
 
   // 维度初始值（SET-P0-02 验收 4：读取偏好 defaultGranularity 作为默认维度）
   const getPreference = usePreferenceStore((s) => s.getPreference);
@@ -120,12 +132,24 @@ export default function NavAnalysisPage(): JSX.Element {
   const amountAbbrev = getPreference('amountAbbrev');
   const [dimension, setDimension] = useState<DimensionSwitcherValue>({
     granularity: getPreference('defaultGranularity') as QueryGranularity,
-    startDate,
-    endDate,
+    startDate: initialRange.startDate,
+    endDate: initialRange.endDate,
     // ANL-P0-03：默认聚合读偏好（SET-P0-02 验收4），与 XIRR 页现状一致
     aggregation: getPreference('aggregation') as AggregationMethod,
   });
   const [metric, setMetric] = useState<NavMetric>(NavMetricEnum.BOTH);
+
+  // 偏好对齐 effect（架构 §8）：偏好异步到达后，URL 无 range/startDate/endDate 参数时对齐一次
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search);
+    if (sp.has('range') || sp.has('startDate') || sp.has('endDate')) return;
+    setDimension((prev) => ({
+      ...prev,
+      ...resolveQuickRange(defaultRange, {
+        allRangeStart: baseDate ?? undefined,
+      }),
+    }));
+  }, [defaultRange, baseDate]);
 
   const series = useNavSeries(currentPortfolioId, {
     ...dimension,

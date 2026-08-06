@@ -72,6 +72,17 @@ export enum FeeType {
   OTHER = 'OTHER',
 }
 
+/**
+ * 费用场景（I-03）
+ *
+ * ⚠️ 三处值必须一致（共享知识 §8）：后端 prisma `enum FeeScenario { BUY SELL }`、
+ * shared `FeeScenario` const/type、此处 web enum。
+ */
+export enum FeeScenario {
+  BUY = 'BUY',
+  SELL = 'SELL',
+}
+
 // ============================================================================
 // 用户相关
 // ============================================================================
@@ -239,12 +250,13 @@ export interface CreateDividendRecordDto {
   note?: string;
 }
 
-/** 更新分红 DTO（全部可选，PATCH /dividends/:id） */
+/** 更新分红 DTO（全部可选，PATCH /dividends/:id；I-02 补 type 防 forbidNonWhitelisted 400） */
 export interface UpdateDividendRecordDto {
   securityId?: string;
   date?: string;
   amount?: string;
   tax?: string;
+  type?: DividendType;
   note?: string;
 }
 
@@ -257,6 +269,8 @@ export interface FeeRecord {
   securityCode: string;
   date: string;
   type: FeeType;
+  /** 费用场景（BUY=买入时 / SELL=卖出时，I-03） */
+  scenario: FeeScenario;
   amount: string;
   /** 关联证券买卖流水 ID（可选） */
   transactionId: string | null;
@@ -264,14 +278,58 @@ export interface FeeRecord {
   createdAt: string;
 }
 
-/** 创建费用 DTO（type 可选，后端缺省 OTHER） */
+/** 创建费用 DTO（type 可选，后端缺省 OTHER；scenario 缺省按 transactionId 推断） */
 export interface CreateFeeRecordDto {
   securityId: string;
   date: string;
   type?: FeeType;
+  scenario?: FeeScenario;
   amount: string;
   transactionId?: string;
   note?: string;
+}
+
+/** 更新费用 DTO（I-03 · PATCH /fees/:id，全可选） */
+export interface UpdateFeeRecordDto {
+  securityId?: string;
+  date?: string;
+  amount?: string;
+  type?: FeeType;
+  scenario?: FeeScenario;
+  note?: string;
+}
+
+/** 费用查询参数（I-03 / I-05：标的多值 / 场景 / 日期范围 / grouped 聚合） */
+export interface FeeQuery {
+  /** 标的 ID（逗号分隔多值，I-05 统一筛选器标的多选） */
+  securityId?: string;
+  /** 场景过滤（BUY 买入时 / SELL 卖出时） */
+  scenario?: FeeScenario;
+  /** 起始日期 YYYY-MM-DD（含） */
+  startDate?: string;
+  /** 结束日期 YYYY-MM-DD（含） */
+  endDate?: string;
+  /** grouped=1 按合并键聚合返回 FeeGroupedRow[]（I-03）；缺省返回明细行 */
+  grouped?: boolean;
+}
+
+/** 费用列表 grouped=1 聚合行（I-03 / Q-3：明细行各自保留 transactionId，聚合行携带全量去重列表） */
+export interface FeeGroupedRow {
+  /** `${securityId}|${date}|${scenario}|${type}` */
+  mergeKey: string;
+  securityId: string;
+  securityName: string;
+  securityCode: string;
+  /** YYYY-MM-DD */
+  date: string;
+  scenario: FeeScenario;
+  type: FeeType;
+  /** Σ 金额，toFixed(2) */
+  amount: string;
+  /** 组成笔数 */
+  count: number;
+  /** 关联流水 ID 去重列表 */
+  transactionIds: string[];
 }
 
 // ============================================================================

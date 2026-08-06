@@ -86,6 +86,7 @@ vi.mock('@/hooks/use-fees', () => ({
   FEES_KEY: ['fees'],
   useFees: () => state.fees,
   useCreateFee: () => ({ mutateAsync: state.createFee, isPending: false }),
+  useUpdateFee: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useDeleteFee: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 

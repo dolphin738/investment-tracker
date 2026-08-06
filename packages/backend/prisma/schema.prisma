@@ -247,21 +247,32 @@ model DividendRecord {
 }
 
 model FeeRecord {
-  id            String    @id @default(uuid())
-  portfolioId   String    @map("portfolio_id")
-  securityId    String    @map("security_id")
-  date          DateTime  @db.Date
-  amount        Decimal   @db.Decimal(18, 2)
-  type          FeeType   @default(OTHER)
-  transactionId String?   @map("transaction_id")
+  id            String      @id @default(uuid())
+  portfolioId   String      @map("portfolio_id")
+  securityId    String      @map("security_id")
+  date          DateTime    @db.Date
+  amount        Decimal     @db.Decimal(18, 2)
+  type          FeeType     @default(OTHER)
+  // 🆕 I-03：费用场景（BUY=买入时 / SELL=卖出时），非空。
+  // 正常写入路径由 FeeService 显式推断/校验后落库；@default(BUY) 仅作安全网默认值
+  // （架构裁决 Q-8：不采纳 DB 层唯一约束，合并走展示层聚合，明细行保留精确关联）。
+  scenario      FeeScenario @default(BUY)
+  transactionId String?     @map("transaction_id")
   note          String?
-  createdAt     DateTime  @default(now()) @map("created_at")
-  portfolio     Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
-  security      Security  @relation(fields: [securityId], references: [id], onDelete: Cascade)
+  createdAt     DateTime    @default(now()) @map("created_at")
+  portfolio     Portfolio   @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  security      Security    @relation(fields: [securityId], references: [id], onDelete: Cascade)
 
   @@index([portfolioId, date])
   @@index([securityId, date])
+  // 🆕 I-03：场景筛选走统一筛选器（I-05）时的查询索引
+  @@index([portfolioId, scenario, date])
   @@map("fee_records")
+}
+
+enum FeeScenario {
+  BUY
+  SELL
 }
 
 model UserPreference {

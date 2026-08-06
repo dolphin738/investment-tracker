@@ -507,6 +507,31 @@ describe('DividendService', () => {
 
       expect(prisma.cashFlow.create).not.toHaveBeenCalled();
     });
+
+    it('改 type 时落库（I-02 P0 修复：前端编辑分红携带 type 不再 400 且可修改类型）', async () => {
+      prisma.dividendRecord.findFirst.mockResolvedValue(makeRecord());
+      prisma.dividendRecord.update.mockResolvedValue(
+        makeRecord({ type: DividendType.STOCK_DIVIDEND }),
+      );
+
+      const result = await service.update(PORTFOLIO_ID, 'div-1', USER_ID, {
+        type: DividendType.STOCK_DIVIDEND,
+      });
+
+      const data = prisma.dividendRecord.update.mock.calls[0][0].data;
+      expect(data).toEqual({ type: DividendType.STOCK_DIVIDEND });
+      expect(result.type).toBe(DividendType.STOCK_DIVIDEND);
+    });
+
+    it('不传 type 时 data 不含 type（避免误清空现有类型）', async () => {
+      prisma.dividendRecord.findFirst.mockResolvedValue(makeRecord());
+      prisma.dividendRecord.update.mockResolvedValue(makeRecord());
+
+      await service.update(PORTFOLIO_ID, 'div-1', USER_ID, { note: 'x' });
+
+      const data = prisma.dividendRecord.update.mock.calls[0][0].data;
+      expect(data.type).toBeUndefined();
+    });
   });
 
   // =========================================================================

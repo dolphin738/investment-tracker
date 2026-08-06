@@ -24,7 +24,7 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { DividendService } from './dividend.service';
 import type { DividendRecordResponse } from './dividend.service';
 import { CreateDividendRecordDto } from './dto/create-dividend-record.dto';
@@ -39,13 +39,22 @@ export class DividendController {
   constructor(private readonly dividendService: DividendService) {}
 
   @Get()
-  @ApiOperation({ summary: '分红记录列表（可按标的过滤，不参与收益计算）' })
+  @ApiOperation({ summary: '分红记录列表（可按标的/日期范围过滤，不参与收益计算）' })
+  @ApiQuery({ name: 'securityId', required: false, description: '标的 ID（支持逗号分隔多值）' })
+  @ApiQuery({ name: 'startDate', required: false, description: '起始日期 YYYY-MM-DD（含）' })
+  @ApiQuery({ name: 'endDate', required: false, description: '结束日期 YYYY-MM-DD（含）' })
   async findAll(
     @CurrentUser() user: AuthenticatedUser,
     @Param('portfolioId') portfolioId: string,
     @Query('securityId') securityId?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
   ): Promise<DividendRecordResponse[]> {
-    return this.dividendService.findAll(portfolioId, user.userId, securityId);
+    return this.dividendService.findAll(portfolioId, user.userId, {
+      securityId,
+      startDate,
+      endDate,
+    });
   }
 
   @Post()

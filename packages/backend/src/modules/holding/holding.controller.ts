@@ -116,7 +116,7 @@ export class HoldingController {
   @Get()
   @ApiOperation({ summary: '获取组合实时持仓（由 SecurityTrade 流水推导，只读）' })
   @ApiQuery({ name: 'date', required: false, description: '推导日期 YYYY-MM-DD，缺省为今天' })
-  @ApiQuery({ name: 'securityId', required: false, description: '仅返回该标的的持仓' })
+  @ApiQuery({ name: 'securityId', required: false, description: '标的 ID（支持逗号分隔多值）' })
   @ApiQuery({ name: 'includeClosed', required: false, description: '是否包含已清仓标的' })
   @ApiQuery({
     name: 'types',
@@ -153,10 +153,15 @@ export class HoldingController {
       includeClosed === 'true',
     );
 
-    // 按标的过滤（可选）
-    const bySecurity = securityId
-      ? items.filter((h) => h.securityId === securityId)
-      : items;
+    // 按标的过滤（可选 · I-05：securityId 支持逗号分隔多值）
+    // 例：?securityId=id1,id2 → 集合判断；单值向后兼容。
+    const securityIds = securityId
+      ? securityId.split(',').map((s) => s.trim()).filter((s) => s.length > 0)
+      : [];
+    const bySecurity =
+      securityIds.length > 0
+        ? items.filter((h) => securityIds.includes(h.securityId))
+        : items;
 
     // 按标的类型白名单过滤（可选 · Q-3 乙）
     // derive() 返回的 HoldingView.securityType 是字符串，直接与白名单比对

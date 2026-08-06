@@ -1,28 +1,27 @@
 /**
- * pages/HoldingsPage.tsx — 持仓页（PRD §7.2 · 方案B 只读推导）
+ * pages/HoldingsPage.tsx — 持仓页（PRD §7.2 · 方案B 只读推导 + I-05 统一筛选器）
  *
  * - 标题「+ 录入买卖」按钮 → 打开证券买卖录入弹窗（不是跳出入金页！）
+ * - 🆕 I-05：页面顶部单一「统一筛选器」（HoldingsToolbar 原地升级），持仓 / 买卖明细 /
+ *   分红费用三板块共享，状态单一来源 = URL query（useUrlState<HoldingsFilterState>）：
+ *   - 日期范围（range/from/to）→ 买卖明细 / 分红费用
+ *   - 持仓日期 as-of（date）→ 持仓板块
+ *   - 证券多选（sec）→ 三板块
+ *   - 场景（scenario）→ 买卖明细（side）/ 分红费用（scenario）；持仓不适用
+ *   - 类型多选（types）+ 显示已清仓（closed）→ 持仓板块（专属折叠区）
  * - 【A】持仓汇总：总市值 / 总成本 / 浮盈 / 总盈亏率 / 标的数（HOLD-B-P0-06）
- * - 【B】持仓列表（只读，由 security-trades 推导），PRD §5.2.3 全 11 列：
- *   标的/代码/类型/数量/成本价/现价/成本额/市值/浮动盈亏/盈亏率/占比
- *   （HOLD-B-P0-03 / P0-04；现价支持内联编辑，占比带横向进度条）
- * - 【C】证券买卖明细流水：列表 + 筛选（标的/日期/方向）+ 编辑/删除
+ * - 【B】持仓列表（只读，由 security-trades 推导），PRD §5.2.3 全 11 列
+ * - 【C】证券买卖明细流水：列表（筛选由统一筛选器派生，HOLD-B-P0-07）
  * - 【E】分红 / 费用记录：按标的累计分红与累计费用 + 明细 CRUD（HOLD-B-P0-10）
  * - 空态引导按钮 → 打开录入弹窗（与出入金页完全解耦）
  *
  * 排序（决策 Q-5 甲）：列表在前端按市值降序展示，不依赖后端排序参数。
- *
- * 版式说明（阶段 C）：草图把【E】画作页面末尾的独立区块，但本页自阶段 A 起
- * 已把【C】收敛为 Tab；【E】沿用同一模式作为第三个 Tab，与【C】保持一致，
- * 同时避免与【B】持仓表并列造成长页滚动。功能验收（按标的查看累计分红/费用）不变。
  */
 
 import { useEffect, useMemo, useState } from 'react';
 import { PackageOpen, Plus, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Table,
@@ -34,13 +33,6 @@ import {
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import {
   Dialog,
   DialogContent,
@@ -56,8 +48,10 @@ import { InlinePriceEditor } from '@/features/security-price/inline-price-editor
 import { DividendFeeSection } from '@/features/security-income/dividend-fee-section';
 import { HoldingsToolbar } from '@/features/holdings/holdings-toolbar';
 import { createHoldingsSchema } from '@/features/holdings/holdings-query-params';
-import type { HoldingsQueryState } from '@/features/holdings/holdings-query-params';
-import { usePortfolioStore } from '@/stores/portfolio.store';
+import type { HoldingsFilterState } from '@/features/holdings/holdings-query-params';
+import { resolveQuickRange } from '@/features/query/dimension-switcher';
+import { useDefaultDateRange } from '@/features/query/use-default-date-range';
+import { usePortfolioStore, usePortfolioBaseDate } from '@/stores/portfolio.store';
 import { usePreferenceStore } from '@/stores/preference.store';
 import { usePortfolios } from '@/hooks/use-portfolios';
 import { useHoldings } from '@/hooks/use-holdings';
@@ -66,6 +60,9 @@ import { useTransactions } from '@/hooks/use-transactions';
 import { todayInAppTzIso, toIsoDate } from '@/lib/constants';
 import { useUrlState } from '@/lib/url-query';
 import { formatCurrency, formatPercent, cn } from '@/lib/utils';
+import { SecuritySide } from '@investment-tracker/shared';
+import { FeeScenario } from '@/api/types';
+import type { SecurityTradeQuery } from '@/api/types';
 
 // ===== 常量 =====
 const SECURITY_TYPE_LABEL: Record<string, string> = {
@@ -87,28 +84,18 @@ export default function HoldingsPage(): JSX.Element {
 
   // 录入买卖弹窗
   const [tradeDialogOpen, setTradeDialogOpen] = useState(false);
-  // 买卖明细筛选
-  const [filterSecurityId, setFilterSecurityId] = useState<string>('all');
-  const [filterStartDate, setFilterStartDate] = useState<string>('');
-  const [filterEndDate, setFilterEndDate] = useState<string>('');
-  const [filterSide, setFilterSide] = useState<string>('all');
-  const [tradeQuery, setTradeQuery] = useState<{
-    securityId?: string;
-    startDate?: string;
-    endDate?: string;
-  }>({});
 
-  // ===== 持仓查询状态（T02 · URL 持久化）=====
-  // date / closed / types / sec 四个 key 全部走 useUrlState（lib/url-query）：
+  // ===== I-05：统一筛选器状态（单一来源 = URL query）=====
+  // date / closed / types / sec / range / from / to / scenario 全部走 useUrlState：
   // 默认值不写入 URL、非法值降级、白名单外 key 保留；刷新/复制链接可还原。
   const today = todayInAppTzIso();
   const prefShowLiquidated = getPreference('showLiquidated');
-  const [holdingsQuery, setHoldingsQuery] = useUrlState<HoldingsQueryState>(
-    createHoldingsSchema(today, prefShowLiquidated),
+  const defaultRange = useDefaultDateRange();
+  const [holdingsQuery, setHoldingsQuery] = useUrlState<HoldingsFilterState>(
+    createHoldingsSchema(today, prefShowLiquidated, defaultRange),
   );
 
-  // 「显示已清仓」初值 = UserPreference.showLiquidated；URL 参数优先级更高。
-  // useUrlState 的默认值在首帧固化，偏好异步到达后需主动对齐一次（URL 无 closed 时）。
+  // 偏好对齐 effect 1（closed，沿用既有范式）：偏好异步到达后，URL 无 closed 时对齐一次
   const hasClosedParam = useMemo(
     () => new URLSearchParams(window.location.search).has('closed'),
     [],
@@ -118,6 +105,21 @@ export default function HoldingsPage(): JSX.Element {
       setHoldingsQuery({ closed: true });
     }
   }, [prefShowLiquidated, hasClosedParam, holdingsQuery.closed, setHoldingsQuery]);
+
+  // 偏好对齐 effect 2（I-04）：偏好异步到达后，URL 无 range/from/to 时对齐一次
+  const hasRangeParam = useMemo(() => {
+    const sp = new URLSearchParams(window.location.search);
+    return sp.has('range') || sp.has('from') || sp.has('to');
+  }, []);
+  useEffect(() => {
+    if (
+      !hasRangeParam &&
+      holdingsQuery.range !== defaultRange &&
+      defaultRange !== 'custom'
+    ) {
+      setHoldingsQuery({ range: defaultRange as HoldingsFilterState['range'] });
+    }
+  }, [defaultRange, hasRangeParam, holdingsQuery.range, setHoldingsQuery]);
 
   // 日期选择器下限（O-4 方案甲，零后端改动）：首个交易日（useTransactions 首条）；
   // 无交易 → 组合创建日；恒 ≤ 今天。
@@ -136,13 +138,49 @@ export default function HoldingsPage(): JSX.Element {
       : today;
   }, [firstTradeQuery.data, currentPortfolio, today]);
 
+  // 「全部」快捷项起点 = 组合首个交易日（问题②）
+  const baseDate = usePortfolioBaseDate();
+
+  // I-05 三板块联动：日期范围解析（range=custom 用 from/to；否则按快捷项）
+  const { startDate, endDate } = useMemo(() => {
+    if (
+      holdingsQuery.range === 'custom' &&
+      holdingsQuery.from &&
+      holdingsQuery.to
+    ) {
+      return { startDate: holdingsQuery.from, endDate: holdingsQuery.to };
+    }
+    return resolveQuickRange(holdingsQuery.range, {
+      allRangeStart: baseDate ?? undefined,
+    });
+  }, [holdingsQuery.range, holdingsQuery.from, holdingsQuery.to, baseDate]);
+
+  // 【持仓板块】as-of 精确推导 + 证券/类型/已清仓过滤
   const holdings = useHoldings(currentPortfolioId, {
     date: holdingsQuery.date,
     includeClosed: holdingsQuery.closed,
     types: holdingsQuery.types.length > 0 ? holdingsQuery.types : undefined,
-    securityId: holdingsQuery.sec || undefined,
+    securityId:
+      holdingsQuery.sec.length > 0 ? holdingsQuery.sec.join(',') : undefined,
   });
   const securities = useSecurities(currentPortfolioId);
+
+  // 【买卖明细板块】证券多值 + 场景→side + 日期范围
+  const tradeQuery: SecurityTradeQuery = useMemo(() => {
+    const q: SecurityTradeQuery = {};
+    if (holdingsQuery.sec.length > 0) {
+      q.securityId = holdingsQuery.sec.join(',');
+    }
+    if (holdingsQuery.scenario === 'BUY') {
+      q.side = SecuritySide.BUY_SEC;
+    }
+    if (holdingsQuery.scenario === 'SELL') {
+      q.side = SecuritySide.SELL_SEC;
+    }
+    q.startDate = startDate;
+    q.endDate = endDate;
+    return q;
+  }, [holdingsQuery.sec, holdingsQuery.scenario, startDate, endDate]);
 
   /**
    * 【A4】持仓列表前端排序（决策 Q-5 甲）：默认按市值降序。
@@ -202,22 +240,6 @@ export default function HoldingsPage(): JSX.Element {
   const aggregate = holdings.data?.aggregate;
   const securityList = securities.data ?? [];
 
-  const handleApplyTradeFilter = () => {
-    const q: { securityId?: string; startDate?: string; endDate?: string } = {};
-    if (filterSecurityId !== 'all') q.securityId = filterSecurityId;
-    if (filterStartDate) q.startDate = filterStartDate;
-    if (filterEndDate) q.endDate = filterEndDate;
-    setTradeQuery(q);
-  };
-
-  const handleResetTradeFilter = () => {
-    setFilterSecurityId('all');
-    setFilterStartDate('');
-    setFilterEndDate('');
-    setFilterSide('all');
-    setTradeQuery({});
-  };
-
   return (
     <div className="space-y-6">
       <PageHeader
@@ -231,15 +253,14 @@ export default function HoldingsPage(): JSX.Element {
         }
       />
 
-      {/* T02 工具栏：日期选择器 + 显示已清仓 + 类型多选（URL 持久化） */}
+      {/* I-05 统一筛选器：三板块共享（持仓日期卡片重新设计承载） */}
       <HoldingsToolbar
-        date={holdingsQuery.date}
+        value={holdingsQuery}
+        onChange={setHoldingsQuery}
         minDate={minDate}
-        includeClosed={holdingsQuery.closed}
-        types={holdingsQuery.types}
-        onDateChange={(v) => setHoldingsQuery({ date: v })}
-        onClosedChange={(v) => setHoldingsQuery({ closed: v })}
-        onTypesChange={(v) => setHoldingsQuery({ types: v })}
+        allRangeStart={baseDate}
+        securities={securityList}
+        defaultRange={defaultRange}
       />
 
       <Tabs defaultValue="holdings">
@@ -251,9 +272,8 @@ export default function HoldingsPage(): JSX.Element {
         </TabsList>
 
         {/* ============ 持仓 Tab ============ */}
-        {/* 【A1】必须用 TabsContent 包裹，否则两个区块恒同时渲染、Tab 切换失效 */}
         <TabsContent value="holdings" className="mt-4 space-y-6">
-          {/* 【A】汇总（HOLD-B-P0-06：含总盈亏率共 5 项） */}
+          {/* 【A】汇总（HOLD-B-P0-06：含总盈亏率共 5 项；随筛选动态变化） */}
           {aggregate && (
             <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
               <Card>
@@ -475,83 +495,28 @@ export default function HoldingsPage(): JSX.Element {
         </TabsContent>
 
         {/* ============ 买卖明细 Tab ============ */}
+        {/* I-05：筛选由统一筛选器派生（日期范围/证券/场景），不再本 Tab 独立筛选 */}
         <TabsContent value="trades" className="mt-4 space-y-4">
-          {/* 【C】筛选 */}
-          <Card>
-            <CardContent className="pt-4">
-              <div className="flex flex-wrap items-end gap-3">
-                <div className="space-y-1.5">
-                  <Label className="text-xs">标的</Label>
-                  <Select
-                    value={filterSecurityId}
-                    onValueChange={setFilterSecurityId}
-                  >
-                    <SelectTrigger className="w-[180px]">
-                      <SelectValue placeholder="全部标的" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">全部标的</SelectItem>
-                      {securityList.map((sec) => (
-                        <SelectItem key={sec.id} value={sec.id}>
-                          {sec.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs">方向</Label>
-                  <Select value={filterSide} onValueChange={setFilterSide}>
-                    <SelectTrigger className="w-[110px]">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">全部</SelectItem>
-                      <SelectItem value="BUY_SEC">买入</SelectItem>
-                      <SelectItem value="SELL_SEC">卖出</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs">起始日期</Label>
-                  <Input
-                    type="date"
-                    className="w-[150px]"
-                    value={filterStartDate}
-                    onChange={(e) => setFilterStartDate(e.target.value)}
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs">截止日期</Label>
-                  <Input
-                    type="date"
-                    className="w-[150px]"
-                    value={filterEndDate}
-                    onChange={(e) => setFilterEndDate(e.target.value)}
-                  />
-                </div>
-                <div className="flex gap-2">
-                  <Button size="sm" onClick={handleApplyTradeFilter}>
-                    筛选
-                  </Button>
-                  <Button size="sm" variant="outline" onClick={handleResetTradeFilter}>
-                    重置
-                  </Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
           <SecurityTradeList
             portfolioId={currentPortfolioId}
             query={tradeQuery}
-            sideFilter={filterSide}
+            sideFilter="all"
           />
         </TabsContent>
 
-        {/* ============ 【E】分红 / 费用 Tab（HOLD-B-P0-10） ============ */}
+        {/* ============ 【E】分红 / 费用 Tab（HOLD-B-P0-10 + I-05 筛选联动） ============ */}
         <TabsContent value="income" className="mt-4">
-          <DividendFeeSection portfolioId={currentPortfolioId} />
+          <DividendFeeSection
+            portfolioId={currentPortfolioId}
+            securityIds={holdingsQuery.sec}
+            scenario={
+              holdingsQuery.scenario === 'all'
+                ? 'all'
+                : (holdingsQuery.scenario as FeeScenario)
+            }
+            startDate={startDate}
+            endDate={endDate}
+          />
         </TabsContent>
       </Tabs>
 

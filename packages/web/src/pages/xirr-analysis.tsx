@@ -8,7 +8,7 @@
  * - 明细表（日期/XIRR/环比变化）
  */
 
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Card,
   CardContent,
@@ -25,8 +25,13 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Skeleton } from '@/components/ui/skeleton';
-import { DimensionSwitcher, QUICK_RANGE_OPTIONS } from '@/features/query/dimension-switcher';
+import {
+  DimensionSwitcher,
+  QUICK_RANGE_OPTIONS,
+  resolveQuickRange,
+} from '@/features/query/dimension-switcher';
 import type { DimensionSwitcherValue } from '@/features/query/dimension-switcher';
+import { useDefaultDateRange } from '@/features/query/use-default-date-range';
 import { XirrTrendChart } from '@/components/charts/xirr-trend-chart';
 import { YearlyBarChart } from '@/components/charts/yearly-bar-chart';
 import {
@@ -36,7 +41,6 @@ import {
 import { usePreferenceStore } from '@/stores/preference.store';
 import { useXirrSeries, useLatestXirr, useYearStartXirr } from '@/hooks/use-query-data';
 import { formatPercent, formatChange, formatDate } from '@/lib/utils';
-import { getDefaultDateRange } from '@/lib/constants';
 import {
   AggregationMethod,
   QueryGranularity,
@@ -47,17 +51,37 @@ export default function XirrAnalysisPage(): JSX.Element {
   const currentPortfolioId = usePortfolioStore((s) => s.currentPortfolioId);
   // 「全部」快捷项的起点 = 组合首个交易日（问题②）
   const baseDate = usePortfolioBaseDate();
-  const { startDate, endDate } = getDefaultDateRange();
+  // I-04：默认日期范围 = 偏好（URL 无 range 参数时），非法/空回落 '1y'
+  const defaultRange = useDefaultDateRange();
+  const initialRange = useMemo(
+    () =>
+      resolveQuickRange(defaultRange, {
+        allRangeStart: baseDate ?? undefined,
+      }),
+    [defaultRange, baseDate],
+  );
 
   // 维度初始值（SET-P0-02 验收 4：读取偏好 defaultGranularity 作为默认维度）
   const getPreference = usePreferenceStore((s) => s.getPreference);
   const xirrDecimals = getPreference('xirrDecimals');
   const [dimension, setDimension] = useState<DimensionSwitcherValue>({
     granularity: getPreference('defaultGranularity') as QueryGranularity,
-    startDate,
-    endDate,
+    startDate: initialRange.startDate,
+    endDate: initialRange.endDate,
     aggregation: AggregationMethod.LAST,
   });
+
+  // 偏好对齐 effect（架构 §8）：偏好异步到达后，URL 无 range/startDate/endDate 参数时对齐一次
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search);
+    if (sp.has('range') || sp.has('startDate') || sp.has('endDate')) return;
+    setDimension((prev) => ({
+      ...prev,
+      ...resolveQuickRange(defaultRange, {
+        allRangeStart: baseDate ?? undefined,
+      }),
+    }));
+  }, [defaultRange, baseDate]);
 
   const series = useXirrSeries(currentPortfolioId, dimension);
   const latest = useLatestXirr(currentPortfolioId);

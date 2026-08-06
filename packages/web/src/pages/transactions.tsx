@@ -60,6 +60,8 @@ import { usePreferenceStore } from '@/stores/preference.store';
 import { usePortfolios } from '@/hooks/use-portfolios';
 import { useLatestCashBalance, useUpsertCashBalance } from '@/hooks/use-cash-balances';
 import { DateRangeQuickPicker } from '@/components/date/date-range-quick-picker';
+import { resolveQuickRange } from '@/features/query/dimension-switcher';
+import { useDefaultDateRange } from '@/features/query/use-default-date-range';
 import { toIsoDate } from '@/lib/constants';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import type { TransactionQuery } from '@/api/types';
@@ -69,6 +71,15 @@ export default function TransactionsPage(): JSX.Element {
   const currentPortfolioId = usePortfolioStore((s) => s.currentPortfolioId);
   // 「全部」快捷项的起点 = 组合首个交易日（问题②）
   const baseDate = usePortfolioBaseDate();
+  // I-04：默认日期范围 = 偏好（URL 无 startDate/endDate 时），非法/空回落 '1y'
+  const defaultRange = useDefaultDateRange();
+  const defaultRangeValue = useMemo(
+    () =>
+      resolveQuickRange(defaultRange, {
+        allRangeStart: baseDate ?? undefined,
+      }),
+    [defaultRange, baseDate],
+  );
   const { data: portfolios = [], isLoading: portfoliosLoading } = usePortfolios();
   const getPreference = usePreferenceStore((s) => s.getPreference);
   const amountThousands = getPreference('amountThousands');
@@ -82,13 +93,17 @@ export default function TransactionsPage(): JSX.Element {
   );
   const {
     types,
-    startDate: filterStartDate,
-    endDate: filterEndDate,
+    startDate: urlStartDate,
+    endDate: urlEndDate,
     sortBy,
     sortOrder,
     page,
     pageSize,
   } = parsed;
+
+  // I-04：URL 参数优先；无 startDate/endDate 时回落偏好默认范围（而非「全部」）
+  const filterStartDate = urlStartDate || defaultRangeValue.startDate;
+  const filterEndDate = urlEndDate || defaultRangeValue.endDate;
 
   /** 更新 URL query（null / '' 删除该参数；变更即生效，无需「筛选」按钮） */
   const updateParams = useCallback(

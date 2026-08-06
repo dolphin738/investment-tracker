@@ -33,10 +33,14 @@ export interface DividendRecord {
   securityId: string;
   /** 分红日期 YYYY-MM-DD */
   date: string;
-  /** 分红金额 */
+  /** 分红金额（税前） */
   amount: string;
   /** 分红类型 */
   type: DividendType;
+  /** 所得税（≥ 0，缺省 0；存量数据迁移后为 0） */
+  tax: string;
+  /** 净额 = amount − tax（后端统一计算，前端不自行二次计算 K-2） */
+  netAmount: string;
   /** 备注 */
   note: string | null;
   /** 创建时间 ISO 8601 */
@@ -55,6 +59,20 @@ export interface CreateDividendRecordDto {
   amount: string;
   /** 分红类型，默认 CASH */
   type?: DividendType;
+  /** 所得税（可选，≥ 0；净额 = amount − tax ≥ 0） */
+  tax?: string;
   /** 备注 */
+  note?: string;
+}
+
+/**
+ * 更新分红记录 DTO（I-02 修复后含 type）
+ */
+export interface UpdateDividendRecordDto {
+  securityId?: string;
+  date?: string;
+  amount?: string;
+  tax?: string;
+  type?: DividendType;
   note?: string;
 }

@@ -12,11 +12,13 @@ import { ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsDateString,
   IsDecimal,
+  IsEnum,
   IsOptional,
   IsString,
   IsUUID,
   MaxLength,
 } from 'class-validator';
+import { DividendType } from '@prisma/client';
 
 export class UpdateDividendRecordDto {
   @ApiPropertyOptional({ description: '关联标的 ID（必须属于同一组合）' })
@@ -47,6 +49,16 @@ export class UpdateDividendRecordDto {
   @IsOptional()
   @IsDecimal({ decimal_digits: '0,2' })
   tax?: string;
+
+  // 🔴 I-02 P0 修复：补 type 声明（全局 ValidationPipe whitelist+forbidNonWhitelisted，
+  // 前端编辑分红提交 type 时缺此声明会 400「property type should not exist」）
+  @ApiPropertyOptional({
+    description: '分红类型：CASH 现金分红 / STOCK_DIVIDEND 红利再投',
+    enum: DividendType,
+  })
+  @IsOptional()
+  @IsEnum(DividendType)
+  type?: DividendType;
 
   @ApiPropertyOptional({ description: '备注（最长 200 字）' })
   @IsOptional()

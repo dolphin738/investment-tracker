@@ -89,17 +89,12 @@ import {
 } from '@/hooks/use-preferences';
 import { usePreferenceStore, DEFAULT_PREFERENCES } from '@/stores/preference.store';
 import { ROUTE_PATH, AGGREGATION_OPTIONS, GRANULARITY_OPTIONS } from '@/lib/constants';
+// I-04：设置页「默认日期范围」与全站快捷范围为同一组选项（单一真相源）。
+// 🔴 禁止再定义本地 DATE_RANGE_OPTIONS（消除两处漂移的根因，PRD I-04 验收 7）。
+import { QUICK_RANGE_OPTIONS } from '@/features/query/dimension-switcher';
 import type { Portfolio } from '@investment-tracker/shared';
 import type { UpdatePreferenceDto } from '@/api/types';
 import { cn, formatDate } from '@/lib/utils';
-
-/** 日期范围选项 */
-const DATE_RANGE_OPTIONS = [
-  { value: '3m', label: '近 3 月' },
-  { value: '1y', label: '近 1 年' },
-  { value: 'ytd', label: '今年至今' },
-  { value: 'all', label: '全部' },
-] as const;
 
 /** 主题选项 */
 const THEME_OPTIONS = [
@@ -512,7 +507,7 @@ export default function SettingsPage(): JSX.Element {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {DATE_RANGE_OPTIONS.map((opt) => (
+                      {QUICK_RANGE_OPTIONS.map((opt) => (
                         <SelectItem key={opt.value} value={opt.value}>
                           {opt.label}
                         </SelectItem>

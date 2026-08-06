@@ -15,10 +15,30 @@ import type {
   UpdateDividendRecordDto,
 } from './types';
 
+/** 分红查询参数（I-05：标的多值 / 日期范围） */
+export interface DividendQuery {
+  /** 标的 ID（逗号分隔多值） */
+  securityId?: string;
+  /** 起始日期 YYYY-MM-DD（含） */
+  startDate?: string;
+  /** 结束日期 YYYY-MM-DD（含） */
+  endDate?: string;
+}
+
 /** 获取分红记录列表 */
-export function listDividends(portfolioId: string): Promise<DividendRecord[]> {
+export function listDividends(
+  portfolioId: string,
+  query: DividendQuery = {},
+): Promise<DividendRecord[]> {
   return http.get<DividendRecord[]>(
     `/portfolios/${portfolioId}/dividends`,
+    {
+      params: {
+        ...(query.securityId ? { securityId: query.securityId } : {}),
+        ...(query.startDate ? { startDate: query.startDate } : {}),
+        ...(query.endDate ? { endDate: query.endDate } : {}),
+      },
+    },
   );
 }
 

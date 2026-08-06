@@ -221,14 +221,14 @@ describe('SecurityTradeService（增量费用口径）', () => {
       );
     });
 
-    it('DTO 带 fee=8 时也不写入 fee 字段（data 不含 fee，现值保留）', async () => {
+    it('DTO 带 fee=8 时写入 fee 字段（I-01：update 契约支持 fee 落库，裁决 Q-2）', async () => {
       await service.update(USER_ID, PORTFOLIO_ID, TRADE_ID, {
         fee: 8,
         note: '改备注',
       });
 
       const data = prisma.securityTrade.update.mock.calls[0][0].data;
-      expect(data).not.toHaveProperty('fee');
+      expect(data.fee).toBe(8);
       expect(data.note).toBe('改备注');
     });
 

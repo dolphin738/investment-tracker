@@ -217,8 +217,17 @@ export class SecurityTradeService {
     const pageSize = query.pageSize ?? 20;
 
     const where: Record<string, unknown> = { portfolioId };
+    // I-05：securityId 支持逗号分隔多值（前端统一筛选器标的多选）
     if (query.securityId) {
-      where.securityId = query.securityId;
+      const ids = query.securityId
+        .split(',')
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+      if (ids.length === 1) {
+        where.securityId = ids[0];
+      } else if (ids.length > 1) {
+        where.securityId = { in: ids };
+      }
     }
     if (query.side) {
       where.side = query.side;
@@ -311,7 +320,10 @@ export class SecurityTradeService {
         ...(dto.side !== undefined && { side: dto.side }),
         ...(dto.quantity !== undefined && { quantity: dto.quantity }),
         ...(dto.price !== undefined && { price: dto.price }),
-        // 增量设计 C-5/U-1：update 忽略 fee 字段（保留现值，存量 fee≠0 不丢失）
+        // I-01（裁决 Q-2）：update 契约支持 fee 落库（旧口径兼容 + 契约完整性）。
+        // 前端按统一口径提交 fee=0（含费单价入 price、费用拆分落 FeeRecord），
+        // 此处仅当调用方显式传 fee 时才覆盖，避免误清空存量 fee≠0。
+        ...(dto.fee !== undefined && { fee: dto.fee }),
         ...(dto.note !== undefined && { note: dto.note }),
       },
     });

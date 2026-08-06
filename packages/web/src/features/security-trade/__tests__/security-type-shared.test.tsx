@@ -13,6 +13,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { SecurityType as SharedSecurityType } from '@investment-tracker/shared';
 import { SecurityType as ReExportedSecurityType } from '@/api/types';
 
@@ -23,6 +24,8 @@ const mocks = vi.hoisted(() => ({
   createSecurity: vi.fn(),
   createTrade: vi.fn(),
   updateTrade: vi.fn(),
+  // 稳定引用：表单 useFees（I-01 编辑态费用回填）返回稳定空数组，避免 effect 循环
+  feesData: [] as unknown[],
 }));
 
 vi.mock('sonner', () => ({
@@ -48,6 +51,20 @@ vi.mock('@/hooks/use-security-trades', () => ({
     mutateAsync: mocks.updateTrade,
     isPending: false,
   }),
+}));
+
+// I-01：表单新增 useFees（编辑态费用三框回填）+ useQueryClient，mock 稳定引用
+vi.mock('@/hooks/use-fees', () => ({
+  FEES_KEY: ['fees'],
+  useFees: () => ({
+    data: mocks.feesData,
+    isLoading: false,
+    isError: false,
+    refetch: () => {},
+  }),
+  useCreateFee: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useUpdateFee: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useDeleteFee: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
 /**
@@ -173,6 +190,14 @@ vi.mock('@/components/ui/select', async () => {
 
 import { SecurityTradeForm } from '@/features/security-trade/security-trade-form';
 
+/** 表单新增 useQueryClient（I-01 费用缓存失效），渲染需 QueryClientProvider 包裹 */
+function renderWithClient(ui: React.ReactElement): ReturnType<typeof render> {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
+}
+
 function installPolyfills(): void {
   if (!Element.prototype.scrollIntoView) {
     Element.prototype.scrollIntoView = function (): void {};
@@ -257,14 +282,14 @@ describe('证券买卖表单「新建标的」类型下拉（shared SecurityType
   });
 
   it('折叠区默认类型为「股票」（SecurityType.STOCK）', async () => {
-    render(<SecurityTradeForm portfolioId="pf-1" />);
+    renderWithClient(<SecurityTradeForm portfolioId="pf-1" />);
     await openNewSecurityPanel();
 
     expect(getTypeSelect().value).toBe('STOCK');
   });
 
   it('类型下拉 5 个选项齐全（股票/基金/债券/现金/其他），且值取自 shared', async () => {
-    render(<SecurityTradeForm portfolioId="pf-1" />);
+    renderWithClient(<SecurityTradeForm portfolioId="pf-1" />);
     await openNewSecurityPanel();
 
     const options = Array.from(getTypeSelect().querySelectorAll('option')).filter(
@@ -292,7 +317,7 @@ describe('证券买卖表单「新建标的」类型下拉（shared SecurityType
   ])(
     '可切换到「%s」并以 %s 提交（as const 赋值不被字面量类型卡住）',
     async (_label, expectedValue) => {
-      render(<SecurityTradeForm portfolioId="pf-1" />);
+      renderWithClient(<SecurityTradeForm portfolioId="pf-1" />);
       await openNewSecurityPanel();
 
       fireEvent.change(screen.getByPlaceholderText('如 600519'), {
@@ -325,7 +350,7 @@ describe('证券买卖表单「新建标的」类型下拉（shared SecurityType
   );
 
   it('提交载荷的 type 取值必定落在 shared 白名单内（后端 400 防线的前置保证）', async () => {
-    render(<SecurityTradeForm portfolioId="pf-1" />);
+    renderWithClient(<SecurityTradeForm portfolioId="pf-1" />);
     await openNewSecurityPanel();
 
     fireEvent.change(screen.getByPlaceholderText('如 600519'), {
@@ -343,7 +368,7 @@ describe('证券买卖表单「新建标的」类型下拉（shared SecurityType
   });
 
   it('连续切换两次类型，最终以最后一次为准（状态不被首个字面量锁死）', async () => {
-    render(<SecurityTradeForm portfolioId="pf-1" />);
+    renderWithClient(<SecurityTradeForm portfolioId="pf-1" />);
     await openNewSecurityPanel();
 
     fireEvent.change(screen.getByPlaceholderText('如 600519'), {

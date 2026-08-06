@@ -45,6 +45,18 @@ export interface DividendRecordResponse {
 /** Prisma 查询时统一带出的标的字段 */
 const SECURITY_SELECT = { select: { name: true, code: true } } as const;
 
+/** findAll 过滤选项（I-05 统一筛选器：分红板块日期范围 + 标的多选） */
+export interface DividendQueryOptions {
+  /** 单值标的（兼容旧调用；逗号分隔时按多值处理） */
+  securityId?: string;
+  /** 标的 ID 列表（多值；与 securityId 二选一，优先于 securityId） */
+  securityIds?: string[];
+  /** 起始日期 YYYY-MM-DD（含） */
+  startDate?: string;
+  /** 结束日期 YYYY-MM-DD（含） */
+  endDate?: string;
+}
+
 @Injectable()
 export class DividendService {
   constructor(private readonly prisma: PrismaService) {}
@@ -206,20 +218,39 @@ export class DividendService {
   /**
    * 查询分红记录列表（按日期倒序）
    *
+   * 第三个参数兼容两种形态：旧调用传 `string`（单值 securityId）或新调用传 `DividendQueryOptions`。
+   *
    * @param portfolioId 组合 ID
    * @param userId 当前用户 ID（数据隔离）
-   * @param securityId 可选：按标的过滤
+   * @param query 过滤选项（可选）：securityId 多值 / startDate / endDate（I-05）
    */
   async findAll(
     portfolioId: string,
     userId: string,
-    securityId?: string,
+    query?: string | DividendQueryOptions,
   ): Promise<DividendRecordResponse[]> {
     await this.validatePortfolioOwnership(portfolioId, userId);
 
+    const opts: DividendQueryOptions =
+      typeof query === 'string' ? { securityId: query } : (query ?? {});
+
     const where: Prisma.DividendRecordWhereInput = { portfolioId };
-    if (securityId) {
-      where.securityId = securityId;
+    const securityIds =
+      opts.securityIds ??
+      (opts.securityId
+        ? opts.securityId.split(',').filter((s) => s.length > 0)
+        : []);
+    // 单值直接等值（向后兼容旧调用）；多值才用 { in: [...] }
+    if (securityIds.length === 1) {
+      where.securityId = securityIds[0];
+    } else if (securityIds.length > 1) {
+      where.securityId = { in: securityIds };
+    }
+    if (opts.startDate || opts.endDate) {
+      where.date = {
+        ...(opts.startDate ? { gte: new Date(opts.startDate) } : {}),
+        ...(opts.endDate ? { lte: new Date(opts.endDate) } : {}),
+      };
     }
 
     const records = await this.prisma.dividendRecord.findMany({
@@ -232,11 +263,12 @@ export class DividendService {
   }
 
   /**
-   * 更新分红记录（增量设计 R-5 / C-3）
+   * 更新分红记录（增量设计 R-5 / C-3 + I-02 P0 修复）
    *
-   * 可改字段：securityId / date / amount / tax / note；全部可选。
+   * 可改字段：securityId / date / amount / tax / type / note；全部可选。
    * - 双闸：portfolio.userId 404 + security 归属 404（K-7 同范式）
    * - 净额校验：resolve 当前值后 amount − tax ≥ 0，否则 400
+   * - 🔴 I-02：补 `type` 落库分支（`dto.type !== undefined` 时才写，避免误清空）
    *
    * @param portfolioId 组合 ID
    * @param id 分红记录 ID
@@ -284,6 +316,8 @@ export class DividendService {
         ...(dto.date !== undefined && { date: new Date(dto.date) }),
         ...(nextAmount !== undefined && { amount: nextAmount }),
         ...(nextTax !== undefined && { tax: nextTax }),
+        // 🔴 I-02 P0 修复：type 落库分支（Q-1 建议允许编辑分红类型）
+        ...(dto.type !== undefined && { type: dto.type }),
         ...(dto.note !== undefined && { note: dto.note }),
       },
       include: { security: SECURITY_SELECT },
