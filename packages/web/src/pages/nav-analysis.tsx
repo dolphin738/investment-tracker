@@ -158,16 +158,9 @@ export default function NavAnalysisPage(): JSX.Element {
   const seriesData = series.data ?? [];
   const dayData = daySeries.data ?? [];
 
-  // 按指标过滤趋势图数据
-  const chartData = useMemo(() => {
-    if (metric === NavMetricEnum.CUMULATIVE) {
-      return seriesData.map((p) => ({ ...p, yearNav: null }));
-    }
-    if (metric === NavMetricEnum.YEAR) {
-      return seriesData.map((p) => ({ ...p, cumulativeNav: null }));
-    }
-    return seriesData;
-  }, [seriesData, metric]);
+  // 问题④：不再把未选中指标置 null（那样 series 仍在，legend/tooltip 会多出
+  // 一个恒为「数据不足」的条目）。改为原样下发数据，由图表按 metric 决定
+  // 「注册哪几条 series」。
 
   const dailyDetails = useMemo(() => computeDailyDetails(dayData), [dayData]);
 
@@ -258,7 +251,8 @@ export default function NavAnalysisPage(): JSX.Element {
 
       {/* 净值趋势双线图（按指标） */}
       <NavTrendChart
-        data={chartData}
+        data={seriesData}
+        metric={metric}
         loading={series.isLoading}
         title={
           metric === NavMetricEnum.CUMULATIVE

@@ -10,6 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { chartGrid } from '@/components/charts/chart-grid';
 import { formatDecimal } from '@/lib/utils';
+import { NavMetric } from '@investment-tracker/shared';
 import type { NavSeriesPoint } from '@investment-tracker/shared';
 
 export interface NavTrendChartProps {
@@ -22,6 +23,16 @@ export interface NavTrendChartProps {
    * 默认 true（历史行为，保持测试契约）；PRD §7.5 要求断线时传 false。
    */
   connectNulls?: boolean;
+  /**
+   * 渲染哪些指标系列（问题④）。
+   *
+   * - `'cumulative'` / `'year'`：**只注册所选的那一条 series**
+   * - `'both'`（缺省）：双线对比，保持历史行为与既有测试契约
+   *
+   * 为什么不由调用方把另一条置 null：置 null 只是数据为空，series 仍然存在，
+   * legend 会多出一个永远无数据的图例项、tooltip 也会多一行「数据不足」。
+   */
+  metric?: NavMetric;
 }
 
 /**
@@ -51,6 +62,7 @@ export function NavTrendChart({
   title = '净值趋势',
   className,
   connectNulls = true,
+  metric = NavMetric.BOTH,
 }: NavTrendChartProps): JSX.Element {
   const option = useMemo(() => {
     // useMemo 无条件先于 JSX 执行，须在此处兜底 undefined/null，
@@ -60,6 +72,37 @@ export function NavTrendChart({
     const cumulativeSeries: (number | null)[] = points.map((d) => d.cumulativeNav);
     const yearSeries: (number | null)[] = points.map((d) => d.yearNav);
     const connect = connectNulls;
+
+    // 问题④：只注册所选指标的 series，未选中的整条不进 option
+    const showCumulative =
+      metric === NavMetric.CUMULATIVE || metric === NavMetric.BOTH;
+    const showYear = metric === NavMetric.YEAR || metric === NavMetric.BOTH;
+
+    const cumulativeSeriesOption = {
+      name: '累计净值',
+      type: 'line',
+      smooth: true,
+      connectNulls: connect,
+      showSymbol: false,
+      symbolSize: 8, // 直径 8 = 半径 4，对应迁移前 activeDot={{ r: 4 }}
+      emphasis: { scale: false }, // 关闭 hover 额外放大，锁死 r=4
+      lineStyle: { width: 2, color: COLOR_CUMULATIVE },
+      itemStyle: { color: COLOR_CUMULATIVE },
+      data: cumulativeSeries,
+    };
+
+    const yearSeriesOption = {
+      name: '当年净值',
+      type: 'line',
+      smooth: true,
+      connectNulls: connect,
+      showSymbol: false,
+      symbolSize: 8,
+      emphasis: { scale: false },
+      lineStyle: { width: 2, color: COLOR_YEAR },
+      itemStyle: { color: COLOR_YEAR },
+      data: yearSeries,
+    };
 
     return {
       tooltip: {
@@ -113,33 +156,11 @@ export function NavTrendChart({
         splitLine: { show: true, lineStyle: { type: [3, 3], color: GRID_COLOR } },
       },
       series: [
-        {
-          name: '累计净值',
-          type: 'line',
-          smooth: true,
-          connectNulls: connect,
-          showSymbol: false,
-          symbolSize: 8, // 直径 8 = 半径 4，对应迁移前 activeDot={{ r: 4 }}
-          emphasis: { scale: false }, // 关闭 hover 额外放大，锁死 r=4
-          lineStyle: { width: 2, color: COLOR_CUMULATIVE },
-          itemStyle: { color: COLOR_CUMULATIVE },
-          data: cumulativeSeries,
-        },
-        {
-          name: '当年净值',
-          type: 'line',
-          smooth: true,
-          connectNulls: connect,
-          showSymbol: false,
-          symbolSize: 8,
-          emphasis: { scale: false },
-          lineStyle: { width: 2, color: COLOR_YEAR },
-          itemStyle: { color: COLOR_YEAR },
-          data: yearSeries,
-        },
+        ...(showCumulative ? [cumulativeSeriesOption] : []),
+        ...(showYear ? [yearSeriesOption] : []),
       ],
     };
-  }, [data, connectNulls]);
+  }, [data, connectNulls, metric]);
 
   return (
     <Card className={className}>

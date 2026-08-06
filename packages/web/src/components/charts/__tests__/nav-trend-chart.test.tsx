@@ -14,6 +14,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render } from '@testing-library/react';
+import { NavMetric } from '@investment-tracker/shared';
 import type { NavSeriesPoint } from '@investment-tracker/shared';
 import {
   CHART_MOCK_TESTID,
@@ -147,5 +148,72 @@ describe('NavTrendChart — 三态渲染冒烟（ECharts）', () => {
     ]);
     expect(valueTooltip).toContain('1.0512');
     expect(valueTooltip).not.toContain('数据不足');
+  });
+});
+
+describe('NavTrendChart — metric 只渲染所选系列（问题④）', () => {
+  afterEach(() => {
+    cleanup();
+    echartsSpy.options.length = 0;
+  });
+
+  it('metric 缺省 = both：保持双线（向后兼容既有调用方）', () => {
+    render(<NavTrendChart data={NAV_DATA} />);
+
+    const option = lastOption(echartsSpy);
+    expect(option.series).toHaveLength(2);
+    expect(option.series.map((s) => s.name)).toEqual(['累计净值', '当年净值']);
+  });
+
+  it('metric=both 显式传入：与缺省一致', () => {
+    render(<NavTrendChart data={NAV_DATA} metric={NavMetric.BOTH} />);
+
+    const option = lastOption(echartsSpy);
+    expect(option.series).toHaveLength(2);
+  });
+
+  it('metric=cumulative：只注册「累计净值」一条 series', () => {
+    render(<NavTrendChart data={NAV_DATA} metric={NavMetric.CUMULATIVE} />);
+
+    const option = lastOption(echartsSpy);
+    expect(option.series).toHaveLength(1);
+    expect(option.series[0]?.name).toBe('累计净值');
+    // 数据仍为原始序列，未被置 null
+    expect(option.series[0]?.data).toEqual([1.0, null, 1.0512]);
+    // 「当年净值」整条不存在 —— legend 不会多出空图例项
+    expect(JSON.stringify(option.series)).not.toContain('当年净值');
+  });
+
+  it('metric=year：只注册「当年净值」一条 series', () => {
+    render(<NavTrendChart data={NAV_DATA} metric={NavMetric.YEAR} />);
+
+    const option = lastOption(echartsSpy);
+    expect(option.series).toHaveLength(1);
+    expect(option.series[0]?.name).toBe('当年净值');
+    expect(option.series[0]?.data).toEqual([1.0, null, 1.0512]);
+    expect(JSON.stringify(option.series)).not.toContain('累计净值');
+  });
+
+  it('单指标下 tooltip 只有一行，不再出现恒为「数据不足」的另一指标', () => {
+    render(<NavTrendChart data={NAV_DATA} metric={NavMetric.CUMULATIVE} />);
+
+    const option = lastOption(echartsSpy);
+    // ECharts axis tooltip 只会回传实际存在的 series，模拟单条入参
+    const tip = option.tooltip.formatter([
+      { axisValueLabel: '2024-02', seriesName: '累计净值', value: null, dataIndex: 1 },
+    ]);
+    expect(tip).toContain('数据不足');
+    expect(tip).not.toContain('当年净值');
+  });
+
+  it('切换 metric 后 series 重新计算（useMemo 依赖已包含 metric）', () => {
+    const { rerender } = render(
+      <NavTrendChart data={NAV_DATA} metric={NavMetric.BOTH} />,
+    );
+    expect(lastOption(echartsSpy).series).toHaveLength(2);
+
+    rerender(<NavTrendChart data={NAV_DATA} metric={NavMetric.YEAR} />);
+    expect(lastOption(echartsSpy).series).toHaveLength(1);
+    expect(lastOption(echartsSpy).series[0]?.name).toBe('当年净值');
   });
 });
