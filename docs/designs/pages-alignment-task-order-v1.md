@@ -1,7 +1,7 @@
 # 8 页对齐 · 执行任务书（T01 修复 + T02–T06 四段连打 + Excel 扩展）
 
 > 版本：v1 · 2026-08-06 · 主理人齐活林（Qi）汇编
-> 依据：`docs/incremental-pages-alignment-v1.md`（架构师增量设计，T01–T05）+ `docs/pages-prd-alignment.md`（§7 决策 Q-1甲~Q-7甲）+ QA 第 1 轮验证报告（BUG-1/2/3）+ 用户拍板（四段连打、T05 加 Excel、O-9 纳入）
+> 依据：`docs/designs/incremental-pages-alignment-v1.md`（架构师增量设计，T01–T05）+ `docs/designs/pages-prd-alignment.md`（§7 决策 Q-1甲~Q-7甲）+ QA 第 1 轮验证报告（BUG-1/2/3）+ 用户拍板（四段连打、T05 加 Excel、O-9 纳入）
 > 状态：**待派发**（工程师/QA 受 429 频率限制，预计 2026-08-06 10:06:35 UTC+8 重置后开跑）
 
 ---
@@ -156,11 +156,11 @@ QA 第 1 轮路由 **Engineer**。修复以下 3 项 + 顺手清理：
 
 ### AL-082（P0，FLOW-P0-01②）确认 cashflow-form 已剥离证券明细字段
 - **主理人侦察**：`packages/web/src/pages/transactions.tsx`（出入金页真实落点，AL-084 裁定）grep `securityId|quantity|price|fee` 仅命中 1 处提示文案「存取与证券买卖不会自动调整此值」，**无证券明细表单字段** → 基本已满足。
-- **工程师任务**：正式复核 transactions.tsx（及 cashflow-form 相关组件）无 `securityId/quantity/price/fee` 录入控件；若有残留则剥离；把 `docs/pages-prd-alignment.md` AL-082 行状态由「❓ 需确认」改为「✅ 已完成」并附证据（文件:行号）。
+- **工程师任务**：正式复核 transactions.tsx（及 cashflow-form 相关组件）无 `securityId/quantity/price/fee` 录入控件；若有残留则剥离；把 `docs/designs/pages-prd-alignment.md` AL-082 行状态由「❓ 需确认」改为「✅ 已完成」并附证据（文件:行号）。
 
 ### AL-083（P0，HOLD-B-P0-10 / Q-1甲）确认分红/费用后端模块已随阶段 C 落地
 - **主理人侦察**：`packages/backend/src/modules/dividend/`、`modules/fee/`、`modules/cashflow/` 均存在；fee.controller.ts 注释「阶段 C · Q-1 A 恢复」；shared `types/dividend.ts`（CASH/STOCK_DIVIDEND）存在 → **后端已落地**。
-- **工程师任务**：确认分红/费用**前后端链路**可用（后端 controller/service + 前端 api 调用 + 【E】区 UI 入口）；给出证据（文件列表 + 路由清单）；若前端【E】区入口缺失则补齐最小接入；把 `docs/pages-prd-alignment.md` AL-083 行状态改为「✅ 已完成」。
+- **工程师任务**：确认分红/费用**前后端链路**可用（后端 controller/service + 前端 api 调用 + 【E】区 UI 入口）；给出证据（文件列表 + 路由清单）；若前端【E】区入口缺失则补齐最小接入；把 `docs/designs/pages-prd-alignment.md` AL-083 行状态改为「✅ 已完成」。
 
 **段 5 自验**：无新增测试需求（如补了代码则补测）；文档回填后 `git status` 干净。commit（`docs:` 前缀）。
 

@@ -1,7 +1,7 @@
 # 账户域增量设计 v2 · 后端缺口补齐 + 前端 4 项微调
 
 > 架构师：高见远（software-architect）
-> 上游：`docs/system_design.md`（v1，账户域前端对齐，已标注缺口 A/B/C/D）、`docs/PRD.md` v3.1.8
+> 上游：`../archive/system_design.md`（v1，账户域前端对齐，已标注缺口 A/B/C/D）、`docs/PRD.md` v3.1.8
 > 本轮性质：**后端补字段（让「—」变真值）+ 前端 4 项微调**；Gap D（数据管理 CSV）不做
 > 核查方式：逐文件实读 `schema.prisma` / `portfolio.service.ts` / `account.service.ts` / `overview.service.ts` / `preference.*` / `user-public.mapper.ts` / `calculation.service.ts` / `AccountPage.tsx` / `settings.tsx` / `edit-profile-dialog.tsx` / `api/types.ts`，结论以源码为准
 
@@ -394,7 +394,7 @@ const isUploadedAvatar = Boolean(avatarValue) && !isExternalUrl(avatarValue);
 | **T02** | 后端 Gap C：偏好 4 列（schema + migration + DTO + service + spec） | 后端 | `prisma/schema.prisma`、`prisma/migrations/*`、`preference/dto/update-preference.dto.ts`、`preference/preference.service.ts`、`preference/preference.service.spec.ts` | — | P0 | SET-P0-07 / SET-P1-03 |
 | **T03** | 前端接真值：类型收口 + 账户页去占位 + 偏好入 payload | 前端 | `api/types.ts`、`pages/AccountPage.tsx`、`pages/settings.tsx`、`stores/preference.store.ts` | T01, T02 | P0 | ACC-P0-03/04/06、SET-P0-07、SET-P1-03 |
 | **T04** | 前端 4 项微调（布局 + 交互，纯 UI） | 前端 | `features/account/edit-profile-dialog.tsx`、`pages/AccountPage.tsx`、`pages/settings.tsx` | — | P0 | §7.7 / §7.8 / §7.9、SET-P0-01 |
-| **T05** | 联调验收 + 文档收口 | 全栈 | `docs/system_design.md`、`docs/class-diagram.mermaid`、`docs/PRD-COVERAGE-MATRIX.md`、回归清单 | T03, T04 | P1 | 全局一致性 |
+| **T05** | 联调验收 + 文档收口 | 全栈 | `../archive/system_design.md`、`../archive/class-diagram-account-v2.mermaid`、`docs/PRD-COVERAGE-MATRIX.md`、回归清单 | T03, T04 | P1 | 全局一致性 |
 
 **并行建议**：T01 / T02 / T04 三者互不冲突，可同时开工（T04 只碰布局与 `edit-profile-dialog`，T03 只碰数据绑定）。**T03 与 T04 同时改 `AccountPage.tsx` / `settings.tsx`** —— 若由同一工程师串行做（T04 → T03）可完全避免冲突；若并行，请约定 T04 只动 JSX 容器/className、T03 只动数据表达式。
 
@@ -513,7 +513,7 @@ classDiagram
     note for UserPublic "createdAt 由 toUserPublic 投影，唯一出口"
 ```
 
-（`docs/class-diagram.mermaid` 已同步替换为上述目标态。）
+（`../archive/class-diagram-account-v2.mermaid` 已同步替换为上述目标态。）
 
 ---
 

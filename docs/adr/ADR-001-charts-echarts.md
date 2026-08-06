@@ -25,6 +25,8 @@
 
 **结论**：PM「引用面已封闭」判断**成立**，但文档清单**漏了 `README.md:32`**。已补。
 
+> **注（docs/ 整理 · v2.5，只加注不改原文）**：`docs/技术栈评审报告.md` 已于 commit `6aafe4f` 删除；`docs/class-diagram-echarts.mermaid` / `docs/sequence-diagram-echarts.mermaid` 已归档至 `docs/archive/`（同名）。上表行号为 ADR 落地产出时的状态，保持历史原样。
+
 ### 0.2 三项关键现状发现（影响实现方案，PM/主理人未覆盖）
 
 | # | 发现 | 影响 |
@@ -127,6 +129,8 @@ option 由组件内 useMemo(() => ({...}), [deps]) 就地构造
 | 11 | `docs/ENVIRONMENT-SETUP.md` | L136 |
 | 12 | **`README.md`** | **L32（PM 遗漏项，架构师补入）** |
 
+> **注（docs/ 整理 · v2.5，只加注不改原文）**：`docs/ARCHITECTURE-modules.md` 已归档至 `docs/archive/`；表中行号为当时状态，仅作历史记录。
+
 ### 2.3 QA 阶段测试文件（T5，本次仅声明，不实现）
 
 | # | 路径 | 说明 |
@@ -186,6 +190,8 @@ export interface XirrSeriesPoint {
 ### 3.3 组件内部结构（类图）
 
 见 `docs/class-diagram-echarts.mermaid`。
+
+> **注（docs/ 整理 · v2.5，只加注不改原文）**：该文件已归档至 `docs/archive/class-diagram-echarts.mermaid`。
 
 ```mermaid
 classDiagram
@@ -292,6 +298,8 @@ classDiagram
 ## 4. 程序调用流程
 
 见 `docs/sequence-diagram-echarts.mermaid`。
+
+> **注（docs/ 整理 · v2.5，只加注不改原文）**：该文件已归档至 `docs/archive/sequence-diagram-echarts.mermaid`。
 
 ```mermaid
 sequenceDiagram
@@ -750,3 +758,5 @@ graph TD
 **附件**
 - `docs/class-diagram-echarts.mermaid`
 - `docs/sequence-diagram-echarts.mermaid`
+
+> **注（docs/ 整理 · v2.5，只加注不改原文）**：附件两份 mermaid 已归档至 `docs/archive/`（`class-diagram-echarts.mermaid` / `sequence-diagram-echarts.mermaid`）。

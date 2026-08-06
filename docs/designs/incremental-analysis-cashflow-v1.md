@@ -2,7 +2,7 @@
 
 > 架构师：高见远（software-architect）
 > 上游：`docs/PRD.md` v3.1.8（§7.1 / §7.6 / §6.2 FLOW- / §6.4 CASH- / §6.7 ANL- / §5.1 / §5.6 / §6.9 SET-P0-07 / §8）+ 任务书（主理人已知差距线索）
-> 参考模式：`docs/incremental-analysis-snapshots-v1.md`（上一轮分析/资产记录域对齐：前端对齐为主、后端缺字段标注/占位、Gap D 占位口径、Part F 候选修复待主理人拍板）
+> 参考模式：`docs/designs/incremental-analysis-snapshots-v1.md`（上一轮分析/资产记录域对齐：前端对齐为主、后端缺字段标注/占位、Gap D 占位口径、Part F 候选修复待主理人拍板）
 > 核查方式：逐文件实读 PRD 相关章节 + 前端 10 个文件（transactions / nav-analysis / cashflow-form / cashflow-list / dimension-switcher / use-query-data / use-cash-balances / use-transactions / use-snapshots / api types+transaction+cash-balance / preference.store / App.tsx / constants）+ 后端 3 个模块（cashflow / cash-balance / recalculation）+ main.ts ValidationPipe，结论以源码为准
 > 轮次约束：最小变更、不重构无关代码；后端缺口只标注，极小且当前页必需的在 Part F 单独列出供主理人决策
 
@@ -112,7 +112,7 @@
 | **T02** | 出入金页【C】流水区：多选筛选 + URL query + 分页大小 + 空态清除 | `pages/transactions.tsx`（筛选/URL/分页）、`features/cashflow/cashflow-list.tsx`（types 透传/分页/空态按钮）、`features/cashflow/cashflow-form.tsx`（onSuccess 回传） | T01 | P0 | FLOW-P0-02 / §7.1 L1031 |
 | **T03** | 出入金页【B】现金余额区 + 软提示联动：当前余额展示行 + ⓘ 提示 + 「去更新」 | `pages/transactions.tsx`（【B】区 + 软提示聚焦）、`hooks/use-cash-balances.ts`（toast 增强注释）、`features/cashflow/cashflow-form.tsx`（软提示触发参数，与 T02 合并提交防冲突） | T01 | P0 | CASH-P0-02 / CASH-P0-03 / FLOW-P0-06 |
 | **T04** | 净值分析页：快捷范围 + 份额 6 位 + 口径脚注 + 聚合默认读偏好 | `pages/nav-analysis.tsx`、`features/query/dimension-switcher.tsx`（共享常量）、`pages/xirr-analysis.tsx`（去重引用） | — | P0 | DASH-P0-02 / ANL-P0-05 / ANL-P0-06 / ANL-P0-03 |
-| **T05** | 联调验收 + 文档收口 | `docs/incremental-analysis-cashflow-v1.md`（复核）、回归清单（出入金 CRUD / 多选筛选 / URL 刷新保持 / 软提示开关 / 净值页快捷范围 / 双页组合联动） | T02, T03, T04 | P1 | 全局一致性 |
+| **T05** | 联调验收 + 文档收口 | `docs/designs/incremental-analysis-cashflow-v1.md`（复核）、回归清单（出入金 CRUD / 多选筛选 / URL 刷新保持 / 软提示开关 / 净值页快捷范围 / 双页组合联动） | T02, T03, T04 | P1 | 全局一致性 |
 
 **执行建议**：T01 → T02/T03 与 T04 可并行（T02/T03 都碰 `pages/transactions.tsx`，建议串行或约定 T02 只动【C】区、T03 只动【B】区，最后统一提交）；T05 收口。若 Part F 后端候选修复（F2-F5）获批，应先行落地后端再进 T02/T03，前端 types/sort 改为服务端传参（Part E-3 注释同步解除）。
 

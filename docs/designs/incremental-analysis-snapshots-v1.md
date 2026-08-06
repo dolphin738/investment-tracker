@@ -2,7 +2,7 @@
 
 > 架构师：高见远（software-architect）
 > 上游：`docs/PRD.md` v3.1.8（§7.3 / §7.5 / §6.5 / §6.7 / §5.4 / §5.6 / §3.2 / §8）+ 任务书（主理人已知差距线索）
-> 参考模式：`docs/incremental-account-v2.md`（上一轮账户域对齐：前端对齐为主、后端缺字段标注/占位、Gap D 占位口径）
+> 参考模式：`docs/designs/incremental-account-v2.md`（上一轮账户域对齐：前端对齐为主、后端缺字段标注/占位、Gap D 占位口径）
 > 核查方式：逐文件实读 PRD 相关章节 + 前端 8 个文件 + 后端 snapshot/query/recalculation/calculation/valuation 模块，结论以源码为准
 > 轮次约束：最小变更、不顺手重构无关代码、后端缺口只标注（极小且必需的在 Part F 单独列出供主理人决策）
 
@@ -100,7 +100,7 @@
 | **T02** | 资产记录页·列表层：筛选行 + 差异提示条 + 差异金额列 | `features/snapshot/snapshot-list.tsx`、`pages/snapshots.tsx`、`api/types.ts` | T01 | P0 | SNAP-P0-04b / SNAP-P0-07 / §7.3 |
 | **T03** | 资产记录页·表单与操作：保存并重算 + 文案 + 重置确认补自动值 | `features/snapshot/snapshot-form.tsx`、`pages/snapshots.tsx`、`hooks/use-snapshots.ts` | T01 | P0 | SNAP-P0-06 / §7.3 L1188-1190 |
 | **T04** | 收益分析页：较年初修复 + 可选增强（快捷范围 / 当年柱高亮 / URL 同步） | `pages/xirr-analysis.tsx`、`features/query/dimension-switcher.tsx`、`components/charts/yearly-bar-chart.tsx` | T01 | P0（较年初）/ P1（可选） | ANL-P0-04 / DASH-P0-02 / DASH-P1-05 |
-| **T05** | 联调验收 + 文档收口 | `docs/incremental-analysis-snapshots-v1.md`（复核）、回归清单（快照 CRUD / 差异 / 维度切换 / 组合联动） | T02, T03, T04 | P1 | 全局一致性 |
+| **T05** | 联调验收 + 文档收口 | `docs/designs/incremental-analysis-snapshots-v1.md`（复核）、回归清单（快照 CRUD / 差异 / 维度切换 / 组合联动） | T02, T03, T04 | P1 | 全局一致性 |
 
 **执行建议**：T01 → T02/T03/T04 可并行（T02 与 T03 都碰 `pages/snapshots.tsx`，建议串行或约定 T02 只动列表/页头、T03 只动弹窗与 hooks）；T05 收口。若 Part F 后端候选修复（F2-F4）获批，应先行落地后端再进 T02/T03，前端 source 传参改为服务端筛选。
 

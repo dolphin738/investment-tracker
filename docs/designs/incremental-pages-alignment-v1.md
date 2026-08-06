@@ -1,7 +1,7 @@
 # 「8 页 PRD 对齐」增量系统设计 + 任务列表 v1
 
 > 架构师：高见远（software-architect）
-> 上游输入（权威）：`docs/pages-prd-alignment.md` §7 决策表（Q-1~Q-7 用户已拍板）+ `docs/PRD.md` v3.1.8 + `docs/ARCHITECTURE.md` v2.0（Canonical 真相源）
+> 上游输入（权威）：`docs/designs/pages-prd-alignment.md` §7 决策表（Q-1~Q-7 用户已拍板）+ `docs/PRD.md` v3.1.8 + `docs/ARCHITECTURE.md` v2.0（Canonical 真相源）
 > 核查方式：逐文件实读后端 7 模块（holding / cash-balance / valuation / overview / snapshot / upload / common util）+ 前端 18 文件（HoldingsPage / dashboard / transactions / settings / dimension-switcher / query-params / api 层 / hooks 层 / constants）+ 两个 package.json，结论以源码为准
 > 轮次约束：**不修改方案 B 数据架构，只加功能**；**本轮 Prisma schema 零变更**；最小改动、不重构无关代码
 
