@@ -8,6 +8,7 @@ import ReactECharts from 'echarts-for-react';
 import { useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
+import { chartGrid } from '@/components/charts/chart-grid';
 import { formatDecimal } from '@/lib/utils';
 import type { NavSeriesPoint } from '@investment-tracker/shared';
 
@@ -92,7 +93,8 @@ export function NavTrendChart({
         bottom: 0,
         textStyle: { fontSize: 12 },
       },
-      grid: { left: 8, right: 20, top: 10, bottom: 28, containLabel: true },
+      // 右侧留白由 chart-grid 统一给足，避免末位日期被裁切（问题①）
+      grid: chartGrid(),
       xAxis: {
         type: 'category',
         boundaryGap: false,

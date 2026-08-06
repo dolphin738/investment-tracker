@@ -9,6 +9,7 @@ import ReactECharts from 'echarts-for-react';
 import { useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
+import { chartGrid } from '@/components/charts/chart-grid';
 import { formatPercent } from '@/lib/utils';
 import type { XirrSeriesPoint } from '@investment-tracker/shared';
 
@@ -85,7 +86,8 @@ export function XirrTrendChart({
           return `${p.axisValueLabel ?? ''}<br/>${p.marker ?? ''}XIRR: ${text}`;
         },
       },
-      grid: { left: 8, right: 20, top: 10, bottom: 5, containLabel: true },
+      // 右侧留白由 chart-grid 统一给足，避免末位日期被裁切（问题①）
+      grid: chartGrid({ bottom: 5 }),
       xAxis: {
         type: 'category',
         boundaryGap: false,

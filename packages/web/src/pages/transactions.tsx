@@ -63,6 +63,7 @@ import { getOverview } from '@/api/overview.api';
 import { useLatestCashBalance, useUpsertCashBalance } from '@/hooks/use-cash-balances';
 import { useNavSeries } from '@/hooks/use-query-data';
 import { useSnapshots } from '@/hooks/use-snapshots';
+import { chartGrid } from '@/components/charts/chart-grid';
 import { toIsoDate } from '@/lib/constants';
 import { ROUTE_PATH } from '@/lib/constants';
 import { formatCurrency, formatDate } from '@/lib/utils';
@@ -255,7 +256,8 @@ export default function TransactionsPage(): JSX.Element {
         },
       },
       legend: { bottom: 0, textStyle: { fontSize: 12 } },
-      grid: { left: 8, right: 16, top: 10, bottom: 28, containLabel: true },
+      // 右侧留白由 chart-grid 统一给足，避免末位日期被裁切（问题①）
+      grid: chartGrid(),
       xAxis: {
         type: 'category',
         boundaryGap: false,

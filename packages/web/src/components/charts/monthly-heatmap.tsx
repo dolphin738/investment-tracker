@@ -9,6 +9,7 @@ import ReactECharts from 'echarts-for-react';
 import { useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
+import { chartGrid } from '@/components/charts/chart-grid';
 import type { NavSeriesPoint } from '@investment-tracker/shared';
 
 export interface MonthlyHeatmapProps {
@@ -110,7 +111,8 @@ export function MonthlyHeatmap({
           return `${year}年 ${month}月: ${(v * 100).toFixed(2)}%`;
         },
       },
-      grid: { top: 30, right: 30, bottom: 40, left: 60 },
+      // 左侧留给年份类目标签；右侧沿用统一留白（问题①）
+      grid: chartGrid({ top: 30, bottom: 40, left: 60 }),
       xAxis: {
         type: 'category',
         data: monthLabels,
