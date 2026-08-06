@@ -22,7 +22,11 @@ import type { NavSeriesPoint } from '@investment-tracker/shared';
 // ---------------------------------------------------------------------------
 // 替身（vi.hoisted 保证捕获槽先于 vi.mock 工厂初始化）
 // ---------------------------------------------------------------------------
-const echartsSpy = vi.hoisted(() => ({ options: [] as unknown[] }));
+const echartsSpy = vi.hoisted(() => ({
+  options: [] as unknown[],
+  /** 记录传给图表的 style（hero 高度断言的观测点） */
+  styles: [] as Array<Record<string, unknown> | undefined>,
+}));
 
 const snapshotSpy = vi.hoisted(() => ({
   /** 记录 useSnapshots 收到的 (portfolioId, query) */
@@ -34,8 +38,12 @@ const snapshotSpy = vi.hoisted(() => ({
 vi.mock('echarts-for-react', async () => {
   const { createElement } = await import('react');
   return {
-    default: (props: { option: unknown }) => {
+    default: (props: {
+      option: unknown;
+      style?: Record<string, unknown>;
+    }) => {
       echartsSpy.options.push(props.option);
+      echartsSpy.styles.push(props.style);
       return createElement('div', {
         'data-testid': 'echarts-mock',
         'data-option': JSON.stringify(props.option),
@@ -126,6 +134,7 @@ function lastOption(): {
 
 beforeEach(() => {
   echartsSpy.options = [];
+  echartsSpy.styles = [];
   snapshotSpy.calls = [];
   snapshotSpy.result = { data: undefined, isLoading: false, isError: false };
 });
@@ -215,6 +224,7 @@ describe('TotalAssetTrendChart — 三态渲染', () => {
     const skeleton = container.querySelector<HTMLElement>('.animate-pulse');
     expect(skeleton).not.toBeNull();
     expect(skeleton?.classList.contains('h-[300px]')).toBe(true);
+    expect(skeleton?.classList.contains('h-[260px]')).toBe(false);
     expect(screen.queryByTestId('echarts-mock')).toBeNull();
   });
 
@@ -237,6 +247,54 @@ describe('TotalAssetTrendChart — 三态渲染', () => {
     const line = option.series.find((s) => s.name === '总资产');
     expect(line?.type).toBe('line');
     expect(line?.data).toEqual([120000, 150000]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// hero 高度（布局打磨 f1013f3：260 → 300）
+// ---------------------------------------------------------------------------
+/**
+ * 【为什么值得单独一组】高度写在三处：`CHART_HEIGHT` 常量、骨架屏 `h-[300px]`、
+ * 空态 `h-[300px]`。Tailwind 不认模板串拼接的任意值类，所以后两处只能是字面量，
+ * 天然存在「改常量忘改字面量」的漂移风险 —— 表现为加载中/空态与出图后高度突变
+ * （页面跳动）。这里把三处钉在一起，任一处回退到 260 都会红。
+ */
+describe('TotalAssetTrendChart — hero 高度三处一致（300px）', () => {
+  it('出图后 ECharts 容器高度为 300', () => {
+    renderChart();
+
+    const style = echartsSpy.styles[echartsSpy.styles.length - 1];
+    expect(style?.height).toBe(300);
+    expect(style?.width).toBe('100%');
+  });
+
+  it('空态占位高度同为 h-[300px]（与出图后不跳动）', () => {
+    renderChart({ data: [] });
+
+    const empty = screen.getByText('当前范围暂无资产数据');
+    expect(empty.classList.contains('h-[300px]')).toBe(true);
+    expect(empty.classList.contains('h-[260px]')).toBe(false);
+  });
+
+  it('🔴 骨架屏 / 空态 / 出图三态高度完全一致', () => {
+    const { container: loadingBox } = renderChart({ loading: true });
+    const skeletonH = loadingBox
+      .querySelector<HTMLElement>('.animate-pulse')
+      ?.className.match(/h-\[(\d+)px\]/)?.[1];
+    cleanup();
+
+    renderChart({ data: [] });
+    const emptyH = screen
+      .getByText('当前范围暂无资产数据')
+      .className.match(/h-\[(\d+)px\]/)?.[1];
+    cleanup();
+
+    renderChart();
+    const chartH = echartsSpy.styles[echartsSpy.styles.length - 1]?.height;
+
+    expect(skeletonH).toBe('300');
+    expect(emptyH).toBe('300');
+    expect(chartH).toBe(300);
   });
 });
 
