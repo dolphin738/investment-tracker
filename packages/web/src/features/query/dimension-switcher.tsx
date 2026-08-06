@@ -75,15 +75,37 @@ export interface ResolvedDateRange {
   endDate: string;
 }
 
+/** 「全部」起始日兜底值（组合无 baseDate 时使用，等价于「足够早」） */
+export const ALL_RANGE_FALLBACK_START = '2000-01-01';
+
+/** resolveQuickRange 可选项 */
+export interface ResolveQuickRangeOptions {
+  /**
+   * 「全部」范围的起始日 —— 传组合首个交易日（`Portfolio.baseDate`）。
+   *
+   * 缺省时回落 {@link ALL_RANGE_FALLBACK_START}，保持单参调用的向后兼容。
+   */
+  allRangeStart?: string;
+}
+
 /**
  * 快捷范围计算（QUICK_RANGE_OPTIONS 7 项的唯一口径实现，决策 Q-6 乙）。
  *
  * - endDate 恒为今天；startDate 按预设回推。
- * - 'ytd' = 当年 1 月 1 日；'all' = 成立日至今，startDate 固定 2000-01-01
- *   （必须显式返回，否则调用方合并时 `?? value.startDate` 会保留旧起始日，范围不扩大）。
+ * - 'ytd' = 当年 1 月 1 日。
+ * - 'all' = **组合首个交易日（baseDate）至今**（问题②）。调用方应传
+ *   `opts.allRangeStart = currentPortfolio()?.baseDate`；未传或组合尚无
+ *   首笔买入（baseDate=null）时回落 {@link ALL_RANGE_FALLBACK_START}。
+ *   startDate 必须显式返回，否则调用方合并时 `?? value.startDate` 会保留
+ *   旧起始日，范围不扩大。
  * - 未知值回落「近1年」，与旧 dashboard resolveDateRange 的 default 分支一致。
+ *
+ * 🔴 opts 保持可选 —— 既有单参调用（含 quick-range.test.ts）行为不变。
  */
-export function resolveQuickRange(range: string): ResolvedDateRange {
+export function resolveQuickRange(
+  range: string,
+  opts?: ResolveQuickRangeOptions,
+): ResolvedDateRange {
   const end = new Date();
   const endStr = toIsoDate(end);
   const start = new Date();
@@ -106,7 +128,10 @@ export function resolveQuickRange(range: string): ResolvedDateRange {
     case 'ytd':
       return { startDate: `${end.getFullYear()}-01-01`, endDate: endStr };
     case 'all':
-      return { startDate: '2000-01-01', endDate: endStr };
+      return {
+        startDate: opts?.allRangeStart || ALL_RANGE_FALLBACK_START,
+        endDate: endStr,
+      };
     default:
       start.setFullYear(start.getFullYear() - 1);
   }
