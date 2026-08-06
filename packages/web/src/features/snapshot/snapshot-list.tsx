@@ -65,8 +65,6 @@ export interface SnapshotListProps {
   query?: SnapshotQuery;
   /** 点击编辑（页面打开 SnapshotForm 弹窗） */
   onEdit?: (item: AssetSnapshot) => void;
-  /** 管理模式（来自 /snapshots?manage=1） */
-  manageMode?: boolean;
   className?: string;
   emptyText?: string;
 }
@@ -77,7 +75,6 @@ export function SnapshotList({
   portfolioId,
   query,
   onEdit,
-  manageMode = false,
   className,
   emptyText = '暂无资产记录',
 }: SnapshotListProps): JSX.Element {
@@ -190,12 +187,6 @@ export function SnapshotList({
 
   return (
     <div className={className}>
-      {manageMode && (
-        <div className="mb-3 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">
-          ⚙ 历史记录管理模式：可编辑 / 删除 / 重置快照记录。
-        </div>
-      )}
-
       {/* 差异提示条（SNAP-P0-07 ⑥） */}
       {manualStats.manualCount > 0 && (
         <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">

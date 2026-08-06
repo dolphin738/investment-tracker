@@ -4,11 +4,9 @@
  * - 列表：日期/总资产/持仓/现金/来源（🤖自动/✋手工）/系统自动值+差异%/备注/操作
  * - 操作：✎编辑（变手工）、🗑删除（事件日会重新生成自动值）、↺重置（仅手工记录）
  * - 新建/编辑弹窗：日期（不可未来）/总资产（必填）/持仓/现金/备注 + 系统自动值覆盖提示
- * - 支持 /snapshots?manage=1 进入历史记录管理模式（来自出入金页「管理历史记录」）
  */
 
 import { useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
 import { Plus } from 'lucide-react';
 import {
   Card,
@@ -32,8 +30,6 @@ import type { AssetSnapshot } from '@investment-tracker/shared';
 
 export default function SnapshotsPage(): JSX.Element {
   const currentPortfolioId = usePortfolioStore((s) => s.currentPortfolioId);
-  const [searchParams] = useSearchParams();
-  const manageMode = searchParams.get('manage') === '1';
 
   const [createOpen, setCreateOpen] = useState(false);
   const [editing, setEditing] = useState<AssetSnapshot | null>(null);
@@ -92,7 +88,6 @@ export default function SnapshotsPage(): JSX.Element {
             portfolioId={currentPortfolioId}
             query={{ pageSize: 20 }}
             onEdit={handleEdit}
-            manageMode={manageMode}
           />
         </CardContent>
       </Card>

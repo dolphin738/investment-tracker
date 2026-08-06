@@ -7,7 +7,7 @@
  * 2. 三态渲染：loading → Skeleton；空 → 「当前范围暂无资产数据」；正常 → 图表
  * 3. 🔴 手工标记查询走服务端筛选：`source=MANUAL` + `pageSize=200`
  *    （旧实现 pageSize:60 + 前端过滤，在长区间会截断标记）
- * 4. 卡头两个 /snapshots 入口（`?manage=1` 深链是全站唯一入口，不可丢）
+ * 4. 卡头单一 /snapshots 入口（「查看全部历史」，无 ?manage=1 深链）
  * 5. 手工记录数超 200 → 灰字提示
  *
  * jsdom 无 Canvas，`echarts.init()` 会抛错 → 必须 mock `echarts-for-react`，
@@ -380,29 +380,20 @@ describe('TotalAssetTrendChart — 手工记录标记', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 卡头入口（从出入金页迁移，manage=1 深链保活）
+// 卡头入口（单一 /snapshots 入口，无 manage=1 深链）
 // ---------------------------------------------------------------------------
 describe('TotalAssetTrendChart — 卡头 /snapshots 入口（N-21）', () => {
-  it('「查看全部历史」→ /snapshots', () => {
+  it('「查看全部历史」→ /snapshots（单一入口，无 ?manage=1 变体）', () => {
     renderChart();
 
     const link = screen.getByRole('link', { name: /查看全部历史/ });
     expect(link.getAttribute('href')).toBe('/snapshots');
-  });
 
-  it('🔴「管理历史记录」→ /snapshots?manage=1（全站唯一深链入口）', () => {
-    renderChart();
-
-    const link = screen.getByRole('link', { name: /管理历史记录/ });
-    expect(link.getAttribute('href')).toBe('/snapshots?manage=1');
-  });
-
-  it('入口在空态下同样可达（删除出入金页入口后不得失联）', () => {
-    renderChart({ data: [] });
-
-    expect(
-      screen.getByRole('link', { name: /管理历史记录/ }).getAttribute('href'),
-    ).toBe('/snapshots?manage=1');
+    // 全页指向 /snapshots 的链接仅此一个（不存在 ?manage=1 深链变体）
+    const snapshotLinks = screen
+      .getAllByRole('link')
+      .filter((el) => (el.getAttribute('href') ?? '').startsWith('/snapshots'));
+    expect(snapshotLinks).toHaveLength(1);
   });
 
   it('链接文案不与概览页「查看全部」（近期出入金卡）冲突', () => {

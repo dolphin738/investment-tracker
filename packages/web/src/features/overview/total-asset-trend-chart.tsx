@@ -21,7 +21,7 @@
 import { useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import ReactECharts from 'echarts-for-react';
-import { ChevronRight, Settings2 } from 'lucide-react';
+import { ChevronRight } from 'lucide-react';
 import {
   Card,
   CardContent,
@@ -159,8 +159,7 @@ export interface TotalAssetTrendChartProps {
 /**
  * 总资产走势图卡片。
  *
- * 卡头承载从出入金页迁移过来的两个 `/snapshots` 入口 ——
- * 其中「⚙ 管理历史记录」的 `?manage=1` 深链是全站唯一入口，不可再丢。
+ * 卡头承载单一 `/snapshots` 入口（「查看全部历史」），指向历史资产记录页。
  */
 export function TotalAssetTrendChart({
   data,
@@ -269,21 +268,13 @@ export function TotalAssetTrendChart({
     <Card className={className}>
       <CardHeader className="flex flex-row items-center justify-between space-y-0">
         <CardTitle className="text-base">{title}</CardTitle>
-        {/* 从出入金页迁移过来的两个入口；manage=1 是全站唯一深链入口 */}
+        {/* 单一 /snapshots 入口（查看全部历史） */}
         <div className="flex items-center gap-3 text-xs">
           <Link
             to={ROUTE_PATH.SNAPSHOTS}
             className="flex items-center text-muted-foreground hover:underline"
           >
             查看全部历史
-            <ChevronRight className="h-3.5 w-3.5" />
-          </Link>
-          <Link
-            to={`${ROUTE_PATH.SNAPSHOTS}?manage=1`}
-            className="flex items-center text-muted-foreground hover:underline"
-          >
-            <Settings2 className="mr-1 h-3.5 w-3.5" />
-            管理历史记录
             <ChevronRight className="h-3.5 w-3.5" />
           </Link>
         </div>

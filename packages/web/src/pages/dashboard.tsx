@@ -526,9 +526,9 @@ export default function DashboardPage(): JSX.Element {
         {/*
           维度切换 + 范围筛选（共享 DateRangeQuickPicker，受控回显 URL range）。
           移动端纵向堆叠（Tabs 与日期选择器各占一行，避免挤成两行半），
-          ≥640px 回到一行且日期选择器靠右（justify-between）。
+          ≥640px 回到一行，维度 Tabs 与日期选择器靠左紧凑排列，与其他分析页一致。
         */}
-        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between">
+        <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-end">
           <Tabs
             value={overviewQuery.g}
             onValueChange={(v) =>

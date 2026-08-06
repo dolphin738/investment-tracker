@@ -573,15 +573,16 @@ describe('DashboardPage 布局打磨（f1013f3）', () => {
       expect(quad.children).toHaveLength(4);
     });
 
-    it('筛选栏移动端纵向堆叠、≥sm 一行并右对齐日期选择器', async () => {
+    it('筛选栏移动端纵向堆叠、≥sm 一行且日期选择器靠左（无 justify-between，与其他分析页一致）', async () => {
       renderDashboard();
       await screen.findByTestId('nav-chart');
 
       const cls = sectionBody(sectionByTitle('趋势分析'))[0].className;
       expect(cls).toContain('flex-col');
       expect(cls).toContain('sm:flex-row');
-      expect(cls).toContain('sm:justify-between');
-      expect(cls).toContain('gap-3');
+      // 改动二：删除 sm:justify-between，维度 Tabs 与日期选择器靠左紧凑排列
+      expect(cls).not.toContain('sm:justify-between');
+      expect(cls).toContain('gap-4');
     });
 
     it('三张时序图（hero + 净值 + XIRR）收在同一个「趋势分析」区内', async () => {
