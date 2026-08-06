@@ -162,7 +162,7 @@ export interface OnboardingGuideProps {
  * 有组合但无数据的三步引导卡（DASH-P0-06）。
  *
  * 触发条件由调用方判定：portfolios.length > 0 且 overview 加载完成但无数据。
- * 渲染在四宫格位置，6 指标卡与维度切换器仍正常展示。
+ * 渲染在四宫格位置，8 指标卡与维度切换器仍正常展示。
  */
 function OnboardingGuide({
   onOpenCashflow,
@@ -405,7 +405,7 @@ export default function DashboardPage(): JSX.Element {
    * DASH-P0-06：「有组合但无数据」判定。
    * 走到这里 portfolios.length > 0 已由上方早退分支保证；
    * overview 加载完成（非 isLoading）且无返回数据，即视为该组合尚未录入任何数据，
-   * 此时用三步引导卡替换四宫格（6 指标卡与维度切换器仍正常渲染）。
+   * 此时用三步引导卡替换四宫格（8 指标卡与维度切换器仍正常渲染）。
    *
    * 额外排除 isError：请求失败同样满足 `!data`，但那是「加载失败」而非「没有数据」，
    * 误判会把错误伪装成空态并盖掉仍可正常加载的净值/XIRR 图表。

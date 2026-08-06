@@ -370,7 +370,7 @@ describe('DashboardPage 阶段 A', () => {
       expect(screen.queryByText('组合表现对比')).toBeNull();
     });
 
-    it('空态下 6 指标卡与维度切换器照常渲染', async () => {
+    it('空态下 8 指标卡与维度切换器照常渲染', async () => {
       apiMocks.getOverview.mockResolvedValue(null);
 
       renderDashboard();
