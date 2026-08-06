@@ -3,7 +3,8 @@
 > **版本**: v2.5
 > **架构师**: 高见远（Gao）
 > **日期**: 2026-08-03
-> **状态**: 重写发布（基于评审结论落地）+ **v2.1 修订：T5 手工总资产记录的计算层级联口径修正**（§6 / §7.3.1 / §7.3.2 / §8.1 / §13 REG-06；修复「快照层仅当日」被误写为「计算层也仅当日」导致的静默数据错误风险）+ **v2.2 修订：8 页对齐增量（T01–T05）落地同步**（新增 data-transfer 模块 §4.2.17、快照 A3 单条端点与 `derivedTotalAsset`、overview `freshness` 契约、`computeDerivedBatch`/`deriveBatch` 批量派生、URL query 持久化与前端新 feature、依赖 `xlsx`/`papaparse`；**Prisma schema 零变更**）+ **v2.3 修订：§1.3 目录树整体刷新，与代码结构对齐**（cashflow/data-transfer/dividend/fee/overview/holding/valuation 等模块落位、web features/api/hooks 对齐、shared types 补齐）+ **v2.4 修订：§10.1.2 组件分层、§5.2 shared 路径、§14 补 T05、§4.2.18/19 新增分红/费用契约** + **v2.5 修订：docs/ 整理——增量设计移入 designs/、被取代产物入 archive/、目录树与引用同步**
+> **修订史（完整版）**：各版变更说明已迁出至 **[docs/ARCHITECTURE-CHANGELOG.md](./ARCHITECTURE-CHANGELOG.md)**（最新为 v2.5）。
+> **近期修订（v2.5）**：docs 整理 —— 增量设计移入 `docs/designs/`、被取代产物（`system_design.md`、账户域两份 mermaid）入 `docs/archive/`、ARCHITECTURE §1.3 目录树与 §4.x 引用同步、新增 `docs/designs/README.md` 索引（含落地 commit 对照）。**零删除、全 git mv 保留历史**。
 > **依据**: PRD v3.1.9（Consolidated，单一权威）+ ENVIRONMENT-SETUP + 用户拍板决策（含 v2.3 方案B 数据架构）
 >
 > **⚠️ 本档为唯一架构真相源（Canonical）**：取代并吸收 `ARCHITECTURE-modules.md`（已归档至 `docs/archive/`）。任何工程实现以本档 + PRD v3.1.9 为准；二者冲突时以 PRD 金融口径（① 级）与数据架构口径（② 级）裁决优先级为最高依据（见 PRD §2.1–§2.3）。
@@ -101,6 +102,7 @@ graph TB
 ├── docs/
 │   ├── PRD.md                       # 产品需求（权威）
 │   ├── PRD-CHANGELOG.md             # PRD 变更记录
+│   ├── ARCHITECTURE-CHANGELOG.md      # 架构文档变更记录
 │   ├── PRD-COVERAGE-MATRIX.md       # PRD 覆盖率矩阵
 │   ├── ARCHITECTURE.md              # 本文件（Canonical 唯一架构真相源）
 │   ├── ENVIRONMENT-SETUP.md

@@ -6,8 +6,6 @@
 > **日期**：2026-08-03
 > **修订史（完整版）**：每版变更说明 + ID 核算已迁出至 **[docs/PRD-CHANGELOG.md](./PRD-CHANGELOG.md)**（最新为 v3.1.9）。
 > **近期变更（v3.1.9）**：**8 页对齐增量（T01–T05）落地后的文档同步审计** —— ① 快照派生值 `derivedTotalAsset` 语义修订：`source='DERIVED'` 时该字段**等于 `totalAsset`**（修正 v3.1.8 误写的「为 null」），新增 A3 单条端点 `GET /snapshots/:date`（附录 E）；② 数据导入导出由 **CSV 扩展为 CSV+Excel（xlsx）**：`SET-P0-03` / `SET-P0-04` / `FLOW-P1-01` / `HOLD-B-P1-01` 同步（导出 7 类、导入 3 类、preview/commit 两阶段、全流程仅 1 次重算）；③ `DASH-P1-03` 数据新鲜度判定口径细化（行情 = 持仓标的 `MIN(MAX(asOf))`、现金 = `MAX(CashBalance.asOf)`、三按钮 + sessionStorage 静默、判定全部在后端）；④ `DASH-P0-02` 快捷范围扩为 7 项（决策 Q-6 乙）、维度/范围 URL 持久化 key 落定（`g/range/from/to`）；⑤ `HOLD-B-P0-11` 补 URL 持久化（`date/closed/types/sec`）；⑥ `UserPreference` 补 `showLiquidated` 字段。**无需求 ID 增减**（合计 240 / 枚举行 222 / 遗漏 0 不变）。
-> **近期变更（v3.1.8）**：补齐「注销可恢复」的缺失能力 —— `SET-P1-06` 验收标准精炼为「冷静期 / 登录页检测 / 自助恢复 / 到期失效」四段式；**新增 `SYS-P1-02`（账户注销冷静期与自助恢复）**及 §6.10.1 接口契约、§7.10 登录页恢复草图；附录 E 补 `POST /api/auth/account/restore`。**ID 只增不删**（`SET-P1-06` 保持不变）。
-> **近期变更（v3.1.7）**：锚点修复 —— 2 处「见 §13」弱引用改为直链 [docs/PRD-COVERAGE-MATRIX.md](./PRD-COVERAGE-MATRIX.md)；补 1.4.1 / 1.4.2 子节编号（为手动索引铺路）；无需求 ID 增减。
 > **语言**：中文（简体）
 
 ---
