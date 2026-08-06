@@ -263,3 +263,72 @@ describe('PreferenceService.update — 默认组合校验', () => {
     expect(result.theme).toBe('dark');
   });
 });
+
+// ============================================================
+// 增量 I-04：defaultDateRange 7 项白名单（与 QUICK_RANGE_OPTIONS 一致）
+// ============================================================
+
+describe('UpdatePreferenceDto — defaultDateRange 7 项白名单（I-04）', () => {
+  // 与 packages/backend/src/main.ts 保持一致
+  const pipe = new ValidationPipe({
+    transform: true,
+    whitelist: true,
+    forbidNonWhitelisted: true,
+    transformOptions: { enableImplicitConversion: true },
+  });
+
+  const meta: ArgumentMetadata = {
+    type: 'body',
+    metatype: UpdatePreferenceDto,
+    data: '',
+  };
+
+  it.each(['1w', '1m', '3m', '6m', '1y', 'ytd', 'all'])(
+    '接受新扩展值 %s（1w/6m 为本次新增，旧白名单会 400）',
+    async (range) => {
+      const dto = (await pipe.transform(
+        { defaultDateRange: range },
+        meta,
+      )) as UpdatePreferenceDto;
+      expect(dto.defaultDateRange).toBe(range);
+    },
+  );
+
+  it.each(['2w', '1q', 'this-year', ''])(
+    '白名单外值 %s 被拒（默认日期范围不允许任意字符串）',
+    async (range) => {
+      await expect(
+        pipe.transform({ defaultDateRange: range }, meta),
+      ).rejects.toThrow();
+    },
+  );
+});
+
+describe('PreferenceService.update — defaultDateRange 持久化（I-04）', () => {
+  it('传 1w / 6m 等新值 → prisma.update data 原样写入并回传', async () => {
+    for (const range of ['1w', '6m', 'ytd']) {
+      const { service, prisma } = createService();
+      const result = await service.update(USER_ID, { defaultDateRange: range });
+
+      expect(prisma.userPreference.update).toHaveBeenCalledWith({
+        where: { userId: USER_ID },
+        data: { defaultDateRange: range },
+      });
+      expect(result.defaultDateRange).toBe(range);
+    }
+  });
+
+  it('defaultDateRange 未传时不写入该字段（PATCH 语义）', async () => {
+    const { service, prisma } = createService();
+
+    await service.update(USER_ID, { theme: 'dark' });
+
+    expect(prisma.userPreference.update).toHaveBeenCalledWith({
+      where: { userId: USER_ID },
+      data: { theme: 'dark' },
+    });
+    expect(prisma.userPreference.update.mock.calls[0][0].data).not.toHaveProperty(
+      'defaultDateRange',
+    );
+  });
+});

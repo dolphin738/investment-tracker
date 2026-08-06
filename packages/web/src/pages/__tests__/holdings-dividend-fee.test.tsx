@@ -78,6 +78,8 @@ vi.mock('@/hooks/use-fees', () => ({
   FEES_KEY: ['fees'],
   useFees: () => state.fees,
   useCreateFee: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  // I-03：费用编辑走 PATCH /fees/:id（DividendFeeForm 依赖 useUpdateFee）
+  useUpdateFee: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useDeleteFee: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
@@ -467,7 +469,8 @@ describe('HoldingsPage 阶段 C —【E】分红 / 费用区', () => {
       const feeRow = screen
         .getByTestId('fee-detail-table')
         .querySelectorAll('tbody tr')[0];
-      expect(feeRow.querySelectorAll('td')[3].className).toContain('text-down');
+      // I-03：费用明细列序 = 日期/标的/场景/费用类型/金额（合计）/笔数/操作 → 金额为 td[4]
+      expect(feeRow.querySelectorAll('td')[4].className).toContain('text-down');
     });
 
     it('折叠标题带记录条数徽标，并可再次点击收起', () => {

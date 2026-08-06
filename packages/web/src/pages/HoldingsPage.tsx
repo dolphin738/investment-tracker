@@ -18,7 +18,7 @@
  * 排序（决策 Q-5 甲）：列表在前端按市值降序展示，不依赖后端排序参数。
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { PackageOpen, Plus, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -95,25 +95,48 @@ export default function HoldingsPage(): JSX.Element {
     createHoldingsSchema(today, prefShowLiquidated, defaultRange),
   );
 
-  // 偏好对齐 effect 1（closed，沿用既有范式）：偏好异步到达后，URL 无 closed 时对齐一次
+  // 🔴 用户交互守卫（QA 第 1 轮 Bug 修复）：
+  // 偏好对齐 effect 只允许在「偏好异步到达、且用户尚未主动操作该维度」时执行一次。
+  // 用户一旦手动改过 range/from/to（或 closed），对应 ref 置 true，此后 effect 永不再对齐，
+  // 避免「用户选择被偏好默认值弹回、URL 不写入」的问题（增量 PRD I-04 验收 2/3 + I-05 验收 5）。
+  const rangeInteractedRef = useRef(false);
+  const closedInteractedRef = useRef(false);
+
+  /** 统一筛选器变更入口：标记用户交互 + 写入 URL（useUrlState flush 异步落 URL） */
+  const handleFilterChange = (patch: Partial<HoldingsFilterState>) => {
+    if (
+      patch.range !== undefined ||
+      patch.from !== undefined ||
+      patch.to !== undefined
+    ) {
+      rangeInteractedRef.current = true;
+    }
+    if (patch.closed !== undefined) {
+      closedInteractedRef.current = true;
+    }
+    setHoldingsQuery(patch);
+  };
+
+  // 偏好对齐 effect 1（closed）：偏好异步到达后，URL 无 closed 且用户未交互时对齐一次
   const hasClosedParam = useMemo(
     () => new URLSearchParams(window.location.search).has('closed'),
     [],
   );
   useEffect(() => {
-    if (!hasClosedParam && prefShowLiquidated && !holdingsQuery.closed) {
+    if (hasClosedParam || closedInteractedRef.current) return;
+    if (prefShowLiquidated && !holdingsQuery.closed) {
       setHoldingsQuery({ closed: true });
     }
   }, [prefShowLiquidated, hasClosedParam, holdingsQuery.closed, setHoldingsQuery]);
 
-  // 偏好对齐 effect 2（I-04）：偏好异步到达后，URL 无 range/from/to 时对齐一次
+  // 偏好对齐 effect 2（I-04）：偏好异步到达后，URL 无 range/from/to 且用户未交互时对齐一次
   const hasRangeParam = useMemo(() => {
     const sp = new URLSearchParams(window.location.search);
     return sp.has('range') || sp.has('from') || sp.has('to');
   }, []);
   useEffect(() => {
+    if (hasRangeParam || rangeInteractedRef.current) return;
     if (
-      !hasRangeParam &&
       holdingsQuery.range !== defaultRange &&
       defaultRange !== 'custom'
     ) {
@@ -256,7 +279,7 @@ export default function HoldingsPage(): JSX.Element {
       {/* I-05 统一筛选器：三板块共享（持仓日期卡片重新设计承载） */}
       <HoldingsToolbar
         value={holdingsQuery}
-        onChange={setHoldingsQuery}
+        onChange={handleFilterChange}
         minDate={minDate}
         allRangeStart={baseDate}
         securities={securityList}

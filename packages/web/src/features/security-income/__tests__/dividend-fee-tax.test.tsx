@@ -416,12 +416,20 @@ describe('分红表单增量（所得税 + 净额 + 编辑态）', () => {
 
       const args = state.updateDividend.mock.calls[0][0] as {
         id: string;
-        payload: { securityId: string; amount: string; tax: string };
+        payload: {
+          securityId: string;
+          amount: string;
+          tax: string;
+          type: string;
+        };
       };
       expect(args.id).toBe('div-1');
       expect(args.payload.securityId).toBe('s-a');
       expect(args.payload.amount).toBe('1800');
       expect(args.payload.tax).toBe('360');
+      // 🔴 I-02 P0 根因：编辑分红 payload 必须携带 type，
+      // 否则后端 forbidNonWhitelisted 报「property type should not exist」400
+      expect(args.payload.type).toBe('CASH');
     });
 
     it('编辑态净额同样实时重算（1800 − 360 → ¥1,440.00）', () => {

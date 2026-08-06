@@ -749,3 +749,83 @@ describe('[增量] 分红所得税 / 净额 / PATCH 端点', () => {
     });
   });
 });
+
+// ===========================================================================
+// 增量验收：I-02 P0 —— UpdateDividendRecordDto type 白名单 + service.update 落库 type
+// （根因：全局 ValidationPipe whitelist+forbidNonWhitelisted，DTO 缺 type 声明
+//  → 编辑分红提交 type 报「property type should not exist」；本组锁死修复）
+// ===========================================================================
+describe('[增量 I-02] UpdateDividendRecordDto type 白名单 + service.update 落库 type', () => {
+  let prisma: PrismaMock;
+  let dividendService: DividendService;
+
+  beforeEach(() => {
+    prisma = createPrismaMock();
+    prisma.portfolio.findFirst.mockResolvedValue({ id: PORTFOLIO_OF_A });
+    prisma.dividendRecord.findFirst.mockResolvedValue(makeDividendRecord());
+    prisma.dividendRecord.update.mockResolvedValue(
+      makeDividendRecord('320.00', '60.00'),
+    );
+    dividendService = new DividendService(prisma as unknown as PrismaService);
+  });
+
+  /** 跑一遍 class-validator，返回 type 字段的报错数量（更新 DTO） */
+  async function validateUpdateType(type: string): Promise<number> {
+    const instance = plainToInstance(UpdateDividendRecordDto, { type });
+    const errors = await validate(instance);
+    return errors.filter((e) => e.property === 'type').length;
+  }
+
+  describe('DTO 层：UpdateDividendRecordDto.type（P0 根因修复）', () => {
+    it.each(['CASH', 'STOCK_DIVIDEND'])('合法枚举 %s 通过（0 报错）', async (type) => {
+      expect(await validateUpdateType(type)).toBe(0);
+    });
+
+    it.each(['DIVIDEND', 'cash', 'CASH2', ''])(
+      '非法 / 大小写不符 / 空串 %s 被拒（≥1 报错）',
+      async (type) => {
+        expect(await validateUpdateType(type)).toBeGreaterThan(0);
+      },
+    );
+
+    it('type 缺省时不校验（PATCH 语义：不传 = 不修改）', async () => {
+      const instance = plainToInstance(UpdateDividendRecordDto, {
+        note: '仅改备注',
+      });
+      const errors = await validate(instance);
+      expect(errors.filter((e) => e.property === 'type')).toHaveLength(0);
+    });
+  });
+
+  describe('Service 层：update() 落库 type（I-02 修复动作②）', () => {
+    it('dto.type 传入 → prisma.update data 含 type（CASH→STOCK_DIVIDEND）', async () => {
+      const result = await dividendService.update(
+        PORTFOLIO_OF_A,
+        RECORD_ID,
+        USER_A.userId,
+        { type: DividendType.STOCK_DIVIDEND },
+      );
+
+      const data = prisma.dividendRecord.update.mock.calls[0][0].data;
+      expect(data).toEqual({ type: DividendType.STOCK_DIVIDEND });
+      // 返回响应仍统一带 type
+      expect(result.type).toBe(DividendType.CASH);
+    });
+
+    it('dto.type 未传 → data 不含 type（不得误清空）', async () => {
+      await dividendService.update(PORTFOLIO_OF_A, RECORD_ID, USER_A.userId, {
+        note: '仅改备注',
+      });
+
+      const data = prisma.dividendRecord.update.mock.calls[0][0].data;
+      expect(data).not.toHaveProperty('type');
+    });
+
+    it('PATCH 携带 type 不触发重算（不触碰三张收益表）', async () => {
+      await dividendService.update(PORTFOLIO_OF_A, RECORD_ID, USER_A.userId, {
+        type: DividendType.STOCK_DIVIDEND,
+      });
+      expectIncomeTablesUntouched(prisma);
+    });
+  });
+});
