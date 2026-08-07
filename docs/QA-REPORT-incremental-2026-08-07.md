@@ -1,8 +1,9 @@
 # QA 测试报告 — 投资收益统计系统 增量 I-01~I-06（2026-08-07）
 
-> **QA**：严过关（Edward）｜**被测提交**：`79f5d12`（I-01~I-06 增量开发，42 files, +3268/-732）
+> **QA**：严过关（Edward）｜**被测提交**：`79f5d12`（I-01~I-06 增量开发，42 files, +3268/-732）+ `7f84906`（QA 第 1 轮 Bug 修复）
 > **范围**：全量回归（A）+ 新功能逐条验收（B）+ 智能路由判定（C）
-> **测试轮次**：第 1 轮（发现 1 个源码 Bug → 路由 Engineer 修复）→ 第 2 轮（回归验证）
+> **测试轮次**：第 1 轮（发现 1 个源码 Bug → 路由 Engineer，提交 7f84906 修复）→ 第 2 轮（全量回归验证）
+> **最终判定**：✅ **NoOne**（两轮收敛，全量通过）
 > **环境**：pnpm monorepo（backend/finance-core/shared/web）；后端 Jest 24 套件；前端 Vitest 38 文件；prisma 全量 mock，不触库
 
 ---
@@ -16,7 +17,7 @@
 | A.2 计算链路零改动回归 | ✅ dividend/fee 模块**无任何** `recalculateRange` / `recalculateNavRange` / `RecalculationService` / `CalculationModule` 引用（代码 grep + `dividend-fee-acceptance.spec.ts` DI 实锤 + 模块元数据实锤）；REG-01~06 对应 spec（snapshot/recalculation/nav/caliber-consistency 等）全部通过 |
 | A.3 数据隔离双闸（C-3） | ✅ 分红/费用/偏好接口 `user_id` + 组合归属双闸：7 个端点越权一律 404、跨组合挂载标的 404、偏好默认组合校验，用例全过 |
 
-> 注：`api-client.test.ts` 3 个用例在全量并发时偶发 5s 超时，单独运行 7/7 通过、第 2 轮全量未复现 —— 判定为**测试隔离性抖动**（jsdom XHR 并发干扰），非源码问题，已在遗留问题清单登记。
+> 注：`api-client.test.ts` 3 个用例在第 1 轮全量并发时偶发 5s 超时，单独运行 7/7 通过、第 2 轮全量 7/7 通过且未复现 —— 判定为**测试隔离性抖动**（jsdom XHR 并发干扰），非源码问题，见遗留问题 #1。
 
 ---
 
@@ -92,27 +93,27 @@
 | holdings-dividend-fee 测试「费用明细金额列索引」失败 | **QA（自修）** | I-03 新增「场景」列使金额列 3→4，测试断言过期；已改 `td[4]` |
 | holdings-dividend-fee 测试「编辑分红」失败 | **QA（自修）** | use-fees mock 缺 `useUpdateFee`（I-03 新增费用编辑依赖）；已补 mock |
 | api-client 3 用例并发超时 | **QA（登记，非源码）** | 单独运行 7/7 通过；测试隔离性抖动，第 2 轮全量未复现 |
-| **HoldingsPage 偏好对齐 effect 2 range 弹回** | **Engineer（修复）** | 源码 Bug，违反 I-04 验收 2/3 + I-05 验收 5；已修复，第 2 轮回归通过 |
+| **HoldingsPage 偏好对齐 effect 2 range 弹回** | **Engineer（已修复 7f84906）** | 源码 Bug，违反 I-04 验收 2/3 + I-05 验收 5；第 2 轮全量回归通过 |
 | 其余全部 | **NoOne** | 全量通过 |
 
-**第 2 轮最终判定：NoOne**（全部测试通过；遗留问题均为已知偏差/抖动登记）。
+**第 2 轮最终判定：NoOne**（后端 595/595 + 前端 485/485 全部通过；遗留问题均为已知偏差/抖动登记）。
 
 ---
 
-## 4. 第 1 轮发现并修复的问题（Engineer）
+## 4. 第 1 轮发现并修复的问题（Engineer · commit 7f84906）
 
 **Bug**：`packages/web/src/pages/HoldingsPage.tsx` 偏好对齐 effect 2（约 113~122 行）
-- 现象：用户选择快捷范围（如 1m）后状态被弹回偏好默认（1y），URL 不写入 range
+- 现象：用户在统一筛选器选择快捷范围（如 1m）后状态被弹回偏好默认（1y），URL 不写入 range
 - 根因：`hasRangeParam` 用 `[]` 依赖挂载固化 + effect 依赖 `holdingsQuery.range` → 每次用户改 range 都触发对齐重置
-- 修复：`[工程师修复内容摘要]`
-- 回归验证：`holdings-unified-filter.test.tsx > 日期范围 → startDate/endDate` 通过；全量 485/485 通过
+- 修复：新增 `rangeInteractedRef` / `closedInteractedRef` 用户交互守卫；统一筛选器变更统一走 `handleFilterChange(patch)`（凡含 `range/from/to` 或 `closed` 即置对应 ref）；偏好对齐 effect 加 `if (hasRangeParam || rangeInteractedRef.current) return;` → 只在「偏好异步到达、URL 无对应参数、用户尚未主动操作」时执行一次。**顺带修复同型隐患 closed（显示已清仓）**（QA 第 1 轮提醒的潜在模式）
+- 回归验证：`holdings-unified-filter.test.tsx` 7/7 通过（含「用户选择 1m → URL 写入 range=1m 不被弹回」断言）；第 2 轮全量 485/485 通过
 
 ---
 
 ## 5. 遗留问题清单（Known Issues / 登记）
 
-1. **[登记·抖动]** `api-client.test.ts` 3 用例（FormData/Content-Type）在全量并发时偶发 5s 超时；单独运行与第 2 轮全量均通过。建议后续将 `vi.resetModules()` 改 per-file 隔离或配置 `fileParallelism` 以根治（非本次增量引入）。
-2. **[登记·潜在]** `HoldingsPage.tsx` effect 1（closed 偏好对齐）与已修的 effect 2 同模式：若 `prefShowLiquidated=true`，用户手动关闭「显示已清仓」可能被弹回。本次增量未改，建议下轮一并修复（工程师已被告知）。
+1. **[登记·抖动]** `api-client.test.ts` 3 用例（FormData/Content-Type）在第 1 轮全量并发时偶发 5s 超时；单独运行 7/7、第 2 轮全量 7/7 均通过。建议后续将 `vi.resetModules()` 改 per-file 隔离或配置 `fileParallelism` 以根治（非本次增量引入）。
+2. **[已修复]** `HoldingsPage.tsx` closed（显示已清仓）偏好对齐潜在弹回 —— 工程师在 7f84906 中用 `closedInteractedRef` 一并修复，已闭环。
 3. **[已知偏差·架构前提不成立]** 导出 `SET-P0-03`：`export-schemas.ts` 无 FEES 导出类别（架构 §3.2.5 前提不成立），I-03 验收 8「费用导出新增 scenario 列」无法落地；工程师声明未改动。需 PM/架构确认是否补费用导出类别（P2）。
 4. **[登记·React 警告]** `DividendFeeSection` 费用明细表偶发 "Each child in a list should have a unique key" 警告（非失败）。合并键在 grouped 语义下唯一，疑为测试夹具数据或 Radix 内部列表触发，不影响功能。
 
@@ -131,6 +132,8 @@
 | web `features/security-income/__tests__/dividend-fee-section-merged.test.tsx`（新增） | I-03 合并展示（合计/笔数/徽标/不合并）（5 用例） |
 | web `features/security-income/__tests__/dividend-fee-tax.test.tsx`（修改） | I-02 编辑 payload 携带 type 断言 |
 | web `pages/__tests__/holdings-dividend-fee.test.tsx`（修改） | 修复 2 个过期断言/mock |
+
+> 说明：`holdings-unified-filter.test.tsx` 为 QA 维护的验收测试文件（7 用例覆盖 B.4 全部验收维度）。工程师在修复提交中以 2 用例版本覆盖了该文件，QA 已恢复 7 用例综合版本（工作区未提交变更，含 Bug 回归断言），两者语义一致、均通过。
 
 ---
 

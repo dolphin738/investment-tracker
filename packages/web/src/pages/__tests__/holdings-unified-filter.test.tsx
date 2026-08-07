@@ -1,17 +1,20 @@
 /**
- * pages/HoldingsPage — 统一筛选器页面级回归（I-05 / QA 第 1 轮 Bug 修复验证）
+ * HoldingsPage — I-05 三板块联动 + URL 持久化集成测试
  *
- * 覆盖：
- * - R-1 用户在统一筛选器选择快捷范围（如 1m）→ URL 写入 range=1m，
- *   且**不被偏好对齐 effect 弹回偏好默认值**（QA Bug：偏好对齐 effect 依赖
- *   holdingsQuery.range，用户每次改 range 都被重置回 defaultRange）
- * - R-2 买卖明细板块收到派生 query（securityId / startDate / endDate）
- * - R-3 分红/费用板块收到派生筛选 props（securityIds / scenario / startDate / endDate）
- * - R-4 as-of 不随日期范围变化（持仓板块以 as-of 为准，I-05 联动规则）
+ * 覆盖（增量 PRD I-05 验收 1/2/3/4/5 + 架构 §4.4.3 联动规则）：
+ * 1. 页面顶部只有一个统一筛选器（持仓/买卖明细/分红费用三板块共享）
+ * 2. 证券多选 → 三板块同步：useHoldings(securityId) + 买卖明细 query.securityId
+ *    + 分红费用 securityIds
+ * 3. 场景 → 买卖明细 side（BUY→BUY_SEC/SELL→SELL_SEC）+ 分红费用 scenario；持仓不受影响
+ * 4. 日期范围 → 买卖明细/分红费用 startDate/endDate；as-of → 持仓 date
+ * 5. URL 持久化：date/closed/types/sec/range/from/to/scenario 写入；等于默认不写入
+ * 6. 🔴 QA Bug 回归：用户选择快捷范围后 URL 写入 range，不被偏好对齐 effect 弹回
+ *    （HoldingsPage 偏好对齐 effect 2 修复验证，增量 PRD I-04 验收 2/3 + I-05 验收 5）
  *
- * 策略：真实渲染 HoldingsPage + HoldingsToolbar + DateRangeQuickPicker（交互真实）；
- * stub 掉 SecurityTradeList / DividendFeeSection 以捕获派生 query（页面装配观测点）；
- * Radix Select mock 为原生 <select> 替身（同 security-type-shared.test.tsx）。
+ * 策略：真实 HoldingsPage + 真实 HoldingsToolbar + 真实 useUrlState；
+ * mock 数据 hooks（use-holdings/use-transactions/use-securities/use-dividends/use-fees）
+ * 与两个板块子组件（SecurityTradeList/DividendFeeSection）以捕获派生 query props。
+ * Radix Select 按既有做法 mock 为原生 <select>。
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -22,152 +25,33 @@ import {
   screen,
   waitFor,
 } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import type { Portfolio } from '@investment-tracker/shared';
+import { SecuritySide } from '@investment-tracker/shared';
+import { FeeScenario } from '@/api/types';
+import type { HoldingsAggregate } from '@/api/types';
 
 // ---------------------------------------------------------------------------
-// 可变夹具槽 + mock
+// 捕获槽（vi.hoisted：vi.mock 工厂提升到 import 之前执行）
 // ---------------------------------------------------------------------------
-const state = vi.hoisted(() => ({
-  /** 捕获 SecurityTradeList 每次收到的 query props */
-  tradeProps: [] as Array<Record<string, unknown>>,
-  /** 捕获 DividendFeeSection 每次收到的筛选 props */
-  incomeProps: [] as Array<Record<string, unknown>>,
-  /** 捕获 useHoldings 收到的查询参数 */
-  holdingParams: [] as Array<Record<string, unknown>>,
-  /** 稳定引用（避免 useMemo/effect 依赖循环） */
-  stableEmpty: [] as unknown[],
+const capture = vi.hoisted(() => ({
+  holdingsQuery: null as null | Record<string, unknown>,
+  tradeQuery: null as null | Record<string, unknown>,
+  incomeProps: null as null | Record<string, unknown>,
 }));
 
 vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
 }));
 
-vi.mock('@/hooks/use-portfolios', () => ({
-  usePortfolios: () => ({
-    data: [
-      { id: 'pf-1', name: '测试组合', createdAt: '2025-01-01T00:00:00.000Z' },
-    ],
-    isLoading: false,
-  }),
-}));
-
-vi.mock('@/stores/portfolio.store', () => ({
-  usePortfolioStore: (selector: (s: unknown) => unknown) =>
-    selector({ currentPortfolioId: 'pf-1' }),
-  usePortfolioBaseDate: () => null,
-}));
-
-vi.mock('@/stores/preference.store', () => ({
-  usePreferenceStore: (selector: (s: unknown) => unknown) =>
-    selector({
-      getPreference: (key: string) =>
-        ({
-          showLiquidated: false,
-          amountThousands: true,
-          amountAbbrev: false,
-          xirrDecimals: 2,
-        })[key],
-    }),
-}));
-
-vi.mock('@/hooks/use-holdings', () => ({
-  useHoldings: (_pid: unknown, params: Record<string, unknown>) => {
-    state.holdingParams.push(params);
-    return {
-      data: {
-        items: [],
-        aggregate: {
-          totalMarketValue: 0,
-          totalCost: 0,
-          totalProfit: 0,
-          totalProfitRate: 0,
-          securityCount: 0,
-        },
-      },
-      isLoading: false,
-      isError: false,
-      refetch: vi.fn(),
-    };
-  },
-}));
-
-vi.mock('@/hooks/use-securities', () => ({
-  useSecurities: () => ({
-    data: [{ id: 's-a', name: '贵州茅台', code: '600519' }],
-    isLoading: false,
-  }),
-}));
-
-vi.mock('@/hooks/use-transactions', () => ({
-  useTransactions: () => ({ data: { items: [] }, isLoading: false }),
-}));
-
-vi.mock('@/hooks/use-security-trades', () => ({
-  useSecurityTrades: () => ({
-    data: { items: [], total: 0, page: 1, pageSize: 20 },
-    isLoading: false,
-    isError: false,
-  }),
-  useDeleteSecurityTrade: () => ({ mutateAsync: vi.fn(), isPending: false }),
-}));
-
-vi.mock('@/hooks/use-fees', () => ({
-  FEES_KEY: ['fees'],
-  useFees: () => ({
-    data: state.stableEmpty,
-    isLoading: false,
-    isError: false,
-    refetch: () => {},
-  }),
-  useCreateFee: () => ({ mutateAsync: vi.fn(), isPending: false }),
-  useUpdateFee: () => ({ mutateAsync: vi.fn(), isPending: false }),
-  useDeleteFee: () => ({ mutateAsync: vi.fn(), isPending: false }),
-}));
-
-vi.mock('@/hooks/use-dividends', () => ({
-  DIVIDENDS_KEY: ['dividends'],
-  useDividends: () => ({
-    data: state.stableEmpty,
-    isLoading: false,
-    isError: false,
-    refetch: () => {},
-  }),
-  useCreateDividend: () => ({ mutateAsync: vi.fn(), isPending: false }),
-  useUpdateDividend: () => ({ mutateAsync: vi.fn(), isPending: false }),
-  useDeleteDividend: () => ({ mutateAsync: vi.fn(), isPending: false }),
-}));
-
-// stub 板块组件：捕获页面装配的派生 query（真实渲染的只有统一筛选器链路）
-vi.mock('@/features/security-trade/security-trade-list', async () => {
-  const { createElement } = await import('react');
-  return {
-    SecurityTradeList: (props: Record<string, unknown>) => {
-      state.tradeProps.push(props);
-      return createElement('div', { 'data-testid': 'trade-list' }, '买卖明细');
-    },
-  };
-});
-
-vi.mock('@/features/security-income/dividend-fee-section', async () => {
-  const { createElement } = await import('react');
-  return {
-    DividendFeeSection: (props: Record<string, unknown>) => {
-      state.incomeProps.push(props);
-      return createElement('div', { 'data-testid': 'income-section' }, '分红费用');
-    },
-  };
-});
-
-/**
- * Radix Select 替身（原生 <select>）—— 同 security-type-shared.test.tsx。
- */
-vi.mock('@/components/ui/select', async () => {  const React = await import('react');
+vi.mock('@/components/ui/select', async () => {
+  const React = await import('react');
 
   interface ItemProps {
     value: string;
     children?: React.ReactNode;
   }
-
   const SelectItem = (_props: ItemProps): null => null;
   (SelectItem as unknown as { __selectItem: boolean }).__selectItem = true;
 
@@ -192,7 +76,6 @@ vi.mock('@/components/ui/select', async () => {  const React = await import('rea
       if (props?.children) collectItems(props.children, out);
     });
   }
-
   function flattenText(node: React.ReactNode): string {
     if (node == null || typeof node === 'boolean') return '';
     if (typeof node === 'string' || typeof node === 'number') return String(node);
@@ -202,30 +85,6 @@ vi.mock('@/components/ui/select', async () => {  const React = await import('rea
     }
     return '';
   }
-
-  function findTriggerId(node: React.ReactNode): string | undefined {
-    let found: string | undefined;
-    React.Children.forEach(node, (child) => {
-      if (found || !React.isValidElement(child)) return;
-      const props = child.props as { id?: string; children?: React.ReactNode };
-      const isTrigger =
-        (child.type as unknown as { __selectTrigger?: boolean })?.__selectTrigger;
-      if (isTrigger && props.id) {
-        found = props.id;
-        return;
-      }
-      if (props?.children) found = findTriggerId(props.children) ?? found;
-    });
-    return found;
-  }
-
-  const SelectTrigger = ({
-    children,
-    ...rest
-  }: { children?: React.ReactNode }) =>
-    React.createElement('span', rest, children);
-  (SelectTrigger as unknown as { __selectTrigger: boolean }).__selectTrigger =
-    true;
 
   const Select = ({
     value,
@@ -240,11 +99,9 @@ vi.mock('@/components/ui/select', async () => {  const React = await import('rea
   }) => {
     const items: Array<{ value: string; label: string }> = [];
     collectItems(children, items);
-    const id = findTriggerId(children);
     return React.createElement(
       'select',
       {
-        id,
         value: value ?? '',
         disabled,
         onChange: (e: React.ChangeEvent<HTMLSelectElement>) =>
@@ -261,7 +118,7 @@ vi.mock('@/components/ui/select', async () => {  const React = await import('rea
 
   return {
     Select,
-    SelectTrigger,
+    SelectTrigger: passthrough('span'),
     SelectItem,
     SelectValue: passthrough('span'),
     SelectContent: passthrough('span'),
@@ -273,152 +130,372 @@ vi.mock('@/components/ui/select', async () => {  const React = await import('rea
   };
 });
 
-/**
- * Radix Tabs 替身（受控/非受控均支持）：
- * jsdom 下 radix tabs 的 click 切换不生效（探针已验证），mock 为 context 驱动切换，
- * 使「切到买卖明细/分红费用 Tab → 板块组件挂载」这条链路在测试中真实可测。
- */
-vi.mock('@/components/ui/tabs', async () => {
-  const React = await import('react');
-  const Ctx = React.createContext<{ active: string; select: (v: string) => void }>({
-    active: '',
-    select: () => {},
-  });
+// 数据 hooks —— 捕获查询参数
+vi.mock('@/hooks/use-portfolios', () => ({
+  PORTFOLIOS_KEY: ['portfolios'],
+  usePortfolios: () => ({ data: [PORTFOLIO_FIXTURE], isLoading: false }),
+  useCreatePortfolio: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useUpdatePortfolio: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useArchivePortfolio: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useDeletePortfolio: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useClearPortfolioData: () => ({ mutateAsync: vi.fn(), isPending: false }),
+}));
 
-  const Tabs = ({
-    defaultValue,
-    value,
-    onValueChange,
-    children,
-  }: {
-    defaultValue?: string;
-    value?: string;
-    onValueChange?: (v: string) => void;
-    children?: React.ReactNode;
-  }) => {
-    const [inner, setInner] = React.useState<string>(defaultValue ?? value ?? '');
-    const active = value ?? inner;
-    const select = (v: string) => {
-      if (onValueChange) onValueChange(v);
-      else setInner(v);
+vi.mock('@/hooks/use-holdings', () => ({
+  useHoldings: (_pf: string | null, query: Record<string, unknown>) => {
+    capture.holdingsQuery = query ?? null;
+    return {
+      data: { items: [], aggregate: AGGREGATE_FIXTURE },
+      isLoading: false,
+      isError: false,
+      refetch: () => {},
     };
-    return React.createElement(Ctx.Provider, { value: { active, select } }, children);
+  },
+}));
+
+vi.mock('@/hooks/use-securities', () => ({
+  useSecurities: () => ({ data: SECURITIES_FIXTURE, isLoading: false }),
+  useCreateSecurity: () => ({ mutateAsync: vi.fn(), isPending: false }),
+}));
+
+vi.mock('@/hooks/use-transactions', () => ({
+  useTransactions: () => ({
+    data: { items: [{ date: '2024-03-01' }], total: 1 },
+    isLoading: false,
+    isError: false,
+    refetch: () => {},
+  }),
+}));
+
+vi.mock('@/hooks/use-dividends', () => ({
+  DIVIDENDS_KEY: ['dividends'],
+  useDividends: () => ({
+    data: [],
+    isLoading: false,
+    isError: false,
+    refetch: () => {},
+  }),
+  useCreateDividend: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useUpdateDividend: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useDeleteDividend: () => ({ mutateAsync: vi.fn(), isPending: false }),
+}));
+
+vi.mock('@/hooks/use-fees', () => ({
+  FEES_KEY: ['fees'],
+  useFees: () => ({
+    data: [],
+    isLoading: false,
+    isError: false,
+    refetch: () => {},
+  }),
+  useCreateFee: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useUpdateFee: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useDeleteFee: () => ({ mutateAsync: vi.fn(), isPending: false }),
+}));
+
+// 板块子组件 —— 捕获派生 query props
+vi.mock('@/features/security-trade/security-trade-form', async () => {
+  const { createElement } = await import('react');
+  return {
+    SecurityTradeForm: () =>
+      createElement('div', { 'data-testid': 'trade-form' }, '买卖表单'),
   };
-
-  const TabsList = ({ children }: { children?: React.ReactNode }) =>
-    React.createElement('div', { role: 'tablist' }, children);
-
-  const TabsTrigger = ({
-    value,
-    children,
-  }: {
-    value: string;
-    children?: React.ReactNode;
-  }) => {
-    const { select } = React.useContext(Ctx);
-    return React.createElement(
-      'button',
-      { role: 'tab', type: 'button', onClick: () => select(value) },
-      children,
-    );
-  };
-
-  const TabsContent = ({
-    value,
-    children,
-  }: {
-    value: string;
-    children?: React.ReactNode;
-  }) => {
-    const { active } = React.useContext(Ctx);
-    return active === value ? React.createElement('div', null, children) : null;
-  };
-
-  return { Tabs, TabsList, TabsTrigger, TabsContent };
 });
 
-import HoldingsPage from '@/pages/HoldingsPage';
+vi.mock('@/features/security-trade/security-trade-list', async () => {
+  const { createElement } = await import('react');
+  return {
+    SecurityTradeList: (props: { query?: Record<string, unknown> }) => {
+      capture.tradeQuery = props.query ?? null;
+      return createElement('div', { 'data-testid': 'trade-list' }, '买卖明细列表');
+    },
+  };
+});
 
-function renderPage(): void {
-  const client = new QueryClient({
+vi.mock('@/features/security-price/inline-price-editor', async () => {
+  const { createElement } = await import('react');
+  return {
+    InlinePriceEditor: ({ value }: { value: number }) =>
+      createElement('span', null, String(value)),
+  };
+});
+
+vi.mock('@/features/security-income/dividend-fee-section', async () => {
+  const { createElement } = await import('react');
+  return {
+    DividendFeeSection: (props: Record<string, unknown>) => {
+      capture.incomeProps = props;
+      return createElement('div', { 'data-testid': 'income-section' }, '分红费用区');
+    },
+  };
+});
+
+// 必须在 vi.mock 之后导入
+import HoldingsPage from '@/pages/HoldingsPage';
+import { usePortfolioStore } from '@/stores/portfolio.store';
+import { usePreferenceStore } from '@/stores/preference.store';
+
+const PORTFOLIO_FIXTURE = {
+  id: 'pf-1',
+  userId: 'user-1',
+  name: '测试组合',
+  description: null,
+  baseDate: '2024-01-01',
+  currency: 'CNY',
+  archivedAt: null,
+  createdAt: '2024-01-01T00:00:00.000Z',
+  updatedAt: '2024-01-01T00:00:00.000Z',
+} as unknown as Portfolio;
+
+const AGGREGATE_FIXTURE: HoldingsAggregate = {
+  totalMarketValue: 0,
+  totalCost: 0,
+  totalProfit: 0,
+  totalProfitRate: 0,
+  securityCount: 0,
+};
+
+const SECURITIES_FIXTURE = [
+  { id: 's-a', name: '甲股票', code: '600000' },
+  { id: 's-b', name: '乙基金', code: '000002' },
+];
+
+const BASE_PREF = {
+  id: 'pref-1',
+  userId: 'user-1',
+  defaultPortfolioId: 'pf-1',
+  defaultGranularity: 'month',
+  defaultDateRange: '1y',
+  aggregation: 'last',
+  weekStartsOn: 1,
+  navDecimals: 4,
+  xirrDecimals: 2,
+  theme: 'system',
+  staleDays: 3,
+  cashHintOnCashflow: true,
+  cashHintOnTrade: true,
+  amountThousands: true,
+  amountAbbrev: false,
+  createdAt: '2024-01-01T00:00:00.000Z',
+  updatedAt: '2024-01-01T00:00:00.000Z',
+};
+
+function installJsdomPolyfills(): void {
+  if (!('ResizeObserver' in globalThis)) {
+    (globalThis as { ResizeObserver?: unknown }).ResizeObserver = class {
+      observe(): void {}
+      unobserve(): void {}
+      disconnect(): void {}
+    };
+  }
+  if (!Element.prototype.scrollIntoView) {
+    Element.prototype.scrollIntoView = function scrollIntoView(): void {};
+  }
+  if (!Element.prototype.hasPointerCapture) {
+    Element.prototype.hasPointerCapture = (): boolean => false;
+  }
+  if (!Element.prototype.releasePointerCapture) {
+    Element.prototype.releasePointerCapture = (): void => {};
+  }
+}
+
+function renderPage() {
+  const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
-  render(
-    <QueryClientProvider client={client}>
-      <HoldingsPage />
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={['/holdings']}>
+        <HoldingsPage />
+      </MemoryRouter>
     </QueryClientProvider>,
   );
 }
 
-/** 统一筛选器中的快捷范围下拉（DOM 顺序第 1 个 select） */
-function quickRangeSelect(): HTMLSelectElement {
-  const selects = document.querySelectorAll('select');
-  return selects[0] as HTMLSelectElement;
+/** 打开指定 Tab（Radix Tabs 的 Trigger 通过 onMouseDown 激活） */
+function activateTab(name: string): void {
+  fireEvent.mouseDown(screen.getByRole('tab', { name }), { button: 0 });
 }
 
-describe('持仓页统一筛选器（I-05 · QA Bug 回归）', () => {
+/** 读取统一筛选器容器内的原生 <select>：[0]=快捷范围, [1]=场景 */
+function getFilterSelects() {
+  const container = screen.getByTestId('holdings-unified-filter');
+  return Array.from(container.querySelectorAll('select')) as HTMLSelectElement[];
+}
+
+/** 定位「持仓日期（as-of）」单点输入（Label 无 htmlFor，不能 getByLabelText） */
+function getAsOfInput(): HTMLInputElement {
+  const label = screen.getByText('持仓日期（as-of）');
+  const wrap = label.parentElement as HTMLElement;
+  const input = wrap.querySelector('input[type="date"]');
+  if (!input) throw new Error('未找到 as-of 日期输入');
+  return input as HTMLInputElement;
+}
+
+describe('HoldingsPage — I-05 三板块联动', () => {
   beforeEach(() => {
-    // 无任何 URL 参数（等同首次进入）
+    installJsdomPolyfills();
     window.history.replaceState({}, '', '/holdings');
-    state.tradeProps = [];
-    state.incomeProps = [];
-    state.holdingParams = [];
+    usePortfolioStore.setState({
+      portfolios: [PORTFOLIO_FIXTURE],
+      currentPortfolioId: 'pf-1',
+    });
+    usePreferenceStore.setState({ preferences: BASE_PREF, loaded: true });
+    capture.holdingsQuery = null;
+    capture.tradeQuery = null;
+    capture.incomeProps = null;
   });
 
   afterEach(() => {
     cleanup();
-    vi.clearAllMocks();
     window.history.replaceState({}, '', '/holdings');
+    usePreferenceStore.setState({ preferences: null, loaded: false });
+    usePortfolioStore.setState({ portfolios: [], currentPortfolioId: null });
+    vi.clearAllMocks();
   });
 
-  it('用户选择快捷范围 1m → URL 写入 range=1m 且不被偏好对齐弹回（QA Bug 修复）', async () => {
+  it('页面顶部只有一个统一筛选器，三板块共享', () => {
     renderPage();
 
-    // 用户选择快捷范围「近1月」
-    fireEvent.change(quickRangeSelect(), { target: { value: '1m' } });
+    expect(screen.getAllByTestId('holdings-unified-filter')).toHaveLength(1);
+    // 三板块 Tab 都在
+    const tabs = screen.getAllByRole('tab').map((t) => t.textContent?.trim());
+    expect(tabs).toEqual(['持仓', '买卖明细', '分红/费用']);
+  });
 
+  it('默认：range 不写入 URL（等于默认 1y），as-of 默认今日', () => {
+    renderPage();
+
+    expect(window.location.search).not.toContain('range=');
+    expect(window.location.search).not.toContain('sec=');
+    expect(window.location.search).not.toContain('scenario=');
+    // 持仓板块初始以今日为 as-of
+    expect(capture.holdingsQuery).toMatchObject({
+      date: expect.any(String),
+      includeClosed: false,
+    });
+  });
+
+  it('证券多选 → 三板块同步（持仓 securityId + 买卖明细 securityId + 分红费用 securityIds）', async () => {
+    renderPage();
+
+    // 打开证券多选面板并勾选甲股票（第一个 checkbox）
+    fireEvent.click(screen.getByRole('button', { name: /全部证券/ }));
+    const checkboxes = document.querySelectorAll(
+      '[data-testid="holdings-unified-filter"] input[type="checkbox"]',
+    );
+    fireEvent.click(checkboxes[0]);
+
+    // 持仓板块（恒挂载）：useHoldings 收到 securityId
+    await waitFor(() => {
+      expect(capture.holdingsQuery?.securityId).toBe('s-a');
+    });
+    // 买卖明细板块：切到 Tab 后 SecurityTradeList 收到 query.securityId
+    activateTab('买卖明细');
+    await waitFor(() => {
+      expect(capture.tradeQuery?.securityId).toBe('s-a');
+    });
+    // 分红费用板块：切到 Tab 后 DividendFeeSection 收到 securityIds
+    activateTab('分红/费用');
+    await waitFor(() => {
+      expect(capture.incomeProps?.securityIds).toEqual(['s-a']);
+    });
+    // URL 持久化
+    expect(window.location.search).toContain('sec=s-a');
+  });
+
+  it('场景 → 买卖明细 side + 分红费用 scenario；持仓不受影响', async () => {
+    renderPage();
+    const selects = getFilterSelects();
+    const scenarioSelect = selects[1];
+
+    // 买卖明细板块：scenario=BUY → side=BUY_SEC
+    activateTab('买卖明细');
+    fireEvent.change(scenarioSelect, { target: { value: FeeScenario.BUY } });
+    await waitFor(() => {
+      expect(capture.tradeQuery?.side).toBe(SecuritySide.BUY_SEC);
+    });
+    expect(window.location.search).toContain('scenario=BUY');
+
+    fireEvent.change(scenarioSelect, { target: { value: FeeScenario.SELL } });
+    await waitFor(() => {
+      expect(capture.tradeQuery?.side).toBe(SecuritySide.SELL_SEC);
+    });
+
+    fireEvent.change(scenarioSelect, { target: { value: 'all' } });
+    await waitFor(() => {
+      expect(capture.tradeQuery?.side).toBeUndefined();
+    });
+
+    // 分红费用板块：scenario 透传
+    activateTab('分红/费用');
+    fireEvent.change(scenarioSelect, { target: { value: FeeScenario.BUY } });
+    await waitFor(() => {
+      expect(capture.incomeProps?.scenario).toBe(FeeScenario.BUY);
+    });
+
+    // 持仓板块不适用场景：useHoldings 不接收 scenario
+    expect(capture.holdingsQuery).not.toHaveProperty('scenario');
+  });
+
+  it('日期范围 → 买卖明细/分红费用 startDate/endDate；as-of 不变（含 QA Bug 回归：range 写入 URL 不被弹回）', async () => {
+    renderPage();
+    const selects = getFilterSelects();
+    const quickSelect = selects[0];
+
+    activateTab('买卖明细');
+    fireEvent.change(quickSelect, { target: { value: '1m' } });
+    await waitFor(() => {
+      expect(capture.tradeQuery?.startDate).toBeTruthy();
+    });
+    expect(capture.tradeQuery?.endDate).toBeTruthy();
+    // 🔴 QA Bug 回归：用户选择 1m 后 URL 必须写入 range=1m，
+    // 不被偏好对齐 effect 弹回（修复前为 ''）
     await waitFor(() => {
       expect(window.location.search).toContain('range=1m');
     });
-    // 关键断言：URL 真实写入了 range=1m（修复前被弹回默认后等于默认不写入 → 空）
-    expect(window.location.search).not.toBe('');
+
+    // 分红费用板块同步收到日期范围
+    activateTab('分红/费用');
+    await waitFor(() => {
+      expect(capture.incomeProps?.startDate).toBeTruthy();
+    });
+    expect(capture.incomeProps?.endDate).toBeTruthy();
+
+    // 持仓板块以 as-of 为准，不接收 startDate/endDate
+    expect(capture.holdingsQuery).not.toHaveProperty('startDate');
+    expect(capture.holdingsQuery).not.toHaveProperty('endDate');
   });
 
-  it('日期范围 → 买卖明细/分红费用收到派生 query；as-of 不随之变化（联动规则）', async () => {
+  it('as-of → 持仓板块 date；买卖明细/分红费用不变', async () => {
+    renderPage();
+    const asOfInput = getAsOfInput();
+
+    fireEvent.change(asOfInput, { target: { value: '2026-05-01' } });
+    await waitFor(() => {
+      expect(capture.holdingsQuery?.date).toBe('2026-05-01');
+    });
+    expect(window.location.search).toContain('date=2026-05-01');
+  });
+
+  it('URL 持久化：从带参数的 URL 进入 → 筛选状态还原', async () => {
+    window.history.replaceState(
+      {},
+      '',
+      '/holdings?sec=s-b&scenario=SELL&range=3m&date=2026-04-01',
+    );
     renderPage();
 
-    // 切换到「买卖明细」Tab（TabsContent 懒渲染，需激活后才挂载 SecurityTradeList）
-    fireEvent.click(screen.getByRole('tab', { name: '买卖明细' }));
+    // 持仓板块：date 还原
     await waitFor(() => {
-      expect(state.tradeProps.length).toBeGreaterThan(0);
+      expect(capture.holdingsQuery?.date).toBe('2026-04-01');
     });
-
-    // 选择快捷范围 1m
-    fireEvent.change(quickRangeSelect(), { target: { value: '1m' } });
-
+    // 买卖明细：securityId + side + startDate 还原
+    activateTab('买卖明细');
     await waitFor(() => {
-      expect(window.location.search).toContain('range=1m');
+      expect(capture.tradeQuery?.securityId).toBe('s-b');
     });
-
-    // 买卖明细：1m 区间 startDate/endDate 非空（tab 已激活，组件持续收到派生 query）
-    const trade = state.tradeProps[state.tradeProps.length - 1];
-    const tradeQuery = trade.query as { startDate?: string; endDate?: string };
-    expect(tradeQuery.startDate).toBeTruthy();
-    expect(tradeQuery.endDate).toBeTruthy();
-
-    // 分红/费用：切到该 Tab 后同样收到派生筛选 props
-    fireEvent.click(screen.getByRole('tab', { name: '分红/费用' }));
-    await waitFor(() => {
-      expect(state.incomeProps.length).toBeGreaterThan(0);
-    });
-    const income = state.incomeProps[state.incomeProps.length - 1];
-    expect(income.startDate).toBeTruthy();
-    expect(income.endDate).toBeTruthy();
-    expect(income.scenario).toBe('all');
-
-    // 持仓板块：as-of 使用默认今日（URL 无 date 参数时 schema 默认值），
-    // 不因日期范围变化而改变
-    const holdingParam = state.holdingParams[state.holdingParams.length - 1];
-    expect(holdingParam.date).toBeTruthy();
+    expect(capture.tradeQuery?.side).toBe(SecuritySide.SELL_SEC);
+    expect(capture.tradeQuery?.startDate).toBeTruthy();
   });
 });
