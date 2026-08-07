@@ -19,7 +19,7 @@
  * 断言的才是「实际发出去的请求头」。
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AxiosRequestConfig } from 'axios';
 
 // sonner 的 toast 在 jsdom 下会尝试渲染，直接 mock 掉
@@ -67,7 +67,16 @@ function installFakeXHR(onCapture: (c: Captured) => void): () => void {
     abort(): void {}
     send(body: unknown): void {
       onCapture({ headers: { ...this.headers }, body });
-      setTimeout(() => this.onloadend?.(), 0);
+      // 用微任务而非真实定时器 setTimeout(0) 触发完成。
+      //
+      // 根因（遗留 #1）：原实现依赖真实定时器回调驱动 axios Promise，
+      // 在 vitest 默认 threads 池「全量并发」下（叠加本地 CPU/内存争用），
+      // 该定时器回调会被事件循环饿死，导致 axios Promise 偶发超过 5s 超时。
+      // 单独运行无并发争用时 7/7 稳定通过，正是此症结。
+      //
+      // 微任务不进入定时器队列，且同文件内 `send` 调用期间无其他任务阻塞，
+      // 因此完成时机确定、不会抖动，从根上消除「并发超时」类失败。
+      void Promise.resolve().then(() => this.onloadend?.());
     }
   }
 
@@ -91,8 +100,26 @@ describe('api-client 请求拦截器（M2）', () => {
   });
 
   afterEach(() => {
-    restoreXHR?.();
-    vi.clearAllMocks();
+    try {
+      restoreXHR?.();
+    } finally {
+      // 还原全局 XHR 引用，避免模块级/全局状态泄漏到同文件其它用例
+      restoreXHR = undefined;
+      // 防御性还原真实定时器：即便本文件未使用 fake timers，
+      // 也兜底确保无残留 fake timers 影响后续用例（遗留 #1 隔离性加固）
+      vi.useRealTimers();
+      vi.clearAllMocks();
+    }
+  });
+
+  // 安全网：double-check 全局 XHR 已被还原。
+  // vitest 默认 afterEach 总会执行，此处仅作极端异常路径下的兜底，
+  // 杜绝伪造的全局 XMLHttpRequest 泄漏污染同文件用例（遗留 #1）。
+  afterAll(() => {
+    if (restoreXHR) {
+      restoreXHR();
+      restoreXHR = undefined;
+    }
   });
 
   /** 装载 api-client（走真实 xhr adapter） */

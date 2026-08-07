@@ -274,6 +274,7 @@ const BASE_PREF = {
   staleDays: 3,
   cashHintOnCashflow: true,
   cashHintOnTrade: true,
+  showLiquidated: false,
   amountThousands: true,
   amountAbbrev: false,
   createdAt: '2024-01-01T00:00:00.000Z',

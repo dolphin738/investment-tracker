@@ -569,8 +569,12 @@ export function DividendFeeSection({
                         {groupedList.map((row) => {
                           const representative = representativeOf(row);
                           const canEditDelete = Boolean(representative);
+                          // QA 遗留 #3：费用聚合行使用本地复合 key（securityId-date-scenario-type），
+                          // 不依赖后端下发的 mergeKey 字符串格式，保证 key 稳定且必定义，规避
+                          // "Each child in a list should have a unique key" 警告（非失败）。
+                          const feeRowKey = `${row.securityId}-${row.date}-${row.scenario}-${row.type}`;
                           return (
-                            <TableRow key={row.mergeKey}>
+                            <TableRow key={feeRowKey}>
                               <TableCell className="tabular-nums">
                                 {formatDate(row.date)}
                               </TableCell>
