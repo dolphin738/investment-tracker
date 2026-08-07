@@ -11,7 +11,7 @@
  * 🔴 不新增审计表、不改 Prisma：变更历史 = 多行 `asOf` 列表（复用 `useCashBalances`）。
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   ChevronDown,
   ChevronUp,
@@ -25,8 +25,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { DateRangeQuickPicker } from '@/components/date/date-range-quick-picker';
-import { resolveQuickRange } from '@/features/query/dimension-switcher';
+import { resolveQuickRange } from '@/features/query/quick-range';
 import { useDefaultDateRange } from '@/features/query/use-default-date-range';
+import { useRangePreferenceSync } from '@/hooks/use-range-preference-sync';
 import { usePortfolioBaseDate } from '@/stores/portfolio.store';
 import {
   Table,
@@ -76,12 +77,28 @@ export function CashBalanceHistory({
   );
   const [filterStart, setFilterStart] = useState(defaultRangeValue.startDate);
   const [filterEnd, setFilterEnd] = useState(defaultRangeValue.endDate);
-  // 偏好对齐 effect（架构 §8）：偏好异步到达后对齐一次默认范围
-  useEffect(() => {
-    setFilterStart(defaultRangeValue.startDate);
-    setFilterEnd(defaultRangeValue.endDate);
-    setPage(1);
-  }, [defaultRangeValue.startDate, defaultRangeValue.endDate]);
+  // INC-01：快捷范围受控回显（空串 = 不限 / 自定义）
+  const [filterQuick, setFilterQuick] = useState<string>(defaultRange);
+
+  /**
+   * 偏好对齐守卫（INC-01 决策 E · 统一范式）。
+   *
+   * 取代原先「defaultRangeValue 一变就无条件 setFilterStart/End」的 effect ——
+   * 那会在用户手动改过范围后把选择弹回偏好默认值。本组件无 URL 载体，
+   * 故 `urlParamKeys` 传空数组，跳过 URL 判定。
+   */
+  const { markInteracted } = useRangePreferenceSync({
+    currentQuick: filterQuick,
+    currentStartDate: filterStart,
+    allRangeStart: baseDate,
+    urlParamKeys: [],
+    onAlign: (alignment) => {
+      setFilterQuick(alignment.quick);
+      setFilterStart(alignment.startDate);
+      setFilterEnd(alignment.endDate);
+      setPage(1);
+    },
+  });
 
   const getPreference = usePreferenceStore((s) => s.getPreference);
   const amountThousands = getPreference('amountThousands');
@@ -166,10 +183,13 @@ export function CashBalanceHistory({
           */}
           <div className="flex flex-wrap items-end gap-3 rounded-md border border-border p-3">
             <DateRangeQuickPicker
+              quick={filterQuick}
               startDate={filterStart}
               endDate={filterEnd}
               allRangeStart={baseDate}
               onChange={(r) => {
+                markInteracted();
+                setFilterQuick(r.quick ?? '');
                 setFilterStart(r.startDate);
                 setFilterEnd(r.endDate);
                 setPage(1); // 换范围后回到第 1 页，避免停留在越界页码
@@ -180,6 +200,8 @@ export function CashBalanceHistory({
                 variant="outline"
                 size="sm"
                 onClick={() => {
+                  markInteracted();
+                  setFilterQuick('');
                   setFilterStart('');
                   setFilterEnd('');
                   setPage(1);

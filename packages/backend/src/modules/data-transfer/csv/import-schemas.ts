@@ -39,8 +39,8 @@ const SECURITY_TRADES_SCHEMA: ImportSchema = {
     { key: 'date', required: true, type: 'date' },
     { key: 'side', required: true, type: 'enum', allowed: ['BUY_SEC', 'SELL_SEC'] },
     { key: 'quantity', required: true, type: 'decimal', maxDecimals: 6 },
-    { key: 'price', required: true, type: 'decimal', maxDecimals: 6 },
-    { key: 'fee', required: false, type: 'decimal', maxDecimals: 2 },
+    { key: 'costPrice', required: true, type: 'decimal', maxDecimals: 6 },
+    { key: 'feeTotal', required: false, type: 'decimal', maxDecimals: 2 },
     { key: 'note', required: false, type: 'string' },
   ],
 };

@@ -8,7 +8,9 @@
  * 本表符号仅供展示与持仓推导，不再参与 XIRR 引擎计算。
  *
  * TransactionType 枚举维持 BUY / SELL 两值不变（C-10 约束）。
- * 分红与费用在持仓模块独立建表（DividendRecord / FeeRecord），不进入 Transaction。
+ * 分红在持仓模块独立建表（DividendRecord），不进入 Transaction；
+ * 费用自 INC-03／INC-04 起物理并入证券买卖流水 security_trades
+ * （commission / stampTax / other / feeTotal 四列），不再有独立的 FeeRecord 表。
  */
 
 /**

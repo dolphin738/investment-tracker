@@ -138,7 +138,8 @@ export class PortfolioService {
    * 清空组合全部业务数据（SET-P0-05 危险操作区 · 保留组合本身）
    *
    * 删除：出入金 / 证券买卖流水 / 标的最新价 / 现金余额 / 总资产记录 /
-   *       每日净值 / 每日 XIRR / 分红 / 费用。
+   *       每日净值 / 每日 XIRR / 分红。
+   *       注：费用已物理并表进 security_trades（INC-04 决策 A），随证券买卖流水一并删除，无独立费用表。
    * 保留：组合本身与标的主数据（securities 仅剩空壳，可继续录入新交易）。
    * 重置：Portfolio.baseDate = null。
    *
@@ -160,7 +161,6 @@ export class PortfolioService {
       this.prisma.dailyNav.deleteMany({ where: { portfolioId: id } }),
       this.prisma.dailyXirr.deleteMany({ where: { portfolioId: id } }),
       this.prisma.dividendRecord.deleteMany({ where: { portfolioId: id } }),
-      this.prisma.feeRecord.deleteMany({ where: { portfolioId: id } }),
     ]);
 
     await this.prisma.portfolio.update({

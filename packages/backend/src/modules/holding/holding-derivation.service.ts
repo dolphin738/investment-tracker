@@ -197,12 +197,12 @@ export class HoldingDerivationService {
         const sid = t.securityId;
         const state = stateMap.get(sid) ?? { qty: 0, costTotal: 0, avgCost: 0 };
         const q = Number(t.quantity);
-        const p = Number(t.price);
-        const fee = Number(t.fee);
+        // 含费单价（INC-03 由 price 重命名）；费用已并入含费单价，成本总额无需再加 feeTotal
+        const p = Number(t.costPrice);
 
         if (t.side === 'BUY_SEC') {
-          // 买入：成本总额 += q*p + fee, 数量 += q
-          state.costTotal += q * p + fee;
+          // 买入：成本总额 += q*含费单价（含费单价已含佣金/印花税/其他费用）
+          state.costTotal += q * p;
           state.qty += q;
           state.avgCost = state.qty > 0 ? state.costTotal / state.qty : 0;
         } else if (t.side === 'SELL_SEC') {

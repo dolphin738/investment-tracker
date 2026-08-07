@@ -38,7 +38,7 @@ describe('DateRangeQuickPicker — 渲染', () => {
     );
 
     expect(screen.getByText('快捷范围')).toBeDefined();
-    expect(screen.getByText('起始日期')).toBeDefined();
+    expect(screen.getByText('开始日期')).toBeDefined();
     expect(screen.getByText('结束日期')).toBeDefined();
   });
 

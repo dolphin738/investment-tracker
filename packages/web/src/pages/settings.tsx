@@ -40,6 +40,12 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
+  ENTRY_BUTTON_ICON_CLASS,
+  ENTRY_BUTTON_LABELS,
+  ENTRY_BUTTON_SIZE,
+  ENTRY_BUTTON_VARIANT,
+} from '@/constants/entry-button-labels';
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -795,9 +801,14 @@ export default function SettingsPage(): JSX.Element {
             <CardTitle className="text-base">组合管理</CardTitle>
             <CardDescription>创建、编辑、归档或删除投资组合</CardDescription>
           </div>
-          <Button onClick={() => setCreating(true)} size="sm">
-            <Plus className="mr-2 h-4 w-4" />
-            新建组合
+          {/* INC-05：与其它录入入口同规格（主色 + sm + Plus），文案不改（决策 H） */}
+          <Button
+            onClick={() => setCreating(true)}
+            size={ENTRY_BUTTON_SIZE}
+            variant={ENTRY_BUTTON_VARIANT}
+          >
+            <Plus className={ENTRY_BUTTON_ICON_CLASS} />
+            {ENTRY_BUTTON_LABELS.portfolio}
           </Button>
         </CardHeader>
         <CardContent>

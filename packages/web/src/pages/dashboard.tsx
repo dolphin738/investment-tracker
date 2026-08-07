@@ -26,7 +26,6 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  ArrowDownToLine,
   ArrowUpFromLine,
   ArrowLeftRight,
   Plus,
@@ -56,7 +55,14 @@ import { buildOverviewMetrics } from '@/features/overview/asset-metrics';
 import { TotalAssetTrendChart } from '@/features/overview/total-asset-trend-chart';
 import { createOverviewSchema } from '@/features/overview/overview-query-params';
 import type { OverviewQueryState } from '@/features/overview/overview-query-params';
-import { resolveQuickRange } from '@/features/query/dimension-switcher';
+import { resolveQuickRange } from '@/features/query/quick-range';
+import { useRangePreferenceSync } from '@/hooks/use-range-preference-sync';
+import {
+  ENTRY_BUTTON_ICON_CLASS,
+  ENTRY_BUTTON_LABELS,
+  ENTRY_BUTTON_SIZE,
+  ENTRY_BUTTON_VARIANT,
+} from '@/constants/entry-button-labels';
 import {
   usePortfolioBaseDate,
   usePortfolioStore,
@@ -139,14 +145,15 @@ const ONBOARDING_STEPS: ReadonlyArray<OnboardingStep> = [
     index: 2,
     title: '录入首笔存入',
     description: '记录第一笔本金存入，作为净值与 XIRR 的计算起点。',
-    actionLabel: '录入出入金',
+    // 决策 H：文案取自统一字典，禁止写字面量
+    actionLabel: ENTRY_BUTTON_LABELS.cashFlow,
     action: 'cashflow',
   },
   {
     index: 3,
     title: '录入证券买卖 / 现价',
     description: '录入买卖流水并维护现价，持仓、净值与收益将自动推导。',
-    actionLabel: '录入买卖',
+    actionLabel: ENTRY_BUTTON_LABELS.securityTrade,
     action: 'trade',
   },
 ];
@@ -193,15 +200,16 @@ function OnboardingGuide({
                 {step.description}
               </p>
               {step.actionLabel && (
+                /* INC-05：引导卡按钮与页头主入口同规格（主色 + sm + Plus） */
                 <Button
-                  size="sm"
-                  variant={step.action === 'trade' ? 'default' : 'outline'}
+                  size={ENTRY_BUTTON_SIZE}
+                  variant={ENTRY_BUTTON_VARIANT}
                   className="mt-auto self-start"
                   onClick={
                     step.action === 'trade' ? onOpenTrade : onOpenCashflow
                   }
                 >
-                  <Plus className="mr-2 h-4 w-4" />
+                  <Plus className={ENTRY_BUTTON_ICON_CLASS} />
                   {step.actionLabel}
                 </Button>
               )}
@@ -252,6 +260,27 @@ export default function DashboardPage(): JSX.Element {
       allRangeStart: baseDate ?? undefined,
     });
   }, [overviewQuery.range, overviewQuery.from, overviewQuery.to, baseDate]);
+
+  /**
+   * 偏好默认范围对齐守卫（INC-01 决策 E · 统一范式）。
+   *
+   * `useUrlState` 的默认值只在**首次渲染**读取一次（内部 `useState(readState)`），
+   * 而 `defaultDateRange` 偏好是异步到达的 —— URL 未显式带 range 时，页面会一直停在
+   * 首帧回落值 '1y'，偏好永远不生效。本守卫在「URL 无范围参数 且 用户未交互」时
+   * 补齐一次；用户手动改过范围后不再对齐（避免选择被弹回）。
+   */
+  const { markInteracted: markRangeInteracted } = useRangePreferenceSync({
+    currentQuick: overviewQuery.range,
+    currentStartDate: startDate,
+    allRangeStart: baseDate,
+    urlParamKeys: ['range', 'from', 'to'],
+    onAlign: (alignment) =>
+      setOverviewQuery({
+        range: alignment.quick as OverviewQueryState['range'],
+        from: '',
+        to: '',
+      }),
+  });
 
   // 概览聚合数据
   const overview = useQuery({
@@ -459,18 +488,24 @@ export default function DashboardPage(): JSX.Element {
             ov?.latestDate ? `数据截止 ${ov.latestDate}` : '最近 12 个月收益概览'
           }
           actions={
+            /* INC-05：两个录入入口统一为「主色 + sm + Plus」基准样式
+              （原「录入出入金」为 outline，与右侧「录入买卖」视觉不齐）。 */
             <div className="flex gap-2">
               <Button
                 onClick={() => setCashflowOpen(true)}
-                variant="outline"
-                size="sm"
+                variant={ENTRY_BUTTON_VARIANT}
+                size={ENTRY_BUTTON_SIZE}
               >
-                <Plus className="mr-2 h-4 w-4" />
-                录入出入金
+                <Plus className={ENTRY_BUTTON_ICON_CLASS} />
+                {ENTRY_BUTTON_LABELS.cashFlow}
               </Button>
-              <Button onClick={() => setTradeOpen(true)} size="sm">
-                <Plus className="mr-2 h-4 w-4" />
-                录入买卖
+              <Button
+                onClick={() => setTradeOpen(true)}
+                variant={ENTRY_BUTTON_VARIANT}
+                size={ENTRY_BUTTON_SIZE}
+              >
+                <Plus className={ENTRY_BUTTON_ICON_CLASS} />
+                {ENTRY_BUTTON_LABELS.securityTrade}
               </Button>
             </div>
           }
@@ -549,13 +584,14 @@ export default function DashboardPage(): JSX.Element {
             startDate={startDate}
             endDate={endDate}
             allRangeStart={baseDate}
-            onChange={(r) =>
+            onChange={(r) => {
+              markRangeInteracted();
               setOverviewQuery(
                 r.quick
                   ? { range: r.quick as OverviewQueryState['range'], from: '', to: '' }
                   : { range: 'custom', from: r.startDate, to: r.endDate },
-              )
-            }
+              );
+            }}
           />
         </div>
 
@@ -653,9 +689,14 @@ export default function DashboardPage(): JSX.Element {
                     title="还没有出入金记录"
                     description="录入第一笔出入金开始跟踪收益"
                     action={
-                      <Button size="sm" onClick={() => setCashflowOpen(true)}>
-                        <ArrowDownToLine className="mr-2 h-4 w-4" />
-                        录入出入金
+                      /* INC-05：空态按钮 variant/图标/文案与主入口一致（尺寸豁免） */
+                      <Button
+                        variant={ENTRY_BUTTON_VARIANT}
+                        size={ENTRY_BUTTON_SIZE}
+                        onClick={() => setCashflowOpen(true)}
+                      >
+                        <Plus className={ENTRY_BUTTON_ICON_CLASS} />
+                        {ENTRY_BUTTON_LABELS.cashFlow}
                       </Button>
                     }
                   />
@@ -724,7 +765,7 @@ export default function DashboardPage(): JSX.Element {
       <Dialog open={cashflowOpen} onOpenChange={setCashflowOpen}>
         <DialogContent className="max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>录入出入金</DialogTitle>
+            <DialogTitle>{ENTRY_BUTTON_LABELS.cashFlow}</DialogTitle>
           </DialogHeader>
           <CashflowForm
             portfolioId={currentPortfolioId}
@@ -737,7 +778,7 @@ export default function DashboardPage(): JSX.Element {
       <Dialog open={tradeOpen} onOpenChange={setTradeOpen}>
         <DialogContent className="max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>录入买卖</DialogTitle>
+            <DialogTitle>{ENTRY_BUTTON_LABELS.securityTrade}</DialogTitle>
           </DialogHeader>
           <SecurityTradeForm
             portfolioId={currentPortfolioId}

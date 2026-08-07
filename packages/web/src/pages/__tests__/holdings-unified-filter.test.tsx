@@ -5,14 +5,15 @@
  * 1. 页面顶部只有一个统一筛选器（持仓/买卖明细/分红费用三板块共享）
  * 2. 证券多选 → 三板块同步：useHoldings(securityId) + 买卖明细 query.securityId
  *    + 分红费用 securityIds
- * 3. 场景 → 买卖明细 side（BUY→BUY_SEC/SELL→SELL_SEC）+ 分红费用 scenario；持仓不受影响
+ * 3. 场景 → 买卖明细 side（BUY→BUY_SEC/SELL→SELL_SEC）；持仓不适用。
+ *    分红板块（INC-04 后仅分红记录）不再承接 scenario 维度。
  * 4. 日期范围 → 买卖明细/分红费用 startDate/endDate；as-of → 持仓 date
  * 5. URL 持久化：date/closed/types/sec/range/from/to/scenario 写入；等于默认不写入
  * 6. 🔴 QA Bug 回归：用户选择快捷范围后 URL 写入 range，不被偏好对齐 effect 弹回
  *    （HoldingsPage 偏好对齐 effect 2 修复验证，增量 PRD I-04 验收 2/3 + I-05 验收 5）
  *
  * 策略：真实 HoldingsPage + 真实 HoldingsToolbar + 真实 useUrlState；
- * mock 数据 hooks（use-holdings/use-transactions/use-securities/use-dividends/use-fees）
+ * mock 数据 hooks（use-holdings/use-transactions/use-securities/use-dividends）
  * 与两个板块子组件（SecurityTradeList/DividendFeeSection）以捕获派生 query props。
  * Radix Select 按既有做法 mock 为原生 <select>。
  */
@@ -178,19 +179,6 @@ vi.mock('@/hooks/use-dividends', () => ({
   useCreateDividend: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useUpdateDividend: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useDeleteDividend: () => ({ mutateAsync: vi.fn(), isPending: false }),
-}));
-
-vi.mock('@/hooks/use-fees', () => ({
-  FEES_KEY: ['fees'],
-  useFees: () => ({
-    data: [],
-    isLoading: false,
-    isError: false,
-    refetch: () => {},
-  }),
-  useCreateFee: () => ({ mutateAsync: vi.fn(), isPending: false }),
-  useUpdateFee: () => ({ mutateAsync: vi.fn(), isPending: false }),
-  useDeleteFee: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
 // 板块子组件 —— 捕获派生 query props
@@ -426,13 +414,6 @@ describe('HoldingsPage — I-05 三板块联动', () => {
     fireEvent.change(scenarioSelect, { target: { value: 'all' } });
     await waitFor(() => {
       expect(capture.tradeQuery?.side).toBeUndefined();
-    });
-
-    // 分红费用板块：scenario 透传
-    activateTab('分红/费用');
-    fireEvent.change(scenarioSelect, { target: { value: FeeScenario.BUY } });
-    await waitFor(() => {
-      expect(capture.incomeProps?.scenario).toBe(FeeScenario.BUY);
     });
 
     // 持仓板块不适用场景：useHoldings 不接收 scenario

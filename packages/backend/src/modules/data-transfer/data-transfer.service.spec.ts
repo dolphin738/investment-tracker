@@ -141,7 +141,7 @@ describe('DataTransferService.preview — 预览不写库', () => {
       securities: [{ id: 's-1', code: 'SEC0001' }],
     });
     const csv =
-      'securityCode,date,side,quantity,price,fee,note\n' +
+      'securityCode,date,side,quantity,costPrice,feeTotal,note\n' +
       'UNKNOWN,2026-01-01,BUY_SEC,100,10.50,5.00,\n';
     const file = makeFile('trades.csv', csv);
 

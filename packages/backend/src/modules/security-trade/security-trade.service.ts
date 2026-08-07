@@ -16,6 +16,7 @@ import {
 } from '@nestjs/common';
 import type { SecurityTrade as PrismaSecurityTrade } from '@prisma/client';
 import { SecuritySide } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RecalculationService } from '../recalculation/recalculation.service';
 import type {
@@ -32,8 +33,16 @@ export interface SecurityTradeResponse {
   date: string;
   side: string;
   quantity: string;
-  price: string;
-  fee: string;
+  /** 含费单价（INC-03 改名自原 price） */
+  costPrice: string;
+  /** 费用合计 = commission+stampTax+other（INC-03 改名自原 fee） */
+  feeTotal: string;
+  /** 佣金（INC-04 物理并表） */
+  commission: string;
+  /** 印花税（INC-04 物理并表） */
+  stampTax: string;
+  /** 其他费用（INC-04 物理并表） */
+  other: string;
   note: string | null;
   createdAt: string;
   updatedAt: string;
@@ -48,8 +57,11 @@ function toResponse(t: PrismaSecurityTrade): SecurityTradeResponse {
     date: t.date.toISOString().split('T')[0],
     side: t.side,
     quantity: t.quantity.toString(),
-    price: t.price.toString(),
-    fee: t.fee.toString(),
+    costPrice: t.costPrice.toString(),
+    feeTotal: t.feeTotal.toString(),
+    commission: t.commission.toString(),
+    stampTax: t.stampTax.toString(),
+    other: t.other.toString(),
     note: t.note,
     createdAt: t.createdAt.toISOString(),
     updatedAt: t.updatedAt.toISOString(),
@@ -182,6 +194,12 @@ export class SecurityTradeService {
       await this.validateSellQuantity(portfolioId, dto.securityId, date, dto.quantity);
     }
 
+    const commission = new Prisma.Decimal(dto.commission ?? 0);
+    const stampTax = new Prisma.Decimal(dto.stampTax ?? 0);
+    const other = new Prisma.Decimal(dto.other ?? 0);
+    // feeTotal = 三项之和（冗余展示列，恒等于三者之和，决策 B/C-09 不回冲成本）
+    const feeTotal = commission.plus(stampTax).plus(other);
+
     const trade = await this.prisma.securityTrade.create({
       data: {
         portfolioId,
@@ -189,10 +207,11 @@ export class SecurityTradeService {
         date,
         side: dto.side,
         quantity: dto.quantity,
-        price: dto.price,
-        // 增量设计 C-5/K-4：trade.fee 新口径恒为 0（含费单价存入 price，
-        // 费用拆分落 FeeRecord 由前端编排 POST /fees 完成）；忽略 DTO.fee
-        fee: 0,
+        costPrice: dto.costPrice,
+        commission,
+        stampTax,
+        other,
+        feeTotal,
         note: dto.note,
       },
     });
@@ -312,6 +331,24 @@ export class SecurityTradeService {
       );
     }
 
+    // 分项费用（INC-04 物理并表）：未传的字段沿用存量值，再据此重算 feeTotal。
+    // 只要任一费用项发生变更，三项连同 feeTotal 须整体重写入库（缺省项用存量值补全），
+    // 保证数据库行内 commission/stampTax/other/feeTotal 始终自洽；未传任何费用项时不写费用字段。
+    const newCommission =
+      dto.commission !== undefined
+        ? new Prisma.Decimal(dto.commission)
+        : existing.commission;
+    const newStampTax =
+      dto.stampTax !== undefined
+        ? new Prisma.Decimal(dto.stampTax)
+        : existing.stampTax;
+    const newOther =
+      dto.other !== undefined ? new Prisma.Decimal(dto.other) : existing.other;
+    const feeTotalChanged =
+      dto.commission !== undefined ||
+      dto.stampTax !== undefined ||
+      dto.other !== undefined;
+
     const updated = await this.prisma.securityTrade.update({
       where: { id },
       data: {
@@ -319,11 +356,14 @@ export class SecurityTradeService {
         ...(dto.date !== undefined && { date: new Date(dto.date) }),
         ...(dto.side !== undefined && { side: dto.side }),
         ...(dto.quantity !== undefined && { quantity: dto.quantity }),
-        ...(dto.price !== undefined && { price: dto.price }),
-        // I-01（裁决 Q-2）：update 契约支持 fee 落库（旧口径兼容 + 契约完整性）。
-        // 前端按统一口径提交 fee=0（含费单价入 price、费用拆分落 FeeRecord），
-        // 此处仅当调用方显式传 fee 时才覆盖，避免误清空存量 fee≠0。
-        ...(dto.fee !== undefined && { fee: dto.fee }),
+        ...(dto.costPrice !== undefined && { costPrice: dto.costPrice }),
+        ...(feeTotalChanged && {
+          commission: newCommission,
+          stampTax: newStampTax,
+          other: newOther,
+          // feeTotal = 三项之和（冗余展示列，决策 B/C-09 不回冲成本）
+          feeTotal: newCommission.plus(newStampTax).plus(newOther),
+        }),
         ...(dto.note !== undefined && { note: dto.note }),
       },
     });

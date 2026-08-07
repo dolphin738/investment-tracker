@@ -25,8 +25,14 @@ import {
 } from '@/components/ui/dialog';
 import { SnapshotForm } from '@/features/snapshot/snapshot-form';
 import { SnapshotList } from '@/features/snapshot/snapshot-list';
-import { resolveQuickRange } from '@/features/query/dimension-switcher';
+import { resolveQuickRange } from '@/features/query/quick-range';
 import { useDefaultDateRange } from '@/features/query/use-default-date-range';
+import {
+  ENTRY_BUTTON_ICON_CLASS,
+  ENTRY_BUTTON_LABELS,
+  ENTRY_BUTTON_SIZE,
+  ENTRY_BUTTON_VARIANT,
+} from '@/constants/entry-button-labels';
 import { usePortfolioBaseDate, usePortfolioStore } from '@/stores/portfolio.store';
 import type { AssetSnapshot } from '@investment-tracker/shared';
 
@@ -77,14 +83,24 @@ export default function SnapshotsPage(): JSX.Element {
           {/* Gap D（SET-P0-03 同口径）：后端导出接口未实现，视觉占位禁用 */}
           <Button
             variant="outline"
+            size={ENTRY_BUTTON_SIZE}
             disabled
             title="v1 暂未开放（SET-P0-03）：导出接口待后端实现"
           >
             导出 CSV
           </Button>
-          <Button onClick={() => setCreateOpen(true)}>
-            <Plus className="mr-2 h-4 w-4" />
-            + 新建记录
+          {/*
+            INC-05：与概览页「录入买卖」同规格（主色 + sm + Plus）。
+            文案由「＋ 新建记录」改为字典值「录入资产记录」——
+            字面「+」删除，加号语义由 Plus 图标承载（决策 H）。
+          */}
+          <Button
+            onClick={() => setCreateOpen(true)}
+            variant={ENTRY_BUTTON_VARIANT}
+            size={ENTRY_BUTTON_SIZE}
+          >
+            <Plus className={ENTRY_BUTTON_ICON_CLASS} />
+            {ENTRY_BUTTON_LABELS.snapshot}
           </Button>
         </div>
       </div>
@@ -124,7 +140,7 @@ export default function SnapshotsPage(): JSX.Element {
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent className="max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>录入资产记录</DialogTitle>
+            <DialogTitle>{ENTRY_BUTTON_LABELS.snapshot}</DialogTitle>
             <DialogDescription>
               保存后将成为手工记录并触发净值/XIRR 重算
             </DialogDescription>

@@ -1,0 +1,75 @@
+classDiagram
+    direction TB
+
+    class SecurityTrade {
+        +string id
+        +string portfolioId
+        +string securityId
+        +string date
+        +SecuritySide side
+        +string quantity   %% Decimal(18,6)
+        +string costPrice  %% 原 price，含费单价 Decimal(18,6) [INC-03/B]
+        +string feeTotal   %% 原 fee，费用合计 Decimal(18,2) = Σ分项 [INC-03]
+        +string commission %% 佣金 Decimal(18,2) [INC-04/A]
+        +string stampTax   %% 印花税 Decimal(18,2) [INC-04/A]
+        +string other      %% 其他费用 Decimal(18,2) [INC-04/A]
+        +string note
+        +string createdAt
+        +string updatedAt
+    }
+
+    class FeeRecord {
+        <<DEPRECATED · 删除 [INC-04 决策A 推翻Q-8]>>
+        +string id
+        +string portfolioId
+        +string securityId
+        +string date
+        +string amount
+        +FeeType type
+        +FeeScenario scenario
+        +string transactionId
+    }
+
+    class SecurityTradeForm {
+        +useForm(tradeSchema)
+        +reset(trade)
+        +saveTradeAndFees()
+        +renderSecuritySelect()
+        +renderFeeInputs()
+    }
+
+    class SecurityTradeList {
+        +renderColumns()
+        +onEdit(trade)
+    }
+
+    class DateRangeQuickPicker {
+        +DateRangeValue value
+        +onChange(v)
+        +boolean isControlled
+    }
+
+    class DimensionSwitcher {
+        +DimensionSwitcherValue value
+        +onChange(v)
+        +renderDateRange()  %% 委托 DateRangeQuickPicker [INC-01/G]
+    }
+
+    class useRangePreferenceSync {
+        +sync(defaultRange)
+        +rangeInteractedRef
+        +closedInteractedRef
+    }
+
+    class SecurityTradeService {
+        +create(dto)
+        +update(id, dto)
+        +toResponse(t)
+    }
+
+    SecurityTradeForm ..> SecurityTrade : 读写(录入/编辑)
+    SecurityTradeList ..> SecurityTrade : 展示
+    DimensionSwitcher *-- DateRangeQuickPicker : 内嵌[决策G]
+    useRangePreferenceSync ..> DateRangeQuickPicker : 对齐偏好[决策E]
+    SecurityTradeService ..> SecurityTrade : 映射响应
+    FeeRecord .. SecurityTrade : 物理并表后删除

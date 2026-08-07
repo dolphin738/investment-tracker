@@ -60,8 +60,14 @@ import { usePreferenceStore } from '@/stores/preference.store';
 import { usePortfolios } from '@/hooks/use-portfolios';
 import { useLatestCashBalance, useUpsertCashBalance } from '@/hooks/use-cash-balances';
 import { DateRangeQuickPicker } from '@/components/date/date-range-quick-picker';
-import { resolveQuickRange } from '@/features/query/dimension-switcher';
+import { resolveQuickRange } from '@/features/query/quick-range';
 import { useDefaultDateRange } from '@/features/query/use-default-date-range';
+import {
+  ENTRY_BUTTON_ICON_CLASS,
+  ENTRY_BUTTON_LABELS,
+  ENTRY_BUTTON_SIZE,
+  ENTRY_BUTTON_VARIANT,
+} from '@/constants/entry-button-labels';
 import { toIsoDate } from '@/lib/constants';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import type { TransactionQuery } from '@/api/types';
@@ -73,13 +79,6 @@ export default function TransactionsPage(): JSX.Element {
   const baseDate = usePortfolioBaseDate();
   // I-04：默认日期范围 = 偏好（URL 无 startDate/endDate 时），非法/空回落 '1y'
   const defaultRange = useDefaultDateRange();
-  const defaultRangeValue = useMemo(
-    () =>
-      resolveQuickRange(defaultRange, {
-        allRangeStart: baseDate ?? undefined,
-      }),
-    [defaultRange, baseDate],
-  );
   const { data: portfolios = [], isLoading: portfoliosLoading } = usePortfolios();
   const getPreference = usePreferenceStore((s) => s.getPreference);
   const amountThousands = getPreference('amountThousands');
@@ -101,9 +100,32 @@ export default function TransactionsPage(): JSX.Element {
     pageSize,
   } = parsed;
 
-  // I-04：URL 参数优先；无 startDate/endDate 时回落偏好默认范围（而非「全部」）
-  const filterStartDate = urlStartDate || defaultRangeValue.startDate;
-  const filterEndDate = urlEndDate || defaultRangeValue.endDate;
+  /**
+   * INC-01：快捷范围受控回显（URL `range` 为唯一真相源）。
+   *
+   * 【为什么本页不用 `useRangePreferenceSync`（决策 E 的等价实现）】
+   * 该 hook 解决的是「状态被 useState 冻结在首帧、偏好异步到达后不生效」。
+   * 本页范围状态完全存放在 URL 上，可**同步派生**：
+   *   - URL 有 `range` → 用它（用户已显式指定，偏好后续变化不再弹回）；
+   *   - URL 只有 startDate/endDate（手动改过日期）→ 回显占位「自定义」；
+   *   - URL 全空 → 回落偏好 `defaultRange`，偏好一到达即自动生效。
+   * 派生写法天然满足「不覆盖用户选择 / 偏好可迟到」两条约束，且不会像
+   * effect 方案那样在挂载时反写 URL（污染分享链接 + 「重置」后回显错位）。
+   */
+  const urlRange = searchParams.get('range') ?? '';
+  const hasExplicitDates = Boolean(urlStartDate || urlEndDate);
+  const quickValue = urlRange || (hasExplicitDates ? '' : defaultRange);
+  const fallbackRangeValue = useMemo(
+    () =>
+      resolveQuickRange(quickValue || defaultRange, {
+        allRangeStart: baseDate ?? undefined,
+      }),
+    [quickValue, defaultRange, baseDate],
+  );
+
+  // URL 参数优先；无 startDate/endDate 时按 quickValue（偏好或 URL range）解析
+  const filterStartDate = urlStartDate || fallbackRangeValue.startDate;
+  const filterEndDate = urlEndDate || fallbackRangeValue.endDate;
 
   /** 更新 URL query（null / '' 删除该参数；变更即生效，无需「筛选」按钮） */
   const updateParams = useCallback(
@@ -241,9 +263,14 @@ export default function TransactionsPage(): JSX.Element {
             管理存入/取出现金流，系统据此计算净值与 XIRR
           </p>
         </div>
-        <Button onClick={() => setOpen(true)}>
-          <Plus className="mr-2 h-4 w-4" />
-          新增出入金
+        {/* INC-05：与概览页「录入买卖」同规格（主色 + sm + Plus），文案取统一字典 */}
+        <Button
+          onClick={() => setOpen(true)}
+          variant={ENTRY_BUTTON_VARIANT}
+          size={ENTRY_BUTTON_SIZE}
+        >
+          <Plus className={ENTRY_BUTTON_ICON_CLASS} />
+          {ENTRY_BUTTON_LABELS.cashFlow}
         </Button>
       </div>
 
@@ -370,12 +397,14 @@ export default function TransactionsPage(): JSX.Element {
             </div>
             {/* 问题⑤⑥：接入共享快捷范围控件，与资产记录页同一实现 */}
             <DateRangeQuickPicker
+              quick={quickValue}
               startDate={filterStartDate}
               endDate={filterEndDate}
-              endLabel="截止日期"
               allRangeStart={baseDate}
               onChange={(r) =>
                 updateParams({
+                  // 选中快捷项 → 写 range；手动改日期 → 清 range（回显占位）
+                  range: r.quick || null,
                   startDate: r.startDate || null,
                   endDate: r.endDate || null,
                   page: 1,
@@ -422,7 +451,7 @@ export default function TransactionsPage(): JSX.Element {
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>录入出入金</DialogTitle>
+            <DialogTitle>{ENTRY_BUTTON_LABELS.cashFlow}</DialogTitle>
           </DialogHeader>
           <CashflowForm
             portfolioId={currentPortfolioId}

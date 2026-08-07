@@ -3,26 +3,23 @@
  *
  * 🆕 I-01（增量 PRD）：录入 / 编辑共用**同一 schema + 同一布局**，仅初始值与提交目标不同。
  * - 统一字段与顺序：方向 → 日期 → 标的 → 数量 → 成交额 → 费用三框（佣金/印花税/其他）
- *   → 含费单价（只读预览）→ 备注
+ *   → 成本价（含费单价，只读预览）→ 备注
  * - 统一公式（K-3，买入/卖出同式）：
- *   - 买入：price = (成交额 + 费用合计) / 数量
- *   - 卖出：price = (成交额 − 费用合计) / 数量；费用合计 > 成交额 → 阻止（C-7 前端闸）
- * - 编辑态回填（I-01 验收 3/4）：费用三框按 `transactionId = trade.id` 的 FeeRecord 按类型拆分回显；
- *   成交额按口径回填（新口径 `q×price −/+ feeTotal`；旧口径 `q×price`）
- * - 编辑保存重建 FeeRecord（裁决 Q-2）：DELETE 该 transactionId 关联的全部费用 → 对 amount>0
- *   的类型逐个 POST /fees（transactionId = trade.id，scenario = side 映射）—— 与录入态对称
- * - 旧口径提示：编辑态若 `trade.fee ≠ 0` 且无关联 FeeRecord → amber 提示「旧口径费用将并入含费单价」
+ *   - 买入：costPrice = (成交额 + 费用合计) / 数量
+ *   - 卖出：costPrice = (成交额 − 费用合计) / 数量；费用合计 > 成交额 → 阻止（C-7 前端闸）
+ * - 编辑态回填：费用三框直接取自 trade.commission/stampTax/other；成交额按口径回填
+ *   `q×costPrice −/+ feeTotal`（含费单价金融算法不变，决策 B：costPrice 仅是 price 重命名）。
  *
- * ⓘ 组合内部买卖，不计入出入金现金流。
+ * ⓘ 组合内部买卖，不计入出入金现金流。INC-04 物理并表：费用明细（佣金/印花税/其他）
+ * 直接承载于 security_trades 一行，feeTotal = 三列之和（后端冗余展示列，前端按公式提交）。
  */
 
 import { useEffect, useMemo, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { Info, Loader2, Plus } from 'lucide-react';
+import { Loader2, Plus } from 'lucide-react';
 import { sumMoney } from '@investment-tracker/shared';
-import { useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -36,15 +33,15 @@ import {
 } from '@/components/ui/select';
 import { useCreateSecurityTrade, useUpdateSecurityTrade } from '@/hooks/use-security-trades';
 import { useSecurities, useCreateSecurity } from '@/hooks/use-securities';
-import { useFees } from '@/hooks/use-fees';
-import { createFee as createFeeApi, deleteFee as deleteFeeApi } from '@/api/fee.api';
 import { toast } from 'sonner';
 import { toIsoDate } from '@/lib/constants';
 // SecurityType 与 SecuritySide 同源：唯一定义在 shared，前后端共用（Q-3）
 import { SecuritySide, SecurityType } from '@investment-tracker/shared';
 import { formatCurrency } from '@/lib/utils';
-import { FeeType, FeeScenario } from '@/api/types';
-import type { FeeRecord, SecurityTradeResponse } from '@/api/types';
+import type {
+  CreateSecurityTradeRequest,
+  SecurityTradeResponse,
+} from '@/api/types';
 
 /** 费用字段：可选、非负、最多 2 位小数 */
 const feeFieldSchema = z
@@ -71,8 +68,8 @@ const baseFields = {
 /**
  * 单一 schema（I-01：录入 / 编辑共用）。
  *
- * 成交额允许最多 6 位小数：录入态用户通常输入 2 位金额；编辑态回填 `q×price −/+ feeTotal`
- * 可能产生 3~6 位小数（price 为 6 位小数），若截断到 2 位会破坏「不改动即成本守恒」。
+ * 成交额允许最多 6 位小数：录入态用户通常输入 2 位金额；编辑态回填 `q×costPrice −/+ feeTotal`
+ * 可能产生 3~6 位小数（costPrice 为 6 位小数），若截断到 2 位会破坏「不改动即成本守恒」。
  */
 const tradeSchema = z
   .object({
@@ -86,7 +83,7 @@ const tradeSchema = z
     stampTax: feeFieldSchema,
     other: feeFieldSchema,
   })
-  // 卖出费用合计 > 成交额 → 阻止（C-7 前端闸 + 后端 price>0 DTO 兜底）
+  // 卖出费用合计 > 成交额 → 阻止（C-7 前端闸 + 后端 costPrice>0 DTO 兜底）
   .superRefine((data, ctx) => {
     if (data.side !== SecuritySide.SELL_SEC) return;
     const feeTotal = sumMoney([
@@ -123,11 +120,6 @@ const SECURITY_TYPE_LABEL: Record<string, string> = {
   OTHER: '其他',
 };
 
-/** side → FeeScenario（I-01/I-03：联动创建费用时场景自动取该笔流水方向） */
-function scenarioOfSide(side: SecuritySide): FeeScenario {
-  return side === SecuritySide.BUY_SEC ? FeeScenario.BUY : FeeScenario.SELL;
-}
-
 /** 6 位小数字符串（编辑态成交额回填用；去除尾随零避免输入框显示 123.450000） */
 function toPrecision6(n: number): string {
   if (!Number.isFinite(n) || n <= 0) return '';
@@ -145,7 +137,6 @@ export function SecurityTradeForm({
   const updateMutation = useUpdateSecurityTrade();
   const createSecurityMutation = useCreateSecurity(portfolioId);
   const { data: securities = [], isLoading: secLoading } = useSecurities(portfolioId);
-  const queryClient = useQueryClient();
   const today = toIsoDate(new Date());
   const [submitting, setSubmitting] = useState(false);
   // 新建标的折叠表单状态
@@ -183,40 +174,18 @@ export function SecurityTradeForm({
     },
   });
 
-  /** 明细行费用（未 grouped 时 useFees 返回 FeeRecord[]；类型守卫剔除聚合行）。
-   *  🔴 依赖用 feeData.data（undefined 稳定）而非 feeList 默认值，避免每次渲染
-   *  新建空数组 → effect 依赖不稳 → reset 无限循环。 */
-  const feeData = useFees(portfolioId);
-  const feeRows = useMemo(
-    () =>
-      ((feeData.data ?? []) as Array<FeeRecord | { transactionId?: unknown }>).filter(
-        (f): f is FeeRecord => typeof (f as FeeRecord).transactionId === 'string',
-      ),
-    [feeData.data],
-  );
-
   /**
    * 编辑态回填（I-01 验收 3/4）：
-   * - 费用三框按 transactionId = trade.id 的 FeeRecord 按类型拆分回显；未关联则空
-   * - 成交额：新口径（fee=0 且有关联费用）`q×price −/+ feeTotal`；旧口径（fee≠0 且无关联）`q×price`
-   * - 旧口径费用三框「其他」回填 trade.fee（佣金/印花税空），保存时自动并入含费单价（成本守恒）
+   * - 费用三框直接取自 trade.commission/stampTax/other（INC-04 物理并表，无独立费用表）
+   * - 成交额：新口径（含费单价口径）`q×costPrice −/+ feeTotal`
+   *   （costPrice 为含费单价，`tradeAmount = qty*costPrice −/+ feeTotal` 倒推，金融算法不变）
    */
   useEffect(() => {
     if (trade) {
-      const linkedFees = feeRows.filter((f) => f.transactionId === trade.id);
-      const legacy = Number(trade.fee) !== 0 && linkedFees.length === 0;
-      const feeByType = new Map(linkedFees.map((f) => [f.type, f.amount]));
-      const feeTotal = Number(
-        sumMoney([
-          feeByType.get(FeeType.COMMISSION) || '0',
-          feeByType.get(FeeType.STAMP_TAX) || '0',
-          feeByType.get(FeeType.OTHER) || '0',
-        ]),
-      );
-      const baseAmount = Number(trade.quantity) * Number(trade.price);
-      const tradeAmount = legacy
-        ? baseAmount
-        : trade.side === SecuritySide.BUY_SEC
+      const feeTotal = Number(trade.feeTotal);
+      const baseAmount = Number(trade.quantity) * Number(trade.costPrice);
+      const tradeAmount =
+        trade.side === SecuritySide.BUY_SEC
           ? baseAmount - feeTotal
           : baseAmount + feeTotal;
       reset({
@@ -225,9 +194,9 @@ export function SecurityTradeForm({
         securityId: trade.securityId,
         quantity: trade.quantity,
         tradeAmount: toPrecision6(tradeAmount),
-        commission: feeByType.get(FeeType.COMMISSION) ?? '',
-        stampTax: feeByType.get(FeeType.STAMP_TAX) ?? '',
-        other: legacy ? trade.fee : (feeByType.get(FeeType.OTHER) ?? ''),
+        commission: trade.commission || '',
+        stampTax: trade.stampTax || '',
+        other: trade.other || '',
         note: trade.note ?? '',
       });
     } else {
@@ -243,10 +212,47 @@ export function SecurityTradeForm({
         note: '',
       });
     }
-  }, [trade, feeRows, reset, today]);
+  }, [trade, reset, today]);
 
   const sideValue = watch('side');
+  const securityIdValue = watch('securityId');
   const qtyValue = watch('quantity');
+
+  /**
+   * 标的下拉的受控值（INC-02）。
+   *
+   * 编辑态首帧 `securities` 往往还没到（`useSecurities` 异步），此时表单的
+   * `securityId` 虽已由回填 effect 写入，但 Radix Select 找不到对应
+   * `SelectItem` → 触发器回落 placeholder「选择标的」，看起来像「没回填」。
+   * 这里让受控值**恒含** `trade.securityId`，与下方保底选项配合，保证
+   * 任何时刻 value 都能命中一个已渲染的选项。
+   */
+  const selectedSecurityId = securityIdValue || trade?.securityId || '';
+
+  /**
+   * 标的下拉选项（INC-02 保底）。
+   *
+   * 列表尚未到达、或当前标的已被移出可选列表（如停用/删除）时，
+   * 在最前面补一条「当前标的」占位项 —— 否则受控 value 无处可落，
+   * 编辑弹窗会把用户已选的标的显示成未选中。
+   */
+  const securityOptions = useMemo<Array<{ id: string; label: string }>>(() => {
+    const options = securities.map((sec) => ({
+      id: sec.id,
+      label: `${sec.name}（${sec.code}）`,
+    }));
+    if (
+      selectedSecurityId &&
+      !options.some((opt) => opt.id === selectedSecurityId)
+    ) {
+      options.unshift({
+        id: selectedSecurityId,
+        label: secLoading ? '当前标的（加载中…）' : '当前标的（已不在可选列表）',
+      });
+    }
+    return options;
+  }, [securities, selectedSecurityId, secLoading]);
+
   const tradeAmountValue = watch('tradeAmount');
   const commissionValue = watch('commission');
   const stampTaxValue = watch('stampTax');
@@ -259,7 +265,7 @@ export function SecurityTradeForm({
     return sumMoney(inputs.map((v) => v || '0'));
   }, [commissionValue, stampTaxValue, otherValue]);
 
-  /** 含费单价（只读实时预览，两态一致，K-3）：买入=(成交额+合计)/数量；卖出=(成交额−合计)/数量 */
+  /** 成本价（含费单价，只读实时预览，两态一致，K-3）：买入=(成交额+合计)/数量；卖出=(成交额−合计)/数量 */
   const derivedPrice = useMemo(() => {
     if (feeTotal === null) return null;
     const qty = Number(qtyValue);
@@ -276,13 +282,6 @@ export function SecurityTradeForm({
     // K-3/U-3：单价收敛到 6 位小数后按现有 number 契约提交
     return Number(raw.toFixed(6));
   }, [feeTotal, qtyValue, tradeAmountValue, sideValue]);
-
-  /** 旧口径提示（trade.fee ≠ 0 且无关联 FeeRecord） */
-  const isLegacy = useMemo(() => {
-    if (!trade) return false;
-    const linked = feeRows.filter((f) => f.transactionId === trade.id);
-    return Number(trade.fee) !== 0 && linked.length === 0;
-  }, [trade, feeRows]);
 
   const handleCreateSecurity = () => {
     if (!newSecurity.code.trim() || !newSecurity.name.trim()) {
@@ -304,21 +303,11 @@ export function SecurityTradeForm({
     );
   };
 
-  /** 费用三框 → 有金额的 entries（值 0 不落，C-6） */
-  const feeEntries = (values: TradeFormValues): Array<{ amount: string; type: FeeType }> =>
-    [
-      { amount: values.commission || '0', type: FeeType.COMMISSION },
-      { amount: values.stampTax || '0', type: FeeType.STAMP_TAX },
-      { amount: values.other || '0', type: FeeType.OTHER },
-    ].filter((entry) => Number(entry.amount) > 0);
-
   /**
    * 统一保存流程（I-01 验收 6，两态对称）：
-   * 1. POST / PATCH /security-trades：{ date, side, securityId, quantity, price: 含费单价, fee: 0, note }
-   * 2. 重建 FeeRecord：编辑态先 DELETE 该 transactionId 关联的全部费用 → 对 amount>0 逐个 POST /fees
-   *    （transactionId = trade.id，scenario = side 映射）
-   * 3. 成功后 toast + 刷新（useCreateSecurityTrade/useUpdateSecurityTrade onSuccess 已连带失效计算链路；
-   *    费用缓存 ['fees'] 在此手动失效）
+   * 提交单笔 /security-trades，INC-04 物理并表承载：
+   * { date, side, securityId, quantity, costPrice（含费单价）, commission, stampTax, other, feeTotal }。
+   * 费用合计 feeTotal = 三列之和（前端按公式提交，后端以三列之和覆盖冗余展示列）。
    */
   const saveTradeAndFees = async (values: TradeFormValues): Promise<string> => {
     const feeTotalStr = sumMoney([
@@ -332,72 +321,36 @@ export function SecurityTradeForm({
       (values.side === SecuritySide.BUY_SEC
         ? amount + Number(feeTotalStr)
         : amount - Number(feeTotalStr)) / qty;
-    const price = Number(raw.toFixed(6));
+    const costPrice = Number(raw.toFixed(6));
+
+    const payload: CreateSecurityTradeRequest = {
+      securityId: values.securityId,
+      date: values.date,
+      side: values.side,
+      quantity: qty,
+      costPrice,
+      commission: Number(values.commission || '0'),
+      stampTax: Number(values.stampTax || '0'),
+      other: Number(values.other || '0'),
+      feeTotal: Number(feeTotalStr),
+      note: values.note || undefined,
+    };
 
     let tradeId: string;
     if (isEdit && trade) {
-      await updateMutation.mutateAsync({
-        portfolioId,
-        id: trade.id,
-        payload: {
-          securityId: values.securityId,
-          date: values.date,
-          side: values.side,
-          quantity: qty,
-          price,
-          fee: 0,
-          note: values.note || undefined,
-        },
-      });
+      await updateMutation.mutateAsync({ portfolioId, id: trade.id, payload });
       tradeId = trade.id;
     } else {
-      const created = await createMutation.mutateAsync({
-        portfolioId,
-        payload: {
-          securityId: values.securityId,
-          date: values.date,
-          side: values.side,
-          quantity: qty,
-          price,
-          fee: 0,
-          note: values.note || undefined,
-        },
-      });
+      const created = await createMutation.mutateAsync({ portfolioId, payload });
       tradeId = created.id;
     }
-
-    // ② 重建 FeeRecord（Q-2：仅维护该笔 transactionId 关联的费用组成，删旧插新）
-    if (isEdit && trade) {
-      const linkedFees = feeRows.filter((f) => f.transactionId === trade.id);
-      for (const f of linkedFees) {
-        await deleteFeeApi(portfolioId, f.id);
-      }
-    }
-    for (const entry of feeEntries(values)) {
-      await createFeeApi(portfolioId, {
-        securityId: values.securityId,
-        date: values.date,
-        amount: entry.amount,
-        type: entry.type,
-        scenario: scenarioOfSide(values.side),
-        transactionId: tradeId,
-      });
-    }
-
-    // 费用缓存失效（写入本身不参与计算，只失效 ['fees']）
-    await queryClient.invalidateQueries({ queryKey: ['fees'] });
     return tradeId;
   };
 
   const onSubmit = async (values: TradeFormValues): Promise<void> => {
     setSubmitting(true);
     try {
-      try {
-        await saveTradeAndFees(values);
-      } catch {
-        // U-5：交易已落库、费用可补录，不阻塞主流程
-        toast.error('交易已保存，费用补录失败，请到「分红/费用」区补录');
-      }
+      await saveTradeAndFees(values);
       reset({
         date: today,
         side: SecuritySide.BUY_SEC,
@@ -410,6 +363,8 @@ export function SecurityTradeForm({
         note: '',
       });
       onSuccess?.();
+    } catch {
+      toast.error('保存失败，请稍后重试');
     } finally {
       setSubmitting(false);
     }
@@ -456,19 +411,20 @@ export function SecurityTradeForm({
         <div className="space-y-2">
           <Label htmlFor="st-security">标的 *</Label>
           <Select
-            value={watch('securityId') || ''}
+            value={selectedSecurityId}
             onValueChange={(v) =>
               v === '__new__' ? setShowNewSecurity(true) : setValue('securityId', v)
             }
-            disabled={secLoading}
+            /* INC-02：编辑态即使列表在加载也不禁用 —— 已有保底选项可正常回显 */
+            disabled={secLoading && !selectedSecurityId}
           >
             <SelectTrigger id="st-security">
               <SelectValue placeholder={secLoading ? '加载中…' : '选择标的'} />
             </SelectTrigger>
             <SelectContent>
-              {securities.map((sec) => (
-                <SelectItem key={sec.id} value={sec.id}>
-                  {sec.name}（{sec.code}）
+              {securityOptions.map((opt) => (
+                <SelectItem key={opt.id} value={opt.id}>
+                  {opt.label}
                 </SelectItem>
               ))}
               <SelectItem value="__new__">
@@ -593,7 +549,7 @@ export function SecurityTradeForm({
           )}
         </div>
 
-        {/* 费用三框并列（两态统一，R-6 ✅ 用户拍板；编辑态按 FeeRecord 拆分回显） */}
+        {/* 费用三框并列（两态统一，R-6 ✅ 用户拍板） */}
         <div className="space-y-2">
           <Label>费用（元）</Label>
           <div className="grid grid-cols-3 gap-2">
@@ -658,7 +614,7 @@ export function SecurityTradeForm({
           </p>
         </div>
 
-        {/* 含费单价实时展示（K-3，两态统一只读预览） */}
+        {/* 成本价实时展示（K-3，两态统一只读预览） */}
         <div className="space-y-2">
           <Label>成本价（自动，含费）</Label>
           <div className="rounded-md border bg-muted/40 px-3 py-2 text-sm tabular-nums">
@@ -679,14 +635,6 @@ export function SecurityTradeForm({
           </div>
         </div>
 
-        {/* 旧口径 fee≠0 提示（C-10 / U-1 · I-01：编辑态检测旧口径时提示并入含费单价） */}
-        {isLegacy && (
-          <p className="flex items-start gap-1.5 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:bg-amber-950/40 dark:text-amber-400">
-            <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-            旧口径记录（费用已并入成交额前录入）：费用已回填至「其他」栏，保存时将自动并入含费单价（成本守恒）。
-          </p>
-        )}
-
         {/* 备注 */}
         <div className="space-y-2">
           <Label htmlFor="st-note">备注（可选）</Label>
@@ -703,9 +651,8 @@ export function SecurityTradeForm({
 
         {/* ⓘ 提示 */}
         <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
-          <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          组合内部买卖，不计入出入金现金流；持仓由买卖流水实时推导。费用将按类型记入
-          费用记录并与本笔交易关联（含费成本价已生效）。
+          组合内部买卖，不计入出入金现金流；持仓由买卖流水实时推导。佣金 / 印花税 /
+          其他费用已并入含费成本价（INC-04 物理并表至证券买卖流水）。
         </p>
       </div>
 

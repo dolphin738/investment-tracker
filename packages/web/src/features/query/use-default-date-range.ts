@@ -11,10 +11,11 @@
  * - 各页把它作为 useState/useUrlState 默认值，并按「偏好对齐 effect 范式」
  *   （URL 无对应参数时 setState 一次）接入 —— 严禁在渲染期依赖未加载偏好。
  *
- * 单一真相源：QUICK_RANGE_OPTIONS（本文件所在目录的 dimension-switcher）。
+ * 单一真相源：QUICK_RANGE_OPTIONS（叶子模块 ./quick-range；dimension-switcher
+ * 仅做向后兼容的再导出，本 hook 直接取叶子模块以免把组件拖进依赖图）。
  */
 
-import { QUICK_RANGE_OPTIONS } from './dimension-switcher';
+import { QUICK_RANGE_OPTIONS } from './quick-range';
 import { usePreferenceStore } from '@/stores/preference.store';
 
 /** 系统回落默认值（PRD §6.9.1） */

@@ -135,7 +135,6 @@ function renderToolbar(
       minDate="2024-01-01"
       allRangeStart="2024-01-01"
       securities={SECURITIES}
-      defaultRange="1y"
     />,
   );
 }

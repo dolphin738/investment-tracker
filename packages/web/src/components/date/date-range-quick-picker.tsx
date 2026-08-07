@@ -1,26 +1,32 @@
 /**
- * components/date/date-range-quick-picker.tsx — 日期范围 + 快捷范围选择器（T-7）
+ * components/date/date-range-quick-picker.tsx — 日期范围 + 快捷范围选择器
  *
- * 【定位】列表页筛选栏的通用日期区间控件。把「快捷范围下拉 + 起止日期输入」
- * 这一组合抽成单一组件，供资产记录页 / 出入金页 / 现金余额变更历史等复用，
- * 避免各页各写一份、样式与口径分头漂移（问题⑤⑥⑦）。
+ * 【定位（INC-01 决策 G）】**全站唯一**的日期区间控件。「快捷范围下拉 + 起止日期输入」
+ * 这一组合只此一份实现，概览页 / 持仓页 / 出入金页 / 资产记录页 / 现金余额变更历史 /
+ * 净值分析页 / XIRR 分析页全部复用，禁止任何页面或组件再内嵌第二套。
  *
- * 【与 DimensionSwitcher 的分工】
- * - `DimensionSwitcher`：分析页专用，含维度 Tabs + 聚合方式 + 日期范围，重量级。
- * - 本组件：只管日期范围，列表页用；两者共用同一份 `QUICK_RANGE_OPTIONS` 与
- *   `resolveQuickRange`，口径唯一真相源仍在 dimension-switcher.tsx。
+ * 【与 DimensionSwitcher 的分工（已在 INC-01 收敛）】
+ * - `DimensionSwitcher`：分析页专用，只负责「维度 Tabs + 聚合方式」，日期范围部分
+ *   已改为**内嵌本组件**，不再自带 Select + Input。
+ * - 本组件：只管日期范围。口径常量（`QUICK_RANGE_OPTIONS` / `resolveQuickRange`）
+ *   下沉在叶子模块 `features/query/quick-range.ts`，两边同源、无循环依赖。
  *
  * 【受控】startDate / endDate 由父级持有；任何变更都通过 onChange 回传。
  * 快捷范围下拉支持**双模**：传 `quick` = 受控（父级驱动回显，如概览页的 URL
- * `range` 状态）；不传 = 沿用内部 useState（列表页既有行为，零影响）。
+ * `range` 状态）；不传 = 沿用内部 useState（历史调用方兼容路径）。
+ * 🔴 INC-01 要求：5 个统一页面一律走**受控** `quick`，并配合
+ * `useRangePreferenceSync` 完成偏好对齐 —— 不传 `quick` 属于遗留兼容模式。
  *
  * 【交互契约】
  * - 选中快捷项 → 按 `resolveQuickRange(v, { allRangeStart })` 覆盖起止日期，
- *   回调携带 `quick` 便于父级写 URL。
+ *   回调携带 `quick` 便于父级写 URL / 状态。
  * - 手动改起止日期 → 回调 `quick: undefined`，同时下拉回落占位（当前区间已不再
  *   等于任一预设，继续高亮预设会误导）。
  * - 「全部」起始日 = `allRangeStart`（组合首个交易日 baseDate），缺省回落
  *   `ALL_RANGE_FALLBACK_START`（问题②）。
+ *
+ * 【文案（INC-01 设计稿拍板 3）】起止标签统一为「开始日期 / 结束日期」。
+ * 调用方**不应**再传 `startLabel` / `endLabel` 覆盖（如旧的「截止日期」已废除）。
  *
  * 【布局】统一 `space-y-1.5` + `Label(text-xs) + Input/Select(h-9)` 结构，
  * 与 snapshot-list / transactions 现有筛选项同高，`items-end` 下天然一排对齐。
@@ -38,10 +44,16 @@ import {
 } from '@/components/ui/select';
 import {
   QUICK_RANGE_OPTIONS,
+  QUICK_RANGE_PLACEHOLDER,
+  isQuickRangeValue,
   resolveQuickRange,
   type QuickRangeOption,
-} from '@/features/query/dimension-switcher';
+} from '@/features/query/quick-range';
 import { cn } from '@/lib/utils';
+
+/** 起止日期标签（INC-01 拍板：全站统一「开始 / 结束」） */
+export const RANGE_START_LABEL = '开始日期';
+export const RANGE_END_LABEL = '结束日期';
 
 /** onChange 回传的区间 */
 export interface DateRangeValue {
@@ -70,25 +82,27 @@ export interface DateRangeQuickPickerProps {
   allRangeStart?: string | null;
   /** 快捷范围选项（缺省 = 共享的 7 项 QUICK_RANGE_OPTIONS） */
   quickRanges?: ReadonlyArray<QuickRangeOption>;
-  /** 起始日期输入的 label（缺省「起始日期」） */
+  /**
+   * 起始日期输入的 label。
+   * @deprecated INC-01 已统一为「开始日期」，新代码不要传此 prop。
+   */
   startLabel?: string;
-  /** 结束日期输入的 label（缺省「结束日期」） */
+  /**
+   * 结束日期输入的 label。
+   * @deprecated INC-01 已统一为「结束日期」，新代码不要传此 prop。
+   */
   endLabel?: string;
   className?: string;
   /**
    * 受控的快捷范围值（如 '1m' / 'all'）。
    *
    * - **传入时**：下拉回显完全由父级驱动（受控），内部 state 不再参与；
-   *   传入不在 `quickRanges` 中的值（如 `'custom'`）→ 渲染占位「选择范围」。
+   *   传入不在 `quickRanges` 中的值（如 `''` / `'custom'`）→ 渲染占位「选择范围」。
    *   用户仍可正常选择快捷项，选中结果通过 `onChange({ quick })` 交由父级写回。
-   * - **不传（undefined）时**：维持原有内部 useState 行为 —— 既有调用方
-   *   （transactions / snapshot-list / cash-balance-history）**零影响**。
+   * - **不传（undefined）时**：维持内部 useState 行为（遗留兼容模式）。
    */
   quick?: string;
 }
-
-/** Select 占位值（Radix Select 不允许空字符串 value，用哨兵值渲染占位） */
-const QUICK_RANGE_PLACEHOLDER = '__none__';
 
 export function DateRangeQuickPicker({
   startDate,
@@ -96,8 +110,8 @@ export function DateRangeQuickPicker({
   onChange,
   allRangeStart,
   quickRanges = QUICK_RANGE_OPTIONS,
-  startLabel = '起始日期',
-  endLabel = '结束日期',
+  startLabel = RANGE_START_LABEL,
+  endLabel = RANGE_END_LABEL,
   className,
   quick,
 }: DateRangeQuickPickerProps): JSX.Element {
@@ -109,15 +123,14 @@ export function DateRangeQuickPicker({
 
   /**
    * 实际回显值。
-   * 受控：父级值命中 quickRanges 才回显，否则（如 'custom' / 未知值）落占位。
+   * 受控：父级值命中 quickRanges 才回显，否则（如 '' / 'custom' / 未知值）落占位。
    * 非受控：用内部 state，逐字节保持改造前行为。
    */
-  const shownQuick =
-    quick === undefined
-      ? innerQuick
-      : quickRanges.some((opt) => opt.value === quick)
-        ? quick
-        : QUICK_RANGE_PLACEHOLDER;
+  const shownQuick = !isControlled
+    ? innerQuick
+    : isQuickRangeValue(quick, quickRanges)
+      ? (quick as string)
+      : QUICK_RANGE_PLACEHOLDER;
 
   /** 选中快捷项：一次性覆盖起止日期 */
   const handleQuickChange = (v: string): void => {

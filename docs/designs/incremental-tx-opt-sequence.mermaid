@@ -1,0 +1,55 @@
+%% SEQ-1 · INC-01 偏好对齐（以 dashboard 为例）
+sequenceDiagram
+    participant P as Page(dashboard)
+    participant U as useUrlState
+    participant H as useRangePreferenceSync
+    participant D as DateRangeQuickPicker
+
+    P->>U: 初始化 query(range)
+    P->>H: sync(defaultDateRange)
+    H->>H: 若 URL 无 range 参数 → 写 defaultRange(守卫: rangeInteractedRef)
+    H->>D: 受控传 quick=range
+    D->>P: onChange(新 range)
+    P->>U: updateParams(range)
+
+%% SEQ-2 · INC-02 标的回填竞态修复
+sequenceDiagram
+    participant User as User
+    participant M as SecurityTradeForm(编辑)
+    participant S as useSecurities
+    participant Sel as Radix Select(标的)
+
+    User->>M: 点击编辑 → 打开弹窗(trade)
+    M->>M: reset({...trade, securityId: trade.securityId})
+    M->>S: 触发/复用 securities 列表
+    S-->>M: securities(异步到达, staleTime 60s)
+    M->>Sel: value=watch('securityId')；options 含 trade.securityId 保底项
+    Note over Sel: 选项就绪前不显占位；当前值恒渲染
+    Sel-->>User: 正确显示标的名称(无竞态)
+
+%% SEQ-3 · INC-03/INC-04 录入并表保存
+sequenceDiagram
+    participant F as SecurityTradeForm
+    participant API as /security-trades
+    participant SVC as SecurityTradeService
+    participant DB as security_trades
+
+    F->>F: 计算 costPrice(含费单价), feeTotal=Σ分项
+    F->>API: POST/PATCH {costPrice, feeTotal, commission, stampTax, other, fee:0}
+    API->>SVC: create/update(dto)
+    SVC->>DB: UPSERT security_trades(含三项费用列)
+    SVC-->>API: SecurityTradeResponse(costPrice, feeTotal, commission, stampTax, other)
+    Note over DB: fee_records 表已删除[INC-04/A]
+
+%% SEQ-4 · INC-01 DimensionSwitcher 内嵌（XIRR/净值）
+sequenceDiagram
+    participant P as xirr-analysis/nav-analysis
+    participant DS as DimensionSwitcher
+    participant D as DateRangeQuickPicker
+    participant H as useRangePreferenceSync
+
+    P->>DS: value={granularity, range}
+    DS->>D: 内嵌渲染(quick=value.range, onChange)
+    D->>DS: onChange(新 range)
+    DS->>P: onChange({...value, range})
+    H->>D: 偏好对齐(首次无参写 default)

@@ -1,9 +1,7 @@
 /**
- * features/security-income/dividend-fee-form.tsx — 分红 / 费用录入编辑表单（HOLD-B-P0-10 + 增量 I-02/I-03）
+ * features/security-income/dividend-fee-form.tsx — 分红录入编辑表单（HOLD-B-P0-10 + 增量 I-02）
  *
- * PRD §7.2【E】：
- * - 分红：日期 / 标的 / 分红额（税前）/ 所得税（可选）/ 类型 / 备注
- * - 费用：日期 / 标的 / 金额 / 费用类型（佣金·印花税·其他）/ 场景（买入时·卖出时）/ 备注
+ * PRD §7.2【E】：分红 = 日期 / 标的 / 分红额（税前）/ 所得税（可选）/ 类型 / 备注
  *
  * ⚠️ 分红增量口径（K-1/K-2）：
  * - amount 恒为税前；tax ≥ 0；净额 = amount − tax，实时展示且 ≥ 0（前端阻止 + 后端兜底）
@@ -12,9 +10,8 @@
  *   所得税标签改「所得税（可选）」；编辑态 type 下拉可改（Q-1 建议允许）
  * - 净额由 shared computeNetAmount（整数分运算）计算，避免浮点毛刺
  *
- * ⚠️ I-03：费用模式新增「场景」必填选择器（买入时/卖出时，缺省 BUY）；
- *   费用编辑走 PATCH /fees/:id（record 为 FeeRecord 时）。
- * ⚠️ D-02 / D-03：两者均不进现金流、不触发重算。
+ * ⚠️ D-02 / D-03：分红不进现金流、不触发重算。
+ * ⚠️ INC-04 物理并表：费用录入已并入「录入买卖」的费用三联字段，本表单仅承载分红。
  */
 
 import { useMemo, useState } from 'react';
@@ -39,32 +36,15 @@ import {
   useCreateDividend,
   useUpdateDividend,
 } from '@/hooks/use-dividends';
-import { useCreateFee, useUpdateFee } from '@/hooks/use-fees';
 import { toIsoDate } from '@/lib/constants';
 import { formatCurrency } from '@/lib/utils';
-import { DividendType, FeeType, FeeScenario } from '@/api/types';
-import type { DividendRecord, FeeRecord } from '@/api/types';
-
-/** 记录种类 */
-export type IncomeRecordKind = 'dividend' | 'fee';
-
-/** 费用类型中文映射（导出供列表复用，避免两处硬编码漂移） */
-export const FEE_TYPE_LABEL: Record<string, string> = {
-  COMMISSION: '佣金',
-  STAMP_TAX: '印花税',
-  OTHER: '其他',
-};
+import { DividendType } from '@/api/types';
+import type { DividendRecord } from '@/api/types';
 
 /** 分红类型中文映射（导出供列表复用） */
 export const DIVIDEND_TYPE_LABEL: Record<string, string> = {
   CASH: '现金分红',
   STOCK_DIVIDEND: '红利再投',
-};
-
-/** 费用场景中文映射（导出供列表徽标复用，I-03） */
-export const FEE_SCENARIO_LABEL: Record<string, string> = {
-  BUY: '买入时',
-  SELL: '卖出时',
 };
 
 /** 金额：> 0 且最多 2 位小数（PRD §8.1 NUMERIC(18,2)，格式校验收敛到 shared） */
@@ -92,9 +72,6 @@ const recordSchema = z
     tax: taxSchema,
     // 分红类型（编辑态可改，Q-1 建议允许；录入态固定 CASH）
     type: z.nativeEnum(DividendType).optional(),
-    feeType: z.nativeEnum(FeeType).optional(),
-    // I-03：费用场景（分红忽略该字段）
-    scenario: z.nativeEnum(FeeScenario).optional(),
     note: z.string().max(200, '备注最多 200 字').optional(),
   })
   // 分红净额 ≥ 0（税 > 税前 → 阻止提交；后端 PATCH/POST 同口径兜底）
@@ -110,28 +87,22 @@ type RecordFormValues = z.infer<typeof recordSchema>;
 
 export interface DividendFeeFormProps {
   portfolioId: string;
-  /** 表单种类：分红 / 费用 */
-  kind: IncomeRecordKind;
-  /** 编辑态：分红传 DividendRecord、费用传 FeeRecord（I-02/I-03 均支持编辑） */
-  record?: DividendRecord | FeeRecord | null;
+  /** 编辑态：分红传 DividendRecord（INC-04 后仅分红一种记录） */
+  record?: DividendRecord | null;
   /** 提交成功后回调（关闭弹窗） */
   onSuccess?: () => void;
 }
 
 export function DividendFeeForm({
   portfolioId,
-  kind,
   record,
   onSuccess,
 }: DividendFeeFormProps): JSX.Element {
-  const isDividend = kind === 'dividend';
   const isEdit = Boolean(record);
   const { data: securities = [], isLoading: secLoading } =
     useSecurities(portfolioId);
   const createDividend = useCreateDividend(portfolioId);
   const updateDividend = useUpdateDividend(portfolioId);
-  const createFee = useCreateFee(portfolioId);
-  const updateFee = useUpdateFee(portfolioId);
   const [submitting, setSubmitting] = useState(false);
 
   const {
@@ -147,68 +118,43 @@ export function DividendFeeForm({
       date: record?.date ?? toIsoDate(new Date()),
       amount: record?.amount ?? '',
       tax: record && 'tax' in record ? (record.tax ?? '') : '',
-      // FeeRecord 也有 type 字段（FeeType），需用 scenario 区分：费用 → undefined
       type:
-        record && 'scenario' in record
-          ? undefined
-          : record && 'type' in record
-            ? (record.type as DividendType | undefined)
-            : DividendType.CASH,
-      feeType: FeeType.OTHER,
-      scenario: record && 'scenario' in record ? record.scenario : FeeScenario.BUY,
+        record && 'type' in record
+          ? (record.type as DividendType | undefined)
+          : DividendType.CASH,
       note: record?.note ?? '',
     },
   });
 
   const securityId = watch('securityId');
-  const feeType = watch('feeType');
-  const scenario = watch('scenario');
   const dividendType = watch('type');
   const amount = watch('amount');
   const tax = watch('tax');
 
   /** 净额实时展示（整数分运算；输入未成型时显示占位） */
   const netAmount = useMemo(() => {
-    if (!isDividend) return null;
     if (!isMoneyString(amount) || !amount) return null;
     if (tax && !isMoneyString(tax)) return null;
     return computeNetAmount(amount, tax || '0');
-  }, [isDividend, amount, tax]);
+  }, [amount, tax]);
 
   const onSubmit = async (values: RecordFormValues): Promise<void> => {
     setSubmitting(true);
     try {
-      if (isDividend) {
-        // 🔴 I-02：payload 必须携带 type（forbidNonWhitelisted 400 根因修复）
-        const payload = {
-          securityId: values.securityId,
-          date: values.date,
-          amount: values.amount,
-          // Q-1 建议允许编辑 type：编辑态取下拉值；录入态固定现金分红
-          type: values.type ?? DividendType.CASH,
-          tax: values.tax || undefined,
-          note: values.note || undefined,
-        };
-        if (isEdit && record) {
-          await updateDividend.mutateAsync({ id: record.id, payload });
-        } else {
-          await createDividend.mutateAsync(payload);
-        }
+      // 🔴 I-02：payload 必须携带 type（forbidNonWhitelisted 400 根因修复）
+      const payload = {
+        securityId: values.securityId,
+        date: values.date,
+        amount: values.amount,
+        // Q-1 建议允许编辑 type：编辑态取下拉值；录入态固定现金分红
+        type: values.type ?? DividendType.CASH,
+        tax: values.tax || undefined,
+        note: values.note || undefined,
+      };
+      if (isEdit && record) {
+        await updateDividend.mutateAsync({ id: record.id, payload });
       } else {
-        const payload = {
-          securityId: values.securityId,
-          date: values.date,
-          amount: values.amount,
-          type: values.feeType ?? FeeType.OTHER,
-          scenario: values.scenario ?? FeeScenario.BUY,
-          note: values.note || undefined,
-        };
-        if (isEdit && record) {
-          // I-03：费用编辑走 PATCH /fees/:id
-          await updateFee.mutateAsync({ id: record.id, payload });
-        } else {
-          await createFee.mutateAsync(payload);
-        }
+        await createDividend.mutateAsync(payload);
       }
       onSuccess?.();
     } finally {
@@ -222,9 +168,7 @@ export function DividendFeeForm({
       <p className="flex items-start gap-2 rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">
         <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
         <span>
-          {isDividend
-            ? '分红为独立记录，不计入出入金现金流、不参与 XIRR 与净值计算；红利再投的现金价值已体现在持仓市值中。'
-            : '此处费用为独立记录，不参与 XIRR 与净值计算；买卖手续费请在「录入买卖」的费用字段填写（计入持仓成本）。'}
+          分红为独立记录，不计入出入金现金流、不参与 XIRR 与净值计算；红利再投的现金价值已体现在持仓市值中。
         </span>
       </p>
 
@@ -270,92 +214,41 @@ export function DividendFeeForm({
         )}
       </div>
 
-      {/* 类型 */}
-      {isDividend ? (
-        isEdit && record ? (
-          // Q-1 建议允许：编辑态 type 下拉（I-02）
-          <div className="space-y-1.5">
-            <Label htmlFor="income-type">类型</Label>
-            <Select
-              value={dividendType ?? DividendType.CASH}
-              onValueChange={(v) =>
-                setValue('type', v as DividendType, { shouldValidate: true })
-              }
-            >
-              <SelectTrigger id="income-type">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={DividendType.CASH}>
-                  {DIVIDEND_TYPE_LABEL.CASH}
-                </SelectItem>
-                <SelectItem value={DividendType.STOCK_DIVIDEND}>
-                  {DIVIDEND_TYPE_LABEL.STOCK_DIVIDEND}
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        ) : (
-          <div className="space-y-1.5">
-            <Label>类型</Label>
-            <p className="rounded-md border border-input px-3 py-2 text-sm text-muted-foreground">
-              现金分红（红利再投不录入）
-            </p>
-          </div>
-        )
-      ) : (
+      {/* 类型（编辑态可改 type；录入态固定现金分红，I-02） */}
+      {isEdit && record ? (
         <div className="space-y-1.5">
-          <Label htmlFor="income-fee-type">费用类型 *</Label>
+          <Label htmlFor="income-type">类型</Label>
           <Select
-            value={feeType ?? FeeType.OTHER}
+            value={dividendType ?? DividendType.CASH}
             onValueChange={(v) =>
-              setValue('feeType', v as FeeType, { shouldValidate: true })
+              setValue('type', v as DividendType, { shouldValidate: true })
             }
           >
-            <SelectTrigger id="income-fee-type">
+            <SelectTrigger id="income-type">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value={FeeType.COMMISSION}>
-                {FEE_TYPE_LABEL.COMMISSION}
+              <SelectItem value={DividendType.CASH}>
+                {DIVIDEND_TYPE_LABEL.CASH}
               </SelectItem>
-              <SelectItem value={FeeType.STAMP_TAX}>
-                {FEE_TYPE_LABEL.STAMP_TAX}
-              </SelectItem>
-              <SelectItem value={FeeType.OTHER}>
-                {FEE_TYPE_LABEL.OTHER}
+              <SelectItem value={DividendType.STOCK_DIVIDEND}>
+                {DIVIDEND_TYPE_LABEL.STOCK_DIVIDEND}
               </SelectItem>
             </SelectContent>
           </Select>
         </div>
-      )}
-
-      {/* I-03：费用场景选择器（仅费用模式；分红忽略） */}
-      {!isDividend && (
+      ) : (
         <div className="space-y-1.5">
-          <Label htmlFor="income-fee-scenario">场景 *</Label>
-          <Select
-            value={scenario ?? FeeScenario.BUY}
-            onValueChange={(v) =>
-              setValue('scenario', v as FeeScenario, { shouldValidate: true })
-            }
-          >
-            <SelectTrigger id="income-fee-scenario">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={FeeScenario.BUY}>买入时</SelectItem>
-              <SelectItem value={FeeScenario.SELL}>卖出时</SelectItem>
-            </SelectContent>
-          </Select>
+          <Label>类型</Label>
+          <p className="rounded-md border border-input px-3 py-2 text-sm text-muted-foreground">
+            现金分红（红利再投不录入）
+          </p>
         </div>
       )}
 
       {/* 金额（分红 = 税前） */}
       <div className="space-y-1.5">
-        <Label htmlFor="income-amount">
-          {isDividend ? '分红额（税前）*' : '费用金额 *'}
-        </Label>
+        <Label htmlFor="income-amount">分红额（税前）*</Label>
         <Input
           id="income-amount"
           type="text"
@@ -368,45 +261,41 @@ export function DividendFeeForm({
         )}
       </div>
 
-      {/* 所得税（仅分红；I-02：标签改「（可选）」） */}
-      {isDividend && (
-        <div className="space-y-1.5">
-          <Label htmlFor="income-tax">所得税（可选）</Label>
-          <Input
-            id="income-tax"
-            type="text"
-            inputMode="decimal"
-            placeholder="0.00"
-            {...register('tax')}
-          />
-          {errors.tax && (
-            <p className="text-xs text-destructive">{errors.tax.message}</p>
+      {/* 所得税（I-02：标签改「（可选）」） */}
+      <div className="space-y-1.5">
+        <Label htmlFor="income-tax">所得税（可选）</Label>
+        <Input
+          id="income-tax"
+          type="text"
+          inputMode="decimal"
+          placeholder="0.00"
+          {...register('tax')}
+        />
+        {errors.tax && (
+          <p className="text-xs text-destructive">{errors.tax.message}</p>
+        )}
+      </div>
+
+      {/* 净额实时展示 */}
+      <div className="space-y-1.5">
+        <Label>净额（自动）</Label>
+        <div
+          className={`rounded-md border px-3 py-2 text-sm tabular-nums ${
+            netAmount !== null && Number(netAmount) < 0
+              ? 'border-destructive/60 bg-destructive/5 text-destructive'
+              : 'bg-muted/40 text-foreground'
+          }`}
+          data-testid="dividend-net-amount"
+        >
+          {netAmount !== null ? (
+            formatCurrency(Number(netAmount), 2)
+          ) : (
+            <span className="text-muted-foreground">
+              填写分红额与所得税后自动计算
+            </span>
           )}
         </div>
-      )}
-
-      {/* 净额实时展示（仅分红） */}
-      {isDividend && (
-        <div className="space-y-1.5">
-          <Label>净额（自动）</Label>
-          <div
-            className={`rounded-md border px-3 py-2 text-sm tabular-nums ${
-              netAmount !== null && Number(netAmount) < 0
-                ? 'border-destructive/60 bg-destructive/5 text-destructive'
-                : 'bg-muted/40 text-foreground'
-            }`}
-            data-testid="dividend-net-amount"
-          >
-            {netAmount !== null ? (
-              formatCurrency(Number(netAmount), 2)
-            ) : (
-              <span className="text-muted-foreground">
-                填写分红额与所得税后自动计算
-              </span>
-            )}
-          </div>
-        </div>
-      )}
+      </div>
 
       {/* 备注 */}
       <div className="space-y-1.5">

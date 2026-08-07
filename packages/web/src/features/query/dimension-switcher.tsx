@@ -1,18 +1,29 @@
 /**
- * features/query/dimension-switcher.tsx — 维度切换 + 日期范围选择
+ * features/query/dimension-switcher.tsx — 维度切换 + 聚合方式（+ 内嵌统一日期范围控件）
  *
  * 用于 XIRR 分析页、净值分析页：
  * - Tabs 切换 granularity（日/周/月/年）
- * - 日期范围选择（startDate / endDate）
  * - 聚合方式切换（期末值/平均值）
- * - 快捷范围下拉（可选 prop `quickRanges`，缺省不渲染，DASH-P0-02 快捷项）
+ * - 日期范围：**内嵌全站唯一控件 `DateRangeQuickPicker`**（INC-01 决策 G）
+ *
+ * 【INC-01 改造要点】
+ * 改造前本组件自带一套「快捷范围 Select + 起止 Input(w-[160px]) + `~` 分隔符」，
+ * 与列表页的 `DateRangeQuickPicker`（w-[150px]、无分隔符、标签文案不同）视觉/交互
+ * 双轨，属决策 G 明令消除的「第二套控件」。改造后：
+ * - 删除内嵌 Select / Input / 私有 `quickRange` useState；
+ * - 日期范围整体交给 `DateRangeQuickPicker`，宽度、标签、占位、交互全站唯一；
+ * - 快捷项回显改为**受控**：`value.quick` 由父页面持有，配合
+ *   `useRangePreferenceSync` 完成偏好默认值对齐（决策 E）。
+ *
+ * 【口径常量迁移】`QUICK_RANGE_OPTIONS` / `resolveQuickRange` / `ALL_RANGE_FALLBACK_START`
+ * 等已下沉到叶子模块 `./quick-range`（打断 dimension-switcher ↔ date-range-quick-picker
+ * 的循环依赖）。本文件继续 **原样 re-export**，所有既有 `from '@/features/query/dimension-switcher'`
+ * 的 import 保持可用，无需改动调用方。
  *
  * 受控组件：value + onChange，由父页面持有状态。
  */
 
-import { useState } from 'react';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
   Select,
@@ -21,40 +32,70 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { AGGREGATION_OPTIONS, GRANULARITY_OPTIONS, toIsoDate } from '@/lib/constants';
+import { DateRangeQuickPicker } from '@/components/date/date-range-quick-picker';
+import { QUICK_RANGE_OPTIONS } from './quick-range';
+// 说明：下方 `export type { QuickRangeOption } from './quick-range'` 是**再导出**，
+// 不产生本地绑定；此处 import 才引入可用于类型标注的本地名，两者不冲突。
+import type { QuickRangeOption } from './quick-range';
+import { AGGREGATION_OPTIONS, GRANULARITY_OPTIONS } from '@/lib/constants';
 import { cn } from '@/lib/utils';
 import type {
   AggregationMethod,
   QueryGranularity,
 } from '@investment-tracker/shared';
 
+// ── 快捷范围口径（唯一真相源在 ./quick-range，此处原样 re-export 保持向后兼容）──
+export {
+  QUICK_RANGE_OPTIONS,
+  QUICK_RANGE_PLACEHOLDER,
+  ALL_RANGE_FALLBACK_START,
+  resolveQuickRange,
+  isQuickRangeValue,
+} from './quick-range';
+export type {
+  QuickRangeOption,
+  ResolvedDateRange,
+  ResolveQuickRangeOptions,
+} from './quick-range';
+
 export interface DimensionSwitcherValue {
   granularity: QueryGranularity;
+  /**
+   * 起始日期 YYYY-MM-DD。
+   *
+   * 空值语义统一为**空串 `''`**（INC-01：与 `DateRangeQuickPicker` 对齐）；
+   * `undefined` 仍被接受（历史状态），渲染时按 `?? ''` 处理。
+   */
   startDate?: string;
+  /** 结束日期 YYYY-MM-DD，空值语义同 {@link DimensionSwitcherValue.startDate} */
   endDate?: string;
   aggregation: AggregationMethod;
-}
-
-export interface QuickRangeOption {
-  value: string;
-  label: string;
+  /**
+   * 当前命中的快捷范围值（如 '1y' / 'all'），受控回显用。
+   *
+   * - 空串 `''` / `undefined` / 未命中预设 → 下拉显示占位「选择范围」；
+   * - 用户手动改起止日期时本字段被置空（自定义区间不再高亮任何预设）。
+   */
+  quick?: string;
 }
 
 /**
- * 快捷范围预设（DASH-P0-02 / 决策 Q-6 乙：7 项，唯一真相源）。
+ * 剥离仅用于 UI 回显的 `quick` 字段，得到可直接下发后端的查询参数。
  *
- * 概览页、净值分析页、XIRR 分析页共用此常量与 resolveQuickRange，
- * 不再各自维护本地副本，避免口径漂移。
+ * 🔴 **必须调用**：后端全局 `ValidationPipe` 开启了 `forbidNonWhitelisted`
+ * （`backend/src/main.ts`），把 `DimensionSwitcherValue` 原样当作查询参数
+ * 透传（如 `useXirrSeries(id, dimension)`）会因多出 `quick` 键被 400 拒绝。
+ *
+ * @param value 维度切换器的受控值
+ * @returns 去掉 `quick` 后的查询参数（granularity / startDate / endDate / aggregation）
  */
-export const QUICK_RANGE_OPTIONS: ReadonlyArray<QuickRangeOption> = [
-  { value: '1w', label: '近一周' },
-  { value: '1m', label: '近1月' },
-  { value: '3m', label: '近3月' },
-  { value: '6m', label: '近6月' },
-  { value: '1y', label: '近1年' },
-  { value: 'ytd', label: '今年' },
-  { value: 'all', label: '全部' },
-];
+export function toDimensionQueryParams(
+  value: DimensionSwitcherValue,
+): Omit<DimensionSwitcherValue, 'quick'> {
+  const params = { ...value };
+  delete params.quick;
+  return params;
+}
 
 export interface DimensionSwitcherProps {
   value: DimensionSwitcherValue;
@@ -62,101 +103,26 @@ export interface DimensionSwitcherProps {
   /** 是否显示聚合方式切换（默认 true） */
   showAggregation?: boolean;
   /**
-   * 快捷范围预设（如 近3月/近1年/今年至今/全部）。
-   * 缺省不渲染；选中后按预设计算起止日期并回调 onChange。
+   * 快捷范围预设（如 近3月/近1年/今年/全部）。
+   * 缺省 = 共享的 7 项 {@link QUICK_RANGE_OPTIONS}；传 `[]` 可隐藏快捷下拉。
    */
   quickRanges?: ReadonlyArray<QuickRangeOption>;
   /**
    * 「全部」快捷项的起始日 —— 传当前组合首个交易日（`Portfolio.baseDate`，问题②）。
-   * 缺省或为 null 时回落 {@link ALL_RANGE_FALLBACK_START}。
+   * 缺省或为 null 时回落 `ALL_RANGE_FALLBACK_START`。
    */
   allRangeStart?: string | null;
   className?: string;
 }
 
-/** 快捷范围解析结果（起止日期恒为具体值，便于直接下发查询参数） */
-export interface ResolvedDateRange {
-  startDate: string;
-  endDate: string;
-}
-
-/** 「全部」起始日兜底值（组合无 baseDate 时使用，等价于「足够早」） */
-export const ALL_RANGE_FALLBACK_START = '2000-01-01';
-
-/** resolveQuickRange 可选项 */
-export interface ResolveQuickRangeOptions {
-  /**
-   * 「全部」范围的起始日 —— 传组合首个交易日（`Portfolio.baseDate`）。
-   *
-   * 缺省时回落 {@link ALL_RANGE_FALLBACK_START}，保持单参调用的向后兼容。
-   */
-  allRangeStart?: string;
-}
-
-/**
- * 快捷范围计算（QUICK_RANGE_OPTIONS 7 项的唯一口径实现，决策 Q-6 乙）。
- *
- * - endDate 恒为今天；startDate 按预设回推。
- * - 'ytd' = 当年 1 月 1 日。
- * - 'all' = **组合首个交易日（baseDate）至今**（问题②）。调用方应传
- *   `opts.allRangeStart = currentPortfolio()?.baseDate`；未传或组合尚无
- *   首笔买入（baseDate=null）时回落 {@link ALL_RANGE_FALLBACK_START}。
- *   startDate 必须显式返回，否则调用方合并时 `?? value.startDate` 会保留
- *   旧起始日，范围不扩大。
- * - 未知值回落「近1年」，与旧 dashboard resolveDateRange 的 default 分支一致。
- *
- * 🔴 opts 保持可选 —— 既有单参调用（含 quick-range.test.ts）行为不变。
- */
-export function resolveQuickRange(
-  range: string,
-  opts?: ResolveQuickRangeOptions,
-): ResolvedDateRange {
-  const end = new Date();
-  const endStr = toIsoDate(end);
-  const start = new Date();
-  switch (range) {
-    case '1w':
-      start.setDate(start.getDate() - 7);
-      break;
-    case '1m':
-      start.setMonth(start.getMonth() - 1);
-      break;
-    case '3m':
-      start.setMonth(start.getMonth() - 3);
-      break;
-    case '6m':
-      start.setMonth(start.getMonth() - 6);
-      break;
-    case '1y':
-      start.setFullYear(start.getFullYear() - 1);
-      break;
-    case 'ytd':
-      return { startDate: `${end.getFullYear()}-01-01`, endDate: endStr };
-    case 'all':
-      return {
-        startDate: opts?.allRangeStart || ALL_RANGE_FALLBACK_START,
-        endDate: endStr,
-      };
-    default:
-      start.setFullYear(start.getFullYear() - 1);
-  }
-  return { startDate: toIsoDate(start), endDate: endStr };
-}
-
-/** Select 占位值（Radix Select 不允许空字符串 value，用哨兵值渲染占位） */
-const QUICK_RANGE_PLACEHOLDER = '__none__';
-
 export function DimensionSwitcher({
   value,
   onChange,
   showAggregation = true,
-  quickRanges,
+  quickRanges = QUICK_RANGE_OPTIONS,
   allRangeStart,
   className,
 }: DimensionSwitcherProps): JSX.Element {
-  // 最近一次选中的快捷项（仅作 Select 回显；用户手动改日期后不回退，仍显示上次预设）
-  const [quickRange, setQuickRange] = useState<string>(QUICK_RANGE_PLACEHOLDER);
-
   return (
     <div
       className={cn(
@@ -208,66 +174,25 @@ export function DimensionSwitcher({
             </Select>
           </div>
         )}
-
-        {quickRanges && quickRanges.length > 0 && (
-          <div className="space-y-1.5">
-            <Label className="text-xs text-muted-foreground">快捷范围</Label>
-            <Select
-              value={quickRange}
-              onValueChange={(v) => {
-                setQuickRange(v);
-                // resolveQuickRange 恒返回具体起止日期，直接覆盖即可
-                // 「全部」以组合首个交易日为起点（问题②），未传则回落兜底值
-                const range = resolveQuickRange(v, {
-                  allRangeStart: allRangeStart ?? undefined,
-                });
-                onChange({
-                  ...value,
-                  startDate: range.startDate,
-                  endDate: range.endDate,
-                });
-              }}
-            >
-              <SelectTrigger className="w-[130px]">
-                <SelectValue placeholder="选择范围" />
-              </SelectTrigger>
-              <SelectContent>
-                {quickRanges.map((opt) => (
-                  <SelectItem key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        )}
       </div>
 
-      <div className="flex items-end gap-2">
-        <div className="space-y-1.5">
-          <Label className="text-xs text-muted-foreground">起始日期</Label>
-          <Input
-            type="date"
-            value={value.startDate ?? ''}
-            onChange={(e) =>
-              onChange({ ...value, startDate: e.target.value || undefined })
-            }
-            className="w-[160px]"
-          />
-        </div>
-        <span className="pb-2 text-muted-foreground">~</span>
-        <div className="space-y-1.5">
-          <Label className="text-xs text-muted-foreground">结束日期</Label>
-          <Input
-            type="date"
-            value={value.endDate ?? ''}
-            onChange={(e) =>
-              onChange({ ...value, endDate: e.target.value || undefined })
-            }
-            className="w-[160px]"
-          />
-        </div>
-      </div>
+      {/* 日期范围：全站唯一控件（INC-01 决策 G），受控 quick 回显 */}
+      <DateRangeQuickPicker
+        quick={value.quick ?? ''}
+        startDate={value.startDate ?? ''}
+        endDate={value.endDate ?? ''}
+        quickRanges={quickRanges}
+        allRangeStart={allRangeStart}
+        onChange={(range) =>
+          onChange({
+            ...value,
+            startDate: range.startDate,
+            endDate: range.endDate,
+            // 手动改起止日期时 range.quick 为 undefined → 落回空串（自定义区间）
+            quick: range.quick ?? '',
+          })
+        }
+      />
     </div>
   );
 }

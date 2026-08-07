@@ -1,10 +1,12 @@
 /**
- * SecurityTradeService — 证券买卖流水 CRUD 与费用口径验收（增量设计 C-5/C-7/K-4）
+ * SecurityTradeService — 证券买卖流水 CRUD 与费用物理并表验收（INC-03 / INC-04）
  *
  * 验证点：
- * - **create 强制 fee=0**：DTO 传 5.0 仍落 0（新口径：含费单价存 price，费用拆 FeeRecord）
- * - **update 忽略 fee**：即使 DTO 带 fee 也不写入，现值保留（存量 fee≠0 不丢失）
- * - **price>0 DTO 兜底**（C-7）：费用>成交额 ⇒ 含费单价 ≤ 0 ⇒ 400（class-validator 层）
+ * - **create 落库 costPrice + 分项费用**：commission/stampTax/other 缺省 0；
+ *   feeTotal = 三项之和（冗余展示列，决策 B/C-09 不回冲成本）
+ * - **update 分项费用可写**：传入 commission/stampTax/other 任一即重算 feeTotal；
+ *   未传字段沿用存量值
+ * - **costPrice>0 DTO 兜底**（C-7）：含费单价 ≤ 0 ⇒ 400（class-validator 层）
  * - 卖出硬校验：validateSellQuantity 在 create/update 的 SELL 路径被调用
  * - 写入后触发 recalculateRange（T2）
  * - 数据隔离：组合不属于当前用户 → 404
@@ -45,7 +47,7 @@ function createPrismaMock() {
 
 type PrismaMock = ReturnType<typeof createPrismaMock>;
 
-/** 构造一条 prisma 层交易记录 */
+/** 构造一条 prisma 层交易记录（INC-03/INC-04：costPrice + 分项费用 + feeTotal） */
 function makeTrade(overrides: Record<string, unknown> = {}) {
   return {
     id: TRADE_ID,
@@ -54,8 +56,11 @@ function makeTrade(overrides: Record<string, unknown> = {}) {
     date: new Date('2025-07-15T00:00:00.000Z'),
     side: SecuritySide.BUY_SEC,
     quantity: new Prisma.Decimal('100'),
-    price: new Prisma.Decimal('1500.45'),
-    fee: new Prisma.Decimal('0'),
+    costPrice: new Prisma.Decimal('1500.45'),
+    commission: new Prisma.Decimal('0'),
+    stampTax: new Prisma.Decimal('0'),
+    other: new Prisma.Decimal('0'),
+    feeTotal: new Prisma.Decimal('0'),
     note: null,
     createdAt: new Date('2025-07-15T00:00:00.000Z'),
     updatedAt: new Date('2025-07-15T00:00:00.000Z'),
@@ -63,7 +68,7 @@ function makeTrade(overrides: Record<string, unknown> = {}) {
   };
 }
 
-describe('SecurityTradeService（增量费用口径）', () => {
+describe('SecurityTradeService（增量费用物理并表）', () => {
   let prisma: PrismaMock;
   let recalc: { recalculateRange: jest.Mock };
   let service: SecurityTradeService;
@@ -90,7 +95,7 @@ describe('SecurityTradeService（增量费用口径）', () => {
           date: '2025-07-15',
           side: SecuritySide.BUY_SEC,
           quantity: 100,
-          price: 1500.45,
+          costPrice: 1500.45,
         }),
       ).rejects.toBeInstanceOf(NotFoundException);
 
@@ -111,57 +116,108 @@ describe('SecurityTradeService（增量费用口径）', () => {
   });
 
   // =========================================================================
-  // create：fee 强制 0（C-5 / K-4）
+  // create：costPrice + 分项费用 + feeTotal = Σ
   // =========================================================================
-  describe('create 费用口径', () => {
-    it('DTO 传 fee=5.0 仍落库 fee=0，price 原样写入（含费单价）', async () => {
-      prisma.securityTrade.create.mockResolvedValue(makeTrade());
+  describe('create 费用物理并表', () => {
+    it('DTO 传 commission/stampTax/other → feeTotal = 三项之和，costPrice 原样写入', async () => {
+      prisma.securityTrade.create.mockImplementation((args) =>
+        makeTrade({ ...(args as { data: Record<string, unknown> }).data }),
+      );
 
       const result = await service.create(USER_ID, PORTFOLIO_ID, {
         securityId: SECURITY_ID,
         date: '2025-07-15',
         side: SecuritySide.BUY_SEC,
         quantity: 100,
-        price: 1500.45,
-        fee: 5.0,
+        costPrice: 1500.45,
+        commission: 3,
+        stampTax: 1.5,
+        other: 0.5,
         note: '建仓',
       });
 
       const args = prisma.securityTrade.create.mock.calls[0][0];
-      expect(args.data.fee).toBe(0);
-      expect(args.data.price).toBe(1500.45);
+      // costPrice/quantity 为原始数值；commission/stampTax/other/feeTotal 以 Decimal 入库
+      expect(args.data.costPrice).toBe(1500.45);
+      expect(args.data.commission.toString()).toBe('3');
+      expect(args.data.stampTax.toString()).toBe('1.5');
+      expect(args.data.other.toString()).toBe('0.5');
+      // feeTotal = 3 + 1.5 + 0.5 = 5
+      expect(args.data.feeTotal.toString()).toBe('5');
       expect(args.data.quantity).toBe(100);
       expect(args.data.note).toBe('建仓');
 
-      // 响应 fee 字符串为 '0'
-      expect(result.fee).toBe('0');
-      expect(result.price).toBe('1500.45');
+      // 响应：feeTotal/costPrice/分项均以字符串回传
+      expect(result.costPrice).toBe('1500.45');
+      expect(result.commission).toBe('3');
+      expect(result.stampTax).toBe('1.5');
+      expect(result.other).toBe('0.5');
+      expect(result.feeTotal).toBe('5');
     });
 
-    it('DTO 不传 fee 同样落 0（旧前端兼容）', async () => {
-      prisma.securityTrade.create.mockResolvedValue(makeTrade());
+    it('create 响应字段集为改名后字段（costPrice/feeTotal/commission/stampTax/other），不含旧 price/fee 键（INC-03 列改名）', async () => {
+      prisma.securityTrade.create.mockImplementation((args) =>
+        makeTrade({ ...(args as { data: Record<string, unknown> }).data }),
+      );
+
+      const result = await service.create(USER_ID, PORTFOLIO_ID, {
+        securityId: SECURITY_ID,
+        date: '2025-07-15',
+        side: SecuritySide.BUY_SEC,
+        quantity: 100,
+        costPrice: 1500.45,
+        commission: 3,
+        stampTax: 1.5,
+        other: 0.5,
+      });
+
+      const keys = Object.keys(result);
+      for (const k of [
+        'costPrice',
+        'feeTotal',
+        'commission',
+        'stampTax',
+        'other',
+      ]) {
+        expect(keys).toContain(k);
+        expect(typeof (result as unknown as Record<string, unknown>)[k]).toBe('string');
+      }
+      // 旧字段名不得残留（物理并表后无 price/fee）
+      expect(keys).not.toContain('price');
+      expect(keys).not.toContain('fee');
+    });
+
+    it('分项费用缺省为 0，feeTotal = 0', async () => {
+      prisma.securityTrade.create.mockImplementation((args) =>
+        makeTrade({ ...(args as { data: Record<string, unknown> }).data }),
+      );
 
       await service.create(USER_ID, PORTFOLIO_ID, {
         securityId: SECURITY_ID,
         date: '2025-07-15',
         side: SecuritySide.BUY_SEC,
         quantity: 100,
-        price: 1500.45,
+        costPrice: 1500.45,
       });
 
       const args = prisma.securityTrade.create.mock.calls[0][0];
-      expect(args.data.fee).toBe(0);
+      expect(args.data.commission.toString()).toBe('0');
+      expect(args.data.stampTax.toString()).toBe('0');
+      expect(args.data.other.toString()).toBe('0');
+      expect(args.data.feeTotal.toString()).toBe('0');
     });
 
     it('BUY 不校验卖出持仓量', async () => {
-      prisma.securityTrade.create.mockResolvedValue(makeTrade());
+      prisma.securityTrade.create.mockImplementation((args) =>
+        makeTrade({ ...(args as { data: Record<string, unknown> }).data }),
+      );
 
       await service.create(USER_ID, PORTFOLIO_ID, {
         securityId: SECURITY_ID,
         date: '2025-07-15',
         side: SecuritySide.BUY_SEC,
         quantity: 100,
-        price: 1500.45,
+        costPrice: 1500.45,
       });
 
       // findMany 仅用于校验卖出；买入不应触发
@@ -182,7 +238,7 @@ describe('SecurityTradeService（增量费用口径）', () => {
         date: '2025-07-15',
         side: SecuritySide.SELL_SEC,
         quantity: 50,
-        price: 1600.0,
+        costPrice: 1600.0,
       });
 
       // 卖出路径触发持仓推导查询
@@ -191,14 +247,16 @@ describe('SecurityTradeService（增量费用口径）', () => {
     });
 
     it('create 成功后触发 recalculateRange(portfolioId, date)', async () => {
-      prisma.securityTrade.create.mockResolvedValue(makeTrade());
+      prisma.securityTrade.create.mockImplementation((args) =>
+        makeTrade({ ...(args as { data: Record<string, unknown> }).data }),
+      );
 
       await service.create(USER_ID, PORTFOLIO_ID, {
         securityId: SECURITY_ID,
         date: '2025-07-15',
         side: SecuritySide.BUY_SEC,
         quantity: 100,
-        price: 1500.45,
+        costPrice: 1500.45,
       });
 
       expect(recalc.recalculateRange).toHaveBeenCalledWith(
@@ -209,37 +267,67 @@ describe('SecurityTradeService（增量费用口径）', () => {
   });
 
   // =========================================================================
-  // update：忽略 fee（C-5 / U-1）
+  // update：分项费用可写，feeTotal 重算
   // =========================================================================
-  describe('update 费用口径', () => {
+  describe('update 费用物理并表', () => {
     beforeEach(() => {
       prisma.securityTrade.findFirst.mockResolvedValue(
-        makeTrade({ fee: new Prisma.Decimal('5') }),
+        makeTrade({
+          commission: new Prisma.Decimal('1'),
+          stampTax: new Prisma.Decimal('0'),
+          other: new Prisma.Decimal('0'),
+          feeTotal: new Prisma.Decimal('1'),
+        }),
       );
       prisma.securityTrade.update.mockResolvedValue(
-        makeTrade({ fee: new Prisma.Decimal('5') }),
+        makeTrade({
+          commission: new Prisma.Decimal('1'),
+          stampTax: new Prisma.Decimal('0'),
+          other: new Prisma.Decimal('0'),
+          feeTotal: new Prisma.Decimal('1'),
+        }),
       );
     });
 
-    it('DTO 带 fee=8 时写入 fee 字段（I-01：update 契约支持 fee 落库，裁决 Q-2）', async () => {
+    it('DTO 传 stampTax=2 → feeTotal 重算为 commission+2+other = 3', async () => {
       await service.update(USER_ID, PORTFOLIO_ID, TRADE_ID, {
-        fee: 8,
+        stampTax: 2,
         note: '改备注',
       });
 
       const data = prisma.securityTrade.update.mock.calls[0][0].data;
-      expect(data.fee).toBe(8);
+      // 仅传 stampTax=2 → 三项整体重写入库，commission/other 沿用存量（Decimal）
+      expect(data.stampTax.toString()).toBe('2');
+      expect(data.commission.toString()).toBe('1'); // 沿用存量
+      expect(data.other.toString()).toBe('0');
+      expect(data.feeTotal.toString()).toBe('3'); // 1 + 2 + 0
       expect(data.note).toBe('改备注');
     });
 
-    it('不传 fee 时 data 不含 fee 键（现值不受影响）', async () => {
+    it('DTO 仅传 commission=4（其余沿用存量）→ feeTotal 重算为 4+0+0 = 4（守卫单字段丢失 bug）', async () => {
       await service.update(USER_ID, PORTFOLIO_ID, TRADE_ID, {
-        price: 1600.0,
+        commission: 4,
       });
 
       const data = prisma.securityTrade.update.mock.calls[0][0].data;
-      expect(data).not.toHaveProperty('fee');
-      expect(data.price).toBe(1600.0);
+      // 仅传 commission=4 → 三项整体重写入库，stampTax/other 沿用存量（Decimal）
+      expect(data.commission.toString()).toBe('4');
+      expect(data.stampTax.toString()).toBe('0'); // 沿用存量
+      expect(data.other.toString()).toBe('0'); // 沿用存量
+      expect(data.feeTotal.toString()).toBe('4'); // 4 + 0 + 0
+    });
+
+    it('不传任何分项费用时 data 不含 feeTotal/commission 键（现值不受影响）', async () => {
+      await service.update(USER_ID, PORTFOLIO_ID, TRADE_ID, {
+        costPrice: 1600.0,
+      });
+
+      const data = prisma.securityTrade.update.mock.calls[0][0].data;
+      expect(data).not.toHaveProperty('feeTotal');
+      expect(data).not.toHaveProperty('commission');
+      expect(data).not.toHaveProperty('stampTax');
+      expect(data).not.toHaveProperty('other');
+      expect(data.costPrice).toBe(1600.0);
     });
 
     it('更新后触发 recalculateRange', async () => {
@@ -252,39 +340,43 @@ describe('SecurityTradeService（增量费用口径）', () => {
   });
 
   // =========================================================================
-  // price > 0 DTO 兜底（C-7：费用>成交额 ⇒ 含费单价 ≤ 0 ⇒ 400）
+  // costPrice > 0 DTO 兜底（C-7）
   // =========================================================================
-  describe('price>0 DTO 校验（卖出费用>成交额的等价兜底）', () => {
-    async function priceErrors(price: number): Promise<number> {
+  describe('costPrice>0 DTO 校验', () => {
+    async function costPriceErrors(costPrice: number): Promise<number> {
       const instance = plainToInstance(CreateSecurityTradeDto, {
         securityId: SECURITY_ID,
         date: '2025-07-15',
         side: SecuritySide.SELL_SEC,
         quantity: 100,
-        price,
+        costPrice,
       });
       const errors = await validate(instance);
-      return errors.filter((e) => e.property === 'price').length;
+      return errors.filter((e) => e.property === 'costPrice').length;
     }
 
-    it.each([0, -1, -0.000001])('price=%s（≤ 0）被拒', async (price) => {
-      expect(await priceErrors(price)).toBe(1);
+    it.each([0, -1, -0.000001])('costPrice=%s（≤ 0）被拒', async (costPrice) => {
+      expect(await costPriceErrors(costPrice)).toBe(1);
     });
 
-    it('price=0.000001（最小正数）通过', async () => {
-      expect(await priceErrors(0.000001)).toBe(0);
+    it('costPrice=0.000001（最小正数）通过', async () => {
+      expect(await costPriceErrors(0.000001)).toBe(0);
     });
 
-    it('DTO 层不要求 fee 必填（fee 可选兼容旧前端）', async () => {
+    it('DTO 层不要求 commission/stampTax/other/feeTotal 必填（缺省 0）', async () => {
       const instance = plainToInstance(CreateSecurityTradeDto, {
         securityId: SECURITY_ID,
         date: '2025-07-15',
         side: SecuritySide.BUY_SEC,
         quantity: 100,
-        price: 1500.45,
+        costPrice: 1500.45,
       });
       const errors = await validate(instance);
-      expect(errors.filter((e) => e.property === 'fee')).toHaveLength(0);
+      expect(
+        errors.filter((e) =>
+          ['commission', 'stampTax', 'other', 'feeTotal'].includes(e.property),
+        ),
+      ).toHaveLength(0);
     });
   });
 });

@@ -17,7 +17,6 @@ export * from './query.ts';
 // 🆕 五大模块增量类型
 export * from './security.ts';
 export * from './dividend.ts';
-export * from './fee.ts';
 export * from './preference.ts';
 
 // 🆕「8 页 PRD 对齐」增量类型（概览新鲜度 / CSV 导入导出）

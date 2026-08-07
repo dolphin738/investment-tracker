@@ -1,42 +1,20 @@
 /**
- * Portfolio（投资组合）类型定义
+ * Portfolio（投资组合）类型 —— **归并转发模块**（T01 共享类型去重）
  *
- * 对应 Prisma model Portfolio（portfolios 表）。
- * 一个 User 可拥有多个 Portfolio，所有业务数据（交易/快照/净值/XIRR）
- * 均通过 portfolioId 关联到具体组合。
+ * 【为什么只剩转发】
+ * `Portfolio` 曾在 `packages/shared/src/types.ts`（包入口 `src/index.ts`
+ * re-export 的那份）与本文件各写一份。本次统一以 `../types.ts` 为**唯一真相源**，
+ * 本文件退化为 type-only 转发，`src/types/index.ts` 的
+ * `export * from './portfolio.ts'` 行为完全不变。
  *
- * 多币种决策（Q-A04）：v1 仅 CNY，currency 字段在 Portfolio 级别记录，
- * transaction/snapshot 不带币种。后期升级多币种时再扩展。
+ * 【语义备忘（原文档保留）】
+ * baseDate = 成立日（首笔存入日，FIN-D6），设定后不可修改；null = 组合尚未成立。
+ * archivedAt 非空表示已归档（列表默认隐藏，不参与计算链路）。
+ *
+ * ⚠️ 请勿在此新增声明；新增/修改一律去 `packages/shared/src/types.ts`。
  */
 
-/**
- * 投资组合实体
- */
-export interface Portfolio {
-  /** UUID 主键 */
-  id: string;
-  /** 所属用户 ID（实现数据隔离） */
-  userId: string;
-  /** 组合名称 */
-  name: string;
-  /** 组合描述，可为空 */
-  description: string | null;
-  /**
-   * 成立日：首笔买入交易日，首次录入买入交易时自动设置，设置后不可更改。
-   * 格式 YYYY-MM-DD，组合未录入首笔买入时为 null。
-   */
-  baseDate: string | null;
-  /** 币种，v1 默认 'CNY' */
-  currency: string;
-  /**
-   * 归档时间 ISO 8601（SET-P1-04）；null = 未归档。
-   *
-   * 归档组合保留全部数据，但从「组合选择器 / 默认组合候选」中隐藏，
-   * 仅在设置页「组合管理」列表可见并可取消归档。
-   */
-  archivedAt: string | null;
-  /** 创建时间 ISO 8601 */
-  createdAt: string;
-  /** 更新时间 ISO 8601 */
-  updatedAt: string;
-}
+export type {
+  /** 投资组合实体（对应 Prisma model Portfolio） */
+  Portfolio,
+} from '../types.ts';

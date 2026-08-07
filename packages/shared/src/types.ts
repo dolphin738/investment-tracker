@@ -49,10 +49,16 @@ export interface SecurityTrade {
   side: SecuritySide;
   /** 交易数量 Decimal 字符串，始终 > 0 */
   quantity: string;
-  /** 成交单价 Decimal 字符串 */
-  price: string;
-  /** 费用 Decimal 字符串（信息记录，计入成本，不回冲） */
-  fee: string;
+  /** 含费单价 Decimal 字符串（INC-03 由 price 重命名，金融算法不变） */
+  costPrice: string;
+  /** 佣金 Decimal 字符串（INC-04 物理并表至 security_trades） */
+  commission: string;
+  /** 印花税 Decimal 字符串（INC-04 物理并表至 security_trades） */
+  stampTax: string;
+  /** 其他费用 Decimal 字符串（INC-04 物理并表至 security_trades） */
+  other: string;
+  /** 费用合计 = commission + stampTax + other（冗余展示列，后端计算） */
+  feeTotal: string;
   /** 备注 */
   note: string | null;
   /** 创建时间 ISO 8601 */
@@ -215,7 +221,20 @@ export interface XirrSeriesPoint {
   label: string;
 }
 
-/** 组合统计摘要（Dashboard 卡片） */
+/**
+ * 组合统计摘要（**单组合** · Dashboard 卡片）
+ *
+ * 对应 API: `GET /portfolios/:portfolioId/summary`
+ *
+ * 🔴 命名消歧（T01 共享类型归并）：Web 端 `packages/web/src/api/types.ts` 里另有
+ * 一个同名的 `PortfolioSummary`，那是 **多组合列表行**（`GET /portfolios/summary`，
+ * 字段为 id/name/totalAsset/netInvested/… 且数值一律 string）。二者是**两个不同
+ * 的接口契约**，不可互相替代，也不要试图合并 —— 引用时务必确认 import 来源：
+ * - 单组合卡片：`import type { PortfolioSummary } from '@investment-tracker/shared'`
+ * - 多组合列表：`import type { PortfolioSummary } from '@/api/types'`
+ *
+ * 本文件是 shared 侧该类型的**唯一真相源**（`src/types/xirr.ts` 已改为转发）。
+ */
 export interface PortfolioSummary {
   /** 累计 XIRR（小数形式，如 0.1234 = 12.34%），null 表示数据不足 */
   cumulativeXirr: number | null;

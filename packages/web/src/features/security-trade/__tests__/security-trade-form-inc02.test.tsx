@@ -1,23 +1,31 @@
 /**
- * features/security-trade/security-trade-form.tsx — 三项费用物理并表（INC-04）
+ * features/security-trade/security-trade-form.tsx — INC-02 标的回填竞态（编辑态）
  *
- * 验证点（对齐增量 PRD INC-03/INC-04 验收）：
- * 1. 提交时 feeTotal = commission + stampTax + other（前端公式提交），
- *    costPrice 按含费单价公式推导（买入=(成交额+费用合计)/数量），
- *    费用三项直接写 security_trades 一行（不再有「删旧 FeeRecord 插新 FeeRecord」逻辑）。
- * 2. 编辑态三项费用正确回填（trade.commission/stampTax/other）。
+ * 背景：编辑态首帧 `useSecurities` 往往还没返回，表单的 `securityId` 虽已由回填
+ * effect 写入，但 Radix Select 找不到对应 SelectItem → 触发器回落 placeholder
+ * 「选择标的」，看起来像「没回填」。INC-02 修复：受控值恒含 `trade.securityId` +
+ * 选项保底 unshift 一条「当前标的」占位，保证任意时刻 value 都能命中已渲染选项。
+ *
+ * 验证点：
+ * 1. securities 未加载完（isLoading=true, data=[]）即打开编辑 → 下拉选中保底项
+ *    （value=trade.securityId，非占位「选择标的」），且控件不被禁用。
+ * 2. securities 已加载且含当前标的 → 显示「名称（代码）」。
+ * 3. 无串号：当前标的已不在可选列表时，显示「当前标的（已不在可选列表）」，
+ *    绝不串到列表中其它标的。
+ *
+ * ⚠️ Radix Select mock 为原生 <select>。
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { SecurityTradeResponse } from '@/api/types';
-import { SecuritySide } from '@investment-tracker/shared';
 
 const mocks = vi.hoisted(() => ({
   createTrade: vi.fn(),
   updateTrade: vi.fn(),
+  // 可控标的夹具
   securities: [] as Array<{ id: string; name: string; code: string }>,
   secLoading: false,
 }));
@@ -170,10 +178,10 @@ const TRADE: SecurityTradeResponse = {
   side: 'BUY_SEC',
   quantity: '100',
   costPrice: '1500.45',
-  commission: '3',
-  stampTax: '1.5',
-  other: '0.5',
-  feeTotal: '5',
+  commission: '0',
+  stampTax: '0',
+  other: '0',
+  feeTotal: '0',
   note: '建仓',
   createdAt: '2025-07-15T00:00:00.000Z',
   updatedAt: '2025-07-15T00:00:00.000Z',
@@ -185,7 +193,7 @@ function makeClient(): QueryClient {
   });
 }
 
-function renderForm(props: { trade?: SecurityTradeResponse | null } = {}): ReturnType<typeof render> {
+function renderForm(props: { trade?: SecurityTradeResponse | null } = {}) {
   return render(
     <QueryClientProvider client={makeClient()}>
       <MemoryRouter>
@@ -195,16 +203,21 @@ function renderForm(props: { trade?: SecurityTradeResponse | null } = {}): Retur
   );
 }
 
+/** 取标的下拉（原生替身）与其当前选中项文本 */
 function securitySelect(): HTMLSelectElement {
   return document.getElementById('st-security') as HTMLSelectElement;
 }
+function selectedText(sel: HTMLSelectElement): string {
+  const opt = Array.from(sel.options).find((o) => o.value === sel.value);
+  return opt?.textContent?.trim() ?? '';
+}
 
-describe('证券买卖录入 · 三项费用物理并表（INC-03/INC-04）', () => {
+describe('INC-02 标的回填竞态（编辑态）', () => {
   beforeEach(() => {
     mocks.createTrade.mockReset();
     mocks.updateTrade.mockReset();
-    mocks.createTrade.mockResolvedValue({ id: 'new-id' });
-    mocks.securities = [{ id: 's-1', name: '测试标的', code: '600000' }];
+    mocks.createTrade.mockResolvedValue(TRADE);
+    mocks.securities = [];
     mocks.secLoading = false;
   });
   afterEach(() => {
@@ -212,53 +225,65 @@ describe('证券买卖录入 · 三项费用物理并表（INC-03/INC-04）', ()
     vi.clearAllMocks();
   });
 
-  it('提交时 feeTotal = 三项之和，costPrice 由含费单价公式推导，直接写 security_trades（无 FeeRecord 痕迹）', async () => {
-    renderForm();
+  it('securities 未加载完即打开编辑 → 选中保底项（value=当前标的），不显示「选择标的」占位', () => {
+    mocks.securities = [];
+    mocks.secLoading = true;
 
-    // 标的
-    fireEvent.change(securitySelect(), { target: { value: 's-1' } });
-    // 数量 / 成交额 / 三项费用
-    fireEvent.change(document.getElementById('st-quantity') as HTMLInputElement, {
-      target: { value: '100' },
-    });
-    fireEvent.change(document.getElementById('st-trade-amount') as HTMLInputElement, {
-      target: { value: '100000' },
-    });
-    fireEvent.change(document.getElementById('st-commission') as HTMLInputElement, {
-      target: { value: '3' },
-    });
-    fireEvent.change(document.getElementById('st-stamp-tax') as HTMLInputElement, {
-      target: { value: '1.5' },
-    });
-    fireEvent.change(document.getElementById('st-other') as HTMLInputElement, {
-      target: { value: '0.5' },
-    });
-
-    fireEvent.click(screen.getByRole('button', { name: '录入' }));
-
-    await waitFor(() => expect(mocks.createTrade).toHaveBeenCalledTimes(1));
-    const payload = (mocks.createTrade.mock.calls[0][0] as { payload: Record<string, unknown> })
-      .payload;
-
-    // feeTotal = 3 + 1.5 + 0.5 = 5
-    expect(payload.commission).toBe(3);
-    expect(payload.stampTax).toBe(1.5);
-    expect(payload.other).toBe(0.5);
-    expect(payload.feeTotal).toBe(5);
-    // 买入含费单价 = (成交额 100000 + 费用合计 5) / 数量 100 = 1000.05
-    expect(payload.costPrice).toBe(1000.05);
-    // 物理并表：直接写 security_trades 行，无 fee/price 旧字段
-    expect(payload).not.toHaveProperty('fee');
-    expect(payload).not.toHaveProperty('price');
-  });
-
-  it('编辑态三项费用正确回填（trade.commission/stampTax/other）', () => {
     renderForm({ trade: TRADE });
 
-    expect((document.getElementById('st-commission') as HTMLInputElement).value).toBe('3');
-    expect((document.getElementById('st-stamp-tax') as HTMLInputElement).value).toBe('1.5');
-    expect((document.getElementById('st-other') as HTMLInputElement).value).toBe('0.5');
-    // 费用合计预览 = 5
-    expect(screen.getByTestId('fee-total').textContent).toContain('5');
+    const sel = securitySelect();
+    // 关键：受控值恒含 trade.securityId，选中保底项而非空占位
+    expect(sel.value).toBe('s-a');
+    expect(selectedText(sel)).toBe('当前标的（加载中…）');
+    // 编辑态即便列表在加载也不禁用（保底项可正常回显）
+    expect(sel.disabled).toBe(false);
+  });
+
+  it('securities 已加载且含当前标的 → 显示「名称（代码）」', () => {
+    mocks.securities = [{ id: 's-a', name: '贵州茅台', code: '600519' }];
+    mocks.secLoading = false;
+
+    renderForm({ trade: TRADE });
+
+    const sel = securitySelect();
+    expect(sel.value).toBe('s-a');
+    expect(selectedText(sel)).toBe('贵州茅台（600519）');
+  });
+
+  it('无串号：当前标的已不在可选列表 → 显示「当前标的（已不在可选列表）」，不串到其它标的', () => {
+    mocks.securities = [{ id: 's-b', name: '其它股票', code: '000001' }];
+    mocks.secLoading = false;
+
+    renderForm({ trade: TRADE });
+
+    const sel = securitySelect();
+    // 仍选中 trade 自己的标的（s-a），而非列表中的 s-b
+    expect(sel.value).toBe('s-a');
+    expect(selectedText(sel)).toBe('当前标的（已不在可选列表）');
+    // 选中的不是别的标的
+    expect(selectedText(sel)).not.toBe('其它股票（000001）');
+  });
+
+  it('加载完成后回填项被真实标的覆盖（不再显示「加载中」）', () => {
+    // 先以加载态渲染
+    mocks.securities = [];
+    mocks.secLoading = true;
+    const { rerender } = renderForm({ trade: TRADE });
+    expect(selectedText(securitySelect())).toBe('当前标的（加载中…）');
+
+    // 列表到达
+    mocks.securities = [{ id: 's-a', name: '贵州茅台', code: '600519' }];
+    mocks.secLoading = false;
+    rerender(
+      <QueryClientProvider client={makeClient()}>
+        <MemoryRouter>
+          <SecurityTradeForm portfolioId="pf-1" trade={TRADE} />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    const sel = securitySelect();
+    expect(sel.value).toBe('s-a');
+    expect(selectedText(sel)).toBe('贵州茅台（600519）');
   });
 });

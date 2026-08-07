@@ -9,7 +9,7 @@
  *   （每日收益 =（当日累计净值 − 前日累计净值）× 前日份额；正红负绿）
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   Card,
   CardContent,
@@ -30,11 +30,15 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Label } from '@/components/ui/label';
 import {
   DimensionSwitcher,
-  QUICK_RANGE_OPTIONS,
-  resolveQuickRange,
+  toDimensionQueryParams,
 } from '@/features/query/dimension-switcher';
 import type { DimensionSwitcherValue } from '@/features/query/dimension-switcher';
+import {
+  QUICK_RANGE_OPTIONS,
+  resolveQuickRange,
+} from '@/features/query/quick-range';
 import { useDefaultDateRange } from '@/features/query/use-default-date-range';
+import { useRangePreferenceSync } from '@/hooks/use-range-preference-sync';
 import { NavTrendChart } from '@/components/charts/nav-trend-chart';
 import { MonthlyHeatmap } from '@/components/charts/monthly-heatmap';
 import {
@@ -136,23 +140,51 @@ export default function NavAnalysisPage(): JSX.Element {
     endDate: initialRange.endDate,
     // ANL-P0-03：默认聚合读偏好（SET-P0-02 验收4），与 XIRR 页现状一致
     aggregation: getPreference('aggregation') as AggregationMethod,
+    // INC-01：快捷范围受控回显，首帧取偏好回落值（'1y'），偏好到达后由对齐 effect 纠正
+    quick: defaultRange,
   });
   const [metric, setMetric] = useState<NavMetric>(NavMetricEnum.BOTH);
 
-  // 偏好对齐 effect（架构 §8）：偏好异步到达后，URL 无 range/startDate/endDate 参数时对齐一次
-  useEffect(() => {
-    const sp = new URLSearchParams(window.location.search);
-    if (sp.has('range') || sp.has('startDate') || sp.has('endDate')) return;
-    setDimension((prev) => ({
-      ...prev,
-      ...resolveQuickRange(defaultRange, {
-        allRangeStart: baseDate ?? undefined,
-      }),
-    }));
-  }, [defaultRange, baseDate]);
+  /**
+   * 偏好对齐守卫（INC-01 决策 E · 统一范式）。
+   *
+   * 取代原先「每次 defaultRange/baseDate 变化就无条件 setDimension」的写法 ——
+   * 那会在用户手动改过范围后把选择弹回偏好默认值（持仓页曾踩过的 QA Bug）。
+   */
+  const { markInteracted } = useRangePreferenceSync({
+    currentQuick: dimension.quick ?? '',
+    currentStartDate: dimension.startDate,
+    allRangeStart: baseDate,
+    urlParamKeys: ['range', 'startDate', 'endDate'],
+    onAlign: (alignment) =>
+      setDimension((prev) => ({
+        ...prev,
+        quick: alignment.quick,
+        startDate: alignment.startDate,
+        endDate: alignment.endDate,
+      })),
+  });
+
+  /** 维度/范围变更入口：改动了日期范围即标记用户交互（此后不再被偏好对齐覆盖） */
+  const handleDimensionChange = (next: DimensionSwitcherValue): void => {
+    if (
+      next.quick !== dimension.quick ||
+      next.startDate !== dimension.startDate ||
+      next.endDate !== dimension.endDate
+    ) {
+      markInteracted();
+    }
+    setDimension(next);
+  };
+
+  // 🔴 必须剥离 quick（纯 UI 回显字段）：后端 ValidationPipe forbidNonWhitelisted 会 400
+  const dimensionParams = useMemo(
+    () => toDimensionQueryParams(dimension),
+    [dimension],
+  );
 
   const series = useNavSeries(currentPortfolioId, {
-    ...dimension,
+    ...dimensionParams,
     metric,
   });
   const latest = useLatestNav(currentPortfolioId);
@@ -160,14 +192,11 @@ export default function NavAnalysisPage(): JSX.Element {
   // 热力图 + 每日明细表固定使用日维度数据（独立查询）。
   // 注意：这里是技术必需（每日收益/月度热力图依赖日粒度），不是用户偏好，
   // 因此不读取 defaultGranularity，保持 DAY 硬编码。
-  const dayParams: typeof dimension = {
-    ...dimension,
-    granularity: QueryGranularity.DAY,
-  };
-  const daySeries = useNavSeries(
-    currentPortfolioId,
-    dimension.granularity === QueryGranularity.DAY ? { ...dimension, metric } : { ...dayParams, metric },
+  const dayParams = useMemo(
+    () => ({ ...dimensionParams, granularity: QueryGranularity.DAY }),
+    [dimensionParams],
   );
+  const daySeries = useNavSeries(currentPortfolioId, { ...dayParams, metric });
 
   if (!currentPortfolioId) {
     return (
@@ -205,7 +234,7 @@ export default function NavAnalysisPage(): JSX.Element {
       <div className="flex flex-wrap items-end gap-4">
         <DimensionSwitcher
           value={dimension}
-          onChange={setDimension}
+          onChange={handleDimensionChange}
           quickRanges={QUICK_RANGE_OPTIONS}
           allRangeStart={baseDate}
         />

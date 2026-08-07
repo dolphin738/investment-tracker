@@ -30,7 +30,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { DateRangeQuickPicker } from '@/components/date/date-range-quick-picker';
-import { resolveQuickRange } from '@/features/query/dimension-switcher';
+import { resolveQuickRange } from '@/features/query/quick-range';
 import { todayInAppTzIso } from '@/lib/constants';
 import { cn } from '@/lib/utils';
 import { SecurityType } from '@investment-tracker/shared';
@@ -50,10 +50,11 @@ export interface HoldingsToolbarProps {
   allRangeStart?: string | null;
   /** 标的多选数据源 */
   securities: Security[];
-  /** 偏好默认范围（URL 无 range 时 schema 默认值；仅供回显兜底） */
-  defaultRange: string;
   className?: string;
 }
+// 🔴 INC-01 死代码清理：原 `defaultRange: string` prop 从未被组件体解构使用
+// （偏好默认值由 HoldingsPage 通过 useUrlState schema 默认值 + 偏好对齐 effect 承担），
+// 属纯噪声接口，已随本次控件统一一并删除。
 
 export function HoldingsToolbar({
   value,

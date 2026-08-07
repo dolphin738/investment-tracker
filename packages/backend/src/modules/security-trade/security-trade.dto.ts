@@ -3,7 +3,11 @@
  *
  * 方案B：SecurityTrade 是持仓推导唯一来源。
  * BUY_SEC=买入，SELL_SEC=卖出。
- * quantity / price / fee 均为 Decimal 精度。
+ * quantity / costPrice / 分项费用为 Decimal 精度。
+ *
+ * INC-03（决策 B）：price 改名 costPrice（含费单价语义不变）。
+ * INC-04（决策 A + F）：分项费用（commission/stampTax/other）直接承载于本表，
+ *   fee_records 表已删除（推翻裁决 Q-8）；feeTotal = 三项之和（冗余展示列）。
  */
 
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
@@ -43,7 +47,7 @@ export class CreateSecurityTradeDto {
   quantity!: number;
 
   @ApiProperty({
-    description: '成交单价（> 0）——新口径为「含费单价」，example: 1500.45, minimum: 0.000001',
+    description: '成交单价（含费单价，> 0）——INC-03 改名自原 price',
     example: 1500.45,
     minimum: 0.000001,
   })
@@ -51,11 +55,10 @@ export class CreateSecurityTradeDto {
   @IsNumber()
   @Min(0.000001)
   @Max(1e15)
-  price!: number;
+  costPrice!: number;
 
   @ApiPropertyOptional({
-    description:
-      '手续费（≥ 0）——增量设计 C-5：该字段已被废弃，服务层 create 强制落 0、update 忽略；费用拆分请 POST /fees（transactionId 关联）',
+    description: '佣金（≥ 0，INC-04 物理并表至 security_trades）',
     example: 0,
     default: 0,
   })
@@ -64,7 +67,43 @@ export class CreateSecurityTradeDto {
   @IsNumber()
   @Min(0)
   @Max(1e15)
-  fee?: number;
+  commission?: number;
+
+  @ApiPropertyOptional({
+    description: '印花税（≥ 0，INC-04 物理并表至 security_trades）',
+    example: 0,
+    default: 0,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @Max(1e15)
+  stampTax?: number;
+
+  @ApiPropertyOptional({
+    description: '其他费用（≥ 0，INC-04 物理并表至 security_trades）',
+    example: 0,
+    default: 0,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @Max(1e15)
+  other?: number;
+
+  @ApiPropertyOptional({
+    description: '费用合计（冗余列，恒等于 commission+stampTax+other；服务端以三分项之和覆盖）',
+    example: 0,
+    default: 0,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @Max(1e15)
+  feeTotal?: number;
 
   @ApiPropertyOptional({ description: '备注' })
   @IsOptional()
@@ -99,21 +138,45 @@ export class UpdateSecurityTradeDto {
   @Max(1e15)
   quantity?: number;
 
-  @ApiPropertyOptional({ description: '成交单价（> 0）', minimum: 0.000001 })
+  @ApiPropertyOptional({ description: '成交单价（含费单价，> 0）', minimum: 0.000001 })
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(0.000001)
   @Max(1e15)
-  price?: number;
+  costPrice?: number;
 
-  @ApiPropertyOptional({ description: '手续费（≥ 0）' })
+  @ApiPropertyOptional({ description: '佣金（≥ 0）', default: 0 })
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(0)
   @Max(1e15)
-  fee?: number;
+  commission?: number;
+
+  @ApiPropertyOptional({ description: '印花税（≥ 0）', default: 0 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @Max(1e15)
+  stampTax?: number;
+
+  @ApiPropertyOptional({ description: '其他费用（≥ 0）', default: 0 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @Max(1e15)
+  other?: number;
+
+  @ApiPropertyOptional({ description: '费用合计（冗余列；服务端以三分项之和覆盖）', default: 0 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @Max(1e15)
+  feeTotal?: number;
 
   @ApiPropertyOptional({ description: '备注' })
   @IsOptional()

@@ -65,18 +65,17 @@ export enum DividendType {
   STOCK_DIVIDEND = 'STOCK_DIVIDEND',
 }
 
-/** 费用类型 */
-export enum FeeType {
-  COMMISSION = 'COMMISSION',
-  STAMP_TAX = 'STAMP_TAX',
-  OTHER = 'OTHER',
-}
-
 /**
- * 费用场景（I-03）
+ * 费用场景（I-03 引入；INC-03/INC-04 后仅前端保留）
  *
- * ⚠️ 三处值必须一致（共享知识 §8）：后端 prisma `enum FeeScenario { BUY SELL }`、
- * shared `FeeScenario` const/type、此处 web enum。
+ * 仅作为前端 TS enum 存在，用于持仓统一筛选器（holdings-toolbar / holdings-query-params）
+ * 的 `scenario` 下拉参数，映射 `SecurityTrade.side`：BUY_SEC → BUY、SELL_SEC → SELL。
+ *
+ * ⚠️ 注意：这**不是** Prisma/Postgres 枚举。后端 `schema.prisma` 已无 `FeeScenario`
+ * 枚举（`"FeeScenario"` 类型由 migration `20260807140302_tx_opt_batch2` 的
+ * `DROP TYPE "FeeScenario"` 删除），`fee_records` 表亦被物理删除；`shared` 中对应的
+ * fee 类型已随 `FeeRecord` 一并删除。故本 enum 为前端单一真源，值（BUY/SELL）必须与
+ * `SecuritySide` 映射口径（BUY_SEC→BUY / SELL_SEC→SELL）保持一致。
  */
 export enum FeeScenario {
   BUY = 'BUY',
@@ -213,9 +212,9 @@ export interface HoldingsAggregate {
 }
 
 // ============================================================================
-// 分红/费用相关（HOLD-B-P0-10 · 不参与 XIRR/净值计算 D-02/D-03）
+// 分红相关（HOLD-B-P0-10 · 不参与 XIRR/净值计算 D-02/D-03）
 //
-// ⚠️ 与后端 DividendService/FeeService 响应逐字段对齐：
+// ⚠️ 与后端 DividendService 响应逐字段对齐：
 // - 两表**无 updatedAt 列**（schema.prisma:230/247 只有 createdAt），故此处不得声明
 // - 后端 include security 后回填 securityName / securityCode，前端无需再映射
 // - amount 为 NUMERIC(18,2) 字符串，避免 JS 浮点丢精，展示前用 Number() 转换
@@ -258,78 +257,6 @@ export interface UpdateDividendRecordDto {
   tax?: string;
   type?: DividendType;
   note?: string;
-}
-
-/** 费用记录 */
-export interface FeeRecord {
-  id: string;
-  portfolioId: string;
-  securityId: string;
-  securityName: string;
-  securityCode: string;
-  date: string;
-  type: FeeType;
-  /** 费用场景（BUY=买入时 / SELL=卖出时，I-03） */
-  scenario: FeeScenario;
-  amount: string;
-  /** 关联证券买卖流水 ID（可选） */
-  transactionId: string | null;
-  note: string | null;
-  createdAt: string;
-}
-
-/** 创建费用 DTO（type 可选，后端缺省 OTHER；scenario 缺省按 transactionId 推断） */
-export interface CreateFeeRecordDto {
-  securityId: string;
-  date: string;
-  type?: FeeType;
-  scenario?: FeeScenario;
-  amount: string;
-  transactionId?: string;
-  note?: string;
-}
-
-/** 更新费用 DTO（I-03 · PATCH /fees/:id，全可选） */
-export interface UpdateFeeRecordDto {
-  securityId?: string;
-  date?: string;
-  amount?: string;
-  type?: FeeType;
-  scenario?: FeeScenario;
-  note?: string;
-}
-
-/** 费用查询参数（I-03 / I-05：标的多值 / 场景 / 日期范围 / grouped 聚合） */
-export interface FeeQuery {
-  /** 标的 ID（逗号分隔多值，I-05 统一筛选器标的多选） */
-  securityId?: string;
-  /** 场景过滤（BUY 买入时 / SELL 卖出时） */
-  scenario?: FeeScenario;
-  /** 起始日期 YYYY-MM-DD（含） */
-  startDate?: string;
-  /** 结束日期 YYYY-MM-DD（含） */
-  endDate?: string;
-  /** grouped=1 按合并键聚合返回 FeeGroupedRow[]（I-03）；缺省返回明细行 */
-  grouped?: boolean;
-}
-
-/** 费用列表 grouped=1 聚合行（I-03 / Q-3：明细行各自保留 transactionId，聚合行携带全量去重列表） */
-export interface FeeGroupedRow {
-  /** `${securityId}|${date}|${scenario}|${type}` */
-  mergeKey: string;
-  securityId: string;
-  securityName: string;
-  securityCode: string;
-  /** YYYY-MM-DD */
-  date: string;
-  scenario: FeeScenario;
-  type: FeeType;
-  /** Σ 金额，toFixed(2) */
-  amount: string;
-  /** 组成笔数 */
-  count: number;
-  /** 关联流水 ID 去重列表 */
-  transactionIds: string[];
 }
 
 // ============================================================================
@@ -623,7 +550,12 @@ export interface OverviewResponse {
 }
 
 /**
- * 组合摘要（GET /portfolios/summary · 用于账户页资产全景 / 组合列表）
+ * 组合摘要（**多组合列表行** · GET /portfolios/summary · 账户页资产全景 / 组合列表）
+ *
+ * 🔴 命名消歧（T01 共享类型归并）：`@investment-tracker/shared` 里另有一个同名的
+ * `PortfolioSummary`，那是**单组合 Dashboard 卡片**契约（`GET /portfolios/:id/summary`，
+ * 字段为 cumulativeXirr/totalReturnRate/… 且数值为 number）。二者是两个不同接口，
+ * 不可互换；Web 端消费的是**本文件这一份**，import 请一律走 `@/api/types`。
  *
  * 数值字段一律以 string 跨网（Prisma.Decimal.toFixed(n)）：
  * - 金额 2 位（totalAsset / netInvested / floatingProfit）
@@ -707,34 +639,54 @@ export interface SecurityTradeResponse {
   /** BUY_SEC=买入 / SELL_SEC=卖出 */
   side: SecuritySide;
   quantity: string;
-  price: string;
-  fee: string;
+  /** 含费单价（INC-03 由 price 重命名，金融算法不变） */
+  costPrice: string;
+  /** 佣金（INC-04 物理并表至 security_trades） */
+  commission: string;
+  /** 印花税（INC-04 物理并表至 security_trades） */
+  stampTax: string;
+  /** 其他费用（INC-04 物理并表至 security_trades） */
+  other: string;
+  /** 费用合计 = commission + stampTax + other（冗余展示列，后端计算） */
+  feeTotal: string;
   note: string | null;
   createdAt: string;
   updatedAt: string;
 }
 
-/** 创建证券买卖流水 DTO（数量/单价/费用为 number，后端 DTO 要求 IsNumber）
- * ⚠️ fee 新口径恒为 0（增量设计 C-5/K-4）：后端 create 强制落 0、update 忽略；
- *    含费单价存入 price，费用拆分落 FeeRecord（transactionId 关联本交易）。 */
+/** 创建证券买卖流水 DTO（数量/含费单价为 number，后端 DTO 要求 IsNumber）
+ * ⚠️ INC-04 物理并表：费用直接承载 commission/stampTax/other 三列，
+ *    feeTotal 由后端以三列之和覆盖（冗余展示列）；前端按公式自行提交 feeTotal 亦可。 */
 export interface CreateSecurityTradeRequest {
   securityId: string;
   date: string;
   side: SecuritySide;
   quantity: number;
-  price: number;
-  fee: number;
+  /** 含费单价（INC-03 由 price 重命名） */
+  costPrice: number;
+  /** 佣金（≥ 0，缺省 0） */
+  commission?: number;
+  /** 印花税（≥ 0，缺省 0） */
+  stampTax?: number;
+  /** 其他费用（≥ 0，缺省 0） */
+  other?: number;
+  /** 费用合计（≥ 0，缺省 0；后端以三列之和覆盖） */
+  feeTotal?: number;
   note?: string;
 }
 
-/** 更新证券买卖流水 DTO（全部可选；fee 字段被后端忽略，保留现值） */
+/** 更新证券买卖流水 DTO（全部可选；分项费用任一传入即重算 feeTotal） */
 export interface UpdateSecurityTradeRequest {
   securityId?: string;
   date?: string;
   side?: SecuritySide;
   quantity?: number;
-  price?: number;
-  fee?: number;
+  /** 含费单价（INC-03 由 price 重命名） */
+  costPrice?: number;
+  commission?: number;
+  stampTax?: number;
+  other?: number;
+  feeTotal?: number;
   note?: string | null;
 }
 

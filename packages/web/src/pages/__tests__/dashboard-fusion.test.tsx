@@ -524,7 +524,7 @@ describe('DashboardPage 总资产概览融合（页面级验收）', () => {
       renderDashboard();
       await screen.findByTestId('nav-chart');
 
-      expect(screen.getByText('起始日期')).toBeDefined();
+      expect(screen.getByText('开始日期')).toBeDefined();
       expect(screen.getByText('结束日期')).toBeDefined();
     });
   });

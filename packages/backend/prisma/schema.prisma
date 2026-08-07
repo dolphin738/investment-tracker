@@ -49,7 +49,6 @@ model Portfolio {
   dailyNavs      DailyNav[]
   dailyXirrs     DailyXirr[]
   dividends      DividendRecord[]
-  fees           FeeRecord[]
 
   @@index([userId])
   @@map("portfolios")
@@ -90,7 +89,6 @@ model Security {
   trades      SecurityTrade[]
   prices      SecurityPrice[]
   dividends   DividendRecord[]
-  fees        FeeRecord[]
 
   @@unique([portfolioId, code])
   @@map("securities")
@@ -105,6 +103,8 @@ enum SecurityType {
 }
 
 // ==================== 证券买卖流水表（方案B · 持仓推导唯一来源）====================
+// INC-04（决策 A + F）：分项费用（佣金/印花税/其他）物理收进本表，原 fee_records 表已删除（推翻裁决 Q-8）。
+// INC-03（决策 B）：price 改名 costPrice（含费单价语义不变）；fee 改名 feeTotal（= Σ 三项，冗余展示列）。
 model SecurityTrade {
   id          String       @id @default(uuid())
   portfolioId String       @map("portfolio_id")
@@ -112,8 +112,11 @@ model SecurityTrade {
   date        DateTime     @db.Date
   side        SecuritySide
   quantity    Decimal      @db.Decimal(18, 6)
-  price       Decimal      @db.Decimal(18, 6)
-  fee         Decimal      @db.Decimal(18, 2)
+  costPrice   Decimal      @map("cost_price") @db.Decimal(18, 6)
+  feeTotal    Decimal      @default(0) @map("fee_total") @db.Decimal(18, 2)
+  commission  Decimal      @default(0) @db.Decimal(18, 2)
+  stampTax    Decimal      @default(0) @db.Decimal(18, 2)
+  other       Decimal      @default(0) @db.Decimal(18, 2)
   note        String?
   createdAt   DateTime     @default(now()) @map("created_at")
   updatedAt   DateTime     @updatedAt @map("updated_at")
@@ -226,7 +229,7 @@ model DailyXirr {
   @@map("daily_xirr")
 }
 
-// ==================== 分红 / 费用 / 偏好（不参与收益计算，C-08/C-09）====================
+// ==================== 分红记录（不参与收益计算，C-08/C-09）====================
 model DividendRecord {
   id          String       @id @default(uuid())
   portfolioId String       @map("portfolio_id")
@@ -246,35 +249,7 @@ model DividendRecord {
   @@map("dividend_records")
 }
 
-model FeeRecord {
-  id            String      @id @default(uuid())
-  portfolioId   String      @map("portfolio_id")
-  securityId    String      @map("security_id")
-  date          DateTime    @db.Date
-  amount        Decimal     @db.Decimal(18, 2)
-  type          FeeType     @default(OTHER)
-  // 🆕 I-03：费用场景（BUY=买入时 / SELL=卖出时），非空。
-  // 正常写入路径由 FeeService 显式推断/校验后落库；@default(BUY) 仅作安全网默认值
-  // （架构裁决 Q-8：不采纳 DB 层唯一约束，合并走展示层聚合，明细行保留精确关联）。
-  scenario      FeeScenario @default(BUY)
-  transactionId String?     @map("transaction_id")
-  note          String?
-  createdAt     DateTime    @default(now()) @map("created_at")
-  portfolio     Portfolio   @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
-  security      Security    @relation(fields: [securityId], references: [id], onDelete: Cascade)
-
-  @@index([portfolioId, date])
-  @@index([securityId, date])
-  // 🆕 I-03：场景筛选走统一筛选器（I-05）时的查询索引
-  @@index([portfolioId, scenario, date])
-  @@map("fee_records")
-}
-
-enum FeeScenario {
-  BUY
-  SELL
-}
-
+// ==================== 用户偏好 ====================
 model UserPreference {
   id                 String   @id @default(uuid())
   userId             String   @unique @map("user_id")
@@ -306,10 +281,4 @@ model UserPreference {
 enum DividendType {
   CASH
   STOCK_DIVIDEND
-}
-
-enum FeeType {
-  COMMISSION
-  STAMP_TAX
-  OTHER
 }

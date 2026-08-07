@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/select';
 import { usePortfolios } from '@/hooks/use-portfolios';
 import { usePortfolioStore } from '@/stores/portfolio.store';
+import { ENTRY_BUTTON_LABELS } from '@/constants/entry-button-labels';
 
 export interface PortfolioSelectorProps {
   /** 选择"创建新组合"时的回调 */
@@ -77,7 +78,8 @@ export function PortfolioSelector({
           <SelectItem value="__create_new__">
             <span className="flex items-center gap-2 text-primary">
               <Plus className="h-3 w-3" />
-              新建组合
+              {/* 决策 H：文案取统一字典（下拉内联入口，样式保持内联规格） */}
+              {ENTRY_BUTTON_LABELS.portfolio}
             </span>
           </SelectItem>
         </SelectContent>

@@ -8,7 +8,7 @@
  * - 明细表（日期/XIRR/环比变化）
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   Card,
   CardContent,
@@ -27,11 +27,15 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   DimensionSwitcher,
-  QUICK_RANGE_OPTIONS,
-  resolveQuickRange,
+  toDimensionQueryParams,
 } from '@/features/query/dimension-switcher';
 import type { DimensionSwitcherValue } from '@/features/query/dimension-switcher';
+import {
+  QUICK_RANGE_OPTIONS,
+  resolveQuickRange,
+} from '@/features/query/quick-range';
 import { useDefaultDateRange } from '@/features/query/use-default-date-range';
+import { useRangePreferenceSync } from '@/hooks/use-range-preference-sync';
 import { XirrTrendChart } from '@/components/charts/xirr-trend-chart';
 import { YearlyBarChart } from '@/components/charts/yearly-bar-chart';
 import {
@@ -69,21 +73,45 @@ export default function XirrAnalysisPage(): JSX.Element {
     startDate: initialRange.startDate,
     endDate: initialRange.endDate,
     aggregation: AggregationMethod.LAST,
+    // INC-01：快捷范围受控回显，首帧取偏好回落值（'1y'），偏好到达后由对齐 effect 纠正
+    quick: defaultRange,
   });
 
-  // 偏好对齐 effect（架构 §8）：偏好异步到达后，URL 无 range/startDate/endDate 参数时对齐一次
-  useEffect(() => {
-    const sp = new URLSearchParams(window.location.search);
-    if (sp.has('range') || sp.has('startDate') || sp.has('endDate')) return;
-    setDimension((prev) => ({
-      ...prev,
-      ...resolveQuickRange(defaultRange, {
-        allRangeStart: baseDate ?? undefined,
-      }),
-    }));
-  }, [defaultRange, baseDate]);
+  /**
+   * 偏好对齐守卫（INC-01 决策 E · 统一范式）。
+   *
+   * 取代原先「每次 defaultRange/baseDate 变化就无条件 setDimension」的写法 ——
+   * 那会在用户手动改过范围后把选择弹回偏好默认值（持仓页曾踩过的 QA Bug）。
+   */
+  const { markInteracted } = useRangePreferenceSync({
+    currentQuick: dimension.quick ?? '',
+    currentStartDate: dimension.startDate,
+    allRangeStart: baseDate,
+    urlParamKeys: ['range', 'startDate', 'endDate'],
+    onAlign: (alignment) =>
+      setDimension((prev) => ({
+        ...prev,
+        quick: alignment.quick,
+        startDate: alignment.startDate,
+        endDate: alignment.endDate,
+      })),
+  });
 
-  const series = useXirrSeries(currentPortfolioId, dimension);
+  /** 维度/范围变更入口：改动了日期范围即标记用户交互（此后不再被偏好对齐覆盖） */
+  const handleDimensionChange = (next: DimensionSwitcherValue): void => {
+    if (
+      next.quick !== dimension.quick ||
+      next.startDate !== dimension.startDate ||
+      next.endDate !== dimension.endDate
+    ) {
+      markInteracted();
+    }
+    setDimension(next);
+  };
+
+  // 🔴 必须剥离 quick（纯 UI 回显字段）：后端 ValidationPipe forbidNonWhitelisted 会 400
+  const seriesParams = useMemo(() => toDimensionQueryParams(dimension), [dimension]);
+  const series = useXirrSeries(currentPortfolioId, seriesParams);
   const latest = useLatestXirr(currentPortfolioId);
   // 较年初基准：独立日粒度查询当年首个非空 XIRR（ANL-P0-04 / Part E-6），
   // 与页面维度/范围解耦 —— 修复旧实现「查询范围不含年初时基准错」的缺陷（Part A2）
@@ -129,7 +157,7 @@ export default function XirrAnalysisPage(): JSX.Element {
       <div className="flex flex-wrap items-end gap-4">
         <DimensionSwitcher
           value={dimension}
-          onChange={setDimension}
+          onChange={handleDimensionChange}
           quickRanges={QUICK_RANGE_OPTIONS}
           allRangeStart={baseDate}
         />

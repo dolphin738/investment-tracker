@@ -35,8 +35,8 @@ function trade(overrides: Partial<Record<string, unknown>> = {}) {
     date: d('2026-01-10'),
     side: SecuritySide.BUY_SEC,
     quantity: { toString: () => '100' },
-    price: { toString: () => '10' },
-    fee: { toString: () => '5' },
+    // INC-03：price 重命名为 costPrice（含费单价，费用已并入，不再单列 fee）
+    costPrice: { toString: () => '10.05' },
     note: null,
     createdAt: new Date('2026-01-10T00:00:00.000Z'),
     updatedAt: new Date('2026-01-10T00:00:00.000Z'),
@@ -133,7 +133,7 @@ describe('HoldingDerivationService.deriveBatch — raw query 类型匹配（Bug 
 
   it('价格行按 text security_id 匹配成功 → 估值 EXACT，市值 = 数量 × 现价', async () => {
     const ctx = setup(
-      [trade()], // 100 股 @10，手续费 5 → costTotal=1005
+      [trade()], // 100 股 @含费单价 10.05 → costTotal=1005
       [priceRow()], // 现价 12.5，asOf 2026-06-15
     );
 
@@ -141,16 +141,16 @@ describe('HoldingDerivationService.deriveBatch — raw query 类型匹配（Bug 
 
     const views = result.get('2026-06-30')!;
     expect(views).toHaveLength(1);
-    expect(views[0]).toMatchObject({
-      securityId: 'sec-1',
-      quantity: 100,
-      avgCost: 10.05, // (100*10 + 5) / 100
-      costTotal: 1005,
-      marketPrice: 12.5,
-      priceAsOf: '2026-06-15',
-      marketValue: 1250,
-      flag: 'EXACT',
-    });
+    // 数值字段用 toBeCloseTo 容差（含费单价 10.05 为二进制浮点不精确值，
+    // 100 * 10.05 = 1005.0000000000001，属正常的浮点尾差，不影响金额口径）
+    expect(views[0].securityId).toBe('sec-1');
+    expect(views[0].quantity).toBe(100);
+    expect(views[0].avgCost).toBeCloseTo(10.05, 6); // 100 * 10.05 / 100
+    expect(views[0].costTotal).toBeCloseTo(1005, 6);
+    expect(views[0].marketPrice).toBe(12.5);
+    expect(views[0].priceAsOf).toBe('2026-06-15');
+    expect(views[0].marketValue).toBeCloseTo(1250, 6);
+    expect(views[0].flag).toBe('EXACT');
   });
 
   it('无价格记录 → 回退成本估值（COST_BASED，priceAsOf=null）', async () => {
@@ -159,11 +159,9 @@ describe('HoldingDerivationService.deriveBatch — raw query 类型匹配（Bug 
     const result = await ctx.service.deriveBatch(PORTFOLIO_ID, [d('2026-06-30')]);
 
     const views = result.get('2026-06-30')!;
-    expect(views[0]).toMatchObject({
-      marketPrice: 10.05,
-      priceAsOf: null,
-      flag: 'COST_BASED',
-    });
+    expect(views[0].marketPrice).toBeCloseTo(10.05, 6); // 沿用 avgCost 估值
+    expect(views[0].priceAsOf).toBe(null);
+    expect(views[0].flag).toBe('COST_BASED');
   });
 
   it('卖出量超持仓 → BadRequestException（400）', async () => {

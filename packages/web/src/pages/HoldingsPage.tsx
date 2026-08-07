@@ -7,12 +7,12 @@
  *   - 日期范围（range/from/to）→ 买卖明细 / 分红费用
  *   - 持仓日期 as-of（date）→ 持仓板块
  *   - 证券多选（sec）→ 三板块
- *   - 场景（scenario）→ 买卖明细（side）/ 分红费用（scenario）；持仓不适用
+ *   - 场景（scenario）→ 买卖明细（side）；持仓不适用（INC-04 后分红板块不再承接 scenario）
  *   - 类型多选（types）+ 显示已清仓（closed）→ 持仓板块（专属折叠区）
  * - 【A】持仓汇总：总市值 / 总成本 / 浮盈 / 总盈亏率 / 标的数（HOLD-B-P0-06）
  * - 【B】持仓列表（只读，由 security-trades 推导），PRD §5.2.3 全 11 列
  * - 【C】证券买卖明细流水：列表（筛选由统一筛选器派生，HOLD-B-P0-07）
- * - 【E】分红 / 费用记录：按标的累计分红与累计费用 + 明细 CRUD（HOLD-B-P0-10）
+ * - 【E】分红记录：按标的累计分红 + 明细 CRUD（HOLD-B-P0-10；INC-04 费用已并入证券买卖流水）
  * - 空态引导按钮 → 打开录入弹窗（与出入金页完全解耦）
  *
  * 排序（决策 Q-5 甲）：列表在前端按市值降序展示，不依赖后端排序参数。
@@ -49,8 +49,14 @@ import { DividendFeeSection } from '@/features/security-income/dividend-fee-sect
 import { HoldingsToolbar } from '@/features/holdings/holdings-toolbar';
 import { createHoldingsSchema } from '@/features/holdings/holdings-query-params';
 import type { HoldingsFilterState } from '@/features/holdings/holdings-query-params';
-import { resolveQuickRange } from '@/features/query/dimension-switcher';
+import { resolveQuickRange } from '@/features/query/quick-range';
 import { useDefaultDateRange } from '@/features/query/use-default-date-range';
+import {
+  ENTRY_BUTTON_ICON_CLASS,
+  ENTRY_BUTTON_LABELS,
+  ENTRY_BUTTON_SIZE,
+  ENTRY_BUTTON_VARIANT,
+} from '@/constants/entry-button-labels';
 import { usePortfolioStore, usePortfolioBaseDate } from '@/stores/portfolio.store';
 import { usePreferenceStore } from '@/stores/preference.store';
 import { usePortfolios } from '@/hooks/use-portfolios';
@@ -269,9 +275,13 @@ export default function HoldingsPage(): JSX.Element {
         title="持仓"
         description="持仓由证券买卖流水实时推导，只读展示；现价可内联修改"
         actions={
-          <Button size="sm" onClick={() => setTradeDialogOpen(true)}>
-            <Plus className="mr-2 h-4 w-4" />
-            录入买卖
+          <Button
+            size={ENTRY_BUTTON_SIZE}
+            variant={ENTRY_BUTTON_VARIANT}
+            onClick={() => setTradeDialogOpen(true)}
+          >
+            <Plus className={ENTRY_BUTTON_ICON_CLASS} />
+            {ENTRY_BUTTON_LABELS.securityTrade}
           </Button>
         }
       />
@@ -283,7 +293,6 @@ export default function HoldingsPage(): JSX.Element {
         minDate={minDate}
         allRangeStart={baseDate}
         securities={securityList}
-        defaultRange={defaultRange}
       />
 
       <Tabs defaultValue="holdings">
@@ -385,9 +394,13 @@ export default function HoldingsPage(): JSX.Element {
                   : '持仓由证券买卖流水实时推导，点击下方按钮录入第一笔买卖'
               }
               action={
-                <Button onClick={() => setTradeDialogOpen(true)}>
-                  <Plus className="mr-2 h-4 w-4" />
-                  录入买卖
+                /* INC-05：空态尺寸豁免，variant/图标/文案与页头主入口一致 */
+                <Button
+                  variant={ENTRY_BUTTON_VARIANT}
+                  onClick={() => setTradeDialogOpen(true)}
+                >
+                  <Plus className={ENTRY_BUTTON_ICON_CLASS} />
+                  {ENTRY_BUTTON_LABELS.securityTrade}
                 </Button>
               }
             />
@@ -532,11 +545,6 @@ export default function HoldingsPage(): JSX.Element {
           <DividendFeeSection
             portfolioId={currentPortfolioId}
             securityIds={holdingsQuery.sec}
-            scenario={
-              holdingsQuery.scenario === 'all'
-                ? 'all'
-                : (holdingsQuery.scenario as FeeScenario)
-            }
             startDate={startDate}
             endDate={endDate}
           />
@@ -547,7 +555,7 @@ export default function HoldingsPage(): JSX.Element {
       <Dialog open={tradeDialogOpen} onOpenChange={setTradeDialogOpen}>
         <DialogContent className="max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>录入买卖</DialogTitle>
+            <DialogTitle>{ENTRY_BUTTON_LABELS.securityTrade}</DialogTitle>
           </DialogHeader>
           <SecurityTradeForm
             portfolioId={currentPortfolioId}

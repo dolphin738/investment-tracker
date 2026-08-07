@@ -47,6 +47,12 @@ import { CardSkeleton } from '@/components/LoadingSpinner';
 import { PageHeader } from '@/components/PageHeader';
 import { UserAvatar } from '@/components/user-avatar';
 import { PortfolioDialog } from '@/features/portfolio/portfolio-dialog';
+import {
+  ENTRY_BUTTON_ICON_CLASS,
+  ENTRY_BUTTON_LABELS,
+  ENTRY_BUTTON_SIZE,
+  ENTRY_BUTTON_VARIANT,
+} from '@/constants/entry-button-labels';
 import { useAuthStore } from '@/stores/auth.store';
 import { usePortfolioStore } from '@/stores/portfolio.store';
 import { usePreferenceStore } from '@/stores/preference.store';
@@ -384,9 +390,14 @@ export default function AccountPage(): JSX.Element {
         <Card className="xl:col-span-12">
           <CardHeader className="flex-row items-center justify-between">
             <CardTitle className="text-base">我的组合</CardTitle>
-            <Button size="sm" variant="outline" onClick={() => setCreating(true)}>
-              <Plus className="mr-2 h-4 w-4" />
-              新建组合
+            {/* INC-05：原 outline，与设置页「新建组合」不一致 → 统一为主色 sm + Plus */}
+            <Button
+              size={ENTRY_BUTTON_SIZE}
+              variant={ENTRY_BUTTON_VARIANT}
+              onClick={() => setCreating(true)}
+            >
+              <Plus className={ENTRY_BUTTON_ICON_CLASS} />
+              {ENTRY_BUTTON_LABELS.portfolio}
             </Button>
           </CardHeader>
           <CardContent>

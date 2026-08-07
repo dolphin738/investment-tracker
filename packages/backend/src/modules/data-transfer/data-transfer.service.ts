@@ -112,8 +112,8 @@ function exampleRow(schema: ImportSchema): Record<string, string> {
         date: '2026-01-01',
         side: 'BUY_SEC',
         quantity: '100',
-        price: '10.50',
-        fee: '5.00',
+        costPrice: '10.50',
+        feeTotal: '5.00',
         note: '示例：买入 100 股',
       };
     case ImportType.CASH_FLOWS:
@@ -510,8 +510,11 @@ export class DataTransferService {
                 date: new Date(`${data.date}T00:00:00.000Z`),
                 side: data.side as SecuritySide,
                 quantity: new Prisma.Decimal(data.quantity),
-                price: new Prisma.Decimal(data.price),
-                fee: new Prisma.Decimal(data.fee || '0'),
+                costPrice: new Prisma.Decimal(data.costPrice),
+                commission: new Prisma.Decimal(data.feeTotal || '0'),
+                stampTax: new Prisma.Decimal('0'),
+                other: new Prisma.Decimal('0'),
+                feeTotal: new Prisma.Decimal(data.feeTotal || '0'),
                 note: data.note || null,
               },
             });

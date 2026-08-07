@@ -34,6 +34,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { DateRangeQuickPicker } from '@/components/date/date-range-quick-picker';
+import { resolveQuickRange } from '@/features/query/quick-range';
+import { useRangePreferenceSync } from '@/hooks/use-range-preference-sync';
 import { usePortfolioBaseDate } from '@/stores/portfolio.store';
 import {
   AlertDialog,
@@ -85,10 +87,31 @@ export function SnapshotList({
   // 筛选行本地状态（日期起止 + 来源 checkbox；「重置」清空）
   const [filterStart, setFilterStart] = useState('');
   const [filterEnd, setFilterEnd] = useState('');
+  // INC-01：快捷范围受控回显（空串 = 不限 / 自定义）
+  const [filterQuick, setFilterQuick] = useState('');
   // 「全部」快捷项的起点 = 组合首个交易日（问题②）
   const baseDate = usePortfolioBaseDate();
   const [autoChecked, setAutoChecked] = useState(true);
   const [manualChecked, setManualChecked] = useState(true);
+
+  /**
+   * 偏好默认范围对齐守卫（INC-01 决策 E · 统一范式）。
+   *
+   * 本组件原先不读偏好（起止恒为空串 = 不限），INC-01 要求 5 个统一页面一致：
+   * 首帧后按 `defaultDateRange` 对齐一次；用户一旦手动改过范围即不再对齐。
+   * 组件无 URL 载体，`urlParamKeys` 传空数组跳过 URL 判定。
+   */
+  const { defaultRange, markInteracted } = useRangePreferenceSync({
+    currentQuick: filterQuick,
+    currentStartDate: filterStart,
+    allRangeStart: baseDate,
+    urlParamKeys: [],
+    onAlign: (alignment) => {
+      setFilterQuick(alignment.quick);
+      setFilterStart(alignment.startDate);
+      setFilterEnd(alignment.endDate);
+    },
+  });
 
   // 偏好（金额格式）
   const getPreference = usePreferenceStore((s) => s.getPreference);
@@ -149,8 +172,16 @@ export function SnapshotList({
   const manualStats = computeManualDiffStats(items, navMap);
 
   const resetFilters = () => {
-    setFilterStart('');
-    setFilterEnd('');
+    // 重置 = 用户主动改范围，必须标记交互，否则会被偏好对齐 effect 二次覆盖
+    markInteracted();
+    // 🔴 回到「偏好默认范围」而非空：页面层 query 本就带偏好默认起止，
+    // 若这里清空，控件显示「不限」但实际查询仍按默认范围过滤 → 回显与结果不一致。
+    const resolved = resolveQuickRange(defaultRange, {
+      allRangeStart: baseDate ?? undefined,
+    });
+    setFilterQuick(defaultRange);
+    setFilterStart(resolved.startDate);
+    setFilterEnd(resolved.endDate);
     setAutoChecked(true);
     setManualChecked(true);
     setPage(1);
@@ -210,10 +241,13 @@ export function SnapshotList({
       <div className="mb-3 flex flex-wrap items-end gap-3 rounded-md border border-border p-3">
         {/* 问题⑤：接入共享快捷范围控件，与出入金页同一实现、同一高度 */}
         <DateRangeQuickPicker
+          quick={filterQuick}
           startDate={filterStart}
           endDate={filterEnd}
           allRangeStart={baseDate}
           onChange={(r) => {
+            markInteracted();
+            setFilterQuick(r.quick ?? '');
             setFilterStart(r.startDate);
             setFilterEnd(r.endDate);
           }}

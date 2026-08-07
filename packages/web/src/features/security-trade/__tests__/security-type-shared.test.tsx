@@ -24,8 +24,6 @@ const mocks = vi.hoisted(() => ({
   createSecurity: vi.fn(),
   createTrade: vi.fn(),
   updateTrade: vi.fn(),
-  // 稳定引用：表单 useFees（I-01 编辑态费用回填）返回稳定空数组，避免 effect 循环
-  feesData: [] as unknown[],
 }));
 
 vi.mock('sonner', () => ({
@@ -51,20 +49,6 @@ vi.mock('@/hooks/use-security-trades', () => ({
     mutateAsync: mocks.updateTrade,
     isPending: false,
   }),
-}));
-
-// I-01：表单新增 useFees（编辑态费用三框回填）+ useQueryClient，mock 稳定引用
-vi.mock('@/hooks/use-fees', () => ({
-  FEES_KEY: ['fees'],
-  useFees: () => ({
-    data: mocks.feesData,
-    isLoading: false,
-    isError: false,
-    refetch: () => {},
-  }),
-  useCreateFee: () => ({ mutateAsync: vi.fn(), isPending: false }),
-  useUpdateFee: () => ({ mutateAsync: vi.fn(), isPending: false }),
-  useDeleteFee: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
 /**
@@ -190,7 +174,7 @@ vi.mock('@/components/ui/select', async () => {
 
 import { SecurityTradeForm } from '@/features/security-trade/security-trade-form';
 
-/** 表单新增 useQueryClient（I-01 费用缓存失效），渲染需 QueryClientProvider 包裹 */
+/** 表单使用 react-query hooks（useSecurities / use-security-trades），渲染需 QueryClientProvider 包裹 */
 function renderWithClient(ui: React.ReactElement): ReturnType<typeof render> {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },

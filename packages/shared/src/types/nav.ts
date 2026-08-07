@@ -1,59 +1,23 @@
 /**
- * DailyNav（每日净值）类型定义
+ * DailyNav（每日净值）类型 —— **归并转发模块**（T01 共享类型去重）
  *
- * 对应 Prisma model DailyNav（daily_nav 表）。
- * 采用公募基金标准"份额-净值"模型：
- * - unit_nav：当日单位净值 = 当日资产快照 / 上日末份额（成立日 = 1.0000）
- * - cumulative_nav：累计净值 = 单位净值（v1 无分红）
- * - year_nav：当年净值 = 累计净值 / base_cumulative_nav（当年首日 = 1.0000）
- * - shares：当日末总份额 = 上日末份额 + 买入份额 - 卖出份额
- * - base_cumulative_nav：当年基准累计净值（上年末最后交易日累计净值，年内不变）
+ * 【为什么只剩转发】
+ * `DailyNav` / `NavSeriesPoint` 曾在 `packages/shared/src/types.ts`（包入口
+ * `src/index.ts` re-export 的那份）与本文件各写一份，字段一致却双份维护。
+ * 本次统一以 `../types.ts` 为**唯一真相源**，本文件退化为 type-only 转发，
+ * `src/types/index.ts` 的 `export * from './nav.ts'` 行为完全不变。
  *
- * 唯一约束：每个组合每日仅一条净值记录（portfolioId + date）。
- * 精度：净值 NUMERIC(12,6)，份额 NUMERIC(18,6)，存储 6 位小数确保计算精度。
+ * 【语义备忘（原文档保留）】
+ * 净值法核算：单位净值 unit_nav、累计净值 cumulative_nav、当年净值 year_nav、
+ * 份额 shares；出入金通过申购/赎回份额调整，不影响单位净值。
+ * 精度：净值 NUMERIC(18,6)，份额 NUMERIC(20,6)。
+ *
+ * ⚠️ 请勿在此新增声明；新增/修改一律去 `packages/shared/src/types.ts`。
  */
 
-/**
- * 每日净值记录实体
- */
-export interface DailyNav {
-  /** UUID 主键 */
-  id: string;
-  /** 所属组合 ID */
-  portfolioId: string;
-  /** 日期 YYYY-MM-DD */
-  date: string;
-  /** 当日单位净值，Decimal as string（如 "1.200000"） */
-  unitNav: string;
-  /** 累计净值，Decimal as string（v1 = 单位净值） */
-  cumulativeNav: string;
-  /** 当年净值，Decimal as string（如 "1.050000"） */
-  yearNav: string;
-  /** 当日末总份额，Decimal as string（如 "10000.000000"） */
-  shares: string;
-  /** 当年基准累计净值，null 表示成立日（base = 1.0） */
-  baseCumulativeNav: string | null;
-  /** 创建时间 ISO 8601 */
-  createdAt: string;
-  /** 更新时间 ISO 8601 */
-  updatedAt: string;
-}
-
-/**
- * 净值时间序列数据点（四维度查询返回）
- *
- * 对应 API: GET /portfolios/:portfolioId/nav
- * 按 granularity（day/week/month/year）聚合后返回。
- */
-export interface NavSeriesPoint {
-  /** 日期 YYYY-MM-DD */
-  date: string;
-  /** 累计净值，聚合后为 number，null 表示无数据 */
-  cumulativeNav: number | null;
-  /** 当年净值，null 表示无数据 */
-  yearNav: number | null;
-  /** 份额，null 表示无数据 */
-  shares: number | null;
-  /** 显示标签（如 "2025-03" 或 "2025-W12"） */
-  label: string;
-}
+export type {
+  /** 每日净值记录实体（对应 Prisma model DailyNav） */
+  DailyNav,
+  /** 净值时间序列数据点（GET /portfolios/:portfolioId/nav，按 granularity 聚合） */
+  NavSeriesPoint,
+} from '../types.ts';

@@ -81,6 +81,15 @@ export function SecurityTradeList({
   const total = data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
+  /** 当前页统计：买入金额（含费成交额）/ 卖出金额（含费成交额）/ 累计费用合计 */
+  const buyAmount = items
+    .filter((t) => t.side === SecuritySide.BUY_SEC)
+    .reduce((sum, t) => sum + Number(t.quantity) * Number(t.costPrice), 0);
+  const sellAmount = items
+    .filter((t) => t.side === SecuritySide.SELL_SEC)
+    .reduce((sum, t) => sum + Number(t.quantity) * Number(t.costPrice), 0);
+  const totalFee = items.reduce((sum, t) => sum + Number(t.feeTotal), 0);
+
   const handleConfirmDelete = () => {
     if (deletingId) {
       deleteMutation.mutate(
@@ -107,16 +116,40 @@ export function SecurityTradeList({
           {emptyText}
         </div>
       ) : (
-        <div className="overflow-x-auto">
-          <Table>
+        <>
+          <div className="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className="rounded-md border bg-muted/40 px-4 py-3">
+              <p className="text-xs text-muted-foreground">买入金额（含费）</p>
+              <p className="mt-1 font-mono text-base font-medium tabular-nums text-up">
+                {formatCurrency(buyAmount)}
+              </p>
+            </div>
+            <div className="rounded-md border bg-muted/40 px-4 py-3">
+              <p className="text-xs text-muted-foreground">卖出金额（含费）</p>
+              <p className="mt-1 font-mono text-base font-medium tabular-nums text-down">
+                {formatCurrency(sellAmount)}
+              </p>
+            </div>
+            <div className="rounded-md border bg-muted/40 px-4 py-3">
+              <p className="text-xs text-muted-foreground">累计费用合计</p>
+              <p className="mt-1 font-mono text-base font-medium tabular-nums">
+                {formatCurrency(totalFee)}
+              </p>
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <Table>
             <TableHeader>
               <TableRow>
                 <TableHead className="w-[100px]">日期</TableHead>
                 <TableHead className="w-[60px]">方向</TableHead>
                 <TableHead>标的</TableHead>
                 <TableHead className="text-right">数量</TableHead>
-                <TableHead className="text-right">单价</TableHead>
-                <TableHead className="text-right">费用</TableHead>
+                <TableHead className="text-right">成本价</TableHead>
+                <TableHead className="text-right">佣金</TableHead>
+                <TableHead className="text-right">印花税</TableHead>
+                <TableHead className="text-right">其他</TableHead>
+                <TableHead className="text-right">费用合计</TableHead>
                 <TableHead className="text-right">成交额</TableHead>
                 <TableHead className="w-[100px]">备注</TableHead>
                 <TableHead className="w-[80px] text-right">操作</TableHead>
@@ -126,12 +159,12 @@ export function SecurityTradeList({
               {items.map((t) => {
                 const sec = securityMap.get(t.securityId);
                 const qty = Number(t.quantity);
-                const price = Number(t.price);
-                const fee = Number(t.fee);
-                const amount =
-                  t.side === SecuritySide.BUY_SEC
-                    ? qty * price + fee
-                    : qty * price - fee;
+                /** 成本价（含费单价，INC-03 由 price 重命名） */
+                const costPrice = Number(t.costPrice);
+                /** 费用合计 = commission + stampTax + other（INC-04 物理并表） */
+                const feeTotal = Number(t.feeTotal);
+                /** 成交额（含费）= 数量 × 含费单价 */
+                const amount = qty * costPrice;
                 return (
                   <TableRow key={t.id}>
                     <TableCell className="font-mono text-sm whitespace-nowrap">
@@ -171,10 +204,19 @@ export function SecurityTradeList({
                       })}
                     </TableCell>
                     <TableCell className="text-right font-mono text-sm whitespace-nowrap">
-                      {formatCurrency(t.price)}
+                      {formatCurrency(t.costPrice, 6)}
                     </TableCell>
                     <TableCell className="text-right font-mono text-sm whitespace-nowrap">
-                      {formatCurrency(t.fee)}
+                      {formatCurrency(t.commission)}
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-sm whitespace-nowrap">
+                      {formatCurrency(t.stampTax)}
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-sm whitespace-nowrap">
+                      {formatCurrency(t.other)}
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-sm whitespace-nowrap">
+                      {formatCurrency(t.feeTotal)}
                     </TableCell>
                     <TableCell className="text-right font-mono whitespace-nowrap">
                       {formatCurrency(amount)}
@@ -207,7 +249,8 @@ export function SecurityTradeList({
               })}
             </TableBody>
           </Table>
-        </div>
+          </div>
+        </>
       )}
 
       {/* 分页 */}
