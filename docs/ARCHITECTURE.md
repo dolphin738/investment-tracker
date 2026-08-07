@@ -1,13 +1,13 @@
 # 投资收益统计系统 — 架构设计文档（Canonical）
 
-> **版本**: v2.7
+> **版本**: v2.8
 > **架构师**: 高见远（Gao）
-> **日期**: 2026-08-06
-> **修订史（完整版）**：各版变更说明已迁出至 **[docs/ARCHITECTURE-CHANGELOG.md](./ARCHITECTURE-CHANGELOG.md)**（最新为 v2.7）。
-> **近期修订（v2.7）**：概览融合收口 —— 走势图卡头合并为**单一 `/snapshots` 入口**（移除 `?manage=1` 深链），`snapshot-list.tsx` 移除 `manageMode`；`features/overview/asset-metrics.ts` 纯函数指标构造（含 `buildOverviewMetrics`/`formatAmountOrEmpty`，修金额 `0` 被 falsy 误判为「暂无数据」）；`date-range-quick-picker` 支持可选受控 `quick` prop（受控/非受控双模）；布局打磨（筛选栏底边对齐 `sm:items-end`）与陈旧注释清理。**后端零改动、URL schema 零改动**。增量设计见 [`docs/designs/overview-fusion-2026-08-06.md`](./designs/overview-fusion-2026-08-06.md) 及 CHANGELOG v2.7。
-> **依据**: PRD v3.1.9（Consolidated，单一权威）+ ENVIRONMENT-SETUP + 用户拍板决策（含 v2.3 方案B 数据架构）
+> **日期**: 2026-08-07
+> **修订史（完整版）**：各版变更说明已迁出至 **[docs/ARCHITECTURE-CHANGELOG.md](./ARCHITECTURE-CHANGELOG.md)**（最新为 v2.8）。
+> **近期修订（v2.8）**：并入增量架构设计 I-01~I-06（以实际交付形态为准，commit `79f5d12`/`7f84906` + 迁移 `20260808_add_fee_scenario`/`20260808_fee_scenario_enum`，QA 两轮 1080/1080 全绿）。要点：① `FeeRecord` 新增 `scenario`（FeeScenario{BUY,SELL}，非空，存量按 transactionId→SecurityTrade.side 推断回填、无法推断默认 BUY，裁决 Q-4）；② 分红 `UpdateDividendRecordDto` 补 `type`、净额后端统一计算（K-2）、`PATCH /fees/:id` 新增；③ 费用列表 `grouped=1` 采用**展示层聚合**（合并键 portfolioId+securityId+date+scenario+type，聚合行带 `transactionIds[]`，**非** DB 物理合并，裁决 Q-8）；④ 默认日期范围取值域扩为 7 项、`QUICK_RANGE_OPTIONS` 为单一真相源、8 处全局生效（新增 `use-default-date-range` hook）；⑤ 持仓页三板块共享**统一筛选器**（URL key 扩 `range/from/to/scenario`/`sec` 多值，as-of 与日期范围口径独立，裁决 Q-6）；⑥ 日期选择器审查（范围型 100% 提供快捷范围）。详见 §3.1 / §3.2.5 / §4.2.6 / §4.2.9 / §4.2.16 / §4.2.18 / §4.2.19 / §10.1.6 / §10.1.8 / §11 / §16.7 / §16.9。偏差登记：费用导出 scenario 列未落地（SET-P2-05，P2）。
+> **依据**: PRD v3.3.0（Consolidated，单一权威）+ ENVIRONMENT-SETUP + 用户拍板决策（含 v2.3 方案B 数据架构）
 >
-> **⚠️ 本档为唯一架构真相源（Canonical）**：取代并吸收 `ARCHITECTURE-modules.md`（已归档至 `docs/archive/`）。任何工程实现以本档 + PRD v3.1.9 为准；二者冲突时以 PRD 金融口径（① 级）与数据架构口径（② 级）裁决优先级为最高依据（见 PRD §2.1–§2.3）。
+> **⚠️ 本档为唯一架构真相源（Canonical）**：取代并吸收 `ARCHITECTURE-modules.md`（已归档至 `docs/archive/`）。任何工程实现以本档 + PRD v3.3.0 为准；二者冲突时以 PRD 金融口径（① 级）与数据架构口径（② 级）裁决优先级为最高依据（见 PRD §2.1–§2.3）。本档覆盖范围含 2026-08-07 并入的增量需求 I-01~I-06（买卖流水编辑态统一 / 分红所得税修复 / 费用记录合并 / 默认日期范围全局化 / 持仓页统一筛选器 / 日期选择器审查）。
 
 ---
 
@@ -413,8 +413,8 @@ graph TB
 │           │   │   ├── transaction-list.tsx
 │           │   │   └── __tests__/
 │           │   ├── holdings/        # 持仓页（8 页对齐新增）
-│           │   │   ├── holdings-query-params.ts   # 🆕 URL schema（date/closed/types/sec，T02）
-│           │   │   └── holdings-toolbar.tsx       # 🆕 日期选择 + 已清仓开关 + 类型多选（T02）
+│           │   │   ├── holdings-query-params.ts   # 🆕 URL schema（HoldingsFilterState：date/closed/types/sec/range/from/to/scenario，I-05）
+│           │   │   └── holdings-toolbar.tsx       # 🆕 日期选择 + 已清仓开关 + 类型多选（T02）→ I-05 升级为统一筛选器
 │           │   ├── overview/        # 概览页（8 页对齐新增）
 │           │   │   ├── overview-query-params.ts   # URL schema（g/range/from/to，T03）
 │           │   │   ├── freshness-banner.tsx       # 数据新鲜度提示条（DASH-P1-03，T03）
@@ -695,7 +695,10 @@ model DailyXirr {
 model DividendRecord {
   id String @id @default(uuid()); portfolioId String @map("portfolio_id")
   securityId String @map("security_id"); date DateTime @db.Date
-  amount Decimal @db.Decimal(18,2); type DividendType @default(CASH)
+  amount Decimal @db.Decimal(18,2)
+  // 所得税（I-02 修复前提，已存在）：净额 = amount − tax（K-2 后端统一计算，不落库）
+  tax Decimal @default(0) @db.Decimal(18,2) @map("tax")
+  type DividendType @default(CASH)
   note String?; createdAt DateTime @default(now()) @map("created_at")
   portfolio Portfolio @relation(fields:[portfolioId],references:[id],onDelete:Cascade)
   security Security @relation(fields:[securityId],references:[id],onDelete:Cascade)
@@ -705,11 +708,15 @@ model FeeRecord {
   id String @id @default(uuid()); portfolioId String @map("portfolio_id")
   securityId String @map("security_id"); date DateTime @db.Date
   amount Decimal @db.Decimal(18,2); type FeeType @default(OTHER)
+  // 🆕 I-03：费用场景（BUY=买入时 / SELL=卖出时），非空；@default(BUY) 为安全网默认
+  // （裁决 Q-8：DB 层不物理合并，合并走展示层聚合；scenario 由 FeeService 显式推断/校验后落库）
+  scenario FeeScenario @default(BUY)
   transactionId String? @map("transaction_id"); note String?
   createdAt DateTime @default(now()) @map("created_at")
   portfolio Portfolio @relation(fields:[portfolioId],references:[id],onDelete:Cascade)
   security Security @relation(fields:[securityId],references:[id],onDelete:Cascade)
-  @@index([portfolioId, date]); @@index([securityId, date]); @@map("fee_records")
+  @@index([portfolioId, date]); @@index([securityId, date])
+  @@index([portfolioId, scenario, date]); @@map("fee_records")   // 🆕 I-03 场景筛选索引
 }
 model UserPreference {
   id String @id @default(uuid()); userId String @unique @map("user_id")
@@ -733,6 +740,7 @@ model UserPreference {
 }
 enum DividendType { CASH STOCK_DIVIDEND }
 enum FeeType { COMMISSION STAMP_TAX OTHER }
+enum FeeScenario { BUY SELL }   // 🆕 I-03：费用场景（买入时 / 卖出时）
 ```
 
 ### 3.2 设计要点说明
@@ -777,6 +785,14 @@ User (1) ──< Portfolio (N)
 #### 3.2.4 SecurityType.CASH 口径裁决
 
 - 枚举值保留（避免破坏性迁移），标注 `@deprecated`；新建标的时**隐藏 CASH 选项**，CASH 类记录不予建立，避免与 `CashBalance` 在 `totalAsset` 中双计（PRD §5.3 决策 A′）。
+
+#### 3.2.5 🆕 增量 I-01~I-06 数据模型变更说明
+
+- **`FeeRecord.scenario`（I-03）**：新增 `FeeScenario { BUY, SELL }` 枚举列，非空，`@default(BUY)` 仅作安全网。落库由 `FeeService.create()` 显式推断/校验：`dto.scenario ?? (transactionId → SecurityTrade.side：BUY_SEC→BUY / SELL_SEC→SELL) ?? BUY`。**不采纳 DB 层 `@@unique` 合并约束**（裁决 Q-8）：合并在展示层按合并键聚合完成，底层明细行保留 `transactionId` 精确关联。
+- **迁移（两份，已执行）**：`20260808_add_fee_scenario`（加 TEXT 列 + `CHECK('BUY','SELL')`，按 transactionId→side 推断回填、无法推断默认 BUY）+ `20260808_fee_scenario_enum`（将 `scenario` 由 TEXT+CHECK **转换为原生 Postgres enum `FeeScenario`**：先 DROP CHECK 再 `ALTER TYPE ... USING`，消除 migrate drift）。回填 SQL 幂等可重跑（开发/测试库；裁决 Q-4）。
+- **`DividendRecord`**：零 schema 变更；`tax`（所得税，存量默认 0）与 `type` 早已存在，`netAmount = amount − tax` 由后端 `toResponse()` 统一计算（K-2），**不落库**。
+- **`UserPreference.defaultDateRange`（I-04）**：保持 `String` + 服务端 `@IsIn` 7 项白名单（裁决 Q-5，**零 migration**），`@default("1y")` 不变。
+- **`SecurityTrade`**：零 schema 变更；`fee` 列口径不变（`price` 恒含费单价、`fee` 恒 0，C-5/K-4），I-01 仅扩 `update` 契约落库 `fee`（前端按统一口径提交 0，裁决 Q-2）。
 
 ---
 
@@ -864,12 +880,13 @@ User (1) ──< Portfolio (N)
 
 | Method | Path | 说明 | 请求体/参数 | 响应 data |
 |--------|------|------|------------|-----------|
-| GET | `/api/portfolios/:portfolioId/security-trades` | 流水列表 | `?securityId&startDate&endDate&page&pageSize` | `Paginated<SecurityTrade>` |
+| GET | `/api/portfolios/:portfolioId/security-trades` | 流水列表 | `?securityId&side&startDate&endDate&page&pageSize`（🆕 I-05：`securityId` 支持逗号分隔多值） | `Paginated<SecurityTrade>` |
 | POST | `/api/portfolios/:portfolioId/security-trades` | 录入买卖 | `{ date, securityId, side: BUY_SEC\|SELL_SEC, quantity, price, fee?, note? }` | `SecurityTrade` |
-| PATCH | `/api/portfolios/:portfolioId/security-trades/:id` | 编辑流水 | `{ date?, quantity?, price?, fee? }` | `SecurityTrade` |
+| PATCH | `/api/portfolios/:portfolioId/security-trades/:id` | 编辑流水 | `{ date?, quantity?, price?, fee? }`（🆕 I-01 落库 `fee`，裁决 Q-2；前端统一口径提交 `fee:0`） | `SecurityTrade` |
 | DELETE | `/api/portfolios/:portfolioId/security-trades/:id` | 删除流水 | — | `null` |
 
 > **硬校验（卖出）**：卖出数量不得超过当前持仓；若会导致负持仓（含未来日期）→ 拒绝（400）。`avgCost` 由回放推导，用户不手填（Q-04 改判）。
+> **🆕 I-01 编辑态与录入态共用同一表单（裁决 Q-2）**：`PATCH /security-trades/:id` 已支持 `fee` 落库；前端按统一口径提交 `fee=0`（`price` 恒含费单价，费用拆分落 `FeeRecord` 由前端编排：`DELETE` 该 `transactionId` 关联的 FeeRecord → 逐类型 `POST /fees` 重建，scenario=side）。**合并展示在展示层聚合**（`GET /fees?grouped=1`），不物理合并底层明细行。统一筛选器（I-05）「场景」维度经 `side`（BUY_SEC/SELL_SEC）映射至本端点。
 
 #### 4.2.7 标的最新价（`/security-prices`）
 
@@ -899,7 +916,7 @@ User (1) ──< Portfolio (N)
 
 | Method | Path | 说明 | 请求参数 | 响应 data |
 |--------|------|------|---------|-----------|
-| GET | `/api/portfolios/:portfolioId/holdings` | 持仓列表（实时推导）| `?date&securityId&includeClosed` | `HoldingView[]`（含 `quantity`/`costTotal`/`avgCost`/`marketValue`/`pnl`/`ratio`）|
+| GET | `/api/portfolios/:portfolioId/holdings` | 持仓列表（实时推导）| `?date&securityId&includeClosed`（🆕 I-05：`securityId` 支持逗号分隔多值，集合判断） | `HoldingView[]`（含 `quantity`/`costTotal`/`avgCost`/`marketValue`/`pnl`/`ratio`）|
 
 #### 4.2.10 组合概览（`/overview` · Dashboard 落地页）
 
@@ -995,7 +1012,9 @@ User (1) ──< Portfolio (N)
 |--------|------|------|---------|-----------|
 | GET | `/api/account/stats` | 账户统计（ACC-P0-06）| — | `AccountStats`（组合数 / 总资产 / 累计XIRR / 当年XIRR）|
 | GET | `/api/users/preferences` | 获取用户偏好（SET-P0-02）| — | `UserPreference` |
-| PATCH | `/api/users/preferences` | 更新用户偏好（全站唯一写入口）| `{ theme?, defaultPortfolioId?, ... }` | `UserPreference` |
+| PATCH | `/api/users/preferences` | 更新用户偏好（全站唯一写入口）| `{ theme?, defaultPortfolioId?, defaultDateRange?, ... }` | `UserPreference` |
+
+> **🆕 I-04 默认日期范围（SET-P0-02）**：`defaultDateRange` 取值域由 `@IsIn` 服务端白名单约束，**扩为 7 项** `['1w','1m','3m','6m','1y','ytd','all']`（裁决 Q-5：保持 `String` + 服务端校验，**零 migration**）；非法/越界值被 `ValidationPipe` 拒绝。前端设置页下拉与 `QUICK_RANGE_OPTIONS`（`features/query/dimension-switcher.tsx`）逐项一致，全站唯一真相源。
 
 #### 4.2.17 数据导入导出（data-transfer · 🆕 v2.2 · T05 · CSV/Excel）
 
@@ -1027,8 +1046,9 @@ User (1) ──< Portfolio (N)
 
 | Method | Path | 说明 | 请求体/参数 | 响应 data |
 |--------|------|------|------------|-----------|
-| GET | `/api/portfolios/:portfolioId/dividends` | 分红记录列表（可按标的过滤） | `?securityId` | `DividendRecordResponse[]`（含 `securityName`/`securityCode`，金额字符串） |
-| POST | `/api/portfolios/:portfolioId/dividends` | 新增分红记录 | `{ securityId, date, amount, type?, note? }` | `DividendRecordResponse` |
+| GET | `/api/portfolios/:portfolioId/dividends` | 分红记录列表 | `?securityId`（🆕 I-05 支持逗号分隔多值）& `startDate` & `endDate`（🆕 I-05 日期范围过滤） | `DividendRecordResponse[]`（含 `securityName`/`securityCode`/`tax`/`netAmount`，金额字符串） |
+| POST | `/api/portfolios/:portfolioId/dividends` | 新增分红记录 | `{ securityId, date, amount, tax?, type?, note? }` | `DividendRecordResponse` |
+| PATCH | `/api/portfolios/:portfolioId/dividends/:id` | 编辑分红记录（🆕 I-02） | `{ securityId?, date?, amount?, tax?, type?, note? }`（全可选；`type` 补声明修复 `forbidNonWhitelisted` 400） | `DividendRecordResponse` |
 | DELETE | `/api/portfolios/:portfolioId/dividends/:id` | 删除分红记录 | — | `null` |
 
 > **口径**：
@@ -1036,6 +1056,7 @@ User (1) ──< Portfolio (N)
 > - **金额**：`NUMERIC(18,2)` 以字符串传输（DTO `IsDecimal` 0~2 位、> 0），响应 `amount` 原样字符串。
 > - **二级隔离**：`securityId` 必须属于同一组合（防跨组合挂载），与 `CashFlowService` 同范式做 `portfolio.userId` 归属校验。
 > - 🔴 **不参与收益计算（C-08 / D-02）**：分红**不进 CashFlow 表**（不参与 XIRR 现金流）、**不触发计算引擎**、不污染 `daily_nav`/`daily_xirr`；与持仓/XIRR 的关系仅为**信息记录**（红利再投 v1 仅记录）。
+> - 🆕 **I-02 分红所得税修复（P0）**：`UpdateDividendRecordDto` 补 `type?`（`@IsOptional @IsEnum(DividendType)`，否则 `forbidNonWhitelisted` 报 400「property type should not exist」）；`DividendService.update()` 落库 `type` 分支。**净额 `netAmount = amount − tax` 恒由后端 `toResponse()` 统一计算**（K-2），前端仅 `toFixed(2)` 展示、不二次计算**；`tax` 可选（空/未传 = 0），净额 ≥ 0 由服务层校验（`< 0` → 400）。金额字段 `amount`/`tax` 一律字符串传输。
 
 #### 4.2.19 费用记录（`/fees` · 阶段 C 恢复 · HOLD-B-P0-10）
 
@@ -1043,8 +1064,9 @@ User (1) ──< Portfolio (N)
 
 | Method | Path | 说明 | 请求体/参数 | 响应 data |
 |--------|------|------|------------|-----------|
-| GET | `/api/portfolios/:portfolioId/fees` | 费用记录列表（可按标的过滤） | `?securityId` | `FeeRecordResponse[]`（含 `securityName`/`securityCode`/`transactionId`，金额字符串） |
-| POST | `/api/portfolios/:portfolioId/fees` | 新增费用记录 | `{ securityId, date, amount, type?, transactionId?, note? }` | `FeeRecordResponse` |
+| GET | `/api/portfolios/:portfolioId/fees` | 费用记录列表 | `?securityId`（🆕 I-05 逗号多值）& `scenario`（🆕 I-03 BUY/SELL）& `startDate` & `endDate`（🆕 I-05）& `grouped=1`（🆕 I-03 按合并键聚合） | `FeeRecordResponse[]` 或 `FeeGroupedRow[]`（含 `securityName`/`securityCode`/`transactionId`/`scenario`，金额字符串） |
+| POST | `/api/portfolios/:portfolioId/fees` | 新增费用记录 | `{ securityId, date, amount, type?, scenario?, transactionId?, note? }`（`scenario` 缺省由服务层推断，见 §3.2.5） | `FeeRecordResponse` |
+| PATCH | `/api/portfolios/:portfolioId/fees/:id` | 编辑费用记录（🆕 I-03） | `{ securityId?, date?, amount?, type?, scenario?, note? }`（全可选；双闸：portfolio.userId + security 归属） | `FeeRecordResponse` |
 | DELETE | `/api/portfolios/:portfolioId/fees/:id` | 删除费用记录 | — | `null` |
 
 > **口径**：
@@ -1052,6 +1074,9 @@ User (1) ──< Portfolio (N)
 > - **金额**：`NUMERIC(18,2)` 以字符串传输（DTO `IsDecimal` 0~2 位、> 0），响应 `amount` 原样字符串。
 > - **二级隔离**：`securityId` 必须属于同一组合（防跨组合挂载），与 `CashFlowService` 同范式做 `portfolio.userId` 归属校验。
 > - 🔴 **与 `SecurityTrade.fee` 互不影响（C-09 / D-03）**：`SecurityTrade.fee` 计入持仓成本；本表**仅信息记录、不回冲成本**；**不进 CashFlow 表**、**不触发计算引擎**。`transactionId` 可选关联证券买卖流水（仅信息关联）。
+> - 🆕 **I-03 费用场景（scenario）**：`FeeScenario { BUY, SELL }`，非空，`@default(BUY)` 安全网；写入由 `FeeService` 显式推断（`dto.scenario ?? transactionId→side ?? BUY`）。买卖明细板块的场景过滤复用本端点 `scenario` 参数（分红板块无场景维度）。
+> - 🆕 **I-03 合并展示（grouped=1，裁决 Q-8）**：合并键 = `(portfolioId, securityId, date, scenario, type)`。**采用展示层聚合、底层明细行不物理合并**——`grouped=1` 返回 `FeeGroupedRow[]`（`mergeKey`/`securityName`/`securityCode`/`amount`(Σ)/`count`/`transactionIds[]` 全量去重）；明细行 `transactionId` 保留精确关联（编辑/删除单笔即重算）。理由：① I-01 编辑需按 `transactionId` 精确重建；② 金融数据审计要求保留明细；③ 个人应用写入并发极低，DB 物理合并收益可忽略（详见 §11 Q-8 与 ADR-003）。
+> - ⚠️ **偏差登记（SET-P2-05，P2）**：费用记录**导出含 scenario 列**未落地——`data-transfer/export-schemas.ts` 当前**无 FEES 导出类别**（架构 §3.2.5 验收前提不成立），I-03 验收项「费用导出新增 scenario 列」暂不能实现。列为 P2，待补费用导出类别后一并落地，不阻塞本次增量。
 
 ---
 
@@ -1823,10 +1848,10 @@ ON CONFLICT (portfolio_id, date) DO UPDATE
 
 | 页面 | URL key | 状态 schema | 说明 |
 |------|---------|------------|------|
-| 持仓 `/holdings` | `date` / `closed` / `types` / `sec` | `HoldingsQueryState`（`features/holdings/holdings-query-params.ts`） | `types` 白名单 = `STOCK/FUND/BOND/CASH/OTHER`（ETF 归 `FUND`）；`sec` 来自概览页「去更新行情」跳转 |
-| 概览 `/` | `g` / `range` / `from` / `to` | `OverviewQueryState`（`features/overview/overview-query-params.ts`） | `range` = `1w/1m/3m/6m/1y/ytd/all/custom`；`from`/`to` 仅 `range=custom` 生效 |
+| 持仓 `/holdings` | `date` / `closed` / `types` / `sec`(🆕 I-05 逗号多值) / `range` / `from` / `to` / `scenario`(🆕 I-05) | `HoldingsFilterState`（`features/holdings/holdings-query-params.ts`：`createHoldingsSchema`） | `types` 白名单 = `STOCK/FUND/BOND/CASH/OTHER`（ETF 归 `FUND`）；`sec` 多值逗号分隔；`range` ∈ 7 项 + `custom`；`scenario` ∈ `all/BUY/SELL`；`from`/`to` 仅 `range=custom` 生效；等于默认值不写入 URL（§16.7） |
+| 概览 `/` | `g` / `range` / `from` / `to` | `OverviewQueryState`（`features/overview/overview-query-params.ts`） | `range` = `1w/1m/3m/6m/1y/ytd/all/custom`（与 `QUICK_RANGE_OPTIONS` 同源，I-04）；`from`/`to` 仅 `range=custom` 生效 |
 
-**🆕 新增 feature（均已在 §1.3 目录树落位）**：`HoldingsToolbar`（日期选择 + 已清仓开关 + 类型多选，T02）、`FreshnessBanner`（数据新鲜度提示条，T03；`isStale` 才渲染、三按钮 + sessionStorage 静默）、`CashBalanceHistory`（现金余额变更历史展开器，T04）、`ExportPanel` / `ImportDialog` / `ImportTemplateButtons` / `CsvDownload`（数据导入导出，T05）。
+**🆕 新增 feature（均已在 §1.3 目录树落位）**：`HoldingsToolbar`（🆕 I-05 **原地升级为统一筛选器**：快捷范围 / as-of 单点 / 证券多选 / 场景 / 类型多选 / 显示已清仓，三板块共享，状态由 `useUrlState<HoldingsFilterState>` 驱动）、`FreshnessBanner`（数据新鲜度提示条，T03；`isStale` 才渲染、三按钮 + sessionStorage 静默）、`CashBalanceHistory`（现金余额变更历史展开器，T04）、`ExportPanel` / `ImportDialog` / `ImportTemplateButtons` / `CsvDownload`（数据导入导出，T05）。
 
 #### 10.1.7 🆕 概览融合组件细节（v2.7 收口）
 
@@ -1835,6 +1860,36 @@ ON CONFLICT (portfolio_id, date) DO UPDATE
 - **日期选择器** `components/date/date-range-quick-picker.tsx`：新增**可选受控 `quick` prop**（`isControlled = quick !== undefined`），受控/非受控双模，既有 3 个调用方零影响；概览页以受控模式替换原快捷范围 `Select`，保持页面单 combobox（守住 `dashboard-alignment` A8 用例）。
 - **快照列表** `features/snapshot/snapshot-list.tsx`：**已移除 `manageMode` prop 及管理模式提示条**（死代码）；`/snapshots` 仅单一浏览模式，管理态统一在页内操作。
 - **Hooks 约束（已知约定）**：`pages/dashboard.tsx` 的 `overviewMetrics` 中 `useMemo` 及派生变量计算**须位于所有提前 `return` 之前**（曾因违反导致冷启动白屏，见 commit `5f6ae54`）；新增 hooks 时须同样遵守顺序。
+
+#### 10.1.8 🆕 增量 I-01~I-06 前端架构要点
+
+**(a) 默认日期范围全局化（I-04 / SET-P0-02）**
+- **单一真相源 `QUICK_RANGE_OPTIONS`**（`features/query/dimension-switcher.tsx`，7 项：`1w/1m/3m/6m/1y/ytd/all`）——全站范围型位置的**唯一**快捷范围定义；设置页已删除本地 `DATE_RANGE_OPTIONS`，改 import 复用；grep 佐证全站无第二份范围数组。
+- **全局生效接入点（8 处）**：概览趋势栏 / XIRR / NAV / 出入金 / 资产记录 / 现金余额历史 / 持仓统一筛选器（I-05）/ I-06 新增范围型位置，均继承同一默认。
+- **默认值优先级链（URL > 偏好 > 系统默认）**：新增 `features/query/use-default-date-range.ts` 返回有效偏好默认（`'1w'|'1m'|'3m'|'6m'|'1y'|'ytd'|'all'`，非法/空回落 `'1y'`）；各页将其作为 `useUrlState` 默认值，并在**偏好异步到达且 URL 无对应参数时**对齐一次。
+- ⚠️ **反模式警示（偏好对齐 effect 必须带用户交互守卫）**：`HoldingsPage.tsx` 第 1 轮曾因对齐 effect 在「用户手动改 range」时被反复触发，导致状态弹回偏好默认、URL 不落 `range`（QA 源码 Bug，commit `7f84906` 修复）。**正确做法**：声明 `rangeInteractedRef` / `closedInteractedRef`，统一筛选器变更统一走 `handleFilterChange(patch)`（凡含 `range/from/to` 或 `closed` 即置对应 ref）；偏好对齐 effect 加 `if (hasRangeParam || rangeInteractedRef.current) return;`，**仅在「偏好异步到达 + URL 无对应参数 + 用户尚未主动操作」时执行一次**。此约定沉淀为架构红线，详见 §16.9 与 ADR-004。
+
+**(b) 持仓页统一筛选器（I-05 / HOLD-B-P0-11）**
+- `HoldingsToolbar` **原地升级**为统一筛选器（不新建文件），承载持仓日期卡片重新设计；状态单一来源 = `HoldingsPage` 持有的 `useUrlState<HoldingsFilterState>`（§10.1.6），**不新增 zustand store**。
+- **三板块联动（URL query 驱动）**：
+
+| 维度变化 | 持仓板块 | 买卖明细板块 | 分红费用板块 |
+|---------|---------|-------------|-------------|
+| 日期范围 | 不变 | 区间过滤 | 区间过滤 |
+| as-of | 精确推导 | 不变 | 不变 |
+| 证券 | 过滤 | 过滤 | 过滤 |
+| 场景 | 不适用（置灰） | `side` 过滤 | `scenario` 过滤 |
+| 类型多选 | 过滤 | 不变 | 不变 |
+| 显示已清仓 | 显示/隐藏 qty=0 | 不变 | 不变 |
+
+- 数据获取：持仓 `useHoldings({ date, includeClosed, types, securityId })`；买卖明细 `useSecurityTrades({ securityId, side: scenario→side, startDate/endDate })`；分红费用 `useDividends({ securityId, startDate, endDate })` + `useFees({ securityId, scenario, startDate, endDate, grouped:1 })`。汇总条随筛选动态变化（纯函数聚合）。
+- **as-of 与日期范围口径独立（裁决 Q-6）**：as-of 仅驱动持仓板块精确回溯；日期范围仅驱动买卖明细/分红费用；UI 注明两口径不互相换算。
+
+**(c) 买卖流水编辑态统一（I-01 / 裁决 Q-2）**
+- `features/security-trade/security-trade-form.tsx` 录入/编辑**共用同一 `tradeSchema` + 同一布局**（`isEdit` 仅影响初始值与提交目标 POST/PATCH）。编辑态展示费用三框（佣金/印花税/其他）并按 `transactionId=trade.id` 的 `FeeRecord` 按类型拆分回显；保存时**重建式**维护该笔关联 FeeRecord（删旧插新，scenario=side）。
+
+**(d) 日期选择器审查（I-06 / SYS-P1-03）**
+- 范围型位置一律使用 `DateRangeQuickPicker` / `QUICK_RANGE_OPTIONS`（受控 `quick` 双模，v2.7 已支持），**禁止裸 `<input type="date">` 成对自实现**；单点型位置（出入金/买卖/分红费用/现金余额/总资产录入日期、as-of）保持单日期。审查矩阵 13 位置 QA 已逐点验收。
 
 ---
 
@@ -1854,6 +1909,11 @@ ON CONFLICT (portfolio_id, date) DO UPDATE
 | **Q-B16** | 手工记录是否参与一致性校验 | **不参与**。持仓汇总条 / 总资产卡的一致性断言**仅 `source='DERIVED'` 时生效**；`MANUAL` 时 UI 提示「今日使用了您的手工记录」 | §9.4 / HOLD-B-P0-06 |
 | **Q-B17** | 删除后是否立即回填 | **事件日回填，非事件日留空前值填充**。删除某日记录后，若该日属事件日集合则由派生层立即回填 `DERIVED`，否则该日无记录、读取时前值填充。🔴 **两种情况都必须紧接 `recalculateNavRange(portfolioId, date)`** —— 删除会改变该日的有效总资产（回填值 ≠ 原手工值；或转为前值填充），份额链条同样断裂，需级联至今日（REG-06） | §8 / §7.3.1 T5 |
 | **Q-B18**<br/>🆕 | 手工记录的写操作是否触发级联 | **触发，但只触发计算层**。快照层仅动当日一行（不做 DERIVED 区间重建，`SNAP-P0-03` 验收 5「不重建自动记录」）；计算层 `daily_nav`/`daily_xirr` **必须自该日级联至今日**。裁决依据：单位份额法 `unitNav_t = totalAsset_t / shares_{t-1}` 具有前向传导性（§7.2）+ PRD §2.4 已将「覆盖历史快照只重算当日」列为必修项 | §7.3.1 T5 / §8.1 / §13 REG-06 |
+| **Q-2** 🆕 | 编辑买卖流水时费用三框如何联动合并后的 FeeRecord？ | **仅维护该笔 `transactionId` 关联的费用组成（删旧插新重建）**；合并只在展示层聚合（`grouped=1`），底层明细行不物理合并。理由：物理合并后无法定位「该笔对合并行的贡献」，编辑会破坏成本语义；展示层聚合 100% 满足 I-03/I-01 验收 | §4.2.6 / §10.1.8(c) |
+| **Q-4** 🆕 | 存量费用 `scenario` 默认值策略？ | **能按 `transactionId` 推断则推断**（`SecurityTrade.side`：BUY_SEC→BUY / SELL_SEC→SELL）；无法推断（transactionId 空/流水已删）**默认 BUY**，UI 可编辑修正（新增 `PATCH /fees/:id`）；一次性数据修复工具列 P2 | §3.1 / §3.2.5 / §4.2.19 |
+| **Q-5** 🆕 | `defaultDateRange` 是否改 Prisma enum？ | **保持 String + 服务端校验**（`@IsIn` 7 项白名单），**零 migration**。改 enum 需 `ALTER TYPE` 且与「String 字段承载前端选项」的既有模式不符，收益仅类型安全，不划算 | §4.2.16 / §10.1.8(a) |
+| **Q-6** 🆕 | 「持仓日期(as-of)」与「日期范围」关系？ | **独立单点**：as-of 保持精确回溯语义，只驱动持仓板块；日期范围只驱动买卖明细/分红费用。两口径在 UI 注明，不互相换算 | §4.2.9 / §10.1.8(b) |
+| **Q-8** 🆕 | `@@unique([portfolioId, securityId, date, scenario, type])` 是否采纳？ | **不采纳 DB 层唯一约束**，采纳「展示层聚合 + 明细行保留」。理由：① I-01 编辑需按 `transactionId` 精确重建，物理合并破坏该语义；② 金融数据审计要求保留明细；③ 个人应用写入并发极低，DB 层强制合并并发收益可忽略。**备选（不推荐）**：`feeRecord.upsert({ where:{mergeKey}, create, update:{amount:{increment}} })` + 捕获 P2002 重试 + Serializable 事务，但编辑语义需重构 | §3.2.5 / §4.2.19 / ADR-003 |
 
 ## 12. Migration 策略（决策 A′）
 
@@ -2200,7 +2260,7 @@ graph LR
 
 | 规则 | 约定 |
 |------|------|
-| key 命名 | **小写**（`date` / `closed` / `types` / `sec` / `g` / `range` / `from` / `to`） |
+| key 命名 | **小写**（`date` / `closed` / `types` / `sec`(逗号多值) / `scenario` / `range` / `from` / `to` / `g`） |
 | 布尔 | `1` / `0`（不是 `true/false`） |
 | 多值 | 逗号分隔（如 `types=STOCK,FUND`） |
 | 默认值 | **等于默认值时不写入 URL**（URL 保持干净、可分享） |
@@ -2222,6 +2282,21 @@ graph LR
 
 **invalidate 矩阵**：CSV/XLSX 导入 commit → `holdings / overview / nav / transactions / snapshots / cash-balances`；现金余额编辑/删除 → `cash-balances / overview / nav / snapshots / holdings`；行情价格更新 → `holdings / overview / nav / snapshots`；偏好 `staleDays` 变更 → `overview`。
 
+### 16.9 🆕 增量 I-01~I-06 跨文件约定
+
+| 约定 | 内容 |
+|------|------|
+| **QUICK_RANGE_OPTIONS 引用路径** | `@/features/query/dimension-switcher`（唯一真相源，7 项 `1w/1m/3m/6m/1y/ytd/all`）。设置页**禁止**再定义第二份范围数组；新增范围型位置一律复用；`resolveQuickRange` 为唯一口径实现 |
+| **FeeScenario 枚举定义位置** | 后端：`prisma/schema.prisma` `enum FeeScenario { BUY SELL }`（唯一 DB 真源）；`shared/src/types/fee.ts` const 对象 + type（与 `FeeType` 同模式）；`web/api/types.ts` enum（与现有 `FeeType` 同模式）。三处值必须一致（BUY/SELL） |
+| **净额计算约定（K-2）** | `netAmount = amount − tax`，恒 ≥ 0；**后端 `toResponse()` 统一计算**，前端仅展示（`toFixed(2)`），不得二次计算；`netAmount` 不落库 |
+| **trade.fee 口径（C-5/K-4）** | `SecurityTrade.price` 恒为**含费单价**、`fee` 恒 0；费用拆分落 `FeeRecord`（`transactionId` 关联）。`PATCH /security-trades/:id` 接受 `fee` 但前端按统一口径提交 0 |
+| **费用合并语义（I-03/Q-8）** | 合并键 = `(portfolioId, securityId, date, scenario, type)`；**底层明细行不物理合并**，展示层 `grouped=1` 聚合；`transactionId` 保留精确关联（编辑/删除组成笔即重算） |
+| **URL 规范（§16.7 沿用）** | 小写 key；布尔 `1/0`；多值逗号分隔；等于默认不写入；非法静默降级；持仓页扩展 key：`date/closed/types/sec/range/from/to/scenario` |
+| **偏好对齐 effect 模式 + 用户交互守卫** | `useUrlState` schema 默认值首帧固化；偏好异步到达后须在 effect 中「URL 无对应参数时对齐一次」（沿用 HoldingsPage `closed` 范式）。**必须声明 `rangeInteractedRef` / `closedInteractedRef` 守卫**：凡经 `handleFilterChange(patch)` 改 `range/from/to/closed` 即置对应 ref，对齐 effect 加 `if (hasRangeParam \|\| rangeInteractedRef.current) return;`，严防「用户手动改 range 被弹回偏好默认、URL 不落参」反模式（QA commit `7f84906`） |
+| **数据隔离双闸（C-3）** | 分红/费用/偏好接口继续 `user_id` + 组合归属双闸；`securityId` 二级校验防跨组合挂载 |
+| **不参与计算（D-02/D-03/C-08/C-09）** | 分红/费用变更**不触发** `recalculateRange/recalculateNavRange`，不失效 `holdings/nav/xirr/snapshots/overview` 缓存（仅 `['fees']`/`['dividends']`） |
+| **金额展示** | 金额 2 位小数右对齐 + 等宽字体；空值显示 `-`；涨跌配色正红负绿（§10.1.1） |
+
 ---
 
 ## 17. 待明确事项（已裁决）
@@ -2236,6 +2311,14 @@ graph LR
 | Q-A06 | **当年净值跨年场景**：如果某组合在年中（如 6 月）才创建第一笔交易，当年净值如何处理？ | 影响 base_cumulative_nav 的初始化 | ✅ 采用默认：成立日即为当年首日，yearNav = 1.0，base = 1.0；后续年度才需要真正的跨年重置 |
 | Q-A07 | **同日多笔交易 XIRR 处理**：同一天多笔买入/卖出，是合并为净现金流还是按时间顺序逐笔？ | 影响 XIRR 现金流构建逻辑 | ✅ 采用默认：同日合并为净现金流（买入总额-卖出总额为净买入），与 PRD Q-08 一致 |
 | Q-A08 | **热力图在 APP 端是否必须**：v1 APP 是否需要月度热力图？ | 影响 APP 图表复杂度 | ✅ 采用默认：v1 APP 不做热力图，仅 Web 端有；APP 端热力图列入 P1 |
+
+#### 17.1 🆕 增量偏差登记（Deviation Register，I-01~I-06）
+
+| 编号 | 来源 | 偏差描述 | 状态 |
+|------|------|---------|------|
+| **SET-P2-05** | I-03 验收项「费用导出新增 scenario 列」 | `data-transfer/export-schemas.ts` **当前无 FEES 导出类别**（架构 §3.2.5 / §4.2.19 验收前提不成立），故「费用导出带 scenario 列」未落地——文档中以「待实现（P2 · SET-P2-05）」标注，而非描述为已有能力 | **P2（已登记）**：待补费用导出类别后一并落地，不阻塞本次增量 |
+
+> **增量设计 §9.2 待用户拍板项闭环说明**：**Q-1**（允许编辑分红 `type`）已随 I-02 落地（§4.2.18 PATCH + `UpdateDividendRecordDto.type`）；**Q-3**（`transactionIds[]` 保留语义）随「展示层聚合 + 明细行保留」方案自动消解（§4.2.19 `FeeGroupedRow.transactionIds`）；**Q-7**（单点型日期选择器快捷选择）维持「仅范围型提供快捷范围」建议，未列入本轮交付。
 
 ---
 
