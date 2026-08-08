@@ -24,7 +24,7 @@ from app.core.exceptions import (
     unhandled_exception_handler,
     validation_exception_handler,
 )
-from app.routers import auth, calc, data, health, portfolios
+from app.routers import aggregation, auth, calc, data, health, portfolios
 
 settings = get_settings()
 
@@ -68,6 +68,9 @@ app.mount(
 
 app.include_router(health.router)
 app.include_router(auth.router)
+# ⚠️ aggregation 必须在 portfolios 之前注册：/comparison 字面路由需优先于 /{portfolio_id}
+app.include_router(aggregation.router_aggregation)
+app.include_router(aggregation.router_account)
 app.include_router(portfolios.router)
 app.include_router(data.router_cashflows)
 app.include_router(data.router_securities)
