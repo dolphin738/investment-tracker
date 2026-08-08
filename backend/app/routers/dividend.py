@@ -24,6 +24,7 @@ from app.models import DividendRecord, Security
 from app.models.enums import DividendType
 from app.routers.common import get_portfolio, serialize_dividend
 from app.schemas import DividendCreateReq, DividendPatchReq
+from app.schemas_resp import DividendOut, Paginated
 
 
 def _coerce_dtype(val: str) -> DividendType:
@@ -71,7 +72,7 @@ router_dividends = APIRouter(
 )
 
 
-@router_dividends.get("/{portfolio_id}/dividends")
+@router_dividends.get("/{portfolio_id}/dividends", response_model=Paginated[DividendOut])
 async def list_dividends(
     p=Depends(get_portfolio),
     db: AsyncSession = Depends(get_db),
@@ -115,7 +116,7 @@ async def list_dividends(
     }
 
 
-@router_dividends.post("/{portfolio_id}/dividends")
+@router_dividends.post("/{portfolio_id}/dividends", response_model=DividendOut)
 async def create_dividend(
     req: DividendCreateReq,
     p=Depends(get_portfolio),
@@ -140,7 +141,7 @@ async def create_dividend(
     return serialize_dividend(d, sec)
 
 
-@router_dividends.patch("/{portfolio_id}/dividends/{div_id}")
+@router_dividends.patch("/{portfolio_id}/dividends/{div_id}", response_model=DividendOut)
 async def patch_dividend(
     req: DividendPatchReq,
     p=Depends(get_portfolio),

@@ -30,6 +30,14 @@ from app.models import (
 )
 from app.routers.common import get_portfolio
 from app.schemas import RecalculateRangeReq
+from app.schemas_resp import (
+    HoldingOut,
+    NavPointOut,
+    Paginated,
+    RecalcOut,
+    XirrLatestOut,
+    XirrPointOut,
+)
 from app.services.holding import HoldingService
 from app.services.recalculation import RecalculationService
 
@@ -95,7 +103,7 @@ router_holdings = APIRouter(
 )
 
 
-@router_holdings.get("/{portfolio_id}/holdings")
+@router_holdings.get("/{portfolio_id}/holdings", response_model=list[HoldingOut])
 async def get_holdings(
     p=Depends(get_portfolio),
     db: AsyncSession = Depends(get_db),
@@ -148,7 +156,7 @@ router_xirr = APIRouter(
 )
 
 
-@router_xirr.get("/{portfolio_id}/xirr")
+@router_xirr.get("/{portfolio_id}/xirr", response_model=list[XirrPointOut])
 async def get_xirr_series(
     p=Depends(get_portfolio),
     db: AsyncSession = Depends(get_db),
@@ -170,7 +178,7 @@ async def get_xirr_series(
     return _bucket(series, granularity, aggregation)
 
 
-@router_xirr.get("/{portfolio_id}/xirr/latest")
+@router_xirr.get("/{portfolio_id}/xirr/latest", response_model=XirrLatestOut)
 async def get_xirr_latest(p=Depends(get_portfolio), db: AsyncSession = Depends(get_db)):
     row = (
         await db.execute(
@@ -191,7 +199,7 @@ router_nav = APIRouter(
 )
 
 
-@router_nav.get("/{portfolio_id}/nav")
+@router_nav.get("/{portfolio_id}/nav", response_model=list[NavPointOut])
 async def get_nav_series(
     p=Depends(get_portfolio),
     db: AsyncSession = Depends(get_db),
@@ -248,7 +256,7 @@ def _shares_at(rows, d: date) -> Decimal | None:
     return match[-1].shares if match else None
 
 
-@router_nav.get("/{portfolio_id}/nav/latest")
+@router_nav.get("/{portfolio_id}/nav/latest", response_model=NavPointOut)
 async def get_nav_latest(p=Depends(get_portfolio), db: AsyncSession = Depends(get_db)):
     row = (
         await db.execute(
@@ -274,7 +282,7 @@ router_recalculate = APIRouter(
 )
 
 
-@router_recalculate.post("/{portfolio_id}/recalculate-range")
+@router_recalculate.post("/{portfolio_id}/recalculate-range", response_model=RecalcOut)
 async def recalculate_range(
     req: RecalculateRangeReq,
     p=Depends(get_portfolio),
@@ -290,7 +298,7 @@ async def recalculate_range(
     return {"affectedDates": n, "duration": duration}
 
 
-@router_recalculate.post("/{portfolio_id}/recalculate")
+@router_recalculate.post("/{portfolio_id}/recalculate", response_model=RecalcOut)
 async def recalculate_full(p=Depends(get_portfolio), db: AsyncSession = Depends(get_db)):
     start = await _first_event_date(db, p.id)
     if start is None:
@@ -376,7 +384,7 @@ async def _load_xirr_rows(db, portfolio_id, start, end):
     return (await db.execute(stmt)).scalars().all()
 
 
-@router_nav.get("/{portfolio_id}/nav/history")
+@router_nav.get("/{portfolio_id}/nav/history", response_model=Paginated[NavPointOut])
 async def get_nav_history(
     p=Depends(get_portfolio),
     db: AsyncSession = Depends(get_db),
@@ -394,7 +402,7 @@ async def get_nav_history(
     return {"items": items, "total": total, "page": page, "pageSize": pageSize}
 
 
-@router_xirr.get("/{portfolio_id}/xirr/history")
+@router_xirr.get("/{portfolio_id}/xirr/history", response_model=Paginated[XirrPointOut])
 async def get_xirr_history(
     p=Depends(get_portfolio),
     db: AsyncSession = Depends(get_db),

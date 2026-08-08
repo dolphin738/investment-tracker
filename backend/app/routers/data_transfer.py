@@ -25,6 +25,7 @@ from app.db.database import get_db
 from app.models import Security
 from app.routers.common import get_portfolio
 from app.schemas import ImportCommitReq
+from app.schemas_resp import ImportCommitOut, ImportPreviewOut
 from app.services import data_transfer as dt
 
 
@@ -91,7 +92,7 @@ async def export_data(
     )
 
 
-@router_dt_portfolio.post("/{portfolio_id}/import/preview")
+@router_dt_portfolio.post("/{portfolio_id}/import/preview", response_model=ImportPreviewOut)
 async def import_preview(
     p=Depends(get_portfolio),
     db: AsyncSession = Depends(get_db),
@@ -135,7 +136,7 @@ async def import_preview(
     }
 
 
-@router_dt_portfolio.post("/{portfolio_id}/import/commit")
+@router_dt_portfolio.post("/{portfolio_id}/import/commit", response_model=ImportCommitOut)
 async def import_commit(
     req: ImportCommitReq,
     p=Depends(get_portfolio),

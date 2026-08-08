@@ -16,6 +16,7 @@ from app.core.security import CurrentUser, get_current_user
 from app.db.database import get_db
 from app.models import UserPreference
 from app.routers.common import serialize_preference
+from app.schemas_resp import PreferenceOut
 
 
 # 服务端白名单（裁决 Q-5：保持 String + 校验，零 migration）
@@ -53,7 +54,7 @@ def _validate(field: str, value: str, allowed: list[str]) -> None:
         )
 
 
-@router.get("/preferences")
+@router.get("/preferences", response_model=PreferenceOut)
 async def get_preferences(
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -62,7 +63,7 @@ async def get_preferences(
     return serialize_preference(pref)
 
 
-@router.patch("/preferences")
+@router.patch("/preferences", response_model=PreferenceOut)
 async def patch_preferences(
     body: dict,
     user: CurrentUser = Depends(get_current_user),

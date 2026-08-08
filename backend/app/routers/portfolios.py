@@ -28,11 +28,12 @@ from app.core.enums import BusinessErrorCode
 from app.core.exceptions import BusinessException
 from app.routers.common import get_portfolio, serialize_portfolio
 from app.schemas import PortfolioArchiveReq, PortfolioCreateReq, PortfolioPatchReq
+from app.schemas_resp import ClearDataOut, PortfolioOut
 
 router = APIRouter(prefix="/api", tags=["portfolios"], route_class=EnvelopeRoute)
 
 
-@router.get("/portfolios")
+@router.get("/portfolios", response_model=list[PortfolioOut])
 async def list_portfolios(
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -47,7 +48,7 @@ async def list_portfolios(
     return [serialize_portfolio(p) for p in rows]
 
 
-@router.post("/portfolios")
+@router.post("/portfolios", response_model=PortfolioOut)
 async def create_portfolio(
     req: PortfolioCreateReq,
     user: CurrentUser = Depends(get_current_user),
@@ -65,12 +66,12 @@ async def create_portfolio(
     return serialize_portfolio(p)
 
 
-@router.get("/portfolios/{portfolio_id}")
+@router.get("/portfolios/{portfolio_id}", response_model=PortfolioOut)
 async def get_portfolio_detail(p: Portfolio = Depends(get_portfolio)) -> dict:
     return serialize_portfolio(p)
 
 
-@router.patch("/portfolios/{portfolio_id}")
+@router.patch("/portfolios/{portfolio_id}", response_model=PortfolioOut)
 async def patch_portfolio(
     req: PortfolioPatchReq,
     p: Portfolio = Depends(get_portfolio),
@@ -94,7 +95,7 @@ async def delete_portfolio(
     return None
 
 
-@router.delete("/portfolios/{portfolio_id}/data")
+@router.delete("/portfolios/{portfolio_id}/data", response_model=ClearDataOut)
 async def clear_data(
     p: Portfolio = Depends(get_portfolio),
     db: AsyncSession = Depends(get_db),
@@ -116,7 +117,7 @@ async def clear_data(
     return {"deletedCount": counts}
 
 
-@router.patch("/portfolios/{portfolio_id}/archive")
+@router.patch("/portfolios/{portfolio_id}/archive", response_model=PortfolioOut)
 async def archive_portfolio(
     req: PortfolioArchiveReq,
     p: Portfolio = Depends(get_portfolio),

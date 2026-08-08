@@ -21,17 +21,18 @@ from app.schemas import (
     RestoreReq,
 )
 from app.services.user import UserService
+from app.schemas_resp import AuthTokenOut, UserPublicOut
 
 router = APIRouter(prefix="/api/auth", tags=["auth"], route_class=EnvelopeRoute)
 
 
-@router.post("/register")
+@router.post("/register", response_model=UserPublicOut)
 async def register(req: RegisterReq, db: AsyncSession = Depends(get_db)) -> dict:
     user = await UserService(db).register(req.email, req.password, req.name)
     return {"id": user.id, "email": user.email, "name": user.name}
 
 
-@router.post("/login")
+@router.post("/login", response_model=AuthTokenOut)
 async def login(req: LoginReq, db: AsyncSession = Depends(get_db)) -> dict:
     user = await UserService(db).authenticate(req.email, req.password)
     token = UserService.issue_token(user)
@@ -41,7 +42,7 @@ async def login(req: LoginReq, db: AsyncSession = Depends(get_db)) -> dict:
     }
 
 
-@router.post("/account/restore")
+@router.post("/account/restore", response_model=AuthTokenOut)
 async def restore(req: RestoreReq, db: AsyncSession = Depends(get_db)) -> dict:
     user = await UserService(db).restore(req.email, req.password)
     token = UserService.issue_token(user)
@@ -51,7 +52,7 @@ async def restore(req: RestoreReq, db: AsyncSession = Depends(get_db)) -> dict:
     }
 
 
-@router.get("/me")
+@router.get("/me", response_model=UserPublicOut)
 async def me(
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -62,7 +63,7 @@ async def me(
     return {"id": u.id, "email": u.email, "name": u.name}
 
 
-@router.patch("/profile")
+@router.patch("/profile", response_model=UserPublicOut)
 async def profile(
     req: ProfilePatchReq,
     user: CurrentUser = Depends(get_current_user),
@@ -79,7 +80,7 @@ async def profile(
     return {"id": u.id, "email": u.email, "name": u.name, "avatar": u.avatar}
 
 
-@router.patch("/password")
+@router.patch("/password", response_model=AuthTokenOut)
 async def change_password(
     req: PasswordPatchReq,
     user: CurrentUser = Depends(get_current_user),
@@ -94,7 +95,7 @@ async def change_password(
     }
 
 
-@router.patch("/email")
+@router.patch("/email", response_model=AuthTokenOut)
 async def change_email(
     req: EmailPatchReq,
     user: CurrentUser = Depends(get_current_user),

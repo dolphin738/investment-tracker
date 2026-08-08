@@ -61,6 +61,15 @@ from app.schemas import (
     TradeCreateReq,
     TradePatchReq,
 )
+from app.schemas_resp import (
+    CashBalanceOut,
+    CashflowOut,
+    Paginated,
+    PriceOut,
+    SecurityOut,
+    SnapshotOut,
+    TradeOut,
+)
 from app.services.asset_valuation import AssetValuationService
 from app.services.holding import HoldingService
 from app.services.recalculation import RecalculationService
@@ -117,7 +126,7 @@ router_cashflows = APIRouter(
 )
 
 
-@router_cashflows.get("/{portfolio_id}/cashflows")
+@router_cashflows.get("/{portfolio_id}/cashflows", response_model=Paginated[CashflowOut])
 async def list_cashflows(
     p=Depends(get_portfolio),
     db: AsyncSession = Depends(get_db),
@@ -135,7 +144,7 @@ async def list_cashflows(
     return await paginate(db, stmt, page, pageSize, serialize_cashflow)
 
 
-@router_cashflows.get("/{portfolio_id}/cashflows/{cf_id}")
+@router_cashflows.get("/{portfolio_id}/cashflows/{cf_id}", response_model=CashflowOut)
 async def get_cashflow(
     p=Depends(get_portfolio), db: AsyncSession = Depends(get_db), cf_id: str = ""
 ):
@@ -145,7 +154,7 @@ async def get_cashflow(
     return serialize_cashflow(cf)
 
 
-@router_cashflows.post("/{portfolio_id}/cashflows")
+@router_cashflows.post("/{portfolio_id}/cashflows", response_model=CashflowOut)
 async def create_cashflow(
     req: CashflowCreateReq, p=Depends(get_portfolio), db: AsyncSession = Depends(get_db)
 ):
@@ -162,7 +171,7 @@ async def create_cashflow(
     return serialize_cashflow(cf)
 
 
-@router_cashflows.patch("/{portfolio_id}/cashflows/{cf_id}")
+@router_cashflows.patch("/{portfolio_id}/cashflows/{cf_id}", response_model=CashflowOut)
 async def patch_cashflow(
     req: CashflowPatchReq,
     p=Depends(get_portfolio),
@@ -208,7 +217,7 @@ router_securities = APIRouter(
 )
 
 
-@router_securities.get("/{portfolio_id}/securities")
+@router_securities.get("/{portfolio_id}/securities", response_model=Paginated[SecurityOut])
 async def list_securities(
     p=Depends(get_portfolio),
     db: AsyncSession = Depends(get_db),
@@ -223,7 +232,7 @@ async def list_securities(
     return await paginate(db, stmt, page, pageSize, serialize_security)
 
 
-@router_securities.get("/{portfolio_id}/securities/{sec_id}")
+@router_securities.get("/{portfolio_id}/securities/{sec_id}", response_model=SecurityOut)
 async def get_security(
     p=Depends(get_portfolio), db: AsyncSession = Depends(get_db), sec_id: str = ""
 ):
@@ -233,7 +242,7 @@ async def get_security(
     return serialize_security(sec)
 
 
-@router_securities.post("/{portfolio_id}/securities")
+@router_securities.post("/{portfolio_id}/securities", response_model=SecurityOut)
 async def create_security(
     req: SecurityCreateReq, p=Depends(get_portfolio), db: AsyncSession = Depends(get_db)
 ):
@@ -250,7 +259,7 @@ async def create_security(
     return serialize_security(sec)
 
 
-@router_securities.patch("/{portfolio_id}/securities/{sec_id}")
+@router_securities.patch("/{portfolio_id}/securities/{sec_id}", response_model=SecurityOut)
 async def patch_security(
     req: SecurityPatchReq,
     p=Depends(get_portfolio),
@@ -301,7 +310,7 @@ router_trades = APIRouter(
 )
 
 
-@router_trades.get("/{portfolio_id}/security-trades")
+@router_trades.get("/{portfolio_id}/security-trades", response_model=Paginated[TradeOut])
 async def list_trades(
     p=Depends(get_portfolio),
     db: AsyncSession = Depends(get_db),
@@ -327,7 +336,7 @@ async def list_trades(
     return await paginate(db, stmt, page, pageSize, serialize_trade)
 
 
-@router_trades.get("/{portfolio_id}/security-trades/{trade_id}")
+@router_trades.get("/{portfolio_id}/security-trades/{trade_id}", response_model=TradeOut)
 async def get_trade(
     p=Depends(get_portfolio), db: AsyncSession = Depends(get_db), trade_id: str = ""
 ):
@@ -337,7 +346,7 @@ async def get_trade(
     return serialize_trade(trade)
 
 
-@router_trades.post("/{portfolio_id}/security-trades")
+@router_trades.post("/{portfolio_id}/security-trades", response_model=TradeOut)
 async def create_trade(
     req: TradeCreateReq, p=Depends(get_portfolio), db: AsyncSession = Depends(get_db)
 ):
@@ -362,7 +371,7 @@ async def create_trade(
     return serialize_trade(trade)
 
 
-@router_trades.patch("/{portfolio_id}/security-trades/{trade_id}")
+@router_trades.patch("/{portfolio_id}/security-trades/{trade_id}", response_model=TradeOut)
 async def patch_trade(
     req: TradePatchReq,
     p=Depends(get_portfolio),
@@ -426,7 +435,7 @@ router_prices = APIRouter(
 )
 
 
-@router_prices.get("/{portfolio_id}/security-prices")
+@router_prices.get("/{portfolio_id}/security-prices", response_model=Paginated[PriceOut])
 async def list_prices(
     p=Depends(get_portfolio),
     db: AsyncSession = Depends(get_db),
@@ -443,7 +452,7 @@ async def list_prices(
     return await paginate(db, stmt, page, pageSize, serialize_price)
 
 
-@router_prices.post("/{portfolio_id}/security-prices")
+@router_prices.post("/{portfolio_id}/security-prices", response_model=PriceOut)
 async def create_price(
     req: PriceCreateReq, p=Depends(get_portfolio), db: AsyncSession = Depends(get_db)
 ):
@@ -460,7 +469,7 @@ async def create_price(
     return serialize_price(price)
 
 
-@router_prices.patch("/{portfolio_id}/security-prices/{price_id}")
+@router_prices.patch("/{portfolio_id}/security-prices/{price_id}", response_model=PriceOut)
 async def patch_price(
     req: PricePatchReq,
     p=Depends(get_portfolio),
@@ -507,7 +516,7 @@ router_cashbalances = APIRouter(
 )
 
 
-@router_cashbalances.get("/{portfolio_id}/cash-balances")
+@router_cashbalances.get("/{portfolio_id}/cash-balances", response_model=Paginated[CashBalanceOut])
 async def list_cashbalances(
     p=Depends(get_portfolio),
     db: AsyncSession = Depends(get_db),
@@ -522,7 +531,7 @@ async def list_cashbalances(
     return await paginate(db, stmt, page, pageSize, serialize_cashbalance)
 
 
-@router_cashbalances.post("/{portfolio_id}/cash-balances")
+@router_cashbalances.post("/{portfolio_id}/cash-balances", response_model=CashBalanceOut)
 async def create_cashbalance(
     req: CashBalanceCreateReq, p=Depends(get_portfolio), db: AsyncSession = Depends(get_db)
 ):
@@ -536,7 +545,7 @@ async def create_cashbalance(
     return serialize_cashbalance(cb)
 
 
-@router_cashbalances.patch("/{portfolio_id}/cash-balances/{cb_id}")
+@router_cashbalances.patch("/{portfolio_id}/cash-balances/{cb_id}", response_model=CashBalanceOut)
 async def patch_cashbalance(
     req: CashBalancePatchReq,
     p=Depends(get_portfolio),
@@ -580,7 +589,7 @@ router_snapshots = APIRouter(
 )
 
 
-@router_snapshots.get("/{portfolio_id}/snapshots")
+@router_snapshots.get("/{portfolio_id}/snapshots", response_model=Paginated[SnapshotOut])
 async def list_snapshots(
     p=Depends(get_portfolio),
     db: AsyncSession = Depends(get_db),
@@ -628,7 +637,7 @@ async def list_snapshots(
     return {"items": items, "total": total, "page": page, "pageSize": pageSize}
 
 
-@router_snapshots.get("/{portfolio_id}/snapshots/{snap_date}")
+@router_snapshots.get("/{portfolio_id}/snapshots/{snap_date}", response_model=SnapshotOut)
 async def get_snapshot_by_date(
     p=Depends(get_portfolio), db: AsyncSession = Depends(get_db), snap_date: date = None
 ):
@@ -648,7 +657,7 @@ async def get_snapshot_by_date(
     return serialize_snapshot(snap, derived_total=derived)
 
 
-@router_snapshots.post("/{portfolio_id}/snapshots")
+@router_snapshots.post("/{portfolio_id}/snapshots", response_model=SnapshotOut)
 async def create_snapshot(
     req: SnapshotCreateReq, p=Depends(get_portfolio), db: AsyncSession = Depends(get_db)
 ):
@@ -662,7 +671,7 @@ async def create_snapshot(
     return serialize_snapshot(snap, derived_total=derived)
 
 
-@router_snapshots.patch("/{portfolio_id}/snapshots/{snap_id}")
+@router_snapshots.patch("/{portfolio_id}/snapshots/{snap_id}", response_model=SnapshotOut)
 async def patch_snapshot(
     req: SnapshotPatchReq,
     p=Depends(get_portfolio),
@@ -705,7 +714,7 @@ async def delete_snapshot(
     return None
 
 
-@router_snapshots.post("/{portfolio_id}/snapshots/{snap_date}/reset")
+@router_snapshots.post("/{portfolio_id}/snapshots/{snap_date}/reset", response_model=SnapshotOut)
 async def reset_snapshot(
     p=Depends(get_portfolio), db: AsyncSession = Depends(get_db), snap_date: date = None
 ):

@@ -10,16 +10,18 @@ from typing import Annotated
 
 from decimal import Decimal
 
-from pydantic import Field, PlainSerializer
+from pydantic import PlainSerializer, WithJsonSchema
 
 
 def _decimal_to_str(d: Decimal) -> str:
     return str(d)
 
 
-# 序列化时为字符串，OpenAPI schema 标注为 string，前端生成类型即 string
+# 序列化时为字符串；用 WithJsonSchema 完全覆盖 Pydantic 默认的
+# anyOf[number, string-pattern]，使 OpenAPI schema 干净地声明 type:string，
+# 前端 openapi-typescript 生成的类型即 string（而非 number | string）。
 DecimalStr = Annotated[
     Decimal,
     PlainSerializer(_decimal_to_str, return_type=str, when_used="json"),
-    Field(json_schema_extra={"type": "string", "example": "0.00"}),
+    WithJsonSchema({"type": "string", "format": "decimal", "example": "0.00"}),
 ]

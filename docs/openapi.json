@@ -1,0 +1,6825 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "投资收益统计系统 API",
+    "description": "方案B — 资产快照 + 出入金 + 证券买卖 + 标的最新价 + 现金余额",
+    "version": "1.0"
+  },
+  "paths": {
+    "/api/health": {
+      "get": {
+        "tags": [
+          "contract"
+        ],
+        "summary": "Health",
+        "operationId": "health_api_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ]
+      }
+    },
+    "/api/empty": {
+      "get": {
+        "tags": [
+          "contract"
+        ],
+        "summary": "Empty",
+        "operationId": "empty_api_empty_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ]
+      }
+    },
+    "/api/echo": {
+      "get": {
+        "tags": [
+          "contract"
+        ],
+        "summary": "Echo",
+        "operationId": "echo_api_echo_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ]
+      }
+    },
+    "/api/decimal-model": {
+      "get": {
+        "tags": [
+          "contract"
+        ],
+        "summary": "Decimal Model",
+        "operationId": "decimal_model_api_decimal_model_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ]
+      }
+    },
+    "/api/protected": {
+      "get": {
+        "tags": [
+          "contract"
+        ],
+        "summary": "Protected",
+        "operationId": "protected_api_protected_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ]
+      }
+    },
+    "/api/boom": {
+      "get": {
+        "tags": [
+          "contract"
+        ],
+        "summary": "Boom",
+        "operationId": "boom_api_boom_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ]
+      }
+    },
+    "/api/token": {
+      "get": {
+        "tags": [
+          "contract"
+        ],
+        "summary": "Issue Demo Token",
+        "operationId": "issue_demo_token_api_token_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ]
+      }
+    },
+    "/api/auth/register": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Register",
+        "operationId": "register_api_auth_register_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterReq"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserPublicOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ]
+      }
+    },
+    "/api/auth/login": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Login",
+        "operationId": "login_api_auth_login_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginReq"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthTokenOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ]
+      }
+    },
+    "/api/auth/account/restore": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Restore",
+        "operationId": "restore_api_auth_account_restore_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RestoreReq"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthTokenOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ]
+      }
+    },
+    "/api/auth/me": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Me",
+        "operationId": "me_api_auth_me_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserPublicOut"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ]
+      }
+    },
+    "/api/auth/profile": {
+      "patch": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Profile",
+        "operationId": "profile_api_auth_profile_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProfilePatchReq"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserPublicOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ]
+      }
+    },
+    "/api/auth/password": {
+      "patch": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Change Password",
+        "operationId": "change_password_api_auth_password_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordPatchReq"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthTokenOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ]
+      }
+    },
+    "/api/auth/email": {
+      "patch": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Change Email",
+        "operationId": "change_email_api_auth_email_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailPatchReq"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthTokenOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ]
+      }
+    },
+    "/api/auth/account": {
+      "delete": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Delete Account",
+        "operationId": "delete_account_api_auth_account_delete",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ]
+      }
+    },
+    "/api/portfolios/comparison": {
+      "get": {
+        "tags": [
+          "aggregation"
+        ],
+        "summary": "Comparison",
+        "operationId": "comparison_api_portfolios_comparison_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PortfolioSummaryOut"
+                  },
+                  "type": "array",
+                  "title": "Response Comparison Api Portfolios Comparison Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ]
+      }
+    },
+    "/api/portfolios/{portfolio_id}/summary": {
+      "get": {
+        "tags": [
+          "aggregation"
+        ],
+        "summary": "Summary",
+        "operationId": "summary_api_portfolios__portfolio_id__summary_get",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortfolioSummaryOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/portfolios/{portfolio_id}/overview": {
+      "get": {
+        "tags": [
+          "aggregation"
+        ],
+        "summary": "Overview",
+        "operationId": "overview_api_portfolios__portfolio_id__overview_get",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Id"
+            }
+          },
+          {
+            "name": "range",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "1w|1m|3m|6m|1y|ytd|all",
+              "default": "1y",
+              "title": "Range"
+            },
+            "description": "1w|1m|3m|6m|1y|ytd|all"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OverviewOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/portfolios/{portfolio_id}/metrics/drawdown": {
+      "get": {
+        "tags": [
+          "aggregation"
+        ],
+        "summary": "Drawdown",
+        "operationId": "drawdown_api_portfolios__portfolio_id__metrics_drawdown_get",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Id"
+            }
+          },
+          {
+            "name": "startDate",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Startdate"
+            }
+          },
+          {
+            "name": "endDate",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Enddate"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DrawdownPointOut"
+                  },
+                  "title": "Response Drawdown Api Portfolios  Portfolio Id  Metrics Drawdown Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/account/stats": {
+      "get": {
+        "tags": [
+          "account"
+        ],
+        "summary": "Account Stats",
+        "operationId": "account_stats_api_account_stats_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountStatsOut"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ]
+      }
+    },
+    "/api/portfolios": {
+      "get": {
+        "tags": [
+          "portfolios"
+        ],
+        "summary": "List Portfolios",
+        "operationId": "list_portfolios_api_portfolios_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PortfolioOut"
+                  },
+                  "type": "array",
+                  "title": "Response List Portfolios Api Portfolios Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "portfolios"
+        ],
+        "summary": "Create Portfolio",
+        "operationId": "create_portfolio_api_portfolios_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PortfolioCreateReq"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortfolioOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ]
+      }
+    },
+    "/api/portfolios/{portfolio_id}": {
+      "get": {
+        "tags": [
+          "portfolios"
+        ],
+        "summary": "Get Portfolio Detail",
+        "operationId": "get_portfolio_detail_api_portfolios__portfolio_id__get",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortfolioOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "portfolios"
+        ],
+        "summary": "Patch Portfolio",
+        "operationId": "patch_portfolio_api_portfolios__portfolio_id__patch",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PortfolioPatchReq"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortfolioOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "portfolios"
+        ],
+        "summary": "Delete Portfolio",
+        "operationId": "delete_portfolio_api_portfolios__portfolio_id__delete",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/portfolios/{portfolio_id}/data": {
+      "delete": {
+        "tags": [
+          "portfolios"
+        ],
+        "summary": "Clear Data",
+        "description": "清空组合所有数据（保留组合本身）。级联删除子表。",
+        "operationId": "clear_data_api_portfolios__portfolio_id__data_delete",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClearDataOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/portfolios/{portfolio_id}/archive": {
+      "patch": {
+        "tags": [
+          "portfolios"
+        ],
+        "summary": "Archive Portfolio",
+        "description": "归档 / 取消归档（§4.2.2）。\n\narchived 缺省或 true → archivedAt = now；false → 置空。\n归档时若该组合为用户偏好默认组合，则同步置空（被隐藏的组合不能再当默认）。",
+        "operationId": "archive_portfolio_api_portfolios__portfolio_id__archive_patch",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PortfolioArchiveReq"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortfolioOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/portfolios/{portfolio_id}/cashflows": {
+      "get": {
+        "tags": [
+          "cashflows"
+        ],
+        "summary": "List Cashflows",
+        "operationId": "list_cashflows_api_portfolios__portfolio_id__cashflows_get",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Id"
+            }
+          },
+          {
+            "name": "startDate",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Startdate"
+            }
+          },
+          {
+            "name": "endDate",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Enddate"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 20,
+              "title": "Pagesize"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Paginated_CashflowOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "cashflows"
+        ],
+        "summary": "Create Cashflow",
+        "operationId": "create_cashflow_api_portfolios__portfolio_id__cashflows_post",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CashflowCreateReq"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CashflowOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/portfolios/{portfolio_id}/cashflows/{cf_id}": {
+      "get": {
+        "tags": [
+          "cashflows"
+        ],
+        "summary": "Get Cashflow",
+        "operationId": "get_cashflow_api_portfolios__portfolio_id__cashflows__cf_id__get",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "cf_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Cf Id"
+            }
+          },
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CashflowOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "cashflows"
+        ],
+        "summary": "Patch Cashflow",
+        "operationId": "patch_cashflow_api_portfolios__portfolio_id__cashflows__cf_id__patch",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "cf_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Cf Id"
+            }
+          },
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CashflowPatchReq"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CashflowOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "cashflows"
+        ],
+        "summary": "Delete Cashflow",
+        "operationId": "delete_cashflow_api_portfolios__portfolio_id__cashflows__cf_id__delete",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "cf_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Cf Id"
+            }
+          },
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/portfolios/{portfolio_id}/securities": {
+      "get": {
+        "tags": [
+          "securities"
+        ],
+        "summary": "List Securities",
+        "operationId": "list_securities_api_portfolios__portfolio_id__securities_get",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Id"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 20,
+              "title": "Pagesize"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Paginated_SecurityOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "securities"
+        ],
+        "summary": "Create Security",
+        "operationId": "create_security_api_portfolios__portfolio_id__securities_post",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SecurityCreateReq"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SecurityOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/portfolios/{portfolio_id}/securities/{sec_id}": {
+      "get": {
+        "tags": [
+          "securities"
+        ],
+        "summary": "Get Security",
+        "operationId": "get_security_api_portfolios__portfolio_id__securities__sec_id__get",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "sec_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Sec Id"
+            }
+          },
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SecurityOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "securities"
+        ],
+        "summary": "Patch Security",
+        "operationId": "patch_security_api_portfolios__portfolio_id__securities__sec_id__patch",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "sec_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Sec Id"
+            }
+          },
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SecurityPatchReq"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SecurityOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "securities"
+        ],
+        "summary": "Delete Security",
+        "operationId": "delete_security_api_portfolios__portfolio_id__securities__sec_id__delete",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "sec_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Sec Id"
+            }
+          },
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/portfolios/{portfolio_id}/security-trades": {
+      "get": {
+        "tags": [
+          "security-trades"
+        ],
+        "summary": "List Trades",
+        "operationId": "list_trades_api_portfolios__portfolio_id__security_trades_get",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Id"
+            }
+          },
+          {
+            "name": "securityId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Securityid"
+            }
+          },
+          {
+            "name": "side",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Side"
+            }
+          },
+          {
+            "name": "startDate",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Startdate"
+            }
+          },
+          {
+            "name": "endDate",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Enddate"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 20,
+              "title": "Pagesize"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Paginated_TradeOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "security-trades"
+        ],
+        "summary": "Create Trade",
+        "operationId": "create_trade_api_portfolios__portfolio_id__security_trades_post",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TradeCreateReq"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TradeOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/portfolios/{portfolio_id}/security-trades/{trade_id}": {
+      "get": {
+        "tags": [
+          "security-trades"
+        ],
+        "summary": "Get Trade",
+        "operationId": "get_trade_api_portfolios__portfolio_id__security_trades__trade_id__get",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "trade_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Trade Id"
+            }
+          },
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TradeOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "security-trades"
+        ],
+        "summary": "Patch Trade",
+        "operationId": "patch_trade_api_portfolios__portfolio_id__security_trades__trade_id__patch",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "trade_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Trade Id"
+            }
+          },
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TradePatchReq"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TradeOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "security-trades"
+        ],
+        "summary": "Delete Trade",
+        "operationId": "delete_trade_api_portfolios__portfolio_id__security_trades__trade_id__delete",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "trade_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Trade Id"
+            }
+          },
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/portfolios/{portfolio_id}/security-prices": {
+      "get": {
+        "tags": [
+          "security-prices"
+        ],
+        "summary": "List Prices",
+        "operationId": "list_prices_api_portfolios__portfolio_id__security_prices_get",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Id"
+            }
+          },
+          {
+            "name": "securityId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Securityid"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 20,
+              "title": "Pagesize"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Paginated_PriceOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "security-prices"
+        ],
+        "summary": "Create Price",
+        "operationId": "create_price_api_portfolios__portfolio_id__security_prices_post",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PriceCreateReq"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PriceOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/portfolios/{portfolio_id}/security-prices/{price_id}": {
+      "patch": {
+        "tags": [
+          "security-prices"
+        ],
+        "summary": "Patch Price",
+        "operationId": "patch_price_api_portfolios__portfolio_id__security_prices__price_id__patch",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "price_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Price Id"
+            }
+          },
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PricePatchReq"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PriceOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "security-prices"
+        ],
+        "summary": "Delete Price",
+        "operationId": "delete_price_api_portfolios__portfolio_id__security_prices__price_id__delete",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "price_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Price Id"
+            }
+          },
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/portfolios/{portfolio_id}/cash-balances": {
+      "get": {
+        "tags": [
+          "cash-balances"
+        ],
+        "summary": "List Cashbalances",
+        "operationId": "list_cashbalances_api_portfolios__portfolio_id__cash_balances_get",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Id"
+            }
+          },
+          {
+            "name": "asOf",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Asof"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 20,
+              "title": "Pagesize"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Paginated_CashBalanceOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "cash-balances"
+        ],
+        "summary": "Create Cashbalance",
+        "operationId": "create_cashbalance_api_portfolios__portfolio_id__cash_balances_post",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CashBalanceCreateReq"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CashBalanceOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/portfolios/{portfolio_id}/cash-balances/{cb_id}": {
+      "patch": {
+        "tags": [
+          "cash-balances"
+        ],
+        "summary": "Patch Cashbalance",
+        "operationId": "patch_cashbalance_api_portfolios__portfolio_id__cash_balances__cb_id__patch",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "cb_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Cb Id"
+            }
+          },
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CashBalancePatchReq"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CashBalanceOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "cash-balances"
+        ],
+        "summary": "Delete Cashbalance",
+        "operationId": "delete_cashbalance_api_portfolios__portfolio_id__cash_balances__cb_id__delete",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "cb_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Cb Id"
+            }
+          },
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/portfolios/{portfolio_id}/snapshots": {
+      "get": {
+        "tags": [
+          "snapshots"
+        ],
+        "summary": "List Snapshots",
+        "operationId": "list_snapshots_api_portfolios__portfolio_id__snapshots_get",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Id"
+            }
+          },
+          {
+            "name": "startDate",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Startdate"
+            }
+          },
+          {
+            "name": "endDate",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Enddate"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 20,
+              "title": "Pagesize"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Paginated_SnapshotOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "snapshots"
+        ],
+        "summary": "Create Snapshot",
+        "operationId": "create_snapshot_api_portfolios__portfolio_id__snapshots_post",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SnapshotCreateReq"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SnapshotOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/portfolios/{portfolio_id}/snapshots/{snap_date}": {
+      "get": {
+        "tags": [
+          "snapshots"
+        ],
+        "summary": "Get Snapshot By Date",
+        "operationId": "get_snapshot_by_date_api_portfolios__portfolio_id__snapshots__snap_date__get",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "snap_date",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "title": "Snap Date"
+            }
+          },
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SnapshotOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/portfolios/{portfolio_id}/snapshots/{snap_id}": {
+      "patch": {
+        "tags": [
+          "snapshots"
+        ],
+        "summary": "Patch Snapshot",
+        "operationId": "patch_snapshot_api_portfolios__portfolio_id__snapshots__snap_id__patch",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "snap_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Snap Id"
+            }
+          },
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SnapshotPatchReq"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SnapshotOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "snapshots"
+        ],
+        "summary": "Delete Snapshot",
+        "operationId": "delete_snapshot_api_portfolios__portfolio_id__snapshots__snap_id__delete",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "snap_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Snap Id"
+            }
+          },
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/portfolios/{portfolio_id}/snapshots/{snap_date}/reset": {
+      "post": {
+        "tags": [
+          "snapshots"
+        ],
+        "summary": "Reset Snapshot",
+        "operationId": "reset_snapshot_api_portfolios__portfolio_id__snapshots__snap_date__reset_post",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "snap_date",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "title": "Snap Date"
+            }
+          },
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SnapshotOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/portfolios/{portfolio_id}/dividends": {
+      "get": {
+        "tags": [
+          "dividends"
+        ],
+        "summary": "List Dividends",
+        "operationId": "list_dividends_api_portfolios__portfolio_id__dividends_get",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Id"
+            }
+          },
+          {
+            "name": "securityId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Securityid"
+            }
+          },
+          {
+            "name": "startDate",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Startdate"
+            }
+          },
+          {
+            "name": "endDate",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Enddate"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "title": "Pagesize"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Paginated_DividendOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "dividends"
+        ],
+        "summary": "Create Dividend",
+        "operationId": "create_dividend_api_portfolios__portfolio_id__dividends_post",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DividendCreateReq"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DividendOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/portfolios/{portfolio_id}/dividends/{div_id}": {
+      "patch": {
+        "tags": [
+          "dividends"
+        ],
+        "summary": "Patch Dividend",
+        "operationId": "patch_dividend_api_portfolios__portfolio_id__dividends__div_id__patch",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "div_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Div Id"
+            }
+          },
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DividendPatchReq"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DividendOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "dividends"
+        ],
+        "summary": "Delete Dividend",
+        "operationId": "delete_dividend_api_portfolios__portfolio_id__dividends__div_id__delete",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "div_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Div Id"
+            }
+          },
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/portfolios/{portfolio_id}/export": {
+      "get": {
+        "tags": [
+          "data-transfer"
+        ],
+        "summary": "Export Data",
+        "operationId": "export_data_api_portfolios__portfolio_id__export_get",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Id"
+            }
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "securities",
+              "title": "Type"
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "csv",
+              "title": "Format"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/portfolios/{portfolio_id}/import/preview": {
+      "post": {
+        "tags": [
+          "data-transfer"
+        ],
+        "summary": "Import Preview",
+        "operationId": "import_preview_api_portfolios__portfolio_id__import_preview_post",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_import_preview_api_portfolios__portfolio_id__import_preview_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportPreviewOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/portfolios/{portfolio_id}/import/commit": {
+      "post": {
+        "tags": [
+          "data-transfer"
+        ],
+        "summary": "Import Commit",
+        "operationId": "import_commit_api_portfolios__portfolio_id__import_commit_post",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportCommitReq"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportCommitOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/data-transfer/template": {
+      "get": {
+        "tags": [
+          "data-transfer"
+        ],
+        "summary": "Download Template",
+        "operationId": "download_template_api_data_transfer_template_get",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "securityTrades",
+              "title": "Type"
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "csv",
+              "title": "Format"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/users/preferences": {
+      "get": {
+        "tags": [
+          "preference"
+        ],
+        "summary": "Get Preferences",
+        "operationId": "get_preferences_api_users_preferences_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreferenceOut"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "preference"
+        ],
+        "summary": "Patch Preferences",
+        "operationId": "patch_preferences_api_users_preferences_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "type": "object",
+                "title": "Body"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreferenceOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ]
+      }
+    },
+    "/api/upload/avatar": {
+      "post": {
+        "tags": [
+          "upload"
+        ],
+        "summary": "Upload Avatar",
+        "operationId": "upload_avatar_api_upload_avatar_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_avatar_api_upload_avatar_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ]
+      }
+    },
+    "/api/portfolios/{portfolio_id}/holdings": {
+      "get": {
+        "tags": [
+          "holdings"
+        ],
+        "summary": "Get Holdings",
+        "operationId": "get_holdings_api_portfolios__portfolio_id__holdings_get",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Id"
+            }
+          },
+          {
+            "name": "asOf",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Asof"
+            }
+          },
+          {
+            "name": "securityId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Securityid"
+            }
+          },
+          {
+            "name": "includeClosed",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Includeclosed"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/HoldingOut"
+                  },
+                  "title": "Response Get Holdings Api Portfolios  Portfolio Id  Holdings Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/portfolios/{portfolio_id}/xirr": {
+      "get": {
+        "tags": [
+          "xirr"
+        ],
+        "summary": "Get Xirr Series",
+        "operationId": "get_xirr_series_api_portfolios__portfolio_id__xirr_get",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Id"
+            }
+          },
+          {
+            "name": "granularity",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "day",
+              "title": "Granularity"
+            }
+          },
+          {
+            "name": "startDate",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Startdate"
+            }
+          },
+          {
+            "name": "endDate",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Enddate"
+            }
+          },
+          {
+            "name": "aggregation",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "last",
+              "title": "Aggregation"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/XirrPointOut"
+                  },
+                  "title": "Response Get Xirr Series Api Portfolios  Portfolio Id  Xirr Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/portfolios/{portfolio_id}/xirr/latest": {
+      "get": {
+        "tags": [
+          "xirr"
+        ],
+        "summary": "Get Xirr Latest",
+        "operationId": "get_xirr_latest_api_portfolios__portfolio_id__xirr_latest_get",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/XirrLatestOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/portfolios/{portfolio_id}/xirr/history": {
+      "get": {
+        "tags": [
+          "xirr"
+        ],
+        "summary": "Get Xirr History",
+        "operationId": "get_xirr_history_api_portfolios__portfolio_id__xirr_history_get",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Id"
+            }
+          },
+          {
+            "name": "granularity",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "month",
+              "title": "Granularity"
+            }
+          },
+          {
+            "name": "aggregation",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "last",
+              "title": "Aggregation"
+            }
+          },
+          {
+            "name": "startDate",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Startdate"
+            }
+          },
+          {
+            "name": "endDate",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Enddate"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 20,
+              "title": "Pagesize"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Paginated_XirrPointOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/portfolios/{portfolio_id}/nav": {
+      "get": {
+        "tags": [
+          "nav"
+        ],
+        "summary": "Get Nav Series",
+        "operationId": "get_nav_series_api_portfolios__portfolio_id__nav_get",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Id"
+            }
+          },
+          {
+            "name": "granularity",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "day",
+              "title": "Granularity"
+            }
+          },
+          {
+            "name": "startDate",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Startdate"
+            }
+          },
+          {
+            "name": "endDate",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Enddate"
+            }
+          },
+          {
+            "name": "aggregation",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "last",
+              "title": "Aggregation"
+            }
+          },
+          {
+            "name": "metric",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "cumulative",
+              "title": "Metric"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/NavPointOut"
+                  },
+                  "title": "Response Get Nav Series Api Portfolios  Portfolio Id  Nav Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/portfolios/{portfolio_id}/nav/latest": {
+      "get": {
+        "tags": [
+          "nav"
+        ],
+        "summary": "Get Nav Latest",
+        "operationId": "get_nav_latest_api_portfolios__portfolio_id__nav_latest_get",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NavPointOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/portfolios/{portfolio_id}/nav/history": {
+      "get": {
+        "tags": [
+          "nav"
+        ],
+        "summary": "Get Nav History",
+        "operationId": "get_nav_history_api_portfolios__portfolio_id__nav_history_get",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Id"
+            }
+          },
+          {
+            "name": "granularity",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "month",
+              "title": "Granularity"
+            }
+          },
+          {
+            "name": "aggregation",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "last",
+              "title": "Aggregation"
+            }
+          },
+          {
+            "name": "startDate",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Startdate"
+            }
+          },
+          {
+            "name": "endDate",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Enddate"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 20,
+              "title": "Pagesize"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Paginated_NavPointOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/portfolios/{portfolio_id}/recalculate-range": {
+      "post": {
+        "tags": [
+          "recalculate"
+        ],
+        "summary": "Recalculate Range",
+        "operationId": "recalculate_range_api_portfolios__portfolio_id__recalculate_range_post",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecalculateRangeReq"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecalcOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/portfolios/{portfolio_id}/recalculate": {
+      "post": {
+        "tags": [
+          "recalculate"
+        ],
+        "summary": "Recalculate Full",
+        "operationId": "recalculate_full_api_portfolios__portfolio_id__recalculate_post",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecalcOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AccountStatsOut": {
+        "properties": {
+          "portfolioCount": {
+            "type": "integer",
+            "title": "Portfoliocount"
+          },
+          "totalAssets": {
+            "type": "string",
+            "title": "Totalassets"
+          },
+          "cumulativeXirr": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cumulativexirr"
+          },
+          "yearXirr": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Yearxirr"
+          }
+        },
+        "type": "object",
+        "required": [
+          "portfolioCount",
+          "totalAssets"
+        ],
+        "title": "AccountStatsOut"
+      },
+      "AuthTokenOut": {
+        "properties": {
+          "accessToken": {
+            "type": "string",
+            "title": "Accesstoken"
+          },
+          "user": {
+            "$ref": "#/components/schemas/UserPublicOut"
+          }
+        },
+        "type": "object",
+        "required": [
+          "accessToken",
+          "user"
+        ],
+        "title": "AuthTokenOut"
+      },
+      "Body_import_preview_api_portfolios__portfolio_id__import_preview_post": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "title": "Type"
+          },
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "file"
+        ],
+        "title": "Body_import_preview_api_portfolios__portfolio_id__import_preview_post"
+      },
+      "Body_upload_avatar_api_upload_avatar_post": {
+        "properties": {
+          "file": {
+            "anyOf": [
+              {
+                "type": "string",
+                "contentMediaType": "application/octet-stream"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "title": "Body_upload_avatar_api_upload_avatar_post"
+      },
+      "CashBalanceCreateReq": {
+        "properties": {
+          "amount": {
+            "type": "string",
+            "format": "decimal",
+            "title": "Amount",
+            "example": "0.00"
+          },
+          "asOf": {
+            "type": "string",
+            "format": "date",
+            "title": "Asof"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "amount",
+          "asOf"
+        ],
+        "title": "CashBalanceCreateReq"
+      },
+      "CashBalanceOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "amount": {
+            "type": "string",
+            "title": "Amount"
+          },
+          "asOf": {
+            "type": "string",
+            "format": "date",
+            "title": "Asof"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "amount",
+          "asOf",
+          "createdAt"
+        ],
+        "title": "CashBalanceOut"
+      },
+      "CashBalancePatchReq": {
+        "properties": {
+          "amount": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "decimal",
+                "example": "0.00"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "title": "CashBalancePatchReq"
+      },
+      "CashflowCreateReq": {
+        "properties": {
+          "date": {
+            "type": "string",
+            "format": "date",
+            "title": "Date"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type"
+          },
+          "amount": {
+            "type": "string",
+            "format": "decimal",
+            "title": "Amount",
+            "example": "0.00"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "date",
+          "type",
+          "amount"
+        ],
+        "title": "CashflowCreateReq"
+      },
+      "CashflowOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "date": {
+            "type": "string",
+            "format": "date",
+            "title": "Date"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type"
+          },
+          "amount": {
+            "type": "string",
+            "title": "Amount"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "date",
+          "type",
+          "amount",
+          "createdAt"
+        ],
+        "title": "CashflowOut"
+      },
+      "CashflowPatchReq": {
+        "properties": {
+          "date": {
+            "type": "null",
+            "title": "Date"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type"
+          },
+          "amount": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "decimal",
+                "example": "0.00"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "title": "CashflowPatchReq"
+      },
+      "ClearDataOut": {
+        "properties": {
+          "deletedCount": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Deletedcount"
+          }
+        },
+        "type": "object",
+        "required": [
+          "deletedCount"
+        ],
+        "title": "ClearDataOut"
+      },
+      "DividendCreateReq": {
+        "properties": {
+          "securityId": {
+            "type": "string",
+            "title": "Securityid"
+          },
+          "date": {
+            "type": "string",
+            "format": "date",
+            "title": "Date"
+          },
+          "amount": {
+            "type": "string",
+            "format": "decimal",
+            "title": "Amount",
+            "example": "0.00"
+          },
+          "tax": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "decimal",
+                "example": "0.00"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tax",
+            "default": "0"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type",
+            "default": "CASH"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "securityId",
+          "date",
+          "amount"
+        ],
+        "title": "DividendCreateReq"
+      },
+      "DividendOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "securityId": {
+            "type": "string",
+            "title": "Securityid"
+          },
+          "securityCode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Securitycode"
+          },
+          "securityName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Securityname"
+          },
+          "date": {
+            "type": "string",
+            "format": "date",
+            "title": "Date"
+          },
+          "amount": {
+            "type": "string",
+            "title": "Amount"
+          },
+          "tax": {
+            "type": "string",
+            "title": "Tax"
+          },
+          "netAmount": {
+            "type": "string",
+            "title": "Netamount"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "securityId",
+          "date",
+          "amount",
+          "tax",
+          "netAmount",
+          "type",
+          "createdAt"
+        ],
+        "title": "DividendOut"
+      },
+      "DividendPatchReq": {
+        "properties": {
+          "securityId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Securityid"
+          },
+          "date": {
+            "type": "null",
+            "title": "Date"
+          },
+          "amount": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "decimal",
+                "example": "0.00"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount"
+          },
+          "tax": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "decimal",
+                "example": "0.00"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tax"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "title": "DividendPatchReq"
+      },
+      "DrawdownPointOut": {
+        "properties": {
+          "date": {
+            "type": "string",
+            "format": "date",
+            "title": "Date"
+          },
+          "drawdown": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Drawdown"
+          },
+          "peakDate": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Peakdate"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          }
+        },
+        "type": "object",
+        "required": [
+          "date",
+          "label"
+        ],
+        "title": "DrawdownPointOut"
+      },
+      "EmailPatchReq": {
+        "properties": {
+          "currentPassword": {
+            "type": "string",
+            "title": "Currentpassword"
+          },
+          "newEmail": {
+            "type": "string",
+            "title": "Newemail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "currentPassword",
+          "newEmail"
+        ],
+        "title": "EmailPatchReq"
+      },
+      "FreshnessOut": {
+        "properties": {
+          "staleDays": {
+            "type": "integer",
+            "title": "Staledays"
+          },
+          "isStale": {
+            "type": "boolean",
+            "title": "Isstale"
+          },
+          "latestPriceAsOf": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latestpriceasof"
+          },
+          "latestPriceLagDays": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latestpricelagdays"
+          },
+          "latestCashAsOf": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latestcashasof"
+          },
+          "latestCashLagDays": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latestcashlagdays"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Reasons",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "staleDays",
+          "isStale"
+        ],
+        "title": "FreshnessOut"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "HoldingOut": {
+        "properties": {
+          "securityId": {
+            "type": "string",
+            "title": "Securityid"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "quantity": {
+            "type": "string",
+            "title": "Quantity"
+          },
+          "avgCost": {
+            "type": "string",
+            "title": "Avgcost"
+          },
+          "costTotal": {
+            "type": "string",
+            "title": "Costtotal"
+          },
+          "price": {
+            "type": "string",
+            "title": "Price"
+          },
+          "marketValue": {
+            "type": "string",
+            "title": "Marketvalue"
+          },
+          "pnl": {
+            "type": "string",
+            "title": "Pnl"
+          },
+          "ratio": {
+            "type": "string",
+            "title": "Ratio"
+          },
+          "isCostBased": {
+            "type": "boolean",
+            "title": "Iscostbased"
+          }
+        },
+        "type": "object",
+        "required": [
+          "securityId",
+          "quantity",
+          "avgCost",
+          "costTotal",
+          "price",
+          "marketValue",
+          "pnl",
+          "ratio",
+          "isCostBased"
+        ],
+        "title": "HoldingOut"
+      },
+      "ImportCommitOut": {
+        "properties": {
+          "inserted": {
+            "type": "integer",
+            "title": "Inserted"
+          },
+          "updated": {
+            "type": "integer",
+            "title": "Updated"
+          },
+          "skipped": {
+            "type": "integer",
+            "title": "Skipped"
+          },
+          "failed": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Failed",
+            "default": []
+          },
+          "recalculated": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recalculated"
+          }
+        },
+        "type": "object",
+        "required": [
+          "inserted",
+          "updated",
+          "skipped"
+        ],
+        "title": "ImportCommitOut"
+      },
+      "ImportCommitReq": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "title": "Type"
+          },
+          "token": {
+            "type": "string",
+            "title": "Token"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "token"
+        ],
+        "title": "ImportCommitReq"
+      },
+      "ImportPreviewOut": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "title": "Type"
+          },
+          "totalRows": {
+            "type": "integer",
+            "title": "Totalrows"
+          },
+          "validRows": {
+            "type": "integer",
+            "title": "Validrows"
+          },
+          "sample": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Sample",
+            "default": []
+          },
+          "errors": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Errors",
+            "default": []
+          },
+          "minDate": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mindate"
+          },
+          "token": {
+            "type": "string",
+            "title": "Token"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "totalRows",
+          "validRows",
+          "token"
+        ],
+        "title": "ImportPreviewOut"
+      },
+      "LoginReq": {
+        "properties": {
+          "email": {
+            "type": "string",
+            "title": "Email"
+          },
+          "password": {
+            "type": "string",
+            "title": "Password"
+          }
+        },
+        "type": "object",
+        "required": [
+          "email",
+          "password"
+        ],
+        "title": "LoginReq"
+      },
+      "NavPointOut": {
+        "properties": {
+          "date": {
+            "type": "string",
+            "format": "date",
+            "title": "Date"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          },
+          "cumulativeNav": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cumulativenav"
+          },
+          "yearNav": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Yearnav"
+          },
+          "shares": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shares"
+          }
+        },
+        "type": "object",
+        "required": [
+          "date"
+        ],
+        "title": "NavPointOut",
+        "description": "NAV 序列点（兼容 metric=both 的 {cumulativeNav,yearNav} 与 单值 {value}）。"
+      },
+      "OverviewOut": {
+        "properties": {
+          "totalAsset": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Totalasset"
+          },
+          "cumulativeXirr": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cumulativexirr"
+          },
+          "yearXirr": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Yearxirr"
+          },
+          "navSeries": {
+            "items": {
+              "$ref": "#/components/schemas/NavPointOut"
+            },
+            "type": "array",
+            "title": "Navseries",
+            "default": []
+          },
+          "recentCashflows": {
+            "items": {
+              "$ref": "#/components/schemas/CashflowOut"
+            },
+            "type": "array",
+            "title": "Recentcashflows",
+            "default": []
+          },
+          "freshness": {
+            "$ref": "#/components/schemas/FreshnessOut"
+          }
+        },
+        "type": "object",
+        "required": [
+          "freshness"
+        ],
+        "title": "OverviewOut"
+      },
+      "Paginated_CashBalanceOut_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CashBalanceOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "pageSize": {
+            "type": "integer",
+            "title": "Pagesize"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "pageSize"
+        ],
+        "title": "Paginated[CashBalanceOut]"
+      },
+      "Paginated_CashflowOut_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CashflowOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "pageSize": {
+            "type": "integer",
+            "title": "Pagesize"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "pageSize"
+        ],
+        "title": "Paginated[CashflowOut]"
+      },
+      "Paginated_DividendOut_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DividendOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "pageSize": {
+            "type": "integer",
+            "title": "Pagesize"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "pageSize"
+        ],
+        "title": "Paginated[DividendOut]"
+      },
+      "Paginated_NavPointOut_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/NavPointOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "pageSize": {
+            "type": "integer",
+            "title": "Pagesize"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "pageSize"
+        ],
+        "title": "Paginated[NavPointOut]"
+      },
+      "Paginated_PriceOut_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PriceOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "pageSize": {
+            "type": "integer",
+            "title": "Pagesize"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "pageSize"
+        ],
+        "title": "Paginated[PriceOut]"
+      },
+      "Paginated_SecurityOut_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SecurityOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "pageSize": {
+            "type": "integer",
+            "title": "Pagesize"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "pageSize"
+        ],
+        "title": "Paginated[SecurityOut]"
+      },
+      "Paginated_SnapshotOut_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SnapshotOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "pageSize": {
+            "type": "integer",
+            "title": "Pagesize"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "pageSize"
+        ],
+        "title": "Paginated[SnapshotOut]"
+      },
+      "Paginated_TradeOut_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TradeOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "pageSize": {
+            "type": "integer",
+            "title": "Pagesize"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "pageSize"
+        ],
+        "title": "Paginated[TradeOut]"
+      },
+      "Paginated_XirrPointOut_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/XirrPointOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "pageSize": {
+            "type": "integer",
+            "title": "Pagesize"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "pageSize"
+        ],
+        "title": "Paginated[XirrPointOut]"
+      },
+      "PasswordPatchReq": {
+        "properties": {
+          "currentPassword": {
+            "type": "string",
+            "title": "Currentpassword"
+          },
+          "newPassword": {
+            "type": "string",
+            "title": "Newpassword"
+          }
+        },
+        "type": "object",
+        "required": [
+          "currentPassword",
+          "newPassword"
+        ],
+        "title": "PasswordPatchReq"
+      },
+      "PortfolioArchiveReq": {
+        "properties": {
+          "archived": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archived"
+          }
+        },
+        "type": "object",
+        "title": "PortfolioArchiveReq",
+        "description": "归档请求：archived 缺省或 true → 归档；false → 取消归档。"
+      },
+      "PortfolioCreateReq": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "currency": {
+            "type": "string",
+            "title": "Currency",
+            "default": "CNY"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "PortfolioCreateReq"
+      },
+      "PortfolioOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "baseDate": {
+            "type": "string",
+            "format": "date",
+            "title": "Basedate"
+          },
+          "currency": {
+            "type": "string",
+            "title": "Currency"
+          },
+          "archivedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archivedat"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updatedat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "baseDate",
+          "currency",
+          "createdAt",
+          "updatedAt"
+        ],
+        "title": "PortfolioOut"
+      },
+      "PortfolioPatchReq": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          }
+        },
+        "type": "object",
+        "title": "PortfolioPatchReq"
+      },
+      "PortfolioSummaryOut": {
+        "properties": {
+          "cumulativeXirr": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cumulativexirr"
+          },
+          "totalReturnRate": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Totalreturnrate"
+          },
+          "yearReturnRate": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Yearreturnrate"
+          },
+          "maxDrawdown": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Maxdrawdown"
+          },
+          "latestDate": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latestdate"
+          },
+          "inceptionDate": {
+            "type": "string",
+            "format": "date",
+            "title": "Inceptiondate"
+          }
+        },
+        "type": "object",
+        "required": [
+          "inceptionDate"
+        ],
+        "title": "PortfolioSummaryOut"
+      },
+      "PreferenceOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "defaultPortfolioId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Defaultportfolioid"
+          },
+          "defaultGranularity": {
+            "type": "string",
+            "title": "Defaultgranularity"
+          },
+          "defaultDateRange": {
+            "type": "string",
+            "title": "Defaultdaterange"
+          },
+          "aggregation": {
+            "type": "string",
+            "title": "Aggregation"
+          },
+          "weekStartsOn": {
+            "type": "integer",
+            "title": "Weekstartson"
+          },
+          "navDecimals": {
+            "type": "integer",
+            "title": "Navdecimals"
+          },
+          "xirrDecimals": {
+            "type": "integer",
+            "title": "Xirrdecimals"
+          },
+          "theme": {
+            "type": "string",
+            "title": "Theme"
+          },
+          "staleDays": {
+            "type": "integer",
+            "title": "Staledays"
+          },
+          "showLiquidated": {
+            "type": "boolean",
+            "title": "Showliquidated"
+          },
+          "costBasisView": {
+            "type": "string",
+            "title": "Costbasisview"
+          },
+          "cashHintOnCashflow": {
+            "type": "boolean",
+            "title": "Cashhintoncashflow"
+          },
+          "cashHintOnTrade": {
+            "type": "boolean",
+            "title": "Cashhintontrade"
+          },
+          "amountThousands": {
+            "type": "boolean",
+            "title": "Amountthousands"
+          },
+          "amountAbbrev": {
+            "type": "boolean",
+            "title": "Amountabbrev"
+          },
+          "dashboardLayout": {
+            "type": "string",
+            "title": "Dashboardlayout"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "defaultGranularity",
+          "defaultDateRange",
+          "aggregation",
+          "weekStartsOn",
+          "navDecimals",
+          "xirrDecimals",
+          "theme",
+          "staleDays",
+          "showLiquidated",
+          "costBasisView",
+          "cashHintOnCashflow",
+          "cashHintOnTrade",
+          "amountThousands",
+          "amountAbbrev",
+          "dashboardLayout"
+        ],
+        "title": "PreferenceOut"
+      },
+      "PriceCreateReq": {
+        "properties": {
+          "securityId": {
+            "type": "string",
+            "title": "Securityid"
+          },
+          "price": {
+            "type": "string",
+            "format": "decimal",
+            "title": "Price",
+            "example": "0.00"
+          },
+          "asOf": {
+            "type": "string",
+            "format": "date",
+            "title": "Asof"
+          }
+        },
+        "type": "object",
+        "required": [
+          "securityId",
+          "price",
+          "asOf"
+        ],
+        "title": "PriceCreateReq"
+      },
+      "PriceOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "securityId": {
+            "type": "string",
+            "title": "Securityid"
+          },
+          "price": {
+            "type": "string",
+            "title": "Price"
+          },
+          "asOf": {
+            "type": "string",
+            "format": "date",
+            "title": "Asof"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "securityId",
+          "price",
+          "asOf",
+          "createdAt"
+        ],
+        "title": "PriceOut"
+      },
+      "PricePatchReq": {
+        "properties": {
+          "price": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "decimal",
+                "example": "0.00"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price"
+          },
+          "asOf": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asof"
+          }
+        },
+        "type": "object",
+        "title": "PricePatchReq"
+      },
+      "ProfilePatchReq": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "avatar": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avatar"
+          }
+        },
+        "type": "object",
+        "title": "ProfilePatchReq"
+      },
+      "RecalcOut": {
+        "properties": {
+          "affectedDates": {
+            "type": "integer",
+            "title": "Affecteddates"
+          },
+          "duration": {
+            "type": "integer",
+            "title": "Duration"
+          }
+        },
+        "type": "object",
+        "required": [
+          "affectedDates",
+          "duration"
+        ],
+        "title": "RecalcOut"
+      },
+      "RecalculateRangeReq": {
+        "properties": {
+          "startDate": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Startdate"
+          },
+          "endDate": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enddate"
+          }
+        },
+        "type": "object",
+        "title": "RecalculateRangeReq"
+      },
+      "RegisterReq": {
+        "properties": {
+          "email": {
+            "type": "string",
+            "title": "Email"
+          },
+          "password": {
+            "type": "string",
+            "title": "Password"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "email",
+          "password"
+        ],
+        "title": "RegisterReq"
+      },
+      "RestoreReq": {
+        "properties": {
+          "email": {
+            "type": "string",
+            "title": "Email"
+          },
+          "password": {
+            "type": "string",
+            "title": "Password"
+          }
+        },
+        "type": "object",
+        "required": [
+          "email",
+          "password"
+        ],
+        "title": "RestoreReq"
+      },
+      "SecurityCreateReq": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type",
+            "default": "STOCK"
+          },
+          "currency": {
+            "type": "string",
+            "title": "Currency",
+            "default": "CNY"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "name"
+        ],
+        "title": "SecurityCreateReq"
+      },
+      "SecurityOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type"
+          },
+          "currency": {
+            "type": "string",
+            "title": "Currency"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "code",
+          "name",
+          "type",
+          "currency",
+          "createdAt"
+        ],
+        "title": "SecurityOut"
+      },
+      "SecurityPatchReq": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type"
+          }
+        },
+        "type": "object",
+        "title": "SecurityPatchReq"
+      },
+      "SnapshotCreateReq": {
+        "properties": {
+          "date": {
+            "type": "string",
+            "format": "date",
+            "title": "Date"
+          },
+          "totalAsset": {
+            "type": "string",
+            "format": "decimal",
+            "title": "Totalasset",
+            "example": "0.00"
+          },
+          "marketValue": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "decimal",
+                "example": "0.00"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Marketvalue"
+          },
+          "cashBalance": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "decimal",
+                "example": "0.00"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cashbalance"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "date",
+          "totalAsset"
+        ],
+        "title": "SnapshotCreateReq"
+      },
+      "SnapshotOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "date": {
+            "type": "string",
+            "format": "date",
+            "title": "Date"
+          },
+          "totalAsset": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Totalasset"
+          },
+          "marketValue": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Marketvalue"
+          },
+          "cashBalance": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cashbalance"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "valuationFlag": {
+            "type": "string",
+            "title": "Valuationflag"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "recordedAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Recordedat"
+          },
+          "derivedTotalAsset": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Derivedtotalasset"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "date",
+          "source",
+          "valuationFlag",
+          "recordedAt"
+        ],
+        "title": "SnapshotOut"
+      },
+      "SnapshotPatchReq": {
+        "properties": {
+          "totalAsset": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "decimal",
+                "example": "0.00"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Totalasset"
+          },
+          "marketValue": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "decimal",
+                "example": "0.00"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Marketvalue"
+          },
+          "cashBalance": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "decimal",
+                "example": "0.00"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cashbalance"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "title": "SnapshotPatchReq"
+      },
+      "TradeCreateReq": {
+        "properties": {
+          "date": {
+            "type": "string",
+            "format": "date",
+            "title": "Date"
+          },
+          "securityId": {
+            "type": "string",
+            "title": "Securityid"
+          },
+          "side": {
+            "type": "string",
+            "title": "Side"
+          },
+          "quantity": {
+            "type": "string",
+            "format": "decimal",
+            "title": "Quantity",
+            "example": "0.00"
+          },
+          "price": {
+            "type": "string",
+            "format": "decimal",
+            "title": "Price",
+            "example": "0.00"
+          },
+          "fee": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "decimal",
+                "example": "0.00"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fee",
+            "default": "0"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "date",
+          "securityId",
+          "side",
+          "quantity",
+          "price"
+        ],
+        "title": "TradeCreateReq"
+      },
+      "TradeOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "securityId": {
+            "type": "string",
+            "title": "Securityid"
+          },
+          "date": {
+            "type": "string",
+            "format": "date",
+            "title": "Date"
+          },
+          "side": {
+            "type": "string",
+            "title": "Side"
+          },
+          "quantity": {
+            "type": "string",
+            "title": "Quantity"
+          },
+          "price": {
+            "type": "string",
+            "title": "Price"
+          },
+          "fee": {
+            "type": "string",
+            "title": "Fee"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "securityId",
+          "date",
+          "side",
+          "quantity",
+          "price",
+          "fee",
+          "createdAt"
+        ],
+        "title": "TradeOut"
+      },
+      "TradePatchReq": {
+        "properties": {
+          "date": {
+            "type": "null",
+            "title": "Date"
+          },
+          "quantity": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "decimal",
+                "example": "0.00"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quantity"
+          },
+          "price": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "decimal",
+                "example": "0.00"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price"
+          },
+          "fee": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "decimal",
+                "example": "0.00"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fee"
+          }
+        },
+        "type": "object",
+        "title": "TradePatchReq"
+      },
+      "UserPublicOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "email": {
+            "type": "string",
+            "title": "Email"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "avatar": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avatar"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "email",
+          "name"
+        ],
+        "title": "UserPublicOut"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      },
+      "XirrLatestOut": {
+        "properties": {
+          "date": {
+            "type": "string",
+            "format": "date",
+            "title": "Date"
+          },
+          "xirrValue": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Xirrvalue"
+          }
+        },
+        "type": "object",
+        "required": [
+          "date"
+        ],
+        "title": "XirrLatestOut"
+      },
+      "XirrPointOut": {
+        "properties": {
+          "date": {
+            "type": "string",
+            "format": "date",
+            "title": "Date"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "type": "object",
+        "required": [
+          "date"
+        ],
+        "title": "XirrPointOut"
+      }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "type": "http",
+        "scheme": "bearer"
+      },
+      "JWT-auth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    }
+  }
+}

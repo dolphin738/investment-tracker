@@ -21,6 +21,12 @@ from app.core.envelope import EnvelopeRoute
 from app.core.security import CurrentUser, get_current_user
 from app.db.database import get_db
 from app.routers.common import get_portfolio
+from app.schemas_resp import (
+    AccountStatsOut,
+    DrawdownPointOut,
+    OverviewOut,
+    PortfolioSummaryOut,
+)
 from app.services.aggregation import AggregationService
 
 router_aggregation = APIRouter(
@@ -29,7 +35,7 @@ router_aggregation = APIRouter(
 router_account = APIRouter(prefix="/api", tags=["account"], route_class=EnvelopeRoute)
 
 
-@router_aggregation.get("/comparison")
+@router_aggregation.get("/comparison", response_model=list[PortfolioSummaryOut])
 async def comparison(
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -37,7 +43,7 @@ async def comparison(
     return await AggregationService(db).comparison(user.user_id)
 
 
-@router_aggregation.get("/{portfolio_id}/summary")
+@router_aggregation.get("/{portfolio_id}/summary", response_model=PortfolioSummaryOut)
 async def summary(
     p=Depends(get_portfolio),
     db: AsyncSession = Depends(get_db),
@@ -45,7 +51,7 @@ async def summary(
     return await AggregationService(db).portfolio_summary(p)
 
 
-@router_aggregation.get("/{portfolio_id}/overview")
+@router_aggregation.get("/{portfolio_id}/overview", response_model=OverviewOut)
 async def overview(
     p=Depends(get_portfolio),
     db: AsyncSession = Depends(get_db),
@@ -54,7 +60,7 @@ async def overview(
     return await AggregationService(db).overview(p, range)
 
 
-@router_aggregation.get("/{portfolio_id}/metrics/drawdown")
+@router_aggregation.get("/{portfolio_id}/metrics/drawdown", response_model=list[DrawdownPointOut])
 async def drawdown(
     p=Depends(get_portfolio),
     db: AsyncSession = Depends(get_db),
@@ -64,7 +70,7 @@ async def drawdown(
     return await AggregationService(db).drawdown(p.id, startDate, endDate)
 
 
-@router_account.get("/account/stats")
+@router_account.get("/account/stats", response_model=AccountStatsOut)
 async def account_stats(
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
