@@ -113,14 +113,16 @@ async def get_holdings(
 ):
     as_of = asOf or _today()
     sec_ids = _split_ids(securityId)
+    single_id = sec_ids[0] if sec_ids and len(sec_ids) == 1 else None
     views = await HoldingService(db).derive(
         p.id,
         as_of,
         include_closed=includeClosed,
-        security_id=sec_ids[0] if sec_ids and len(sec_ids) == 1 else (sec_ids[0] if sec_ids else None),
+        security_id=single_id,
     )
     if sec_ids and len(sec_ids) > 1:
-        views = [v for v in views if v.security_id in set(sec_ids)]
+        wanted = set(sec_ids)
+        views = [v for v in views if v.security_id in wanted]
     sec_map = {
         s.id: s
         for s in (

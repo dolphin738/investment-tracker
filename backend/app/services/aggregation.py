@@ -79,8 +79,9 @@ class AggregationService:
         snap = await self._latest_snapshot(p.id)
         nav = await self._latest_nav(p.id)
         xirr = await self._latest_xirr(p.id)
-        total_return = (nav.cumulative_nav - Decimal(1)) * Decimal(100) if nav else None
-        year_return = (nav.year_nav - Decimal(1)) * Decimal(100) if nav else None
+        # M3：收益率统一为比值（与 XIRR 一致），前端展示时 ×100
+        total_return = (nav.cumulative_nav - Decimal(1)) if nav else None
+        year_return = (nav.year_nav - Decimal(1)) if nav else None
         return {
             "cumulativeXirr": xirr.xirr_value if xirr else None,
             "totalReturnRate": total_return,
@@ -156,6 +157,82 @@ class AggregationService:
             )
         ).scalars().all()
         return [await self.portfolio_summary(p) for p in portfolios]
+
+    # ── 全部组合摘要行（GET /portfolios/summary · Web 客户端绑定）──
+    async def summary_list(self, user_id: str) -> list[dict]:
+        """返回 PortfolioSummaryRow 列表，形状与 PortfolioSummaryOut 不同。"""
+        from app.models import SecurityTrade
+
+        portfolios = (
+            await self.session.execute(
+                select(Portfolio)
+                .where(Portfolio.user_id == user_id)
+                .order_by(Portfolio.created_at.desc())
+            )
+        ).scalars().all()
+
+        out: list[dict] = []
+        for p in portfolios:
+            snap = await self._latest_snapshot(p.id)
+            nav = await self._latest_nav(p.id)
+            xirr = await self._latest_xirr(p.id)
+
+            # 净投入 = Σ存入 − Σ取出
+            cf_rows = (
+                await self.session.execute(
+                    select(CashFlow).where(CashFlow.portfolio_id == p.id)
+                )
+            ).scalars().all()
+            net_invested = sum(
+                (cf.amount if cf.type is CashFlowType.BUY else -cf.amount for cf in cf_rows),
+                Decimal(0),
+            )
+
+            # 持仓标的数
+            held = await HoldingService(self.session).derive(
+                p.id, today_app_tz(), include_closed=False
+            )
+            holdings_count = sum(1 for h in held if h.quantity > 0)
+
+            # lastUpdatedAt = 快照/买卖较晚者
+            last_trade_date = (
+                await self.session.execute(
+                    select(func.max(SecurityTrade.date)).where(
+                        SecurityTrade.portfolio_id == p.id
+                    )
+                )
+            ).scalar()
+            snap_date = snap.date if snap else None
+            last_updated = max(
+                d for d in [snap_date, last_trade_date] if d is not None
+            ) if (snap_date or last_trade_date) else None
+
+            total_asset = snap.total_asset if snap else Decimal(0)
+            floating_profit = (
+                total_asset - net_invested if snap else None
+            )
+
+            cum_nav = nav.cumulative_nav if nav else None
+            year_rate = (nav.year_nav - Decimal(1)) if nav else None
+            cum_rate = (nav.cumulative_nav - Decimal(1)) if nav else None
+
+            out.append({
+                "id": p.id,
+                "name": p.name,
+                "totalAsset": str(total_asset),
+                "holdingsCount": holdings_count,
+                "lastUpdatedAt": last_updated.isoformat() if last_updated else None,
+                "baseDate": p.base_date.isoformat() if p.base_date else None,
+                "currency": p.currency,
+                "createdAt": p.created_at.isoformat() if p.created_at else None,
+                "cumulativeNav": str(cum_nav) if cum_nav is not None else None,
+                "yearReturnRate": str(year_rate) if year_rate is not None else None,
+                "cumulativeReturnRate": str(cum_rate) if cum_rate is not None else None,
+                "xirr": str(xirr.xirr_value) if xirr and xirr.xirr_value is not None else None,
+                "netInvested": str(net_invested),
+                "floatingProfit": str(floating_profit) if floating_profit is not None else None,
+            })
+        return out
 
     # ── §4.2.16 账户统计 ──
     async def account_stats(self, user_id: str) -> dict:

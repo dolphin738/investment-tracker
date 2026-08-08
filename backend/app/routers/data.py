@@ -94,7 +94,7 @@ async def _assert_sell_ok(
     quantity: Decimal,
     exclude_trade_id: str | None = None,
 ) -> None:
-    """§9.2 卖出硬校验：卖出量不得超过当前持仓（含未来日期）。"""
+    """§9.2 卖出硬校验：卖出量不得超过当前及后续日期持仓。"""
     held = await HoldingService(db).derive(
         portfolio_id,
         as_of,
@@ -110,6 +110,36 @@ async def _assert_sell_ok(
             message=f"当前持有 {current}，最多可卖 {current}",
             status_code=400,
         )
+
+    # 后续日期负持仓检查：插入历史卖出可能导致后续已有卖出日期持仓为负
+    future_sell_dates: list[date] = (
+        await db.execute(
+            select(SecurityTrade.date)
+            .where(
+                SecurityTrade.portfolio_id == portfolio_id,
+                SecurityTrade.security_id == security_id,
+                SecurityTrade.side == SecuritySide.SELL_SEC,
+                SecurityTrade.date > as_of,
+            )
+            .distinct()
+        )
+    ).scalars().all()
+    for d in future_sell_dates:
+        held = await HoldingService(db).derive(
+            portfolio_id,
+            d,
+            include_closed=True,
+            security_id=security_id,
+            exclude_trade_id=exclude_trade_id,
+        )
+        view = next((h for h in held if h.security_id == security_id), None)
+        held_qty = view.quantity if view is not None else ZERO
+        if quantity > held_qty:
+            raise BusinessException(
+                code=BusinessErrorCode.VALIDATION_FAILED,
+                message=f"日期 {d.isoformat()} 持仓 {held_qty}，加入本次卖出后将不足",
+                status_code=400,
+            )
 
 
 def _split_ids(raw: Optional[str]) -> Optional[list[str]]:
@@ -158,10 +188,24 @@ async def get_cashflow(
 async def create_cashflow(
     req: CashflowCreateReq, p=Depends(get_portfolio), db: AsyncSession = Depends(get_db)
 ):
+    cf_type = _coerce(CashFlowType, req.type, "type")
+    # M1：PRD §3.6 首笔出入金必须为存入；若组合尚无任何现金流且本次为取出，拒绝
+    if cf_type is CashFlowType.SELL:
+        has_existing = (
+            await db.execute(
+                select(CashFlow.id).where(CashFlow.portfolio_id == p.id).limit(1)
+            )
+        ).scalar_one_or_none()
+        if has_existing is None:
+            raise BusinessException(
+                BusinessErrorCode.VALIDATION_FAILED,
+                "首笔出入金必须为存入（买入），不能为取出（卖出）",
+                status_code=400,
+            )
     cf = CashFlow(
         portfolio_id=p.id,
         date=req.date,
-        type=_coerce(CashFlowType, req.type, "type"),
+        type=cf_type,
         amount=req.amount,
         note=req.note,
     )
@@ -405,7 +449,7 @@ async def patch_trade(
     if req.fee is not None:
         trade.fee_total = req.fee
     await db.commit()
-    force = await RecalculationService(db).snapshot_dates_since(p.id, new_date)
+    force = await RecalculationService(db).snapshot_dates_since(p.id, min(new_date, old_date))
     await RecalculationService(db).recalculateRange(
         p.id, min(new_date, old_date), force_dates=force
     )
@@ -456,13 +500,26 @@ async def list_prices(
 async def create_price(
     req: PriceCreateReq, p=Depends(get_portfolio), db: AsyncSession = Depends(get_db)
 ):
-    price = SecurityPrice(
-        portfolio_id=p.id,
-        security_id=req.securityId,
-        price=req.price,
-        as_of=req.asOf,
-    )
-    db.add(price)
+    existing = (
+        await db.execute(
+            select(SecurityPrice).where(
+                SecurityPrice.portfolio_id == p.id,
+                SecurityPrice.security_id == req.securityId,
+                SecurityPrice.as_of == req.asOf,
+            )
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        existing.price = req.price
+        price = existing
+    else:
+        price = SecurityPrice(
+            portfolio_id=p.id,
+            security_id=req.securityId,
+            price=req.price,
+            as_of=req.asOf,
+        )
+        db.add(price)
     await db.commit()
     force = await RecalculationService(db).snapshot_dates_since(p.id, req.asOf)
     await RecalculationService(db).recalculateRange(p.id, req.asOf, force_dates=force)
@@ -486,7 +543,7 @@ async def patch_price(
     if req.asOf is not None:
         price.as_of = req.asOf
     await db.commit()
-    force = await RecalculationService(db).snapshot_dates_since(p.id, new_as_of)
+    force = await RecalculationService(db).snapshot_dates_since(p.id, min(new_as_of, old_as_of))
     await RecalculationService(db).recalculateRange(
         p.id, min(new_as_of, old_as_of), force_dates=force
     )
@@ -535,10 +592,23 @@ async def list_cashbalances(
 async def create_cashbalance(
     req: CashBalanceCreateReq, p=Depends(get_portfolio), db: AsyncSession = Depends(get_db)
 ):
-    cb = CashBalance(
-        portfolio_id=p.id, amount=req.amount, as_of=req.asOf, note=req.note
-    )
-    db.add(cb)
+    existing = (
+        await db.execute(
+            select(CashBalance).where(
+                CashBalance.portfolio_id == p.id,
+                CashBalance.as_of == req.asOf,
+            )
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        existing.amount = req.amount
+        existing.note = req.note
+        cb = existing
+    else:
+        cb = CashBalance(
+            portfolio_id=p.id, amount=req.amount, as_of=req.asOf, note=req.note
+        )
+        db.add(cb)
     await db.commit()
     force = await RecalculationService(db).snapshot_dates_since(p.id, req.asOf)
     await RecalculationService(db).recalculateRange(p.id, req.asOf, force_dates=force)
@@ -663,7 +733,8 @@ async def create_snapshot(
 ):
     av = AssetValuationService(db)
     snap = await av.upsertManual(
-        p.id, req.date, req.totalAsset, req.marketValue, req.cashBalance, req.note
+        p.id, req.date, req.totalAsset, req.marketValue, req.cashBalance, req.note,
+        cascade=False,
     )
     await db.flush()
     await RecalculationService(db).recalculateNavRange(p.id, req.date)
@@ -682,21 +753,20 @@ async def patch_snapshot(
     if snap is None or snap.portfolio_id != p.id:
         raise BusinessException(BusinessErrorCode.NOT_FOUND, "总资产记录不存在", status_code=404)
     old_date = snap.date
-    if req.totalAsset is not None:
-        snap.total_asset = req.totalAsset
-    if req.marketValue is not None:
-        snap.market_value = req.marketValue
-    if req.cashBalance is not None:
-        snap.cash_balance = req.cashBalance
-    if req.note is not None:
-        snap.note = req.note
-    # 手工覆盖：source 改写为 MANUAL
-    snap.source = SnapshotSource.MANUAL
-    snap.valuation_flag = SnapshotValuation.MANUAL_INPUT
-    await db.flush()
-    await RecalculationService(db).recalculateNavRange(p.id, min(snap.date, old_date))
+    # 合并补丁值：未提供的字段沿用原值
+    total_asset = req.totalAsset if req.totalAsset is not None else snap.total_asset
+    market_value = req.marketValue if req.marketValue is not None else snap.market_value
+    cash_balance = req.cashBalance if req.cashBalance is not None else snap.cash_balance
+    note = req.note if req.note is not None else snap.note
+    # 经服务层写入（C-11），cascade=False 避免与路由级 recalculateNavRange 重复
     av = AssetValuationService(db)
-    derived = (await av.computeDerived(p.id, snap.date)).total_asset
+    snap = await av.upsertManual(
+        p.id, old_date, total_asset, market_value, cash_balance, note,
+        cascade=False,
+    )
+    await db.flush()
+    await RecalculationService(db).recalculateNavRange(p.id, old_date)
+    derived = (await av.computeDerived(p.id, old_date)).total_asset
     return serialize_snapshot(snap, derived_total=derived)
 
 
@@ -708,7 +778,7 @@ async def delete_snapshot(
     if snap is None or snap.portfolio_id != p.id:
         raise BusinessException(BusinessErrorCode.NOT_FOUND, "总资产记录不存在", status_code=404)
     d = snap.date
-    await AssetValuationService(db).deleteRecord(p.id, d)
+    await AssetValuationService(db).deleteRecord(p.id, d, cascade=False)
     await db.flush()
     await RecalculationService(db).recalculateNavRange(p.id, d)
     return None
@@ -719,7 +789,7 @@ async def reset_snapshot(
     p=Depends(get_portfolio), db: AsyncSession = Depends(get_db), snap_date: date = None
 ):
     av = AssetValuationService(db)
-    snap = await av.resetToDerived(p.id, snap_date)
+    snap = await av.resetToDerived(p.id, snap_date, cascade=False)
     await db.flush()
     await RecalculationService(db).recalculateNavRange(p.id, snap_date)
     return serialize_snapshot(snap, derived_total=snap.total_asset)

@@ -41,6 +41,7 @@ from app.models import (
     SnapshotValuation,
 )
 from app.models.enums import CashFlowType, SecuritySide
+from app.services.asset_valuation import AssetValuationService
 from app.services.recalculation import RecalculationService
 
 settings = get_settings()
@@ -156,7 +157,12 @@ def _parse_date(s: str) -> date | None:
             return None
 
 
-def _parse_decimal(s: str) -> Decimal | None:
+def _parse_decimal(s: str, max_scale: int = 2) -> Decimal | None:
+    """解析十进制字符串；超过 max_scale 位小数视为精度非法返回 None。
+
+    M4：数量/价格为 Numeric(18,6)，默认 2 位约束会误拒碎股/高精度报价；
+    调用方按需传入 max_scale（如 quantity/price 用 6）。
+    """
     s = (s or "").strip()
     if s == "":
         return None
@@ -164,9 +170,35 @@ def _parse_decimal(s: str) -> Decimal | None:
         d = Decimal(s)
     except (InvalidOperation, ValueError):
         return None
-    if d.as_tuple().exponent < -2:  # 超过 2 位小数
+    if d.as_tuple().exponent < -max_scale:
         return None
     return d
+
+
+def _check_no_oversell(trades: list) -> str | None:
+    """回放全部证券买卖，校验任意时点持仓不为负（导入批量 SELL 硬校验，对齐 §9.2）。
+
+    与手动 create_trade 的 _assert_sell_ok 口径一致：quantity 恒正、side 区分买卖。
+    同日期 BUY 先于 SELL，允许当日买入即卖出。返回错误字符串；无超额返回 None。
+    """
+    by_sec: dict[str, list] = {}
+    for t in trades:
+        by_sec.setdefault(t.security_id, []).append(t)
+    for sec_id, items in by_sec.items():
+        ordered = sorted(
+            items,
+            key=lambda t: (t.date, 0 if t.side is SecuritySide.BUY_SEC else 1),
+        )
+        held = Decimal(0)
+        for t in ordered:
+            delta = t.quantity if t.side is SecuritySide.BUY_SEC else -t.quantity
+            held += delta
+            if held < 0:
+                return (
+                    f"证券 {sec_id} 在 {t.date.isoformat()} 卖出超额："
+                    f"累计持仓将变为 {held}，不能为负"
+                )
+    return None
 
 
 def _err(row, field, code, message) -> dict:
@@ -220,9 +252,11 @@ def validate_and_build(
                 if raw == "" and col not in _REQUIRED[type_]:
                     parsed[col] = None  # 可选列可空
                     continue
-                d = _parse_decimal(raw)
+                # 金额/费用限 2 位小数；数量/价格放宽到 6 位（Numeric(18,6)）
+                max_scale = 6 if col in ("quantity", "price") else 2
+                d = _parse_decimal(raw, max_scale=max_scale)
                 if d is None:
-                    row_errs.append(_err(i, col, "INVALID_DECIMAL_PRECISION", f"{col} 金额无效（最多 2 位小数）：{raw}"))
+                    row_errs.append(_err(i, col, "INVALID_DECIMAL_PRECISION", f"{col} 数值无效（最多 {max_scale} 位小数）：{raw}"))
                 else:
                     parsed[col] = str(d)
             elif kind == "enum":
@@ -479,19 +513,32 @@ async def commit_import(
     failed: list[dict] = []
 
     if type_ == "securityTrades":
-        for r in rows:
-            db.add(
-                SecurityTrade(
-                    portfolio_id=portfolio_id,
-                    security_id=r["security_id"],
-                    date=date.fromisoformat(r["date"]),
-                    side=SecuritySide(r["side"]),
-                    quantity=Decimal(r["quantity"]),
-                    cost_price=Decimal(r["price"]),
-                    fee_total=Decimal(r.get("fee") or "0"),
-                    note=r.get("note") or None,
-                )
+        # L2：导入卖出硬校验（与手动 create_trade 一致），超额 SELL 整批拒绝
+        existing = (
+            await db.execute(
+                select(SecurityTrade).where(SecurityTrade.portfolio_id == portfolio_id)
             )
+        ).scalars().all()
+        batch = [
+            SecurityTrade(
+                portfolio_id=portfolio_id,
+                security_id=r["security_id"],
+                date=date.fromisoformat(r["date"]),
+                side=SecuritySide(r["side"]),
+                quantity=Decimal(r["quantity"]),
+                cost_price=Decimal(r["price"]),
+                fee_total=Decimal(r.get("fee") or "0"),
+                note=r.get("note") or None,
+            )
+            for r in rows
+        ]
+        oversell = _check_no_oversell(list(existing) + batch)
+        if oversell:
+            raise BusinessException(
+                BusinessErrorCode.VALIDATION_FAILED, oversell, status_code=400
+            )
+        for t in batch:
+            db.add(t)
             inserted += 1
     elif type_ == "cashFlows":
         for r in rows:
@@ -506,48 +553,51 @@ async def commit_import(
             )
             inserted += 1
     elif type_ == "assetSnapshots":
+        av = AssetValuationService(db)
         for r in rows:
             d = date.fromisoformat(r["date"])
+            mv = Decimal(r["marketValue"]) if r.get("marketValue") else None
+            cb = Decimal(r["cashBalance"]) if r.get("cashBalance") else None
             existing = (
                 await db.execute(
-                    select(AssetSnapshot).where(
+                    select(AssetSnapshot.id).where(
                         AssetSnapshot.portfolio_id == portfolio_id,
                         AssetSnapshot.date == d,
                     )
                 )
             ).scalar_one_or_none()
-            mv = Decimal(r["marketValue"]) if r.get("marketValue") else None
-            cb = Decimal(r["cashBalance"]) if r.get("cashBalance") else None
+            await av.upsertManual(
+                portfolio_id,
+                d,
+                Decimal(r["totalAsset"]),
+                mv,
+                cb,
+                r.get("note") or None,
+                cascade=False,
+            )
             if existing is not None:
-                existing.total_asset = Decimal(r["totalAsset"])
-                existing.market_value = mv
-                existing.cash_balance = cb
-                existing.source = SnapshotSource.MANUAL
-                existing.valuation_flag = SnapshotValuation.MANUAL_INPUT
-                existing.note = r.get("note") or None
                 updated += 1
             else:
-                db.add(
-                    AssetSnapshot(
-                        portfolio_id=portfolio_id,
-                        date=d,
-                        total_asset=Decimal(r["totalAsset"]),
-                        market_value=mv,
-                        cash_balance=cb,
-                        source=SnapshotSource.MANUAL,
-                        valuation_flag=SnapshotValuation.MANUAL_INPUT,
-                        note=r.get("note") or None,
-                    )
-                )
                 inserted += 1
 
     await db.commit()
 
     recalculated = None
     if min_date:
-        days = await RecalculationService(db).recalculateNavRange(
-            portfolio_id, date.fromisoformat(min_date)
-        )
+        start_date = date.fromisoformat(min_date)
+        if type_ == "assetSnapshots":
+            # T5: only calculation layer cascade
+            days = await RecalculationService(db).recalculateNavRange(
+                portfolio_id, start_date
+            )
+        else:
+            # T1-T4: snapshot layer rebuild + calculation layer cascade
+            force = await RecalculationService(db).snapshot_dates_since(
+                portfolio_id, start_date
+            )
+            days = await RecalculationService(db).recalculateRange(
+                portfolio_id, start_date, force_dates=force
+            )
         recalculated = {
             "fromDate": min_date,
             "toDate": today_app_tz().isoformat(),

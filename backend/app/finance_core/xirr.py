@@ -13,9 +13,17 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 from math import isfinite
 
+import logging
+
 import pyxirr
 
+logger = logging.getLogger(__name__)
+
 _XIRR_Q = Decimal("1e-8")  # PRD 8.1: XIRR NUMERIC(20,8)
+# NUMERIC(20,8) 量程上限：整数位最多 12 位（20 - 8）。用于落库前防护，
+# 避免极端短持有期高收益产生的超大年化值（如 1 日 +10% → ~1.28e15）触发
+# Postgres numeric field overflow 并使整笔重算事务失败。
+_XIRR_MAX = Decimal("999999999999.99999999")
 
 
 def _isfinite(x: float) -> bool:
@@ -46,7 +54,7 @@ def calculate_xirr(cashflows: list[Cashflow]) -> Decimal | None:
     dates = [c.d for c in ordered]
     amounts = [float(c.amount) for c in ordered]
     try:
-        rate = pyxirr.xirr(dates, amounts)
+        rate = pyxirr.xirr(dates, amounts, guess=0.1)
     except pyxirr.InvalidPaymentsError:
         # 全同号 / 无法插值出变号 → 不可计算
         return None
@@ -60,6 +68,13 @@ def calculate_xirr(cashflows: list[Cashflow]) -> Decimal | None:
         return None
     # float(f64) → 8 位小数 Decimal（PRD 8.1 NUMERIC(20,8)）
     try:
-        return Decimal(str(rate)).quantize(_XIRR_Q)
+        q = Decimal(str(rate)).quantize(_XIRR_Q)
     except (InvalidOperation, ValueError):
         return None
+    # 量程保护：NUMERIC(20,8) 整数位最多 12 位。极端短持有期高收益（如 1 日 +10%）
+    # 会产生 ~1e15 级年化值，落库会触发 Postgres numeric field overflow 并使整笔
+    # 重算事务失败。超界视为不可表示，与"现金流<2/全同号→None"口径一致。
+    if abs(q) > _XIRR_MAX:
+        logger.warning("XIRR 超出 NUMERIC(20,8) 量程，按不可计算处理: rate=%s", rate)
+        return None
+    return q

@@ -61,21 +61,21 @@ def test_nav_inception():
     assert r.base_cumulative_nav == Decimal("1.0")
 
 
-def test_nav_inception_no_buy_raises():
-    import pytest
-
-    with pytest.raises(ValueError):
-        compute_daily_nav(None, Decimal("0"), Decimal("0"), Decimal("0"), date(2026, 1, 2))
+def test_nav_inception_no_buy_returns_none():
+    # 成立日无存入 → 返回 None（组合尚未成立，跳过 NAV 计算）
+    r = compute_daily_nav(None, Decimal("0"), Decimal("0"), Decimal("0"), date(2026, 1, 2))
+    assert r is None
 
 
 def test_nav_non_inception():
     prev = NavState(date(2026, 1, 2), Decimal("1000"), Decimal("1.0"), Decimal("1.0"))
     # 当日资产 1600，买入 500，无卖出
+    # PRD 附录 B：nav = (asset - buy + sell) / prev_shares = (1600-500+0)/1000 = 1.1
     r = compute_daily_nav(prev, Decimal("1600"), Decimal("500"), Decimal("0"), date(2026, 1, 3))
-    assert r.unit_nav == Decimal("1.6")
-    assert r.cumulative_nav == Decimal("1.6")
-    assert r.shares == Decimal("1312.5")  # 1000 + 500/1.6
-    assert r.year_nav == Decimal("1.6")  # 同年，base=1.0
+    assert r.unit_nav == Decimal("1.1")
+    assert r.cumulative_nav == Decimal("1.1")
+    assert r.shares == Decimal("1454.545454545454545454545454")  # 1000 + 500/1.1
+    assert r.year_nav == Decimal("1.1")  # 同年，base=1.0
 
 
 def test_nav_year_reset():

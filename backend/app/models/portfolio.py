@@ -1,7 +1,7 @@
 """投资组合表（对齐 app Prisma: Portfolio）。"""
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 
 from sqlalchemy import Date, DateTime, ForeignKey, String, Text, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -23,7 +23,7 @@ class Portfolio(Base, TimestampMixin):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     base_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     currency: Mapped[str] = mapped_column(String(10), default="CNY", nullable=False)
-    archived_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     user: Mapped["User"] = relationship(back_populates="portfolios")
     cashflows: Mapped[list["CashFlow"]] = relationship(

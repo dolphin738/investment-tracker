@@ -6,7 +6,7 @@
 写入分两类：
 - 派生路径 persistDerived：遇当日 MANUAL 跳过、不覆盖（双保险②）。
 - 手工三路径 upsertManual / deleteRecord / resetToDerived：无条件覆盖当日一行，
-  级联义务由调用方（RecalculationService / 路由）负责。
+  各方法内部 cascade=True 时自动调用 recalculateNavRange（REG-06）。
 """
 from __future__ import annotations
 
@@ -90,9 +90,13 @@ class AssetValuationService:
         ).scalars().all()
         cash_rows = (
             await self.session.execute(
-                select(CashBalance).where(
+                select(CashBalance)
+                .where(
                     CashBalance.portfolio_id == portfolio_id,
                     CashBalance.as_of <= max_d,
+                )
+                .order_by(
+                    CashBalance.as_of, CashBalance.created_at, CashBalance.id
                 )
             )
         ).scalars().all()
@@ -105,10 +109,13 @@ class AssetValuationService:
             cur = price_best.get(p.security_id)
             if cur is None or p.as_of > cur[0]:
                 price_best[p.security_id] = (p.as_of, p.price)
-        cash_best: dict[date, Decimal] = {}
+        # L5：同 as_of 多条现金余额时，确定性取最新创建（created_at,id 最大）一行，
+        # 与 _latest_cash_balance 的 as_of.desc()+created_at.desc()+id.desc() 口径一致。
+        cash_best: dict[date, CashBalance] = {}
         for c in cash_rows:
-            if c.as_of not in cash_best or c.amount is not None:
-                cash_best[c.as_of] = c.amount
+            cur = cash_best.get(c.as_of)
+            if cur is None or (c.created_at, c.id) > (cur.created_at, cur.id):
+                cash_best[c.as_of] = c
 
         out: dict[date, DerivedResult] = {}
         for d in dates:
@@ -129,19 +136,22 @@ class AssetValuationService:
             existing.valuation_flag = derived.valuation_flag
             existing.recorded_at = datetime.now(timezone.utc)
         else:
-            self.session.add(
-                AssetSnapshot(
-                    portfolio_id=portfolio_id,
-                    date=d,
-                    total_asset=derived.total_asset,
-                    market_value=derived.market_value,
-                    cash_balance=derived.cash_balance,
-                    source=SnapshotSource.DERIVED,
-                    valuation_flag=derived.valuation_flag,
-                    note=None,
-                    recorded_at=datetime.now(timezone.utc),
-                )
+            from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+            stmt = pg_insert(AssetSnapshot.__table__).values(
+                portfolio_id=portfolio_id,
+                date=d,
+                total_asset=derived.total_asset,
+                market_value=derived.market_value,
+                cash_balance=derived.cash_balance,
+                source=SnapshotSource.DERIVED,
+                valuation_flag=derived.valuation_flag,
+                note=None,
+                recorded_at=datetime.now(timezone.utc),
+            ).on_conflict_do_nothing(
+                index_elements=["portfolio_id", "date"]
             )
+            await self.session.execute(stmt)
 
     # ── 落库：手工三路径 ──
     async def upsertManual(
@@ -152,6 +162,7 @@ class AssetValuationService:
         market_value: Decimal | None,
         cash_balance: Decimal | None,
         note: str | None,
+        cascade: bool = True,
     ) -> AssetSnapshot:
         existing = await self._get_snapshot(portfolio_id, d)
         if existing is not None:
@@ -162,22 +173,29 @@ class AssetValuationService:
             existing.valuation_flag = SnapshotValuation.MANUAL_INPUT
             existing.note = note
             existing.recorded_at = datetime.now(timezone.utc)
-            return existing
-        snap = AssetSnapshot(
-            portfolio_id=portfolio_id,
-            date=d,
-            total_asset=total_asset,
-            market_value=market_value,
-            cash_balance=cash_balance,
-            source=SnapshotSource.MANUAL,
-            valuation_flag=SnapshotValuation.MANUAL_INPUT,
-            note=note,
-            recorded_at=datetime.now(timezone.utc),
-        )
-        self.session.add(snap)
+            snap = existing
+        else:
+            snap = AssetSnapshot(
+                portfolio_id=portfolio_id,
+                date=d,
+                total_asset=total_asset,
+                market_value=market_value,
+                cash_balance=cash_balance,
+                source=SnapshotSource.MANUAL,
+                valuation_flag=SnapshotValuation.MANUAL_INPUT,
+                note=note,
+                recorded_at=datetime.now(timezone.utc),
+            )
+            self.session.add(snap)
+        if cascade:
+            from app.services.recalculation import RecalculationService
+
+            await RecalculationService(self.session).recalculateNavRange(portfolio_id, d)
         return snap
 
-    async def resetToDerived(self, portfolio_id: str, d: date) -> AssetSnapshot:
+    async def resetToDerived(
+        self, portfolio_id: str, d: date, cascade: bool = True
+    ) -> AssetSnapshot:
         """↺ 重置为自动值：原地覆盖该行（非删除），source 置回 DERIVED。"""
         derived = await self.computeDerived(portfolio_id, d)
         existing = await self._get_snapshot(portfolio_id, d)
@@ -189,22 +207,29 @@ class AssetValuationService:
             existing.valuation_flag = derived.valuation_flag
             existing.note = None
             existing.recorded_at = datetime.now(timezone.utc)
-            return existing
-        snap = AssetSnapshot(
-            portfolio_id=portfolio_id,
-            date=d,
-            total_asset=derived.total_asset,
-            market_value=derived.market_value,
-            cash_balance=derived.cash_balance,
-            source=SnapshotSource.DERIVED,
-            valuation_flag=derived.valuation_flag,
-            note=None,
-            recorded_at=datetime.now(timezone.utc),
-        )
-        self.session.add(snap)
+            snap = existing
+        else:
+            snap = AssetSnapshot(
+                portfolio_id=portfolio_id,
+                date=d,
+                total_asset=derived.total_asset,
+                market_value=derived.market_value,
+                cash_balance=derived.cash_balance,
+                source=SnapshotSource.DERIVED,
+                valuation_flag=derived.valuation_flag,
+                note=None,
+                recorded_at=datetime.now(timezone.utc),
+            )
+            self.session.add(snap)
+        if cascade:
+            from app.services.recalculation import RecalculationService
+
+            await RecalculationService(self.session).recalculateNavRange(portfolio_id, d)
         return snap
 
-    async def deleteRecord(self, portfolio_id: str, d: date) -> None:
+    async def deleteRecord(
+        self, portfolio_id: str, d: date, cascade: bool = True
+    ) -> None:
         """事务内三删：快照 + daily_nav + daily_xirr（避免幽灵 prevNav）。"""
         await self.session.execute(
             delete(AssetSnapshot).where(
@@ -225,6 +250,10 @@ class AssetValuationService:
         # 若当日仍为事件日 → 立即回填 DERIVED；否则留空（读路径前值填充）
         if await self._is_event_date(portfolio_id, d):
             await self.persistDerived(portfolio_id, d)
+        if cascade:
+            from app.services.recalculation import RecalculationService
+
+            await RecalculationService(self.session).recalculateNavRange(portfolio_id, d)
 
     # ── 内部工具 ──
     async def _get_snapshot(
@@ -249,7 +278,11 @@ class AssetValuationService:
                     CashBalance.portfolio_id == portfolio_id,
                     CashBalance.as_of <= d,
                 )
-                .order_by(CashBalance.as_of.desc())
+                .order_by(
+                    CashBalance.as_of.desc(),
+                    CashBalance.created_at.desc(),
+                    CashBalance.id.desc(),
+                )
                 .limit(1)
             )
         ).scalar_one_or_none()
@@ -267,7 +300,7 @@ class AssetValuationService:
         d: date,
         held: dict[str, list],
         price_best: dict[str, tuple[date, Decimal]],
-        cash_best: dict[date, Decimal],
+        cash_best: dict[date, CashBalance],
     ) -> DerivedResult:
         from app.finance_core.holding import (
             HoldingView,
@@ -300,7 +333,7 @@ class AssetValuationService:
         cash_exists = False
         for as_of in sorted(cash_best.keys()):
             if as_of <= d:
-                cash = cash_best[as_of] or ZERO
+                cash = cash_best[as_of].amount or ZERO
                 cash_exists = True
             else:
                 break

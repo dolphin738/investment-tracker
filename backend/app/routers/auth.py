@@ -63,6 +63,29 @@ async def me(
     return {"id": u.id, "email": u.email, "name": u.name}
 
 
+@router.get("/profile", response_model=UserPublicOut)
+async def get_profile(
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """当前用户完整资料（Web 客户端绑定此路径读取当前用户）。
+
+    返回 id/email/name/avatar/phone/bio/createdAt，与 PATCH /profile 对称。
+    """
+    u = (
+        await db.execute(select(User).where(User.id == user.user_id))
+    ).scalar_one()
+    return {
+        "id": u.id,
+        "email": u.email,
+        "name": u.name,
+        "avatar": u.avatar,
+        "phone": u.phone,
+        "bio": u.bio,
+        "createdAt": u.created_at.isoformat() if u.created_at else None,
+    }
+
+
 @router.patch("/profile", response_model=UserPublicOut)
 async def profile(
     req: ProfilePatchReq,

@@ -26,6 +26,7 @@ from app.schemas_resp import (
     DrawdownPointOut,
     OverviewOut,
     PortfolioSummaryOut,
+    PortfolioSummaryRow,
 )
 from app.services.aggregation import AggregationService
 
@@ -33,6 +34,19 @@ router_aggregation = APIRouter(
     prefix="/api/portfolios", tags=["aggregation"], route_class=EnvelopeRoute
 )
 router_account = APIRouter(prefix="/api", tags=["account"], route_class=EnvelopeRoute)
+
+
+@router_aggregation.get("/summary", response_model=list[PortfolioSummaryRow])
+async def summary_list(
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """全部组合摘要行（Web 客户端 dashboard 对比 + 账户列表绑定此路径）。
+
+    返回 PortfolioSummaryRow[]，与 /comparison 的 PortfolioSummaryOut 形状不同。
+    必须在 /{portfolio_id} 路由前注册，否则会被参数路由吞掉。
+    """
+    return await AggregationService(db).summary_list(user.user_id)
 
 
 @router_aggregation.get("/comparison", response_model=list[PortfolioSummaryOut])

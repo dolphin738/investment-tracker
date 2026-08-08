@@ -13,13 +13,16 @@ from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal
+import logging
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.finance_core.nav import NavResult, NavState, compute_daily_nav
 from app.finance_core.xirr import Cashflow, calculate_xirr
 from app.models import AssetSnapshot, CashFlow, CashFlowType, DailyNav, DailyXirr
+
+logger = logging.getLogger(__name__)
 
 _NAV_Q = Decimal("0.000001")    # NUMERIC(12,6)
 _XIRR_Q = Decimal("0.00000001")  # NUMERIC(20,8)
@@ -31,6 +34,22 @@ class CalculationService:
 
     async def compute_range(self, portfolio_id: str, start: date, end: date) -> int:
         """对 [start, end] 内每个有快照的日期升序计算净值+XIRR 并 upsert。返回处理天数。"""
+        # L4：若 start 落在组合成立日之后，但此前未计算前缀（start 之前无 DailyNav），
+        # 将 start 回退到最早事件日（成立日），避免区间首日误判为成立日重置份额链。
+        cf_min = (
+            await self.session.execute(
+                select(func.min(CashFlow.date)).where(CashFlow.portfolio_id == portfolio_id)
+            )
+        ).scalar()
+        snap_min = (
+            await self.session.execute(
+                select(func.min(AssetSnapshot.date)).where(AssetSnapshot.portfolio_id == portfolio_id)
+            )
+        ).scalar()
+        candidates = [d for d in (cf_min, snap_min) if d is not None]
+        first_event = min(candidates) if candidates else None
+        if first_event is not None and first_event < start:
+            start = first_event
         snaps = (
             await self.session.execute(
                 select(AssetSnapshot)
@@ -80,6 +99,9 @@ class CalculationService:
             sell = sum((c.amount for c in day_cf if c.type is CashFlowType.SELL), Decimal(0))
 
             nav = compute_daily_nav(prev, snap.total_asset, buy, sell, snap.date)
+            if nav is None:
+                # 组合尚未成立（无存入流水），跳过 NAV/XIRR 落库，不推进 prev
+                continue
             # 量化后既落库也作为次日递推的 prev（与重跑读库一致）
             nav_q = NavResult(
                 unit_nav=nav.unit_nav.quantize(_NAV_Q),
@@ -109,7 +131,15 @@ class CalculationService:
             xirr_cf.append(Cashflow(snap.date, snap.total_asset))
             xirr = calculate_xirr(xirr_cf)
             xirr_q = xirr.quantize(_XIRR_Q) if xirr is not None else None
-            await self._upsert_xirr(portfolio_id, snap.date, xirr_q)
+            # H1 后半：单日 XIRR 落库防御。即便 xirr.py 已做量程保护，
+            # 仍兜底捕获，避免单日异常使整笔区间重算事务失败（500）。
+            try:
+                await self._upsert_xirr(portfolio_id, snap.date, xirr_q)
+            except Exception:
+                logger.warning(
+                    "XIRR 落库失败（组合 %s 日期 %s），跳过该日",
+                    portfolio_id, snap.date, exc_info=True,
+                )
             count += 1
 
         await self.session.commit()

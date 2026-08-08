@@ -50,6 +50,9 @@ class UserPublicOut(BaseModel):
     email: str
     name: str
     avatar: Optional[str] = None
+    phone: Optional[str] = None
+    bio: Optional[str] = None
+    createdAt: Optional[str] = None
 
 
 class AuthTokenOut(BaseModel):
@@ -209,6 +212,27 @@ class PortfolioSummaryOut(BaseModel):
     maxDrawdown: Optional[str] = None
     latestDate: Optional[date] = None
     inceptionDate: date
+
+
+class PortfolioSummaryRow(BaseModel):
+    """全部组合摘要行（GET /portfolios/summary · Web 客户端绑定此路径）。
+
+    与 PortfolioSummaryOut（单组合 Dashboard 卡片）是不同契约，不可混淆。
+    """
+    id: str
+    name: str
+    totalAsset: str
+    holdingsCount: int
+    lastUpdatedAt: Optional[str] = None
+    baseDate: Optional[str] = None
+    currency: str
+    createdAt: str
+    cumulativeNav: Optional[str] = None
+    yearReturnRate: Optional[str] = None
+    cumulativeReturnRate: Optional[str] = None
+    xirr: Optional[str] = None
+    netInvested: str
+    floatingProfit: Optional[str] = None
 
 
 class OverviewOut(BaseModel):

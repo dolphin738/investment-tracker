@@ -6,10 +6,11 @@
 from __future__ import annotations
 
 from datetime import date
+import datetime
 from decimal import Decimal
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from app.core.types import DecimalStr
 
@@ -72,9 +73,16 @@ class CashflowCreateReq(BaseModel):
     amount: DecimalStr
     note: Optional[str] = None
 
+    @field_validator("amount")
+    @classmethod
+    def _amount_positive(cls, v: Decimal) -> Decimal:
+        if v <= 0:
+            raise ValueError("金额必须大于 0")
+        return v
+
 
 class CashflowPatchReq(BaseModel):
-    date: Optional[date] = None
+    date: Optional[datetime.date] = None
     type: Optional[str] = None
     amount: Optional[DecimalStr] = None
     note: Optional[str] = None
@@ -103,9 +111,17 @@ class TradeCreateReq(BaseModel):
     fee: Optional[DecimalStr] = Decimal(0)
     note: Optional[str] = None
 
+    @field_validator("quantity", "price")
+    @classmethod
+    def _qty_price_positive(cls, v: Decimal) -> Decimal:
+        if v <= 0:
+            raise ValueError("数量/价格必须大于 0")
+        return v
+
 
 class TradePatchReq(BaseModel):
-    date: Optional[date] = None
+    date: Optional[datetime.date] = None
+    side: Optional[str] = None
     quantity: Optional[DecimalStr] = None
     price: Optional[DecimalStr] = None
     fee: Optional[DecimalStr] = None
@@ -116,6 +132,13 @@ class PriceCreateReq(BaseModel):
     securityId: str
     price: DecimalStr
     asOf: date
+
+    @field_validator("price")
+    @classmethod
+    def _price_positive(cls, v: Decimal) -> Decimal:
+        if v <= 0:
+            raise ValueError("价格必须大于 0")
+        return v
 
 
 class PricePatchReq(BaseModel):
@@ -128,6 +151,13 @@ class CashBalanceCreateReq(BaseModel):
     amount: DecimalStr
     asOf: date
     note: Optional[str] = None
+
+    @field_validator("amount")
+    @classmethod
+    def _amount_positive(cls, v: Decimal) -> Decimal:
+        if v <= 0:
+            raise ValueError("金额必须大于 0")
+        return v
 
 
 class CashBalancePatchReq(BaseModel):
@@ -142,6 +172,13 @@ class SnapshotCreateReq(BaseModel):
     marketValue: Optional[DecimalStr] = None
     cashBalance: Optional[DecimalStr] = None
     note: Optional[str] = None
+
+    @field_validator("totalAsset")
+    @classmethod
+    def _total_positive(cls, v: Decimal) -> Decimal:
+        if v <= 0:
+            raise ValueError("总资产必须大于 0")
+        return v
 
 
 class SnapshotPatchReq(BaseModel):
@@ -166,10 +203,17 @@ class DividendCreateReq(BaseModel):
     type: Optional[str] = "CASH"
     note: Optional[str] = None
 
+    @field_validator("amount")
+    @classmethod
+    def _amount_positive(cls, v: Decimal) -> Decimal:
+        if v <= 0:
+            raise ValueError("金额必须大于 0")
+        return v
+
 
 class DividendPatchReq(BaseModel):
     securityId: Optional[str] = None
-    date: Optional[date] = None
+    date: Optional[datetime.date] = None
     amount: Optional[DecimalStr] = None
     tax: Optional[DecimalStr] = None
     type: Optional[str] = None
