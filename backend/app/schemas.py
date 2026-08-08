@@ -136,3 +136,28 @@ class SnapshotPatchReq(BaseModel):
 class RecalculateRangeReq(BaseModel):
     startDate: Optional[date] = None
     endDate: Optional[date] = None
+
+
+# ── 分红 §4.2.18 ──
+class DividendCreateReq(BaseModel):
+    securityId: str
+    date: date
+    amount: Decimal
+    tax: Optional[Decimal] = Decimal(0)
+    type: Optional[str] = "CASH"
+    note: Optional[str] = None
+
+
+class DividendPatchReq(BaseModel):
+    securityId: Optional[str] = None
+    date: Optional[date] = None
+    amount: Optional[Decimal] = None
+    tax: Optional[Decimal] = None
+    type: Optional[str] = None
+    note: Optional[str] = None
+
+
+# ── 数据导入提交 §4.2.17 ──
+class ImportCommitReq(BaseModel):
+    type: str
+    token: str

@@ -24,7 +24,18 @@ from app.core.exceptions import (
     unhandled_exception_handler,
     validation_exception_handler,
 )
-from app.routers import aggregation, auth, calc, data, health, portfolios
+from app.routers import (
+    aggregation,
+    auth,
+    calc,
+    data,
+    data_transfer,
+    dividend,
+    health,
+    portfolios,
+    preference,
+    upload,
+)
 
 settings = get_settings()
 
@@ -78,6 +89,11 @@ app.include_router(data.router_trades)
 app.include_router(data.router_prices)
 app.include_router(data.router_cashbalances)
 app.include_router(data.router_snapshots)
+app.include_router(dividend.router_dividends)
+app.include_router(data_transfer.router_dt_portfolio)
+app.include_router(data_transfer.router_dt_global)
+app.include_router(preference.router)
+app.include_router(upload.router)
 app.include_router(calc.router_holdings)
 app.include_router(calc.router_xirr)
 app.include_router(calc.router_nav)

@@ -27,3 +27,6 @@ Thumbs.db
 
 # Local agent memory (not for repo)
 .workbuddy/
+
+# Local generated docs (e.g. ls snapshots)
+docs/ls/

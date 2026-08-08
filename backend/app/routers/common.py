@@ -21,7 +21,7 @@ from app.models import (
     SecurityPrice,
     SecurityTrade,
 )
-from app.models.enums import SnapshotSource
+from app.models.enums import DividendType, SnapshotSource
 
 
 async def get_portfolio(
@@ -140,4 +140,45 @@ def serialize_snapshot(s: AssetSnapshot, derived_total=None) -> dict:
         "note": s.note,
         "recordedAt": s.recorded_at,
         "derivedTotalAsset": derived_total,
+    }
+
+
+def serialize_dividend(d, sec=None) -> dict:
+    sec_code = sec.code if sec is not None else None
+    sec_name = sec.name if sec is not None else None
+    net = d.amount - d.tax
+    return {
+        "id": d.id,
+        "securityId": d.security_id,
+        "securityCode": sec_code,
+        "securityName": sec_name,
+        "date": d.date,
+        "amount": d.amount,
+        "tax": d.tax,
+        "netAmount": net,
+        "type": d.type.value if isinstance(d.type, DividendType) else d.type,
+        "note": d.note,
+        "createdAt": d.created_at,
+    }
+
+
+def serialize_preference(p) -> dict:
+    return {
+        "id": p.id,
+        "defaultPortfolioId": p.default_portfolio_id,
+        "defaultGranularity": p.default_granularity,
+        "defaultDateRange": p.default_date_range,
+        "aggregation": p.aggregation,
+        "weekStartsOn": p.week_starts_on,
+        "navDecimals": p.nav_decimals,
+        "xirrDecimals": p.xirr_decimals,
+        "theme": p.theme,
+        "staleDays": p.stale_days,
+        "showLiquidated": p.show_liquidated,
+        "costBasisView": p.cost_basis_view,
+        "cashHintOnCashflow": p.cash_hint_on_cashflow,
+        "cashHintOnTrade": p.cash_hint_on_trade,
+        "amountThousands": p.amount_thousands,
+        "amountAbbrev": p.amount_abbrev,
+        "dashboardLayout": p.dashboard_layout,
     }

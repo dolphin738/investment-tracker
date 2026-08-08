@@ -10,11 +10,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
+from math import isfinite
 
 import pyxirr
 
 _XIRR_Q = Decimal("1e-8")  # PRD 8.1: XIRR NUMERIC(20,8)
+
+
+def _isfinite(x: float) -> bool:
+    return isfinite(x)
 
 
 @dataclass(frozen=True)
@@ -50,5 +55,11 @@ def calculate_xirr(cashflows: list[Cashflow]) -> Decimal | None:
         return None
     if rate is None:
         return None
+    # pyxirr 对退化现金流（如同日收付、无解）可能返回 inf/nan → 视为不可计算
+    if not _isfinite(rate):
+        return None
     # float(f64) → 8 位小数 Decimal（PRD 8.1 NUMERIC(20,8)）
-    return Decimal(str(rate)).quantize(_XIRR_Q)
+    try:
+        return Decimal(str(rate)).quantize(_XIRR_Q)
+    except (InvalidOperation, ValueError):
+        return None
