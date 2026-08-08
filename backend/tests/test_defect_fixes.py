@@ -302,19 +302,23 @@ async def test_l4_recalculate_start_rollback(client):
 
 # ── L5 ────────────────────────────────────────────────────────────────────
 async def test_l5_cash_balance_deterministic_latest(client):
-    """同 as_of 多条现金余额时，确定性取最新创建一行（不随路径分歧）。"""
+    """同 as_of 多条现金余额时，确定性取最新创建一行（不随路径分歧）。
+
+    注意：create_cashbalance API 已改为按 as_of upsert（同 as_of 只保留一行），
+    无法经 API 造出多行；故直接经 DB 会话插入两条同 as_of 余额，验证读取端
+    （_latest_cash_balance / computeDerivedBatch）确定性取最新创建一行。
+    """
     creds = await register_login(client, "l5@example.com", "pw123456")
     h = auth(creds["token"])
     pid = await _create_portfolio(client, h, "L5组合")
-    # 同 as_of 两条现金余额（第二条更晚创建，金额更小）
-    await client.post(
-        f"/api/portfolios/{pid}/cash-balances",
-        headers=h, json={"asOf": str(D1), "amount": 90000},
-    )
-    await client.post(
-        f"/api/portfolios/{pid}/cash-balances",
-        headers=h, json={"asOf": str(D1), "amount": 80000},
-    )
+    # 直接插入两条同 as_of 现金余额（第二条更晚创建、金额更小）
+    from app.db.database import AsyncSessionLocal
+    from app.models import CashBalance
+
+    async with AsyncSessionLocal() as s:
+        s.add(CashBalance(portfolio_id=pid, as_of=D1, amount=Decimal("90000")))
+        s.add(CashBalance(portfolio_id=pid, as_of=D1, amount=Decimal("80000")))
+        await s.commit()
     # 手工快照触发派生计算，读取 derivedTotalAsset（无持仓 → 仅现金）
     r = await client.post(
         f"/api/portfolios/{pid}/snapshots",
