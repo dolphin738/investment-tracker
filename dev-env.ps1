@@ -1,23 +1,23 @@
 # ===========================================================================
-# å¼€å‘ç¯å¢ƒåˆå§‹åŒ–è„šæœ¬ (investment_return_tracker)
+# ¿ª·¢»·¾³³õÊ¼»¯½Å±¾ (investment_return_tracker)
 # ===========================================================================
-# ç”¨æ³•ï¼šåœ¨ PowerShell ä¸­ cd åˆ°é¡¹ç›®æ ¹ç›®å½•åï¼Œdot-source æ‰§è¡Œï¼š
+# ÓÃ·¨£ºÔÚ PowerShell ÖĞ cd µ½ÏîÄ¿¸ùÄ¿Â¼ºó£¬dot-source Ö´ĞĞ£º
 #   . .\dev-env.ps1
-#   ï¼ˆå‰é¢ ç‚¹+ç©ºæ ¼ è¡¨ç¤ºåœ¨å½“å‰ä¼šè¯æ‰§è¡Œï¼Œä¿ç•™ PATH / venv æ¿€æ´»çŠ¶æ€ï¼‰
+#   £¨Ç°Ãæ µã+¿Õ¸ñ ±íÊ¾ÔÚµ±Ç°»á»°Ö´ĞĞ£¬±£Áô PATH / venv ¼¤»î×´Ì¬£©
 #
-# ä½œç”¨ï¼š
-#   1. æŠŠ WorkBuddy managed Python 3.13 ä¸ managed Node 22 åŠ å…¥ PATH
-#      â€”â€” è§£å†³â€œæ— æ³•æ‰§è¡Œ python / nodeâ€çš„æ ¹å› ï¼ˆå®ƒä»¬é»˜è®¤ä¸åœ¨ç³»ç»Ÿ PATHï¼‰
-#   2. æ¸…é™¤ NODE_OPTIONSï¼ˆç»•è¿‡å®‰å…¨é’©å­å¯¹ pnpm çš„æ‹¦æˆªï¼Œæ²¿ç”¨ app/dev-env.ps1ï¼‰
-#   3. åœ¨é¡¹ç›®å†…åˆ›å»ºå¹¶æ¿€æ´» Python è™šæ‹Ÿç¯å¢ƒ backend/.venv
-#   4. å®‰è£…åç«¯ä¾èµ–ï¼ˆrequirements.txtï¼Œå«æµ‹è¯•ä¾èµ–ï¼‰
-#   5. å¤åˆ¶ backend/.env.example -> backend/.envï¼ˆè‹¥ä¸å­˜åœ¨ï¼‰
-#   6. è‹¥ web/ å·²åˆå§‹åŒ–ï¼ˆæœ‰ package.jsonï¼‰ï¼Œæ‰§è¡Œ pnpm install
+# ×÷ÓÃ£º
+#   1. °Ñ WorkBuddy managed Python 3.13 Óë managed Node 22 ¼ÓÈë PATH
+#      ¡ª¡ª ½â¾ö¡°ÎŞ·¨Ö´ĞĞ python / node¡±µÄ¸ùÒò£¨ËüÃÇÄ¬ÈÏ²»ÔÚÏµÍ³ PATH£©
+#   2. Çå³ı NODE_OPTIONS£¨ÈÆ¹ı°²È«¹³×Ó¶Ô pnpm µÄÀ¹½Ø£¬ÑØÓÃ app/dev-env.ps1£©
+#   3. ÔÚÏîÄ¿ÄÚ´´½¨²¢¼¤»î Python ĞéÄâ»·¾³ backend/.venv
+#   4. °²×°ºó¶ËÒÀÀµ£¨requirements.txt£¬º¬²âÊÔÒÀÀµ£©
+#   5. ¸´ÖÆ backend/.env.example -> backend/.env£¨Èô²»´æÔÚ£©
+#   6. Èô web/ ÒÑ³õÊ¼»¯£¨ÓĞ package.json£©£¬Ö´ĞĞ pnpm install
 # ===========================================================================
 
 $ErrorActionPreference = "Stop"
 
-# ---------- 1. å®šä½ Pythonï¼ˆå¤šå€™é€‰ï¼Œä¼˜å…ˆ managedï¼‰----------
+# ---------- 1. ¶¨Î» Python£¨¶àºòÑ¡£¬ÓÅÏÈ managed£©----------
 function Find-Python {
     $candidates = @(
         "C:\Users\dolphin738\.workbuddy\binaries\python\versions\3.13.12\python.exe",
@@ -40,46 +40,46 @@ $nodePath = "C:\Users\dolphin738\.workbuddy\binaries\node\versions\22.22.2"
 
 $python = Find-Python
 if (-not $python) {
-    Write-Host "âœ— æœªæ‰¾åˆ° Python (>=3.11)ã€‚è¯·å®‰è£… Python æˆ–ç¡®è®¤ WorkBuddy managed Python è·¯å¾„ã€‚" -ForegroundColor Red
+    Write-Host " Î´ÕÒµ½ Python (>=3.11)¡£Çë°²×° Python »òÈ·ÈÏ WorkBuddy managed Python Â·¾¶¡£" -ForegroundColor Red
     return
 }
 
-# æŠŠ python / node æ‰€åœ¨ç›®å½•å‰ç½®åˆ° PATH
+# °Ñ python / node ËùÔÚÄ¿Â¼Ç°ÖÃµ½ PATH
 $pyDir = Split-Path -Parent $python
 $env:PATH = "$pyDir;$env:PATH"
 if (Test-Path "$nodePath\node.exe") {
     $env:PATH = "$nodePath;$env:PATH"
 }
-$env:NODE_OPTIONS = $null   # æ²¿ç”¨ app/dev-env.ps1ï¼šç»•è¿‡å®‰å…¨é’©å­æ‹¦æˆª
+$env:NODE_OPTIONS = $null   # ÑØÓÃ app/dev-env.ps1£ºÈÆ¹ı°²È«¹³×ÓÀ¹½Ø
 
-# ---------- 2. é¡¹ç›®æ ¹ç›®å½• & venv ----------
+# ---------- 2. ÏîÄ¿¸ùÄ¿Â¼ & venv ----------
 $root = Split-Path -Parent $MyInvocation.MyCommand.Definition
 $backend = Join-Path $root "backend"
 $venv = Join-Path $backend ".venv"
 
 if (-not (Test-Path $backend)) {
-    Write-Host "âœ— æœªæ‰¾åˆ° backend/ ç›®å½•ï¼Œè¯·åœ¨é¡¹ç›®æ ¹ç›®å½•è¿è¡Œæœ¬è„šæœ¬ã€‚" -ForegroundColor Red
+    Write-Host " Î´ÕÒµ½ backend/ Ä¿Â¼£¬ÇëÔÚÏîÄ¿¸ùÄ¿Â¼ÔËĞĞ±¾½Å±¾¡£" -ForegroundColor Red
     return
 }
 
 if (-not (Test-Path $venv)) {
-    Write-Host "â†’ åˆ›å»ºè™šæ‹Ÿç¯å¢ƒ $venv" -ForegroundColor Cyan
+    Write-Host "¡ú ´´½¨ĞéÄâ»·¾³ $venv" -ForegroundColor Cyan
     & $python -m venv $venv
 } else {
-    Write-Host "â†’ è™šæ‹Ÿç¯å¢ƒå·²å­˜åœ¨ï¼Œè·³è¿‡åˆ›å»º" -ForegroundColor DarkGray
+    Write-Host "¡ú ĞéÄâ»·¾³ÒÑ´æÔÚ£¬Ìø¹ı´´½¨" -ForegroundColor DarkGray
 }
 
-# æ¿€æ´» venvï¼ˆdot-sourceï¼Œä½¿å½“å‰ä¼šè¯çš„ python/pip æŒ‡å‘ venvï¼‰
+# ¼¤»î venv£¨dot-source£¬Ê¹µ±Ç°»á»°µÄ python/pip Ö¸Ïò venv£©
 $activate = Join-Path $venv "Scripts\Activate.ps1"
 if (Test-Path $activate) { . $activate }
 
-# ---------- 3. å®‰è£…åç«¯ä¾èµ– ----------
+# ---------- 3. °²×°ºó¶ËÒÀÀµ ----------
 $req = Join-Path $backend "requirements.txt"
 if (-not (Test-Path $req)) {
-    Write-Host "âœ— æœªæ‰¾åˆ° backend/requirements.txt" -ForegroundColor Red
+    Write-Host " Î´ÕÒµ½ backend/requirements.txt" -ForegroundColor Red
     return
 }
-Write-Host "â†’ å®‰è£…åç«¯ä¾èµ– (pip install -r requirements.txt)" -ForegroundColor Cyan
+Write-Host "¡ú °²×°ºó¶ËÒÀÀµ (pip install -r requirements.txt)" -ForegroundColor Cyan
 python -m pip install --upgrade pip -q
 python -m pip install -r $req -q
 
@@ -88,37 +88,52 @@ $envExample = Join-Path $backend ".env.example"
 $envFile = Join-Path $backend ".env"
 if ((Test-Path $envExample) -and -not (Test-Path $envFile)) {
     Copy-Item $envExample $envFile
-    Write-Host "â†’ å·²å¤åˆ¶ .env.example -> backend/.envï¼ˆè¯·æŒ‰éœ€ä¿®æ”¹å¯†é’¥/æ•°æ®åº“é…ç½®ï¼‰" -ForegroundColor Green
+    Write-Host "¡ú ÒÑ¸´ÖÆ .env.example -> backend/.env£¨Çë°´ĞèĞŞ¸ÄÃÜÔ¿/Êı¾İ¿âÅäÖÃ£©" -ForegroundColor Green
 } elseif (Test-Path $envFile) {
-    Write-Host "â†’ backend/.env å·²å­˜åœ¨ï¼Œè·³è¿‡" -ForegroundColor DarkGray
+    Write-Host "¡ú backend/.env ÒÑ´æÔÚ£¬Ìø¹ı" -ForegroundColor DarkGray
 }
 
-# ---------- 5. å‰ç«¯ï¼ˆweb å°±ç»ªåè‡ªåŠ¨å®‰è£…ï¼‰----------
+# ---------- 5. Ç°¶Ë£¨web ¾ÍĞ÷ºó×Ô¶¯°²×°£©----------
 $web = Join-Path $root "web"
 if (Test-Path (Join-Path $web "package.json")) {
-    Write-Host "â†’ å®‰è£…å‰ç«¯ä¾èµ– (pnpm install)" -ForegroundColor Cyan
+    Write-Host "¡ú °²×°Ç°¶ËÒÀÀµ (pnpm install)" -ForegroundColor Cyan
     Push-Location $web
     pnpm install
     Pop-Location
 } else {
-    Write-Host "â†’ web/ å°šæœªåˆå§‹åŒ–ï¼ˆæ—  package.jsonï¼‰ï¼Œè·³è¿‡å‰ç«¯ä¾èµ–" -ForegroundColor DarkGray
+    Write-Host "¡ú web/ ÉĞÎ´³õÊ¼»¯£¨ÎŞ package.json£©£¬Ìø¹ıÇ°¶ËÒÀÀµ" -ForegroundColor DarkGray
 }
 
-# ---------- 6. ç¯å¢ƒä¿¡æ¯ ----------
+# ---------- 5.5 ±ã½İº¯Êı£ºÆô¶¯ºó¶Ë£¨×Ô¶¯ cd backend£¬±ÜÃâ ModuleNotFoundError£©----------
+function Start-Backend {
+    $bk = Join-Path $root "backend"
+    if (-not (Test-Path (Join-Path $bk "app\main.py"))) {
+        Write-Host "? Î´ÕÒµ½ backend/app/main.py" -ForegroundColor Red
+        return
+    }
+    Write-Host "¡ú Æô¶¯ºó¶Ë (uvicorn app.main:app --reload --port 8000)" -ForegroundColor Cyan
+    Write-Host "  Swagger: http://localhost:8000/api/docs" -ForegroundColor DarkGray
+    Push-Location $bk
+    uvicorn app.main:app --reload --port 8000
+    Pop-Location
+}
+
+# ---------- 6. »·¾³ĞÅÏ¢ ----------
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "  å¼€å‘ç¯å¢ƒå·²åˆå§‹åŒ–" -ForegroundColor Green
+Write-Host "  ¿ª·¢»·¾³ÒÑ³õÊ¼»¯" -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  Python : $(python -V 2>&1)"
 Write-Host "  venv   : $venv"
 Write-Host "  Node   : $(node -v 2>$null)"
 Write-Host "  pnpm   : $(pnpm -v 2>$null)"
-Write-Host "  ç›®å½•   : $root"
+Write-Host "  Ä¿Â¼   : $root"
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "å¸¸ç”¨å‘½ä»¤ï¼š" -ForegroundColor Yellow
-Write-Host "  pytest                                 è¿è¡Œåç«¯æµ‹è¯•ï¼ˆåœ¨ backend/ ä¸‹ï¼‰"
-Write-Host "  uvicorn app.main:app --reload --port 8000   å¯åŠ¨åç«¯ (Swagger: /api/docs)"
-Write-Host "  alembic revision --autogenerate ...   ç”Ÿæˆè¿ç§»ï¼ˆPhase 1+ï¼‰"
-Write-Host "  pnpm dev                               å¯åŠ¨å‰ç«¯ï¼ˆweb å°±ç»ªåï¼‰"
+Write-Host "³£ÓÃÃüÁî£º" -ForegroundColor Yellow
+Write-Host "  pytest                                 ÔËĞĞºó¶Ë²âÊÔ£¨ÔÚ backend/ ÏÂ£©"
+Write-Host "  Start-Backend                         Æô¶¯ºó¶Ë£¨×Ô¶¯ cd backend£¬Swagger: /api/docs£©"
+Write-Host "  cd backend; uvicorn app.main:app --reload --port 8000   £¨µÈ¼ÛÊÖ¶¯·½Ê½£©"
+Write-Host "  alembic revision --autogenerate ...   Éú³ÉÇ¨ÒÆ£¨Phase 1+£©"
+Write-Host "  pnpm dev                               Æô¶¯Ç°¶Ë£¨web ¾ÍĞ÷ºó£©"
 Write-Host ""
