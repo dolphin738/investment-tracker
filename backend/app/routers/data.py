@@ -135,6 +135,16 @@ async def list_cashflows(
     return await paginate(db, stmt, page, pageSize, serialize_cashflow)
 
 
+@router_cashflows.get("/{portfolio_id}/cashflows/{cf_id}")
+async def get_cashflow(
+    p=Depends(get_portfolio), db: AsyncSession = Depends(get_db), cf_id: str = ""
+):
+    cf = await db.get(CashFlow, cf_id)
+    if cf is None or cf.portfolio_id != p.id:
+        raise BusinessException(BusinessErrorCode.NOT_FOUND, "出入金不存在", status_code=404)
+    return serialize_cashflow(cf)
+
+
 @router_cashflows.post("/{portfolio_id}/cashflows")
 async def create_cashflow(
     req: CashflowCreateReq, p=Depends(get_portfolio), db: AsyncSession = Depends(get_db)
@@ -211,6 +221,16 @@ async def list_securities(
         .order_by(Security.created_at.desc())
     )
     return await paginate(db, stmt, page, pageSize, serialize_security)
+
+
+@router_securities.get("/{portfolio_id}/securities/{sec_id}")
+async def get_security(
+    p=Depends(get_portfolio), db: AsyncSession = Depends(get_db), sec_id: str = ""
+):
+    sec = await db.get(Security, sec_id)
+    if sec is None or sec.portfolio_id != p.id:
+        raise BusinessException(BusinessErrorCode.NOT_FOUND, "标的不存在", status_code=404)
+    return serialize_security(sec)
 
 
 @router_securities.post("/{portfolio_id}/securities")
@@ -305,6 +325,16 @@ async def list_trades(
         stmt = stmt.where(SecurityTrade.date <= endDate)
     stmt = stmt.order_by(SecurityTrade.date.desc(), SecurityTrade.created_at.desc())
     return await paginate(db, stmt, page, pageSize, serialize_trade)
+
+
+@router_trades.get("/{portfolio_id}/security-trades/{trade_id}")
+async def get_trade(
+    p=Depends(get_portfolio), db: AsyncSession = Depends(get_db), trade_id: str = ""
+):
+    trade = await db.get(SecurityTrade, trade_id)
+    if trade is None or trade.portfolio_id != p.id:
+        raise BusinessException(BusinessErrorCode.NOT_FOUND, "买卖流水不存在", status_code=404)
+    return serialize_trade(trade)
 
 
 @router_trades.post("/{portfolio_id}/security-trades")

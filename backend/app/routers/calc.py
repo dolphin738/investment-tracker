@@ -311,3 +311,102 @@ def _split_ids(raw: Optional[str]) -> Optional[list[str]]:
     if not raw:
         return None
     return [x for x in raw.split(",") if x]
+
+
+# ── NAV / XIRR 历史（带分页）§4.2.19 / §4.2.20 ──
+def _agg(vals, aggregation: str):
+    clean = [v for v in vals if v is not None]
+    if not clean:
+        return None
+    if aggregation == "avg":
+        return sum(clean) / len(clean)
+    return clean[-1]
+
+
+def _bucket_nav(rows, granularity: str, aggregation: str) -> list[dict]:
+    groups: dict = {}
+    for r in rows:
+        groups.setdefault(_period_key(r.date, granularity), []).append(r)
+    out: list[dict] = []
+    for key in sorted(groups):
+        items = groups[key]
+        rep = _bucket_date(min(r.date for r in items), granularity)
+        out.append(
+            {
+                "date": rep,
+                "cumulativeNav": _agg([r.cumulative_nav for r in items], aggregation),
+                "yearNav": _agg([r.year_nav for r in items], aggregation),
+                "shares": _agg([r.shares for r in items], aggregation),
+            }
+        )
+    return out
+
+
+def _bucket_xirr(rows, granularity: str, aggregation: str) -> list[dict]:
+    groups: dict = {}
+    for r in rows:
+        groups.setdefault(_period_key(r.date, granularity), []).append(r)
+    out: list[dict] = []
+    for key in sorted(groups):
+        items = groups[key]
+        rep = _bucket_date(min(r.date for r in items), granularity)
+        out.append(
+            {"date": rep, "xirrValue": _agg([r.xirr_value for r in items], aggregation)}
+        )
+    return out
+
+
+async def _load_nav_rows(db, portfolio_id, start, end):
+    stmt = select(DailyNav).where(DailyNav.portfolio_id == portfolio_id)
+    if start:
+        stmt = stmt.where(DailyNav.date >= start)
+    if end:
+        stmt = stmt.where(DailyNav.date <= end)
+    stmt = stmt.order_by(DailyNav.date)
+    return (await db.execute(stmt)).scalars().all()
+
+
+async def _load_xirr_rows(db, portfolio_id, start, end):
+    stmt = select(DailyXirr).where(DailyXirr.portfolio_id == portfolio_id)
+    if start:
+        stmt = stmt.where(DailyXirr.date >= start)
+    if end:
+        stmt = stmt.where(DailyXirr.date <= end)
+    stmt = stmt.order_by(DailyXirr.date)
+    return (await db.execute(stmt)).scalars().all()
+
+
+@router_nav.get("/{portfolio_id}/nav/history")
+async def get_nav_history(
+    p=Depends(get_portfolio),
+    db: AsyncSession = Depends(get_db),
+    granularity: str = "month",
+    aggregation: str = "last",
+    startDate: Optional[date] = None,
+    endDate: Optional[date] = None,
+    page: int = 1,
+    pageSize: int = 20,
+):
+    rows = await _load_nav_rows(db, p.id, startDate, endDate)
+    points = _bucket_nav(rows, granularity, aggregation)
+    total = len(points)
+    items = points[(page - 1) * pageSize : page * pageSize]
+    return {"items": items, "total": total, "page": page, "pageSize": pageSize}
+
+
+@router_xirr.get("/{portfolio_id}/xirr/history")
+async def get_xirr_history(
+    p=Depends(get_portfolio),
+    db: AsyncSession = Depends(get_db),
+    granularity: str = "month",
+    aggregation: str = "last",
+    startDate: Optional[date] = None,
+    endDate: Optional[date] = None,
+    page: int = 1,
+    pageSize: int = 20,
+):
+    rows = await _load_xirr_rows(db, p.id, startDate, endDate)
+    points = _bucket_xirr(rows, granularity, aggregation)
+    total = len(points)
+    items = points[(page - 1) * pageSize : page * pageSize]
+    return {"items": items, "total": total, "page": page, "pageSize": pageSize}

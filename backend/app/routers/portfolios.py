@@ -4,8 +4,10 @@
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.envelope import EnvelopeRoute
@@ -20,11 +22,12 @@ from app.models import (
     Portfolio,
     SecurityPrice,
     SecurityTrade,
+    UserPreference,
 )
 from app.core.enums import BusinessErrorCode
 from app.core.exceptions import BusinessException
 from app.routers.common import get_portfolio, serialize_portfolio
-from app.schemas import PortfolioCreateReq, PortfolioPatchReq
+from app.schemas import PortfolioArchiveReq, PortfolioCreateReq, PortfolioPatchReq
 
 router = APIRouter(prefix="/api", tags=["portfolios"], route_class=EnvelopeRoute)
 
@@ -111,3 +114,30 @@ async def clear_data(
         counts[tbl.__tablename__] = int(res.rowcount or 0)
     await db.commit()
     return {"deletedCount": counts}
+
+
+@router.patch("/portfolios/{portfolio_id}/archive")
+async def archive_portfolio(
+    req: PortfolioArchiveReq,
+    p: Portfolio = Depends(get_portfolio),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """归档 / 取消归档（§4.2.2）。
+
+    archived 缺省或 true → archivedAt = now；false → 置空。
+    归档时若该组合为用户偏好默认组合，则同步置空（被隐藏的组合不能再当默认）。
+    """
+    archiving = req.archived is not False
+    p.archived_at = datetime.now(timezone.utc) if archiving else None
+    await db.commit()
+    if archiving:
+        await db.execute(
+            update(UserPreference)
+            .where(
+                UserPreference.user_id == p.user_id,
+                UserPreference.default_portfolio_id == p.id,
+            )
+            .values(default_portfolio_id=None)
+        )
+        await db.commit()
+    return serialize_portfolio(p)

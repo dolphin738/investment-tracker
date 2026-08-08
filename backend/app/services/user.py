@@ -94,6 +94,89 @@ class UserService:
         await self.session.refresh(user)
         return user
 
+    async def change_password(
+        self, user_id: str, current_password: str, new_password: str
+    ) -> User:
+        """改密码：校验当前密码 → 新密码不可与当前相同 → 哈希落库。"""
+        user = (
+            await self.session.execute(select(User).where(User.id == user_id))
+        ).scalar_one_or_none()
+        if user is None:
+            raise BusinessException(
+                code=BusinessErrorCode.UNAUTHORIZED,
+                message="账户不可用",
+                status_code=401,
+            )
+        if not verify_password(current_password, user.password_hash):
+            raise BusinessException(
+                code=BusinessErrorCode.PASSWORD_WRONG,
+                message="当前密码错误",
+                status_code=400,
+            )
+        if new_password == current_password:
+            raise BusinessException(
+                code=BusinessErrorCode.VALIDATION_FAILED,
+                message="新密码不能与当前密码相同",
+                status_code=400,
+            )
+        user.password_hash = hash_password(new_password)
+        await self.session.commit()
+        await self.session.refresh(user)
+        return user
+
+    async def change_email(
+        self, user_id: str, current_password: str, new_email: str
+    ) -> User:
+        """改邮箱：校验当前密码 → 新邮箱不可与当前相同 → 查重 → 落库。"""
+        user = (
+            await self.session.execute(select(User).where(User.id == user_id))
+        ).scalar_one_or_none()
+        if user is None:
+            raise BusinessException(
+                code=BusinessErrorCode.UNAUTHORIZED,
+                message="账户不可用",
+                status_code=401,
+            )
+        if not verify_password(current_password, user.password_hash):
+            raise BusinessException(
+                code=BusinessErrorCode.PASSWORD_WRONG,
+                message="当前密码错误",
+                status_code=400,
+            )
+        if new_email == user.email:
+            raise BusinessException(
+                code=BusinessErrorCode.VALIDATION_FAILED,
+                message="新邮箱与当前邮箱相同",
+                status_code=400,
+            )
+        occupied = (
+            await self.session.execute(select(User).where(User.email == new_email))
+        ).scalar_one_or_none()
+        if occupied is not None:
+            raise BusinessException(
+                code=BusinessErrorCode.EMAIL_TAKEN,
+                message="该邮箱已被注册",
+                status_code=409,
+            )
+        user.email = new_email
+        await self.session.commit()
+        await self.session.refresh(user)
+        return user
+
+    async def delete_account(self, user_id: str) -> None:
+        """注销：软删除（SET deletedAt = now），数据保留 30 天可恢复。"""
+        user = (
+            await self.session.execute(select(User).where(User.id == user_id))
+        ).scalar_one_or_none()
+        if user is None:
+            raise BusinessException(
+                code=BusinessErrorCode.UNAUTHORIZED,
+                message="账户不可用",
+                status_code=401,
+            )
+        user.deleted_at = datetime.now(timezone.utc)
+        await self.session.commit()
+
     def _assert_restore_window(self, user: User) -> None:
         """已注销用户访问：未超期 → 1007（带剩余天数）；超期 → 1009。"""
         deadline = user.deleted_at + timedelta(days=ACCOUNT_RETENTION_DAYS)

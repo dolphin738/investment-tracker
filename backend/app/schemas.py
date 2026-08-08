@@ -1,7 +1,7 @@
 """请求体 Schema（Pydantic v2）。
 
 仅用于入参校验；响应由 EnvelopeRoute 包裹，字段名与 app 契约一致（驼峰）。
-金额用 Decimal（JSON 数字解析为 Decimal，精度足够覆盖本项目金额）。
+金额统一用 DecimalStr（序列化与 OpenAPI schema 均为字符串，对齐 Prisma Decimal 行为）。
 """
 from __future__ import annotations
 
@@ -10,6 +10,8 @@ from decimal import Decimal
 from typing import Optional
 
 from pydantic import BaseModel
+
+from app.core.types import DecimalStr
 
 
 # ── 认证 ──
@@ -34,6 +36,17 @@ class RestoreReq(BaseModel):
     password: str
 
 
+# ── 改密 / 改邮（§4.2.1）──
+class PasswordPatchReq(BaseModel):
+    currentPassword: str
+    newPassword: str
+
+
+class EmailPatchReq(BaseModel):
+    currentPassword: str
+    newEmail: str
+
+
 # ── 组合 ──
 class PortfolioCreateReq(BaseModel):
     name: str
@@ -46,18 +59,24 @@ class PortfolioPatchReq(BaseModel):
     description: Optional[str] = None
 
 
+class PortfolioArchiveReq(BaseModel):
+    """归档请求：archived 缺省或 true → 归档；false → 取消归档。"""
+
+    archived: Optional[bool] = None
+
+
 # ── 出入金 ──
 class CashflowCreateReq(BaseModel):
     date: date
     type: str  # BUY / SELL
-    amount: Decimal
+    amount: DecimalStr
     note: Optional[str] = None
 
 
 class CashflowPatchReq(BaseModel):
     date: Optional[date] = None
     type: Optional[str] = None
-    amount: Optional[Decimal] = None
+    amount: Optional[DecimalStr] = None
     note: Optional[str] = None
 
 
@@ -79,56 +98,56 @@ class TradeCreateReq(BaseModel):
     date: date
     securityId: str
     side: str  # BUY_SEC / SELL_SEC
-    quantity: Decimal
-    price: Decimal
-    fee: Optional[Decimal] = Decimal(0)
+    quantity: DecimalStr
+    price: DecimalStr
+    fee: Optional[DecimalStr] = Decimal(0)
     note: Optional[str] = None
 
 
 class TradePatchReq(BaseModel):
     date: Optional[date] = None
-    quantity: Optional[Decimal] = None
-    price: Optional[Decimal] = None
-    fee: Optional[Decimal] = None
+    quantity: Optional[DecimalStr] = None
+    price: Optional[DecimalStr] = None
+    fee: Optional[DecimalStr] = None
 
 
 # ── 最新价 ──
 class PriceCreateReq(BaseModel):
     securityId: str
-    price: Decimal
+    price: DecimalStr
     asOf: date
 
 
 class PricePatchReq(BaseModel):
-    price: Optional[Decimal] = None
+    price: Optional[DecimalStr] = None
     asOf: Optional[date] = None
 
 
 # ── 现金余额 ──
 class CashBalanceCreateReq(BaseModel):
-    amount: Decimal
+    amount: DecimalStr
     asOf: date
     note: Optional[str] = None
 
 
 class CashBalancePatchReq(BaseModel):
-    amount: Optional[Decimal] = None
+    amount: Optional[DecimalStr] = None
     note: Optional[str] = None
 
 
 # ── 总资产快照 ──
 class SnapshotCreateReq(BaseModel):
     date: date
-    totalAsset: Decimal
-    marketValue: Optional[Decimal] = None
-    cashBalance: Optional[Decimal] = None
+    totalAsset: DecimalStr
+    marketValue: Optional[DecimalStr] = None
+    cashBalance: Optional[DecimalStr] = None
     note: Optional[str] = None
 
 
 class SnapshotPatchReq(BaseModel):
-    totalAsset: Optional[Decimal] = None
-    marketValue: Optional[Decimal] = None
-    cashBalance: Optional[Decimal] = None
+    totalAsset: Optional[DecimalStr] = None
+    marketValue: Optional[DecimalStr] = None
+    cashBalance: Optional[DecimalStr] = None
     note: Optional[str] = None
 
 
@@ -142,8 +161,8 @@ class RecalculateRangeReq(BaseModel):
 class DividendCreateReq(BaseModel):
     securityId: str
     date: date
-    amount: Decimal
-    tax: Optional[Decimal] = Decimal(0)
+    amount: DecimalStr
+    tax: Optional[DecimalStr] = Decimal(0)
     type: Optional[str] = "CASH"
     note: Optional[str] = None
 
@@ -151,8 +170,8 @@ class DividendCreateReq(BaseModel):
 class DividendPatchReq(BaseModel):
     securityId: Optional[str] = None
     date: Optional[date] = None
-    amount: Optional[Decimal] = None
-    tax: Optional[Decimal] = None
+    amount: Optional[DecimalStr] = None
+    tax: Optional[DecimalStr] = None
     type: Optional[str] = None
     note: Optional[str] = None
 

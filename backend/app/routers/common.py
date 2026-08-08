@@ -67,6 +67,7 @@ def serialize_portfolio(p: Portfolio) -> dict:
         "description": p.description,
         "baseDate": p.base_date,
         "currency": p.currency,
+        "archivedAt": p.archived_at,
         "createdAt": p.created_at,
         "updatedAt": p.updated_at,
     }

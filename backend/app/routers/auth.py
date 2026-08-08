@@ -12,7 +12,14 @@ from app.core.envelope import EnvelopeRoute
 from app.core.security import CurrentUser, get_current_user
 from app.db.database import get_db
 from app.models import User
-from app.schemas import LoginReq, ProfilePatchReq, RegisterReq, RestoreReq
+from app.schemas import (
+    EmailPatchReq,
+    LoginReq,
+    PasswordPatchReq,
+    ProfilePatchReq,
+    RegisterReq,
+    RestoreReq,
+)
 from app.services.user import UserService
 
 router = APIRouter(prefix="/api/auth", tags=["auth"], route_class=EnvelopeRoute)
@@ -70,3 +77,42 @@ async def profile(
         u.avatar = req.avatar
     await db.commit()
     return {"id": u.id, "email": u.email, "name": u.name, "avatar": u.avatar}
+
+
+@router.patch("/password")
+async def change_password(
+    req: PasswordPatchReq,
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    u = await UserService(db).change_password(
+        user.user_id, req.currentPassword, req.newPassword
+    )
+    return {
+        "accessToken": UserService.issue_token(u),
+        "user": {"id": u.id, "email": u.email, "name": u.name},
+    }
+
+
+@router.patch("/email")
+async def change_email(
+    req: EmailPatchReq,
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    u = await UserService(db).change_email(
+        user.user_id, req.currentPassword, req.newEmail
+    )
+    return {
+        "accessToken": UserService.issue_token(u),
+        "user": {"id": u.id, "email": u.email, "name": u.name},
+    }
+
+
+@router.delete("/account")
+async def delete_account(
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    await UserService(db).delete_account(user.user_id)
+    return None
