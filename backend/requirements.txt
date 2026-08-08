@@ -1,0 +1,20 @@
+# 后端依赖锁定清单（与 backend/pyproject.toml 同步）
+# 由 dev-env.ps1 用于 pip install -r requirements.txt
+# 升级版本时请同步修改 pyproject.toml
+
+# ── 主依赖（生产）──
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+pydantic-settings==2.7.1
+sqlalchemy==2.0.36
+asyncpg==0.30.0
+alembic==1.14.0
+PyJWT==2.10.1
+bcrypt==4.2.1
+python-multipart==0.0.20
+
+# ── 开发 / 测试依赖 ──
+pytest==8.3.4
+pytest-asyncio==0.24.0
+httpx==0.28.1
