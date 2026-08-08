@@ -24,3 +24,6 @@ Thumbs.db
 # Editors
 .idea/
 .vscode/
+
+# Local agent memory (not for repo)
+.workbuddy/
