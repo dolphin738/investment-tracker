@@ -159,3 +159,37 @@ def test_validate_no_negative_clean():
         _trade("S1", date(2026, 1, 3), SecuritySide.SELL_SEC, Decimal("100"), Decimal("15")),
     ]
     assert validate_trades_no_negative(trades) == []
+
+
+# ───────────────────────── §9.4 同日多笔（顺序敏感） ─────────────────────────
+def test_holding_same_day_multiple_trades():
+    # 同日三笔，按 (date, created_at) 升序回放：先两笔买入加权，再一笔卖出
+    trades = [
+        _trade("S1", date(2026, 1, 2), SecuritySide.BUY_SEC, Decimal("100"), Decimal("10"),
+               created=datetime(2026, 1, 2, 8, 0, 0)),
+        _trade("S1", date(2026, 1, 2), SecuritySide.BUY_SEC, Decimal("100"), Decimal("20"),
+               created=datetime(2026, 1, 2, 9, 0, 0)),
+        _trade("S1", date(2026, 1, 2), SecuritySide.SELL_SEC, Decimal("100"), Decimal("15"),
+               created=datetime(2026, 1, 2, 10, 0, 0)),
+    ]
+    v = derive_holdings(trades, {"S1": Decimal("15")})[0]
+    assert v.quantity == Decimal("100")
+    assert v.avg_cost == Decimal("15")          # (100*10 + 100*20) / 200
+    assert v.cost_total == Decimal("1500.00")   # 100 * 15
+    assert v.market_value == Decimal("1500.00")
+
+
+def test_holding_same_day_liquidate_then_rebuy():
+    # 同日清仓再买：清仓后 avg 重置，同日多笔的顺序敏感性验证
+    trades = [
+        _trade("S1", date(2026, 1, 2), SecuritySide.BUY_SEC, Decimal("100"), Decimal("10"),
+               created=datetime(2026, 1, 2, 8, 0, 0)),
+        _trade("S1", date(2026, 1, 2), SecuritySide.SELL_SEC, Decimal("100"), Decimal("15"),
+               created=datetime(2026, 1, 2, 9, 0, 0)),
+        _trade("S1", date(2026, 1, 2), SecuritySide.BUY_SEC, Decimal("50"), Decimal("20"),
+               created=datetime(2026, 1, 2, 10, 0, 0)),
+    ]
+    v = derive_holdings(trades, {"S1": Decimal("20")})[0]
+    assert v.quantity == Decimal("50")
+    assert v.avg_cost == Decimal("20")          # 清仓后重新买入，avg 重置
+    assert v.cost_total == Decimal("1000.00")
