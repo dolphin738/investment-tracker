@@ -12,7 +12,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import select, text
 
-from app.db.database import AsyncSessionLocal
+import app.db.database as dbmod
 import app.models  # noqa: F401
 from app.finance_core import HoldingView
 from app.models import (
@@ -39,7 +39,7 @@ MARKER = "phase2_svc_test@example.com"
 
 @pytest.mark.asyncio
 async def test_compute_range_nav_and_xirr():
-    async with AsyncSessionLocal() as s:
+    async with dbmod.AsyncSessionLocal() as s:
         await s.execute(text("DELETE FROM users WHERE email = :e"), {"e": MARKER})
         await s.commit()
 
@@ -116,7 +116,7 @@ async def test_compute_range_nav_and_xirr():
 
 @pytest.mark.asyncio
 async def test_holding_derive_and_filters():
-    async with AsyncSessionLocal() as s:
+    async with dbmod.AsyncSessionLocal() as s:
         await s.execute(text("DELETE FROM users WHERE email = :e"), {"e": MARKER})
         await s.commit()
 

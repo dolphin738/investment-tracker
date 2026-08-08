@@ -24,7 +24,7 @@ from app.core.exceptions import (
     unhandled_exception_handler,
     validation_exception_handler,
 )
-from app.routers import health
+from app.routers import auth, calc, data, health, portfolios
 
 settings = get_settings()
 
@@ -67,6 +67,18 @@ app.mount(
 )
 
 app.include_router(health.router)
+app.include_router(auth.router)
+app.include_router(portfolios.router)
+app.include_router(data.router_cashflows)
+app.include_router(data.router_securities)
+app.include_router(data.router_trades)
+app.include_router(data.router_prices)
+app.include_router(data.router_cashbalances)
+app.include_router(data.router_snapshots)
+app.include_router(calc.router_holdings)
+app.include_router(calc.router_xirr)
+app.include_router(calc.router_nav)
+app.include_router(calc.router_recalculate)
 
 
 def _custom_openapi() -> dict:

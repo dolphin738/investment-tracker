@@ -26,6 +26,7 @@ class HoldingService:
         as_of: date,
         include_closed: bool = False,
         security_id: str | None = None,
+        exclude_trade_id: str | None = None,
     ) -> list[HoldingView]:
         q = select(SecurityTrade).where(
             SecurityTrade.portfolio_id == portfolio_id,
@@ -33,6 +34,8 @@ class HoldingService:
         )
         if security_id:
             q = q.where(SecurityTrade.security_id == security_id)
+        if exclude_trade_id:
+            q = q.where(SecurityTrade.id != exclude_trade_id)
         q = q.order_by(SecurityTrade.date, SecurityTrade.created_at)
         trades = (await self.session.execute(q)).scalars().all()
 

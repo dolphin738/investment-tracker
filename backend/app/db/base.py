@@ -9,7 +9,7 @@ Phase 1：对齐 app/prisma/schema.prisma 方案B 目标态。
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import DateTime, String, func, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -27,19 +27,32 @@ def pk_uuid() -> Mapped[str]:
 
 
 class CreatedAtMixin:
-    """仅 created_at（对齐 Prisma 仅 @default(now()) 的表）。"""
+    """仅 created_at（对齐 Prisma 仅 @default(now()) 的表）。
+
+    created_at 改为 Python 端默认值：避免 INSERT 后 server_default 列被过期，
+    导致同步序列化函数在 async 上下文触发惰性加载（MissingGreenlet）。DB 端
+    server_default 作为兜底保留。
+    """
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
+        DateTime(timezone=True),
+        server_default=func.now(),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
     )
 
 
 class TimestampMixin(CreatedAtMixin):
-    """created_at + updated_at（对齐 Prisma @default(now()) / @updatedAt）。"""
+    """created_at + updated_at（对齐 Prisma @default(now()) / @updatedAt）。
+
+    updated_at 改为 Python 端 onupdate：避免 UPDATE 后 onupdate 列被过期，导致同步
+    序列化函数在 async 上下文触发惰性加载（MissingGreenlet）。DB 端 onupdate 作兜底。
+    """
 
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
-        onupdate=func.now(),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
         nullable=False,
     )

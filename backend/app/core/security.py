@@ -13,10 +13,14 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.enums import BusinessErrorCode
 from app.core.exceptions import BusinessException
+from app.db.database import get_db
+from app.models import User
 
 settings = get_settings()
 
@@ -62,11 +66,12 @@ class CurrentUser:
 
 async def get_current_user(
     creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    db: AsyncSession = Depends(get_db),
 ) -> CurrentUser:
-    """受保护路由依赖：解析 Bearer Token 并返回当前用户。
+    """受保护路由依赖：解析 Bearer Token 并查库确认用户存在且未软删除。
 
-    TODO(Phase 1): 验签后查库确认用户存在且 deletedAt 为空，否则抛 1001。
-    当前 Phase 0 仅做 JWT 验签（无 DB），足以验证信封/错误码/JWT 契约。
+    鉴权链：验签失败/缺失 → 1001/1002；用户不存在或处于注销冷静期 → 1001
+    （统一 1001，不泄露账户枚举信息）。
     """
     if creds is None:
         raise BusinessException(
@@ -88,4 +93,14 @@ async def get_current_user(
             message="无效 Token",
             status_code=401,
         )
-    return CurrentUser(user_id=payload["sub"], email=payload.get("email", ""))
+    sub = payload.get("sub")
+    user = (
+        await db.execute(select(User).where(User.id == sub))
+    ).scalar_one_or_none()
+    if user is None or user.deleted_at is not None:
+        raise BusinessException(
+            code=BusinessErrorCode.UNAUTHORIZED,
+            message="无效 Token 或账户不可用",
+            status_code=401,
+        )
+    return CurrentUser(user_id=user.id, email=user.email)

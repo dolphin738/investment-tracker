@@ -9,12 +9,21 @@ from decimal import Decimal
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums import BusinessErrorCode
 from app.core.envelope import EnvelopeRoute
 from app.core.exceptions import BusinessException
-from app.core.security import CurrentUser, create_access_token, get_current_user
+from app.core.security import (
+    CurrentUser,
+    create_access_token,
+    get_current_user,
+    hash_password,
+)
 from app.core.types import DecimalStr
+from app.db.database import get_db
+from app.models import User
 
 # 所有业务 router 必须用 EnvelopeRoute，才能自动包信封
 router = APIRouter(prefix="/api", tags=["contract"], route_class=EnvelopeRoute)
@@ -64,6 +73,20 @@ async def boom() -> None:
 
 
 @router.get("/token")
-async def issue_demo_token() -> dict:
-    # 仅用于冒烟测试便捷获取 token（真实签发在 auth 模块）
+async def issue_demo_token(db: AsyncSession = Depends(get_db)) -> dict:
+    # 仅用于冒烟测试便捷获取 token（真实签发在 auth 模块）。
+    # 同时确保 demo 用户存在，使 Phase 3 的受保护路由 DB 校验（用户存在 + 未软删除）通过。
+    user = (
+        await db.execute(select(User).where(User.id == "demo-user-id"))
+    ).scalar_one_or_none()
+    if user is None:
+        db.add(
+            User(
+                id="demo-user-id",
+                email="demo@example.com",
+                password_hash=hash_password("demo-pass"),
+                name="Demo",
+            )
+        )
+        await db.commit()
     return {"token": create_access_token("demo-user-id", "demo@example.com")}
