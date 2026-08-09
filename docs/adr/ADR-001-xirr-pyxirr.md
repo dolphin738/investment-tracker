@@ -13,7 +13,7 @@
 | 类别 | 位置 | 状态 |
 |------|------|------|
 | 实现代码 | `backend/app/finance_core/xirr.py` | ✅ 已委托 `pyxirr` |
-| 依赖声明 | `backend/requirements.txt`（`pyxirr==0.10.8`） | ✅ 已锁定 |
+| 依赖声明 | `backend/pyproject.toml`（`pyxirr==0.10.8`，见 `[project].dependencies`） | ✅ 已锁定 |
 | 单测 | `backend/tests/test_finance_core.py`（XIRR 已知案例 + 边界） | ✅ 15 项纯函数测试含 XIRR |
 | 集成测试 | `backend/tests/test_calculation_service.py` | ✅ 成立日 XIRR 退化断言已对齐 pyxirr 行为 |
 | 上游文档 | `../app/docs/ARCHITECTURE.md §7.1` | ⚠️ **口径漂移源，见 §3** |
@@ -110,7 +110,7 @@ Phase 2 计算层原计划（对齐 `app/docs/ARCHITECTURE.md §7.1`）是**自�
 ## 5. 参考
 
 - `backend/app/finance_core/xirr.py` — 委托实现
-- `backend/requirements.txt` — `pyxirr==0.10.8`
+- `backend/pyproject.toml` — `pyxirr==0.10.8`（依赖真相源，取代原 requirements.txt）
 - `backend/tests/test_finance_core.py` — XIRR 单测（已知案例 + 边界 + 退化）
 - `backend/tests/test_calculation_service.py` — 成立日 XIRR=0.0 集成断言
 - `../app/docs/ARCHITECTURE.md §7.1` — 上游口径（注意 §3 漂移声明）

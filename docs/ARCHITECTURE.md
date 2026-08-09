@@ -1060,7 +1060,7 @@ sequenceDiagram
 
 ## 15. 依赖包列表
 
-### 15.1 后端主依赖（`backend/requirements.txt` / `pyproject.toml`）
+### 15.1 后端主依赖（`backend/pyproject.toml`，依赖真相源）
 
 | 包 | 版本 | 用途 |
 |----|------|------|

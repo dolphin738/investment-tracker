@@ -10,7 +10,7 @@
 #      —— 解决“无法执行 python / node”的根因（它们默认不在系统 PATH）
 #   2. 清除 NODE_OPTIONS（绕过安全钩子对 pnpm 的拦截，沿用 app/dev-env.ps1）
 #   3. 在项目内创建并激活 Python 虚拟环境 backend/.venv
-#   4. 安装后端依赖（requirements.txt，含测试依赖）
+#   4. 安装后端依赖（pyproject.toml，含测试依赖）
 #   5. 复制 backend/.env.example -> backend/.env（若不存在）
 #   6. 若 web/ 已初始化（有 package.json），执行 pnpm install
 # ===========================================================================
@@ -74,14 +74,19 @@ $activate = Join-Path $venv "Scripts\Activate.ps1"
 if (Test-Path $activate) { . $activate }
 
 # ---------- 3. 安装后端依赖 ----------
-$req = Join-Path $backend "requirements.txt"
-if (-not (Test-Path $req)) {
-    Write-Host " 未找到 backend/requirements.txt" -ForegroundColor Red
+$pyproject = Join-Path $backend "pyproject.toml"
+if (-not (Test-Path $pyproject)) {
+    Write-Host " 未找到 backend/pyproject.toml" -ForegroundColor Red
     return
 }
-Write-Host "→ 安装后端依赖 (pip install -r requirements.txt)" -ForegroundColor Cyan
+Write-Host "→ 安装后端依赖 (pip install -e .[dev])" -ForegroundColor Cyan
 python -m pip install --upgrade pip -q
-python -m pip install -r $req -q
+Push-Location $backend
+try {
+    python -m pip install -e ".[dev]" -q
+} finally {
+    Pop-Location
+}
 
 # ---------- 4. .env ----------
 $envExample = Join-Path $backend ".env.example"
