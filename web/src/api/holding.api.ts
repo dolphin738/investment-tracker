@@ -28,8 +28,16 @@ export function listHoldings(
   portfolioId: string,
   params: HoldingQueryParams = {},
 ): Promise<{ items: HoldingResponse[]; aggregate: HoldingsAggregate }> {
+  // 类型筛选：后端按逗号分隔字符串接收（白名单校验在后端 holding 端点），
+  // 故将 SecurityType[] 数组序列化为 "STOCK,FUND"，避免 axios 以重复 key 发送而被后端忽略。
+  const query: Record<string, unknown> = { ...params };
+  if (Array.isArray(params.types) && params.types.length > 0) {
+    query.types = params.types.join(',');
+  } else {
+    delete query.types;
+  }
   return http.get<{ items: HoldingResponse[]; aggregate: HoldingsAggregate }>(
     `/portfolios/${portfolioId}/holdings`,
-    { params },
+    { params: query },
   );
 }

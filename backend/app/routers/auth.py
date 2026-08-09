@@ -97,8 +97,9 @@ async def profile(
     ).scalar_one()
     if req.name is not None:
         u.name = req.name
-    if req.avatar is not None:
-        # 缺陷1：更换 URL 头像时清理旧文件，避免孤立文件泄漏
+    if req.avatar is not None and req.avatar != u.avatar:
+        # 仅当头像真正变化时清理旧文件：上传接口已即时落库生效（u.avatar 即新值），
+        # 若「保存」时新旧值相同（刚上传未改），跳过 _remove_old，避免误删刚上传的文件。
         from app.routers.upload import _remove_old
 
         _remove_old(u.avatar)

@@ -355,7 +355,12 @@ class AggregationService:
                 )
             ).all()
             maxes = {sid: mx for sid, mx in rows}
-            if any(mx is None for mx in maxes.values()):
+            # 任一持仓标的缺失行情记录（无行 / 行数少于持仓数 / 行内 NULL）→ 视为无行情。
+            # 必须显式判空：held 非空但 maxes 为空时 min() 会抛 ValueError
+            # （未捕获 → 概览页 500「服务器内部错误」）。修复问题3。
+            if not maxes or len(maxes) < len(held) or any(
+                mx is None for mx in maxes.values()
+            ):
                 price_asof = None  # 存在持仓标的无行情记录
             else:
                 price_asof = min(maxes.values())

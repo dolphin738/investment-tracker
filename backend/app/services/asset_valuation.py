@@ -17,6 +17,7 @@ from decimal import Decimal
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.date_utils import today_app_tz
 from app.finance_core.holding import ZERO
 from app.models import (
     AssetSnapshot,
@@ -255,15 +256,8 @@ class AssetValuationService:
 
             await RecalculationService(self.session).recalculateNavRange(portfolio_id, d)
 
-    async def prune_derived(self, portfolio_id: str, d: date) -> None:
-        """缺陷3：当日已无事件（如删出入金后），删除残留的 0 值 DERIVED 快照及对应净值/xirr。
-
-        仅删 DERIVED（手工记录与事件无关，保留）；删后重算 [d, today] 的 NAV/XIRR，
-        修复因移除当日快照而断链的 prevNav。
-        """
-        existing = await self._get_snapshot(portfolio_id, d)
-        if existing is None or existing.source is not SnapshotSource.DERIVED:
-            return
+    async def _delete_derived_day(self, portfolio_id: str, d: date) -> None:
+        """事务内三删：DERIVED 快照 + daily_nav + daily_xirr（避免幽灵 prevNav）。"""
         await self.session.execute(
             delete(AssetSnapshot).where(
                 AssetSnapshot.portfolio_id == portfolio_id,
@@ -281,9 +275,40 @@ class AssetValuationService:
                 DailyXirr.portfolio_id == portfolio_id, DailyXirr.date == d
             )
         )
+
+    async def prune_zero_orphans(self, portfolio_id: str, since: date) -> None:
+        """统一清理删除后残留的孤儿 DERIVED 快照（问题2）。
+
+        两类孤儿：
+        - 删除日 since 已不再含任何事件 → 其 DERIVED 快照陈旧（即便非 0，如删买卖后
+          仍残留含费成本估值的快照）应删除；
+        - 区间内任一「0 值」DERIVED（total_asset == 0）：包括「仍为事件日但仅余出入金→0」
+          （如删现金余额后当日只剩出入金）以及「今日 0 值快照」。0 值快照不携带任何
+          信息，恒为删除产物。
+
+        清理后重算 [since, today] 的 NAV/XIRR，修复断链的 prevNav。
+        """
+        today = today_app_tz()
+        # ① 删除日若已非事件日 → 删其 DERIVED（陈旧即便非 0）
+        if not await self._is_event_date(portfolio_id, since):
+            await self._delete_derived_day(portfolio_id, since)
+        # ② 区间内任一 0 值 DERIVED（即便仍是事件日 / 含今日）
+        zero_rows = (
+            await self.session.execute(
+                select(AssetSnapshot).where(
+                    AssetSnapshot.portfolio_id == portfolio_id,
+                    AssetSnapshot.date >= since,
+                    AssetSnapshot.date <= today,
+                    AssetSnapshot.source == SnapshotSource.DERIVED,
+                    AssetSnapshot.total_asset == ZERO,
+                )
+            )
+        ).scalars().all()
+        for snap in zero_rows:
+            await self._delete_derived_day(portfolio_id, snap.date)
         from app.services.recalculation import RecalculationService
 
-        await RecalculationService(self.session).recalculateNavRange(portfolio_id, d)
+        await RecalculationService(self.session).recalculateNavRange(portfolio_id, since)
 
     # ── 内部工具 ──
     async def _get_snapshot(

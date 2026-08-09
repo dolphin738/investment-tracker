@@ -108,5 +108,10 @@ class RecalculationService:
                 )
             ).scalars().all()
             dates.update(rows)
-        dates.add(until)  # 区间端点
+        # 区间端点：仅当区间内【存在事件】时才把今日并入，避免「全部删除后」
+        # 仍派生一条 0 值今日 DERIVED 快照（孤儿记录，污染概览/总资产）。
+        # 若区间内无任何事件（如删除了最后一笔出入金/买卖/现价/现金），
+        # 则不生成任何 DERIVED 快照，由删除路径的 prune_zero_orphans 兜底清理残留。
+        if dates:
+            dates.add(until)
         return sorted(dates)

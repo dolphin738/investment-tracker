@@ -251,9 +251,8 @@ async def delete_cashflow(
     await db.commit()
     av = AssetValuationService(db)
     await RecalculationService(db).recalculateRange(p.id, d)
-    # 缺陷3：删除出入金后，若当日已无其它事件，清理残留的 0 值 DERIVED 快照/净值/xirr
-    if not await av._is_event_date(p.id, d):
-        await av.prune_derived(p.id, d)
+    # 问题2：删除出入金后统一清理残留 0 值孤儿 DERIVED 快照（含删除日陈旧快照 + 区间内 0 值）
+    await av.prune_zero_orphans(p.id, d)
     return None
 
 
@@ -481,6 +480,8 @@ async def delete_trade(
     await db.commit()
     force = await RecalculationService(db).snapshot_dates_since(p.id, d)
     await RecalculationService(db).recalculateRange(p.id, d, force_dates=force)
+    # 问题2：删除买卖后清理残留 0 值孤儿 DERIVED 快照
+    await AssetValuationService(db).prune_zero_orphans(p.id, d)
     return None
 
 
@@ -575,6 +576,8 @@ async def delete_price(
     await db.commit()
     force = await RecalculationService(db).snapshot_dates_since(p.id, d)
     await RecalculationService(db).recalculateRange(p.id, d, force_dates=force)
+    # 问题2：删除现价后清理残留 0 值孤儿 DERIVED 快照
+    await AssetValuationService(db).prune_zero_orphans(p.id, d)
     return None
 
 
@@ -661,6 +664,8 @@ async def delete_cashbalance(
     await db.commit()
     force = await RecalculationService(db).snapshot_dates_since(p.id, d)
     await RecalculationService(db).recalculateRange(p.id, d, force_dates=force)
+    # 问题2：删除现金余额后清理残留 0 值孤儿 DERIVED 快照
+    await AssetValuationService(db).prune_zero_orphans(p.id, d)
     return None
 
 

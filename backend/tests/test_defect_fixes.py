@@ -513,3 +513,198 @@ async def test_defect7_snapshot_source_filter(client):
     )
     manual = env(r)[2]["items"]
     assert len(manual) == 1 and all(s["source"] == "MANUAL" for s in manual)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 用户提交的系统缺陷（第二批：5 个异常）— 问题2/3/4 回归
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ── 问题2-A：删除唯一出入金后，今日 0 值孤儿快照也应消失 ──────────────────
+async def test_p2a_delete_only_cashflow_no_today_zero(client):
+    """删除唯一一笔出入金后，区间内（含今日）不应残留任何 DERIVED 快照。
+
+    验证 recalculation._get_event_dates 仅在存在事件时才并入今日，
+    以及 data.delete_cashflow 统一调用 prune_zero_orphans。
+    """
+    creds = await register_login(client, "p2a@example.com", "pw123456")
+    h = auth(creds["token"])
+    pid = await _create_portfolio(client, h)
+    cf = (await client.post(
+        f"/api/portfolios/{pid}/cashflows", headers=h,
+        json={"date": str(D1), "type": "BUY", "amount": 10000},
+    )).json()["data"]
+    # 删除前：存在 D1 派生快照（及今日 0 快照）
+    r = await client.get(
+        f"/api/portfolios/{pid}/snapshots", headers=h, params={"startDate": str(D1)}
+    )
+    assert env(r)[2]["total"] >= 1
+    # 删除出入金
+    r = await client.delete(f"/api/portfolios/{pid}/cashflows/{cf['id']}", headers=h)
+    assert env(r)[0] == 200
+    # 删除后：区间内无任何快照（无 0 孤儿）
+    r = await client.get(
+        f"/api/portfolios/{pid}/snapshots", headers=h, params={"startDate": str(D1)}
+    )
+    assert env(r)[2]["total"] == 0
+
+
+# ── 问题2-B：删除现金余额后，残留的 0 值 DERIVED 快照应被清理 ───────────────
+async def test_p2b_delete_cashbalance_no_zero_orphan(client):
+    """删现金余额（出入金仍在）→ 当日仅余出入金→0，应清理该 0 值孤儿快照。
+
+    此前 delete_cashbalance 未调用任何 prune，会残留 0 值 DERIVED 快照。
+    """
+    creds = await register_login(client, "p2b@example.com", "pw123456")
+    h = auth(creds["token"])
+    pid = await _create_portfolio(client, h)
+    await client.post(
+        f"/api/portfolios/{pid}/cashflows", headers=h,
+        json={"date": str(D1), "type": "BUY", "amount": 10000},
+    )
+    await client.post(
+        f"/api/portfolios/{pid}/cash-balances", headers=h,
+        json={"asOf": str(D1), "amount": 7984},
+    )
+    cb_list = (await client.get(
+        f"/api/portfolios/{pid}/cash-balances", headers=h
+    )).json()["data"]["items"]
+    cb_id = cb_list[0]["id"]
+    r = await client.delete(
+        f"/api/portfolios/{pid}/cash-balances/{cb_id}", headers=h
+    )
+    assert env(r)[0] == 200
+    # 不应残留任何 0 值 DERIVED 快照
+    r = await client.get(f"/api/portfolios/{pid}/snapshots", headers=h)
+    items = env(r)[2]["items"]
+    zero = [s for s in items if str(s["totalAsset"]) in ("0", "0.00", "0.0")]
+    assert zero == [], f"残留 0 值孤儿快照: {zero}"
+
+
+# ── 问题2-C：删除买卖后，陈旧 DERIVED 快照应被清理 ───────────────────────
+async def test_p2c_delete_trade_no_orphan(client):
+    """删买卖（无现金/无现价）→ 当日 COST_BASED 快照陈旧，应被清理（不再残留）。"""
+    creds = await register_login(client, "p2c@example.com", "pw123456")
+    h = auth(creds["token"])
+    pid = await _create_portfolio(client, h)
+    sec = (await client.post(
+        f"/api/portfolios/{pid}/securities", headers=h,
+        json={"code": "600000", "name": "x", "type": "STOCK"},
+    )).json()["data"]
+    tr = (await client.post(
+        f"/api/portfolios/{pid}/security-trades", headers=h,
+        json={"date": str(D1), "securityId": sec["id"], "side": "BUY_SEC",
+              "quantity": 100, "costPrice": 20.16},
+    )).json()["data"]
+    # 删除买卖
+    r = await client.delete(
+        f"/api/portfolios/{pid}/security-trades/{tr['id']}", headers=h
+    )
+    assert env(r)[0] == 200
+    # 删除后：无任何快照残留
+    r = await client.get(
+        f"/api/portfolios/{pid}/snapshots", headers=h, params={"startDate": str(D1)}
+    )
+    assert env(r)[2]["total"] == 0
+
+
+# ── 问题3：概览页持仓无行情记录不应 500 ─────────────────────────────────
+async def test_p3_overview_no_price_not_500(client):
+    """录入入金/现金/买入但无现价 → 概览页此前抛 ValueError（min 空集合）→ 500。
+
+    修复后：返回 200，totalAsset=入金总额，持仓市值=成本估值，freshness 正确标记陈旧。
+    """
+    creds = await register_login(client, "p3b@example.com", "pw123456")
+    h = auth(creds["token"])
+    pid = await _create_portfolio(client, h)
+    await client.post(
+        f"/api/portfolios/{pid}/cashflows", headers=h,
+        json={"date": str(D1), "type": "BUY", "amount": 10000},
+    )
+    await client.post(
+        f"/api/portfolios/{pid}/cash-balances", headers=h,
+        json={"asOf": str(D1), "amount": 7984},
+    )
+    sec = (await client.post(
+        f"/api/portfolios/{pid}/securities", headers=h,
+        json={"code": "600000", "name": "x", "type": "STOCK"},
+    )).json()["data"]
+    await client.post(
+        f"/api/portfolios/{pid}/security-trades", headers=h,
+        json={"date": str(D1), "securityId": sec["id"], "side": "BUY_SEC",
+              "quantity": 100, "costPrice": 20.16},
+    )
+    r = await client.get(f"/api/portfolios/{pid}/overview", headers=h)
+    status, code, data, _ = env(r)
+    assert status == 200 and code == 0
+    assert data["totalAsset"] == "10000.00"
+    assert data["holdingsSummary"]["totalMarketValue"] == "2016.000000000000"
+    assert data["freshness"]["isStale"] is True
+
+
+# ── 问题4：持仓页类型筛选器后端生效 ─────────────────────────────────────
+async def test_p4_holdings_type_filter(client):
+    """持仓类型筛选（types=逗号分隔）应真正过滤结果，而非此前被 FastAPI 忽略。"""
+    creds = await register_login(client, "p4@example.com", "pw123456")
+    h = auth(creds["token"])
+    pid = await _create_portfolio(client, h)
+    await client.post(
+        f"/api/portfolios/{pid}/cashflows", headers=h,
+        json={"date": str(D1), "type": "BUY", "amount": 100000},
+    )
+    await client.post(
+        f"/api/portfolios/{pid}/cash-balances", headers=h,
+        json={"asOf": str(D1), "amount": 90000},
+    )
+    stock = (await client.post(
+        f"/api/portfolios/{pid}/securities", headers=h,
+        json={"code": "600000", "name": "股", "type": "STOCK"},
+    )).json()["data"]
+    fund = (await client.post(
+        f"/api/portfolios/{pid}/securities", headers=h,
+        json={"code": "500001", "name": "基", "type": "FUND"},
+    )).json()["data"]
+    await client.post(
+        f"/api/portfolios/{pid}/security-prices", headers=h,
+        json={"securityId": stock["id"], "price": 10, "asOf": str(D1)},
+    )
+    await client.post(
+        f"/api/portfolios/{pid}/security-prices", headers=h,
+        json={"securityId": fund["id"], "price": 10, "asOf": str(D1)},
+    )
+    await client.post(
+        f"/api/portfolios/{pid}/security-trades", headers=h,
+        json={"date": str(D1), "securityId": stock["id"], "side": "BUY_SEC",
+              "quantity": 100, "costPrice": 10},
+    )
+    await client.post(
+        f"/api/portfolios/{pid}/security-trades", headers=h,
+        json={"date": str(D1), "securityId": fund["id"], "side": "BUY_SEC",
+              "quantity": 100, "costPrice": 10},
+    )
+    # 无筛选 → 2 个
+    r = await client.get(
+        f"/api/portfolios/{pid}/holdings", headers=h, params={"asOf": str(D1)}
+    )
+    _, _, allh, _ = env(r)
+    assert len(allh["items"]) == 2
+    # 仅 STOCK
+    r = await client.get(
+        f"/api/portfolios/{pid}/holdings", headers=h,
+        params={"asOf": str(D1), "types": "STOCK"},
+    )
+    _, _, sth, _ = env(r)
+    assert len(sth["items"]) == 1 and sth["items"][0]["securityType"] == "STOCK"
+    # 仅 FUND
+    r = await client.get(
+        f"/api/portfolios/{pid}/holdings", headers=h,
+        params={"asOf": str(D1), "types": "FUND"},
+    )
+    _, _, fnd, _ = env(r)
+    assert len(fnd["items"]) == 1 and fnd["items"][0]["securityType"] == "FUND"
+    # 多类型
+    r = await client.get(
+        f"/api/portfolios/{pid}/holdings", headers=h,
+        params={"asOf": str(D1), "types": "STOCK,FUND"},
+    )
+    _, _, both, _ = env(r)
+    assert len(both["items"]) == 2

@@ -110,6 +110,7 @@ async def get_holdings(
     asOf: Optional[date] = None,
     securityId: Optional[str] = None,
     includeClosed: bool = False,
+    types: Optional[str] = None,
 ):
     as_of = asOf or _today()
     sec_ids = _split_ids(securityId)
@@ -123,12 +124,26 @@ async def get_holdings(
     if sec_ids and len(sec_ids) > 1:
         wanted = set(sec_ids)
         views = [v for v in views if v.security_id in wanted]
+    # 标的元数据（类型筛选 + 列表展示共用）
     sec_map = {
         s.id: s
         for s in (
             await db.execute(select(Security).where(Security.portfolio_id == p.id))
         ).scalars().all()
     }
+    # 类型筛选（修复问题4：此前未接收后端参数 → 持仓页类型筛选器无效）。
+    # types 为逗号分隔的 SecurityType 值（如 "STOCK,FUND"），按 sec.type.value 过滤。
+    type_set = (
+        {t.strip().upper() for t in types.split(",") if t.strip()} if types else None
+    )
+    if type_set:
+        views = [
+            v
+            for v in views
+            if (sec := sec_map.get(v.security_id)) is not None
+            and sec.type is not None
+            and sec.type.value in type_set
+        ]
     # 各标的现价日期（as_of 前最后一条 SecurityPrice.as_of）
     price_rows = (
         await db.execute(
