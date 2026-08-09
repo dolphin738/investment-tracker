@@ -1060,7 +1060,10 @@ sequenceDiagram
 
 ## 15. 依赖包列表
 
-### 15.1 后端主依赖（`backend/pyproject.toml`，依赖真相源）
+> 后端依赖由 **uv** 管理：声明文件 `backend/pyproject.toml`、锁定文件 `backend/uv.lock`，
+> 开发与 CI 统一使用 `uv sync --extra dev` 安装（主依赖 + 测试/dev 依赖）。
+
+### 15.1 后端主依赖（`backend/pyproject.toml` 声明 + `uv.lock` 锁定）
 
 | 包 | 版本 | 用途 |
 |----|------|------|

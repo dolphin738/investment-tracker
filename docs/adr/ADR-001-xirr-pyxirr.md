@@ -110,7 +110,7 @@ Phase 2 计算层原计划（对齐 `app/docs/ARCHITECTURE.md §7.1`）是**自�
 ## 5. 参考
 
 - `backend/app/finance_core/xirr.py` — 委托实现
-- `backend/pyproject.toml` — `pyxirr==0.10.8`（依赖真相源，取代原 requirements.txt）
+- `backend/pyproject.toml` + `backend/uv.lock` — `pyxirr==0.10.8`（依赖真相源，由 uv 管理，取代原 requirements.txt）
 - `backend/tests/test_finance_core.py` — XIRR 单测（已知案例 + 边界 + 退化）
 - `backend/tests/test_calculation_service.py` — 成立日 XIRR=0.0 集成断言
 - `../app/docs/ARCHITECTURE.md §7.1` — 上游口径（注意 §3 漂移声明）

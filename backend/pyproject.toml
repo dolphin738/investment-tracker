@@ -39,3 +39,8 @@ addopts = "-q"
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+
+# 本项目是 FastAPI 应用（非可分发包），明确声明不构建自身，
+# 否则 `uv sync` 会尝试把 backend 当可安装包去构建而报错。
+[tool.uv]
+package = false
