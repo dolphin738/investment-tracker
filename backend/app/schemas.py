@@ -10,7 +10,7 @@ import datetime
 from decimal import Decimal
 from typing import Optional
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.core.types import DecimalStr
 
@@ -103,28 +103,39 @@ class SecurityPatchReq(BaseModel):
 
 # ── 证券买卖 ──
 class TradeCreateReq(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     date: date
     securityId: str
     side: str  # BUY_SEC / SELL_SEC
     quantity: DecimalStr
-    price: DecimalStr
-    fee: Optional[DecimalStr] = Decimal(0)
+    cost_price: DecimalStr = Field(alias="costPrice")  # 含费单价（对齐 app/ INC-03）
+    fee_total: Optional[DecimalStr] = Field(default=Decimal(0), alias="feeTotal")
+    commission: Optional[DecimalStr] = Decimal(0)
+    stamp_tax: Optional[DecimalStr] = Field(default=Decimal(0), alias="stampTax")
+    other: Optional[DecimalStr] = Decimal(0)
     note: Optional[str] = None
 
-    @field_validator("quantity", "price")
+    @field_validator("quantity", "cost_price")
     @classmethod
-    def _qty_price_positive(cls, v: Decimal) -> Decimal:
+    def _qty_cost_price_positive(cls, v: Decimal) -> Decimal:
         if v <= 0:
-            raise ValueError("数量/价格必须大于 0")
+            raise ValueError("数量/含费单价必须大于 0")
         return v
 
 
 class TradePatchReq(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     date: Optional[datetime.date] = None
     side: Optional[str] = None
     quantity: Optional[DecimalStr] = None
-    price: Optional[DecimalStr] = None
-    fee: Optional[DecimalStr] = None
+    cost_price: Optional[DecimalStr] = Field(default=None, alias="costPrice")
+    fee_total: Optional[DecimalStr] = Field(default=None, alias="feeTotal")
+    commission: Optional[DecimalStr] = None
+    stamp_tax: Optional[DecimalStr] = Field(default=None, alias="stampTax")
+    other: Optional[DecimalStr] = None
+    note: Optional[str] = None
 
 
 # ── 最新价 ──

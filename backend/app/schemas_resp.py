@@ -85,8 +85,11 @@ class TradeOut(BaseModel):
     date: date
     side: str
     quantity: str
-    price: str
-    fee: str
+    costPrice: str
+    commission: str
+    stampTax: str
+    other: str
+    feeTotal: str
     note: Optional[str] = None
     createdAt: datetime
 

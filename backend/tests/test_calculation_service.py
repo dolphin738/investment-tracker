@@ -131,7 +131,7 @@ async def test_holding_derive_and_filters():
         await s.flush()
 
         trades = [
-            SecurityTrade(portfolio_id=p.id, security_id=sec.id, date=date(2026, 1, 2), side=SecuritySide.BUY_SEC, quantity=Decimal("100"), cost_price=Decimal("10"), fee_total=Decimal("5")),
+            SecurityTrade(portfolio_id=p.id, security_id=sec.id, date=date(2026, 1, 2), side=SecuritySide.BUY_SEC, quantity=Decimal("100"), cost_price=Decimal("10.05"), fee_total=Decimal("5")),
             SecurityTrade(portfolio_id=p.id, security_id=sec.id, date=date(2026, 1, 3), side=SecuritySide.BUY_SEC, quantity=Decimal("100"), cost_price=Decimal("12"), fee_total=Decimal("0")),
             SecurityTrade(portfolio_id=p.id, security_id=sec.id, date=date(2026, 1, 4), side=SecuritySide.SELL_SEC, quantity=Decimal("50"), cost_price=Decimal("15"), fee_total=Decimal("0")),
         ]

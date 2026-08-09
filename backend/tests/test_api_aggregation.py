@@ -43,8 +43,7 @@ async def _seed(client, h, d1=D1):
             "securityId": sid,
             "side": "BUY_SEC",
             "quantity": 1000,
-            "price": 10,
-            "fee": 0,
+            "costPrice": 10,
         },
     )
     await client.post(

@@ -95,7 +95,7 @@ def _trade(sec, d, side, q, p, fee=Decimal("0"), created=datetime(2026, 1, 1, 0,
 
 def test_holding_multi_buy_partial_sell():
     trades = [
-        _trade("S1", date(2026, 1, 2), SecuritySide.BUY_SEC, Decimal("100"), Decimal("10"), Decimal("5")),
+        _trade("S1", date(2026, 1, 2), SecuritySide.BUY_SEC, Decimal("100"), Decimal("10.05"), Decimal("5")),
         _trade("S1", date(2026, 1, 3), SecuritySide.BUY_SEC, Decimal("100"), Decimal("12")),
         _trade("S1", date(2026, 1, 4), SecuritySide.SELL_SEC, Decimal("50"), Decimal("15")),
     ]
@@ -113,7 +113,7 @@ def test_holding_multi_buy_partial_sell():
 def test_holding_avg_cost_unchanged_after_sell():
     # 卖出后 avg_cost 不变（由上面的 cost_total 等比减少验证）
     trades = [
-        _trade("S1", date(2026, 1, 2), SecuritySide.BUY_SEC, Decimal("100"), Decimal("10"), Decimal("5")),
+        _trade("S1", date(2026, 1, 2), SecuritySide.BUY_SEC, Decimal("100"), Decimal("10.05"), Decimal("5")),
         _trade("S1", date(2026, 1, 4), SecuritySide.SELL_SEC, Decimal("40"), Decimal("15")),
     ]
     v = derive_holdings(trades, {"S1": Decimal("14")})[0]
@@ -124,7 +124,7 @@ def test_holding_avg_cost_unchanged_after_sell():
 
 def test_holding_cost_based_fallback_when_no_price():
     trades = [
-        _trade("S1", date(2026, 1, 2), SecuritySide.BUY_SEC, Decimal("100"), Decimal("10"), Decimal("5")),
+        _trade("S1", date(2026, 1, 2), SecuritySide.BUY_SEC, Decimal("100"), Decimal("10.05"), Decimal("5")),
     ]
     v = derive_holdings(trades, {})[0]  # 无现价
     assert v.is_cost_based is True

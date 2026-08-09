@@ -69,8 +69,8 @@ _FIELD_KIND = {
         "securityCode": "security",
         "side": "enum",
         "quantity": "decimal",
-        "price": "decimal",
-        "fee": "decimal",
+        "costPrice": "decimal",
+        "feeTotal": "decimal",
         "note": "text",
     },
     "cashFlows": {
@@ -88,7 +88,7 @@ _FIELD_KIND = {
     },
 }
 _REQUIRED = {
-    "securityTrades": ["date", "securityCode", "side", "quantity", "price"],
+    "securityTrades": ["date", "securityCode", "side", "quantity", "costPrice"],
     "cashFlows": ["date", "type", "amount"],
     "assetSnapshots": ["date", "totalAsset"],
 }
@@ -253,7 +253,7 @@ def validate_and_build(
                     parsed[col] = None  # 可选列可空
                     continue
                 # 金额/费用限 2 位小数；数量/价格放宽到 6 位（Numeric(18,6)）
-                max_scale = 6 if col in ("quantity", "price") else 2
+                max_scale = 6 if col in ("quantity", "costPrice") else 2
                 d = _parse_decimal(raw, max_scale=max_scale)
                 if d is None:
                     row_errs.append(_err(i, col, "INVALID_DECIMAL_PRECISION", f"{col} 数值无效（最多 {max_scale} 位小数）：{raw}"))
@@ -354,7 +354,7 @@ async def build_export(
             await db.execute(select(Security).where(Security.portfolio_id == portfolio_id))
         ).scalars().all()
         code_map = {s.id: s.code for s in secs}
-        cols = ["date", "securityCode", "side", "quantity", "price", "fee", "note"]
+        cols = ["date", "securityCode", "side", "quantity", "costPrice", "feeTotal", "note"]
         rows = [
             [
                 t.date.isoformat(),
@@ -526,8 +526,8 @@ async def commit_import(
                 date=date.fromisoformat(r["date"]),
                 side=SecuritySide(r["side"]),
                 quantity=Decimal(r["quantity"]),
-                cost_price=Decimal(r["price"]),
-                fee_total=Decimal(r.get("fee") or "0"),
+                cost_price=Decimal(r["costPrice"]),
+                fee_total=Decimal(r.get("feeTotal") or "0"),
                 note=r.get("note") or None,
             )
             for r in rows

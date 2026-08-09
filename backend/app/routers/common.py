@@ -102,8 +102,11 @@ def serialize_trade(t: SecurityTrade) -> dict:
         "date": t.date,
         "side": t.side.value,
         "quantity": t.quantity,
-        "price": t.cost_price,
-        "fee": t.fee_total,
+        "costPrice": t.cost_price,
+        "commission": t.commission,
+        "stampTax": t.stamp_tax,
+        "other": t.other,
+        "feeTotal": t.fee_total,
         "note": t.note,
         "createdAt": t.created_at,
     }

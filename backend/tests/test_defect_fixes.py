@@ -59,7 +59,7 @@ async def _seed_position(client, h, pid, sec_code="600000"):
         f"/api/portfolios/{pid}/security-trades",
         headers=h, json={
             "date": str(D1), "securityId": sec_id, "side": "BUY_SEC",
-            "quantity": 1000, "price": 10, "fee": 0,
+            "quantity": 1000, "costPrice": 10,
         },
     )).json()["data"]
     return sec_id, tr["id"]
@@ -171,7 +171,7 @@ async def test_m4_import_6decimals_accepted(client):
         headers=h, json={"code": "600000", "name": "平安", "type": "STOCK"},
     )
     csv_text = (
-        "date,securityCode,side,quantity,price,fee\n"
+        "date,securityCode,side,quantity,costPrice,feeTotal\n"
         "2024-01-02,600000,BUY_SEC,10.123456,12.345678,0\n"
     )
     files = {"file": ("trades.csv", csv_text.encode("utf-8"), "text/csv")}
@@ -217,7 +217,7 @@ async def test_l2_import_oversell_rejected(client):
     await _seed_position(client, h, pid)  # 持有 1000 股
     # 预览一份超额 SELL（2000 > 1000）
     csv_text = (
-        "date,securityCode,side,quantity,price,fee\n"
+        "date,securityCode,side,quantity,costPrice,feeTotal\n"
         "2024-01-02,600000,SELL_SEC,2000,10,0\n"
     )
     files = {"file": ("trades.csv", csv_text.encode("utf-8"), "text/csv")}
@@ -257,7 +257,7 @@ async def test_l3_negative_amount_rejected(client):
         f"/api/portfolios/{pid}/security-trades",
         headers=h, json={
             "date": str(D1), "securityId": sec, "side": "BUY_SEC",
-            "quantity": 0, "price": 10, "fee": 0,
+            "quantity": 0, "costPrice": 10,
         },
     )
     assert env(r)[0] == 400
@@ -266,7 +266,7 @@ async def test_l3_negative_amount_rejected(client):
         f"/api/portfolios/{pid}/security-trades",
         headers=h, json={
             "date": str(D1), "securityId": sec, "side": "BUY_SEC",
-            "quantity": 100, "price": 0, "fee": 0,
+            "quantity": 100, "costPrice": 0,
         },
     )
     assert env(r)[0] == 400

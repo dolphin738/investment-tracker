@@ -312,7 +312,7 @@ async def test_get_trade_by_id(client):
                 "securityId": sid,
                 "side": "BUY_SEC",
                 "quantity": "100",
-                "price": "10",
+                "costPrice": "10",
             },
         )
     ).json()["data"]

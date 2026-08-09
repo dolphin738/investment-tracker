@@ -405,8 +405,11 @@ async def create_trade(
         date=req.date,
         side=side,
         quantity=req.quantity,
-        cost_price=req.price,
-        fee_total=req.fee or Decimal(0),
+        cost_price=req.cost_price,
+        fee_total=req.fee_total or Decimal(0),
+        commission=req.commission or Decimal(0),
+        stamp_tax=req.stamp_tax or Decimal(0),
+        other=req.other or Decimal(0),
     )
     db.add(trade)
     await db.commit()
@@ -444,10 +447,16 @@ async def patch_trade(
         trade.date = req.date
     if req.quantity is not None:
         trade.quantity = req.quantity
-    if req.price is not None:
-        trade.cost_price = req.price
-    if req.fee is not None:
-        trade.fee_total = req.fee
+    if req.cost_price is not None:
+        trade.cost_price = req.cost_price
+    if req.fee_total is not None:
+        trade.fee_total = req.fee_total
+    if req.commission is not None:
+        trade.commission = req.commission
+    if req.stamp_tax is not None:
+        trade.stamp_tax = req.stamp_tax
+    if req.other is not None:
+        trade.other = req.other
     await db.commit()
     force = await RecalculationService(db).snapshot_dates_since(p.id, min(new_date, old_date))
     await RecalculationService(db).recalculateRange(

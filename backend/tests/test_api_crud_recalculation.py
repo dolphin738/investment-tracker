@@ -53,8 +53,7 @@ async def _seed_portfolio_with_position(client, h, pid):
             "securityId": sec_id,
             "side": "BUY_SEC",
             "quantity": 1000,
-            "price": 10,
-            "fee": 0,
+            "costPrice": 10,
         },
     )
     return sec_id
@@ -122,8 +121,7 @@ async def test_sell_hard_check_rejects_oversell(client):
             "securityId": sec_id,
             "side": "SELL_SEC",
             "quantity": 2000,
-            "price": 10,
-            "fee": 0,
+            "costPrice": 10,
         },
     )
     status, code, _, _ = env(r)
@@ -138,8 +136,7 @@ async def test_sell_hard_check_rejects_oversell(client):
             "securityId": sec_id,
             "side": "SELL_SEC",
             "quantity": 500,
-            "price": 10,
-            "fee": 0,
+            "costPrice": 10,
         },
     )
     assert env(r)[0] == 200
@@ -169,8 +166,7 @@ async def test_manual_snapshot_and_reset(client):
             "securityId": sec_id,
             "side": "SELL_SEC",
             "quantity": 500,
-            "price": 10,
-            "fee": 0,
+            "costPrice": 10,
         },
     )
 

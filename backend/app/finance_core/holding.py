@@ -1,7 +1,7 @@
 """持仓推导引擎（方案B · 交易明细法，纯函数）。对齐 docs/ARCHITECTURE.md §9。
 
 持仓不落库，由 SecurityTrade 流水按 (date, created_at) 升序回放推导：
-- 买入：cost_total += q*p + fee；qty += q；avg_cost = cost_total / qty（移动加权）
+- 买入：cost_total += q*cost_price（cost_price 为含费单价，费用已并入，不再单独加 fee）；qty += q；avg_cost = cost_total / qty（移动加权）
 - 卖出：qty -= q；avg_cost 不变；cost_total = qty * avg_cost；qty==0 时归零重置
 - 市值 = qty * price（price = 最新 SecurityPrice asOf<=date，无则回退 avg_cost 并标记 is_cost_based）
 另含 §9.2 卖出硬校验（回放过程不得出现负持仓）。
@@ -61,7 +61,7 @@ def derive_holdings(
         for t in sec_trades:
             q = t.quantity
             if t.side is SecuritySide.BUY_SEC:
-                cost_total += q * t.cost_price + t.fee_total
+                cost_total += q * t.cost_price  # cost_price 为含费单价（对齐 app/ INC-03），费用已并入，不再单独加 fee_total
                 qty += q
                 avg_cost = cost_total / qty if qty != 0 else ZERO
             else:  # SELL_SEC

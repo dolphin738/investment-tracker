@@ -220,7 +220,7 @@ async def test_template_securitytrades_csv(client):
     )
     assert resp.status_code == 200
     text = resp.content.decode("utf-8-sig")
-    assert text.startswith("date,securityCode,side,quantity,price,fee,note")
+    assert text.startswith("date,securityCode,side,quantity,costPrice,feeTotal,note")
     # 第二行是 # 注释
     lines = text.splitlines()
     assert lines[1].startswith("#")
@@ -305,7 +305,7 @@ async def test_import_securitytrades_and_snapshots(client):
     sid = await _seed_security(client, h, pid, code="600519", name="贵州茅台")
 
     # trades 导入
-    csv_t = f"date,securityCode,side,quantity,price,fee,note\n2024-04-01,600519,BUY_SEC,10,100.5,0,建仓\n"
+    csv_t = f"date,securityCode,side,quantity,costPrice,feeTotal,note\n2024-04-01,600519,BUY_SEC,10,100.5,0,建仓\n"
     prev = (await client.post(
         f"/api/portfolios/{pid}/import/preview",
         headers=h, data={"type": "securityTrades"},
