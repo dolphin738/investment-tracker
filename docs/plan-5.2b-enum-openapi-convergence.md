@@ -186,8 +186,19 @@
 - `web/scripts/gen-api-types.py` 修正 `null`→`null`（`Optional[str]` 原误映射 `unknown` → 现 `T | null`）。
 - `npm run generate:api` 重生成 `web/src/types/api.ts`（73 schema / 52 operations）。
 - `web/src/lib/types.ts`：`CashFlow`/`Portfolio`/`AssetSnapshot` 改为 `components['schemas']['XxxOut']` re-export 别名；`NavSeriesPoint`/`XirrSeriesPoint` 迁出至 `web/src/types/series.ts` 并 re-export。
-- **残留手写（已文档化，非 bug）**：`UserPublic`（后端 `UserPublicOut.createdAt` 可选/`name` 非空，与前端方向相反）、`Paginated<T>`（FastAPI 泛型解析为 `Paginated_XxxOut_` + 前端用 `PaginatedResponse<T>`）、`BUSINESS_ERROR_CODE`/`ACCOUNT_RETENTION_DAYS`（运行时值，无法类型重导出）、全部 `as const` 枚举与金额工具（运行时需要值）。
+- **残留手写（已文档化，非 bug；P5 已消解三项）**：`ACCOUNT_RETENTION_DAYS`（简单整型常量，`ACCOUNT_RETENTION_MS` 由前端派生，保留手写）、全部 `as const` 枚举与金额工具（运行时遍历/计算需要值）。
+  - **P5 已收敛（不再残留）**：`UserPublic`（DTO 经 `3f478dd` 修正 `name` 可空 / `createdAt` 必填后与前端一致，改 re-export `UserPublicOut`）；`Paginated<T>`（移除本地定义，统一用 `@/api/types` 的 `PaginatedResponse<T>`）；`BUSINESS_ERROR_CODE`（生成器 `gen-api-types.py` 自 `core/enums.py` 解析 `BusinessErrorCode` 产出，本文件 re-export，单一事实来源在后端）。详情见下方 P5 执行记录。
 - 消费处修复（因 `AssetSnapshot.totalAsset` 现正确为 `string | null`）：`snapshot-form.tsx` `?? ''`；`lib/utils.ts` `computeManualDiffStats` 参数 `totalAsset` 放宽为 `string | number | null`（内部 `Number()` 已容错）。
+
+### P5 收尾：三项残留手写收敛（2026-08-09 晚）
+- 用户拍板：修后端 DTO → 重生成 → re-export；Paginated 去重；BUSINESS_ERROR_CODE 二级代码生成读 `enums.py`。
+- commit `3f478dd` **fix(backend): align UserPublicOut DTO nullability with DB schema**：`schemas_resp.py` 的 `UserPublicOut` 改为 `name: Optional[str]`（required+nullable，对齐 DB `users.name` 可空）、`createdAt: str`（required，对齐 `TimestampMixin.created_at` NOT NULL）；`docs/openapi.json` 重生成（仅 `UserPublicOut` schema 变化）。
+- commit `6403380` **fix(gitignore): anchor scripts/ to repo root**：修正 `2d4d612` 误用的未锚定 `scripts/`（会误伤 `web/scripts/` 已跟踪源），改为 `/scripts/` 只排除仓库根 `scripts/`。
+- commit `6f98080` **refactor(web): converge hand-written types to generated source (§5.2b)**：
+  - `web/src/lib/types.ts`：`UserPublic` 改 re-export `UserPublicOut`；`BUSINESS_ERROR_CODE`/`BusinessErrorCode` 改 re-export 自 `types/api.ts`；移除本地 `Paginated<T>`（消费方用 `@/api/types` 的 `PaginatedResponse<T>`）。
+  - `web/scripts/gen-api-types.py`：新增二级代码生成，解析 `backend/app/core/enums.py` 的 `BusinessErrorCode` 产出 `BUSINESS_ERROR_CODE` const（单一事实来源在后端）。成员正则由 `^\s+` 收紧为字面 4 空格缩进 `^    `，避免 MULTILINE 下把列 0 的 `ACCOUNT_RETENTION_DAYS` 误吸收进枚举成员。
+  - `web/src/types/api.ts` 重生成（73 schema / 52 operations，`BUSINESS_ERROR_CODE` 仅 12 成员，无 `ACCOUNT_RETENTION_DAYS`）。
+- 至此 `lib/types.ts` 残留手写仅剩 `ACCOUNT_RETENTION_DAYS`（及运行时必需的全部 `as const` 枚举 / 金额工具）。
 
 ### 环境校验说明
 - 本沙箱 `node_modules` 安装损坏（`@types/react` 缺条目、`echarts` 类型入口缺失、`execa`/`@vitest/runner` 缺文件等），致 `tsc --noEmit` 仅余 `echarts` 类型入口报错、`vitest` 无法启动——均属环境损坏，**非本次改动引入**。代码层面 `tsc` 仅余环境性报错；在健康 `node_modules` 环境下 `npm run lint/build/test` 应通过（4 个预存 `security-type-shared.test.tsx` 失败除外，与本次无关）。
