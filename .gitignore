@@ -48,6 +48,7 @@ web/node_modules/
 web/.turbo/
 web/.qa-cache/
 web/dist-node/
+web/vite.config.ts.timestamp-*.mjs
 *.tsbuildinfo
 *.log
 
