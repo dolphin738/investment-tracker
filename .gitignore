@@ -65,3 +65,6 @@ Thumbs.db
 
 # Local generated docs (e.g. ls snapshots)
 docs/ls/
+
+# Project helper scripts (local dev utilities, not part of repo deliverable)
+scripts/
