@@ -285,10 +285,20 @@ class PortfolioSummaryRow(BaseModel):
     floatingProfit: Optional[str] = None
 
 
+class HoldingsSummaryOut(BaseModel):
+    """概览页「持仓市值」卡数据来源（缺陷4-A）。"""
+
+    totalMarketValue: str
+    totalCost: str
+    totalProfit: str
+    securityCount: int
+
+
 class OverviewOut(BaseModel):
     totalAsset: Optional[str] = None
     cumulativeXirr: Optional[str] = None
     yearXirr: Optional[str] = None
+    holdingsSummary: Optional[HoldingsSummaryOut] = None
     navSeries: list[NavPointOut] = []
     recentCashflows: list[CashflowOut] = []
     freshness: FreshnessOut
@@ -303,9 +313,12 @@ class DrawdownPointOut(BaseModel):
 
 class AccountStatsOut(BaseModel):
     portfolioCount: int
-    totalAssets: str
-    cumulativeXirr: Optional[str] = None
-    yearXirr: Optional[str] = None
+    cashflowCount: int
+    tradeCount: int
+    snapshotDays: int
+    recordDays: int
+    firstDate: Optional[date] = None
+    lastDate: Optional[date] = None
 
 
 # ───────────────────────── 数据导入导出 ─────────────────────────

@@ -246,38 +246,39 @@ async def get_nav_series(
     stmt = stmt.order_by(DailyNav.date)
     rows = (await db.execute(stmt)).scalars().all()
 
-    def _pick(r: DailyNav) -> Decimal | None:
+    # 缺陷5 / 缺陷4-B：单指标也同时返回 cumulativeNav/yearNav（未选中置 null），
+    # 避免前端 NavSeriesPoint 解包到 undefined → 曲线不渲染 /「数据不足」。
+    # 保留 value 字段（既有后端测试依赖）以兼容历史契约。
+    groups: dict = {}
+    for r in rows:
+        groups.setdefault(_period_key(r.date, granularity), []).append(r)
+    out = []
+    for key in sorted(groups):
+        items = groups[key]
+        rep = _bucket_date(min(r.date for r in items), granularity)
+        last = items[-1]
         if metric == "year":
-            return r.year_nav
-        if metric == "both":
-            return None  # 特殊：下方单独处理
-        return r.cumulative_nav
-
-    if metric == "both":
-        groups: dict = {}
-        for r in rows:
-            groups.setdefault(_period_key(r.date, granularity), []).append(r)
-        out = []
-        for key in sorted(groups):
-            items = groups[key]
-            rep = _bucket_date(min(r.date for r in items), granularity)
-            last = items[-1]
-            out.append(
-                {
-                    "date": rep,
-                    "cumulativeNav": last.cumulative_nav,
-                    "yearNav": last.year_nav,
-                    "shares": last.shares,
-                }
-            )
-        return out
-
-    series = [(r.date, _pick(r)) for r in rows]
-    bucketed = _bucket(series, granularity, aggregation)
-    return [
-        {"date": b["date"], "value": b["value"], "shares": _shares_at(rows, b["date"])}
-        for b in bucketed
-    ]
+            cum = None
+            yr = _agg([r.year_nav for r in items], aggregation)
+            value = yr
+        elif metric == "both":
+            cum = last.cumulative_nav
+            yr = last.year_nav
+            value = None
+        else:  # cumulative（含缺省）
+            cum = _agg([r.cumulative_nav for r in items], aggregation)
+            yr = None
+            value = cum
+        out.append(
+            {
+                "date": rep,
+                "value": value,
+                "cumulativeNav": cum,
+                "yearNav": yr,
+                "shares": _agg([r.shares for r in items], aggregation),
+            }
+        )
+    return out
 
 
 def _shares_at(rows, d: date) -> Decimal | None:

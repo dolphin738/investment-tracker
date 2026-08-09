@@ -98,6 +98,10 @@ async def profile(
     if req.name is not None:
         u.name = req.name
     if req.avatar is not None:
+        # 缺陷1：更换 URL 头像时清理旧文件，避免孤立文件泄漏
+        from app.routers.upload import _remove_old
+
+        _remove_old(u.avatar)
         u.avatar = req.avatar
     await db.commit()
     return {"id": u.id, "email": u.email, "name": u.name, "avatar": u.avatar}

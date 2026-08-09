@@ -20,6 +20,7 @@ from typing import Iterable, Optional
 from sqlalchemy import func, select
 
 from app.core.date_utils import today_app_tz
+from app.finance_core.holding import ZERO
 from app.finance_core.xirr import Cashflow, calculate_xirr
 from app.models import (
     AssetSnapshot,
@@ -30,6 +31,8 @@ from app.models import (
     DailyXirr,
     Portfolio,
     SecurityPrice,
+    SecurityTrade,
+    User,
     UserPreference,
 )
 from app.routers.common import serialize_cashflow
@@ -98,6 +101,21 @@ class AggregationService:
         xirr = await self._latest_xirr(p.id)
         cumulative_xirr = xirr.xirr_value if xirr else None
 
+        # 持仓汇总（缺陷4-A）：当前持仓市值/成本/盈亏/标的数
+        holdings = await HoldingService(self.session).derive(
+            p.id, today, include_closed=False
+        )
+        total_mv = sum((h.market_value for h in holdings), ZERO)
+        total_cost = sum((h.cost_total for h in holdings), ZERO)
+        total_pnl = total_mv - total_cost
+        sec_count = sum(1 for h in holdings if h.quantity != ZERO)
+        holdings_summary = {
+            "totalMarketValue": str(total_mv),
+            "totalCost": str(total_cost),
+            "totalProfit": str(total_pnl),
+            "securityCount": sec_count,
+        }
+
         # 当年 XIRR：本年窗口（年初→今天）
         year_start = date(today.year, 1, 1)
         year_xirr = await self._xirr_scope([p.id], year_start, today)
@@ -111,6 +129,7 @@ class AggregationService:
             "totalAsset": snap.total_asset if snap else None,
             "cumulativeXirr": cumulative_xirr,
             "yearXirr": year_xirr,
+            "holdingsSummary": holdings_summary,
             "navSeries": nav_series,
             "recentCashflows": recent,
             "freshness": fresh,
@@ -236,26 +255,72 @@ class AggregationService:
 
     # ── §4.2.16 账户统计 ──
     async def account_stats(self, user_id: str) -> dict:
+        """账户页数据统计卡（缺陷6）：对齐前端 AccountStats 契约。
+
+        - portfolioCount：组合数
+        - cashflowCount：出入金笔数（CashFlow 计数）
+        - tradeCount：证券买卖笔数（SecurityTrade 计数）
+        - snapshotDays：总资产记录天数（跨组合去重，distinct 快照日期）
+        - recordDays：账户使用天数（注册至今）
+        - firstDate / lastDate：快照日期范围起止
+        """
+        from sqlalchemy import func
+
         portfolios = (
             await self.session.execute(
                 select(Portfolio).where(Portfolio.user_id == user_id)
             )
         ).scalars().all()
         pids = [p.id for p in portfolios]
-        today = today_app_tz()
-        total = Decimal(0)
-        for pid in pids:
-            snap = await self._latest_snapshot(pid)
-            if snap:
-                total += snap.total_asset
-        cumulative = await self._xirr_scope(pids, date(1900, 1, 1), today)
-        year_start = date(today.year, 1, 1)
-        year = await self._xirr_scope(pids, year_start, today)
+
+        cashflow_count = 0
+        trade_count = 0
+        snapshot_dates: set[date] = set()
+        if pids:
+            cashflow_count = (
+                await self.session.execute(
+                    select(func.count())
+                    .select_from(CashFlow)
+                    .where(CashFlow.portfolio_id.in_(pids))
+                )
+            ).scalar() or 0
+            trade_count = (
+                await self.session.execute(
+                    select(func.count())
+                    .select_from(SecurityTrade)
+                    .where(SecurityTrade.portfolio_id.in_(pids))
+                )
+            ).scalar() or 0
+            snap_rows = (
+                await self.session.execute(
+                    select(AssetSnapshot.date).where(
+                        AssetSnapshot.portfolio_id.in_(pids)
+                    )
+                )
+            ).scalars().all()
+            snapshot_dates = set(snap_rows)
+
+        # 账户使用天数 = 注册至今（含今天）
+        record_days = 0
+        user = (
+            await self.session.execute(
+                select(User).where(User.id == user_id)
+            )
+        ).scalar_one_or_none()
+        if user and user.created_at is not None:
+            record_days = (today_app_tz() - user.created_at.date()).days + 1
+
+        snapshot_days = len(snapshot_dates)
+        first_date = min(snapshot_dates) if snapshot_dates else None
+        last_date = max(snapshot_dates) if snapshot_dates else None
         return {
             "portfolioCount": len(portfolios),
-            "totalAssets": total,
-            "cumulativeXirr": cumulative,
-            "yearXirr": year,
+            "cashflowCount": cashflow_count,
+            "tradeCount": trade_count,
+            "snapshotDays": snapshot_days,
+            "recordDays": record_days,
+            "firstDate": first_date,
+            "lastDate": last_date,
         }
 
     # ── 数据新鲜度（v2.2 · AL-015 / 决策 O-6）──

@@ -66,6 +66,9 @@ Thumbs.db
 # Local generated docs (e.g. ls snapshots)
 docs/ls/
 
+# Dev server runtime artifacts (PID files written by dev scripts)
+.dev-*.pid
+
 # Repo-root helper scripts (local dev utilities, not part of repo deliverable).
 # Anchored to repo root: matches `scripts/` only, NOT `web/scripts/` (which
 # holds committed source such as the OpenAPI->TS type generator).

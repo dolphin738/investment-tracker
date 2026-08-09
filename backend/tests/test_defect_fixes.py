@@ -328,3 +328,188 @@ async def test_l5_cash_balance_deterministic_latest(client):
     _, _, snap, _ = env(r)
     # 应取最新创建（80000）一行，而非 90000 或任意
     assert Decimal(snap["derivedTotalAsset"]) == Decimal("80000")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 用户提交的 7 个系统缺陷回归（2026-08-09）
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ── 缺陷1：URL 头像更换清理旧文件 ─────────────────────────────────────────
+async def test_defect1_url_avatar_clears_old_file(client):
+    """更换 URL 头像时旧上传文件应被删除，不残留孤立文件。"""
+    from app.core.config import get_settings
+    from pathlib import Path
+
+    creds = await register_login(client, "d1avatar@example.com", "pw123456")
+    h = auth(creds["token"])
+    # 先上传一个头像文件（合法 JPEG 魔数）
+    content = (
+        b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00\xff\xd9"
+    )
+    r = await client.post(
+        "/api/upload/avatar", headers=h,
+        files={"file": ("a.jpg", content, "image/jpeg")},
+    )
+    status, _, data, _ = env(r)
+    assert status == 200
+    old_url = data["url"]
+    fname = old_url.rsplit("/", 1)[-1]
+    old_path = Path(get_settings().UPLOAD_DIR) / "avatar" / fname
+    assert old_path.exists()
+    # 再更换为 URL 头像
+    new_avatar = "https://example.com/pic.png"
+    r = await client.patch(
+        "/api/auth/profile", headers=h, json={"avatar": new_avatar}
+    )
+    status, _, data, _ = env(r)
+    assert status == 200
+    assert data["avatar"] == new_avatar
+    # 旧文件应被清理
+    assert not old_path.exists()
+
+
+# ── 缺陷2：成立日动态跟踪实时刷新（后端口径，配合前端失效） ──────────────────
+async def test_defect2_cashflow_date_change_recomputes_base_date(client):
+    """新增更早的存入 → 组合成立日（base_date）应前移。"""
+    creds = await register_login(client, "d2@example.com", "pw123456")
+    h = auth(creds["token"])
+    pid = await _create_portfolio(client, h, "D2组合")
+    await client.post(
+        f"/api/portfolios/{pid}/cashflows", headers=h,
+        json={"date": str(D1), "type": "BUY", "amount": 100000},
+    )
+    r = await client.get(f"/api/portfolios/{pid}/summary", headers=h)
+    assert env(r)[2]["inceptionDate"] == str(D1)
+    # 新增更早的存入 → 成立日应前移到 D0
+    d0 = date(2023, 12, 1)
+    await client.post(
+        f"/api/portfolios/{pid}/cashflows", headers=h,
+        json={"date": str(d0), "type": "BUY", "amount": 50000},
+    )
+    r = await client.get(f"/api/portfolios/{pid}/summary", headers=h)
+    assert env(r)[2]["inceptionDate"] == str(d0)
+
+
+# ── 缺陷3：删除出入金联动清理 0 值 DERIVED 快照 ────────────────────────────
+async def test_defect3_delete_cashflow_clears_zero_derived_snapshot(client):
+    """删除「唯一事件」出入金后，当日 0 值 DERIVED 快照应被联动清除。"""
+    creds = await register_login(client, "d3@example.com", "pw123456")
+    h = auth(creds["token"])
+    pid = await _create_portfolio(client, h, "D3组合")
+    # 仅一笔出入金（无持仓/现金余额）→ 当日派生 0 值 DERIVED 快照
+    await client.post(
+        f"/api/portfolios/{pid}/cashflows", headers=h,
+        json={"date": str(D1), "type": "BUY", "amount": 100000},
+    )
+    r = await client.get(
+        f"/api/portfolios/{pid}/snapshots", headers=h,
+        params={"startDate": str(D1), "endDate": str(D1)},
+    )
+    assert env(r)[2]["total"] >= 1
+    # 获取并删除该出入金
+    cf_list = (await client.get(f"/api/portfolios/{pid}/cashflows", headers=h)).json()["data"]["items"]
+    cf_id = cf_list[0]["id"]
+    r = await client.delete(f"/api/portfolios/{pid}/cashflows/{cf_id}", headers=h)
+    assert env(r)[0] == 200
+    # 当日快照应已清空
+    r = await client.get(
+        f"/api/portfolios/{pid}/snapshots", headers=h,
+        params={"startDate": str(D1), "endDate": str(D1)},
+    )
+    assert env(r)[2]["total"] == 0
+
+
+# ── 缺陷4-A：概览页持仓汇总（持仓市值） ────────────────────────────────────
+async def test_defect4a_overview_holdings_summary(client):
+    """概览页应下发持仓汇总（持仓市值），用于「资产构成·持仓市值」卡。"""
+    creds = await register_login(client, "d4a@example.com", "pw123456")
+    h = auth(creds["token"])
+    pid = await _create_portfolio(client, h, "D4A组合")
+    await _seed_position(client, h, pid)  # 1000 股 @10 → 市值 10000
+    r = await client.get(f"/api/portfolios/{pid}/overview", headers=h)
+    status, _, data, _ = env(r)
+    assert status == 200
+    hs = data["holdingsSummary"]
+    assert hs is not None
+    assert Decimal(hs["totalMarketValue"]) == Decimal("10000")
+
+
+# ── 缺陷4-B + 缺陷5：单指标 /nav 也应下发 cumulativeNav/yearNav ─────────────
+async def test_defect4b5_nav_single_metric_returns_nav_fields(client):
+    """累计/当年/对比三种 metric 都必须下发对应 nav 字段（否则前端曲线不渲染）。"""
+    creds = await register_login(client, "d4b5@example.com", "pw123456")
+    h = auth(creds["token"])
+    pid = await _create_portfolio(client, h, "D4B5组合")
+    await _seed_position(client, h, pid)
+    await client.post(
+        f"/api/portfolios/{pid}/snapshots", headers=h,
+        json={"date": str(D2), "totalAsset": 110000},
+    )
+    await client.post(
+        f"/api/portfolios/{pid}/recalculate-range", headers=h,
+        json={"startDate": str(D1)},
+    )
+    r = await client.get(
+        f"/api/portfolios/{pid}/nav", headers=h, params={"metric": "cumulative"}
+    )
+    assert all(p["cumulativeNav"] is not None for p in env(r)[2])
+    r = await client.get(
+        f"/api/portfolios/{pid}/nav", headers=h, params={"metric": "year"}
+    )
+    assert all(p["yearNav"] is not None for p in env(r)[2])
+    r = await client.get(
+        f"/api/portfolios/{pid}/nav", headers=h, params={"metric": "both"}
+    )
+    assert all(
+        p["cumulativeNav"] is not None and p["yearNav"] is not None
+        for p in env(r)[2]
+    )
+
+
+# ── 缺陷6：账户统计字段对齐（不再 undefined） ──────────────────────────────
+async def test_defect6_account_stats_fields(client):
+    """账户统计应返回前端期望字段（组合/出入金/买卖/记录天数/起止日）。"""
+    creds = await register_login(client, "d6@example.com", "pw123456")
+    h = auth(creds["token"])
+    pid = await _create_portfolio(client, h, "D6组合")
+    await _seed_position(client, h, pid)  # 含 1 笔出入金 + 1 笔买卖
+    r = await client.get("/api/account/stats", headers=h)
+    status, _, data, _ = env(r)
+    assert status == 200
+    assert data["portfolioCount"] == 1
+    assert data["cashflowCount"] >= 1
+    assert data["tradeCount"] >= 1
+    assert data["snapshotDays"] >= 1
+    assert data["recordDays"] >= 1
+    assert data["firstDate"] is not None
+    assert data["lastDate"] is not None
+
+
+# ── 缺陷7：历史资产「来源」筛选服务端生效 ──────────────────────────────────
+async def test_defect7_snapshot_source_filter(client):
+    """来源筛选应在服务端生效（DERIVED/MANUAL 各只返回对应来源）。"""
+    creds = await register_login(client, "d7@example.com", "pw123456")
+    h = auth(creds["token"])
+    pid = await _create_portfolio(client, h, "D7组合")
+    # 派生快照（出入金触发）
+    await client.post(
+        f"/api/portfolios/{pid}/cashflows", headers=h,
+        json={"date": str(D1), "type": "BUY", "amount": 100000},
+    )
+    # 手工快照
+    await client.post(
+        f"/api/portfolios/{pid}/snapshots", headers=h,
+        json={"date": str(D2), "totalAsset": 100000},
+    )
+    r = await client.get(
+        f"/api/portfolios/{pid}/snapshots", headers=h,
+        params={"source": "DERIVED"},
+    )
+    derived = env(r)[2]["items"]
+    assert derived and all(s["source"] == "DERIVED" for s in derived)
+    r = await client.get(
+        f"/api/portfolios/{pid}/snapshots", headers=h,
+        params={"source": "MANUAL"},
+    )
+    manual = env(r)[2]["items"]
+    assert len(manual) == 1 and all(s["source"] == "MANUAL" for s in manual)

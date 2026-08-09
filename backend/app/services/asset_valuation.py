@@ -255,6 +255,36 @@ class AssetValuationService:
 
             await RecalculationService(self.session).recalculateNavRange(portfolio_id, d)
 
+    async def prune_derived(self, portfolio_id: str, d: date) -> None:
+        """缺陷3：当日已无事件（如删出入金后），删除残留的 0 值 DERIVED 快照及对应净值/xirr。
+
+        仅删 DERIVED（手工记录与事件无关，保留）；删后重算 [d, today] 的 NAV/XIRR，
+        修复因移除当日快照而断链的 prevNav。
+        """
+        existing = await self._get_snapshot(portfolio_id, d)
+        if existing is None or existing.source is not SnapshotSource.DERIVED:
+            return
+        await self.session.execute(
+            delete(AssetSnapshot).where(
+                AssetSnapshot.portfolio_id == portfolio_id,
+                AssetSnapshot.date == d,
+                AssetSnapshot.source == SnapshotSource.DERIVED,
+            )
+        )
+        await self.session.execute(
+            delete(DailyNav).where(
+                DailyNav.portfolio_id == portfolio_id, DailyNav.date == d
+            )
+        )
+        await self.session.execute(
+            delete(DailyXirr).where(
+                DailyXirr.portfolio_id == portfolio_id, DailyXirr.date == d
+            )
+        )
+        from app.services.recalculation import RecalculationService
+
+        await RecalculationService(self.session).recalculateNavRange(portfolio_id, d)
+
     # ── 内部工具 ──
     async def _get_snapshot(
         self, portfolio_id: str, d: date

@@ -249,7 +249,11 @@ async def delete_cashflow(
     d = cf.date
     await db.delete(cf)
     await db.commit()
+    av = AssetValuationService(db)
     await RecalculationService(db).recalculateRange(p.id, d)
+    # 缺陷3：删除出入金后，若当日已无其它事件，清理残留的 0 值 DERIVED 快照/净值/xirr
+    if not await av._is_event_date(p.id, d):
+        await av.prune_derived(p.id, d)
     return None
 
 
@@ -674,6 +678,7 @@ async def list_snapshots(
     db: AsyncSession = Depends(get_db),
     startDate: Optional[date] = None,
     endDate: Optional[date] = None,
+    source: Optional[SnapshotSource] = None,
     page: int = 1,
     pageSize: int = 20,
 ):
@@ -684,6 +689,9 @@ async def list_snapshots(
         base = base.where(AssetSnapshot.date >= startDate)
     if endDate:
         base = base.where(AssetSnapshot.date <= endDate)
+    # 缺陷7：来源筛选（DERIVED=自动 / MANUAL=手工），服务端过滤而非前端过滤
+    if source:
+        base = base.where(AssetSnapshot.source == source)
     total = (
         await db.execute(
             select(func.count()).select_from(base.subquery())

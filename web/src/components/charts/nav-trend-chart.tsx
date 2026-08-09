@@ -142,7 +142,15 @@ export function NavTrendChart({
         type: 'category',
         boundaryGap: false,
         data: labels,
-        axisLabel: { fontSize: 12, color: AXIS_COLOR },
+        // 缺陷4-C：强制显示首/尾日期标签（避免区间两端被自动 interval 隐藏 →
+        // 「左侧日期显示不完整 / 日期轴不随筛选器变动」的观感），并隐藏重叠标签。
+        axisLabel: {
+          fontSize: 12,
+          color: AXIS_COLOR,
+          showMinLabel: true,
+          showMaxLabel: true,
+          hideOverlap: true,
+        },
         // ECharts category 轴默认无 splitLine，需显式开启才等价于迁移前的双向网格
         splitLine: { show: true, lineStyle: { type: [3, 3], color: GRID_COLOR } },
       },

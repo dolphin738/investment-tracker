@@ -79,6 +79,7 @@ import { useLatestCashBalance } from '@/hooks/use-cash-balances';
 import { useQuery } from '@tanstack/react-query';
 import { getOverview, getPortfoliosSummary } from '@/api/overview.api';
 import { listTransactions } from '@/api/transaction.api';
+import { NavMetric } from '@/api/types';
 import { CashFlowType } from '@/lib/types';
 import { useUrlState } from '@/lib/url-query';
 import {
@@ -302,6 +303,9 @@ export default function DashboardPage(): JSX.Element {
     startDate,
     endDate,
     aggregation: AggregationMethod.LAST,
+    // 缺陷4-B：明确请求「对比」双线，使累计+当年净值均下发（避免单指标口径下
+    // cumulativeNav/yearNav 解包为 undefined → 净值趋势提示「数据不足」）
+    metric: NavMetric.BOTH,
   });
 
   // 最新净值/XIRR

@@ -28,6 +28,7 @@ import type {
   UpdateTransactionRequest,
 } from '@/api/types';
 import { usePreferenceStore } from '@/stores/preference.store';
+import { PORTFOLIOS_KEY } from '@/hooks/use-portfolios';;
 
 /** 交易列表 query key 工厂 */
 export function transactionsKey(
@@ -122,6 +123,8 @@ function invalidateCashflowRelated(queryClient: ReturnType<typeof useQueryClient
   queryClient.invalidateQueries({ queryKey: ['xirr'] });
   queryClient.invalidateQueries({ queryKey: ['nav'] });
   queryClient.invalidateQueries({ queryKey: ['overview'] });
+  // 缺陷2：出入金增删改会改变组合成立日（base_date），失效组合列表以实时刷新成立日
+  queryClient.invalidateQueries({ queryKey: PORTFOLIOS_KEY });
 }
 
 /** 创建交易 */

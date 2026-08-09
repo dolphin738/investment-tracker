@@ -162,9 +162,14 @@ async def test_account_stats(client):
 
     st, code, data, msg = env(await client.get("/api/account/stats", headers=h))
     assert st == 200 and code == 0, (st, code, msg)
-    for k in ("portfolioCount", "totalAssets", "cumulativeXirr", "yearXirr"):
+    # 缺陷6 新契约：AccountStatsOut（不再含 totalAssets/cumulativeXirr/yearXirr）
+    for k in ("portfolioCount", "cashflowCount", "tradeCount", "snapshotDays", "recordDays", "firstDate", "lastDate"):
         assert k in data, k
-    assert data["portfolioCount"] >= 1
-    assert Decimal(data["totalAssets"]) == Decimal("100000.00")
-    # 单组合：累计XIRR == 最新落库 XIRR（持平场景=0）
-    assert data["cumulativeXirr"] is not None
+    # _seed：1 组合 / 1 出入金 / 1 证券买卖 / recalculate 产生快照
+    assert data["portfolioCount"] == 1
+    assert data["cashflowCount"] == 1
+    assert data["tradeCount"] == 1
+    assert data["snapshotDays"] >= 1
+    assert data["recordDays"] >= 1
+    assert data["firstDate"] is not None
+    assert data["lastDate"] is not None
