@@ -88,6 +88,40 @@ def test_openapi_has_bearer_security():
     assert "/api/health" in spec["paths"]
 
 
+def test_openapi_enum_schemas_extracted():
+    """§5.2b：枚举应作为独立命名 schema 出现，且被实体/行错误引用（$ref）。"""
+    spec = client.get("/api/openapi.json").json()
+    schemas = spec["components"]["schemas"]
+    for name in [
+        "CashFlowType",
+        "SecurityType",
+        "SecuritySide",
+        "SnapshotSource",
+        "SnapshotValuation",
+        "DividendType",
+        "ExportType",
+        "ImportType",
+        "ImportErrorCode",
+    ]:
+        assert name in schemas, f"{name} 应作为独立命名 schema 出现在 OpenAPI"
+        assert "enum" in schemas[name], f"{name} 应为枚举 schema"
+    # 导入行错误引用 ImportErrorCode 命名 schema
+    assert "ImportRowError" in schemas
+    assert (
+        schemas["ImportRowError"]["properties"]["code"]["$ref"]
+        == "#/components/schemas/ImportErrorCode"
+    )
+    # 实体响应体引用枚举命名 schema
+    assert (
+        schemas["CashflowOut"]["properties"]["type"]["$ref"]
+        == "#/components/schemas/CashFlowType"
+    )
+    assert (
+        schemas["ImportPreviewOut"]["properties"]["type"]["$ref"]
+        == "#/components/schemas/ImportType"
+    )
+
+
 def test_swagger_ui_reachable():
     r = client.get("/api/docs")
     assert r.status_code == 200

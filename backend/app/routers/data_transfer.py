@@ -23,28 +23,14 @@ from app.core.exceptions import BusinessException
 from app.core.security import CurrentUser, get_current_user
 from app.db.database import get_db
 from app.models import Security
+from app.models.enums import ExportType, ImportType
 from app.routers.common import get_portfolio
 from app.schemas import ImportCommitReq
 from app.schemas_resp import ImportCommitOut, ImportPreviewOut
 from app.services import data_transfer as dt
 
 
-def _assert_export_type(type_: str) -> None:
-    if type_ not in dt.EXPORT_TYPES:
-        raise BusinessException(
-            code=BusinessErrorCode.VALIDATION_FAILED,
-            message=f"未知导出类型：{type_}（允许 {', '.join(sorted(dt.EXPORT_TYPES))}）",
-            status_code=400,
-        )
-
-
-def _assert_import_type(type_: str) -> None:
-    if type_ not in dt.IMPORT_TYPES:
-        raise BusinessException(
-            code=BusinessErrorCode.VALIDATION_FAILED,
-            message=f"未知导入类型：{type_}（允许 {', '.join(sorted(dt.IMPORT_TYPES))}）",
-            status_code=400,
-        )
+# 类型校验改由 FastAPI 枚举参数（ExportType/ImportType）在边界完成。
 
 
 def _fmt_ok(format_: str) -> str:
@@ -70,15 +56,14 @@ router_dt_portfolio = APIRouter(
 async def export_data(
     p=Depends(get_portfolio),
     db: AsyncSession = Depends(get_db),
-    type: str = "securities",
+    type: ExportType = ExportType.SECURITIES,
     format: str = "csv",
 ):
-    _assert_export_type(type)
     fmt = _fmt_ok(format)
-    columns, rows = await dt.build_export(type, db, p.id)
-    fname = f"{dt.safe_name(p.name)}-{type}-{date.today().isoformat()}.{fmt}"
+    columns, rows = await dt.build_export(type.value, db, p.id)
+    fname = f"{dt.safe_name(p.name)}-{type.value}-{date.today().isoformat()}.{fmt}"
     if fmt == "csv":
-        content = dt.to_csv(columns, rows, f"type={type} exported by investment-tracker")
+        content = dt.to_csv(columns, rows, f"type={type.value} exported by investment-tracker")
         return Response(
             content=content,
             media_type="text/csv; charset=utf-8",
@@ -96,10 +81,9 @@ async def export_data(
 async def import_preview(
     p=Depends(get_portfolio),
     db: AsyncSession = Depends(get_db),
-    type: str = Form(...),
+    type: ImportType = Form(...),
     file: UploadFile = File(...),
 ):
-    _assert_import_type(type)
     ext = dt._ext_of(file.filename)
     if ext not in dt.ALLOWED_EXT:
         raise BusinessException(
@@ -122,11 +106,11 @@ async def import_preview(
     sec_map = {s.code: s.id for s in secs}
 
     valid_rows, errors, sample, min_date = dt.validate_and_build(
-        type, header, data, sec_map
+        type.value, header, data, sec_map
     )
-    token = dt.make_token(type, p.id, valid_rows, min_date)
+    token = dt.make_token(type.value, p.id, valid_rows, min_date)
     return {
-        "type": type,
+        "type": type.value,
         "totalRows": len(data),
         "validRows": len(valid_rows),
         "sample": sample,
@@ -142,9 +126,8 @@ async def import_commit(
     p=Depends(get_portfolio),
     db: AsyncSession = Depends(get_db),
 ):
-    _assert_import_type(req.type)
     payload = dt.decode_token(req.token)
-    if payload.get("purpose") != "dt_import" or payload.get("type") != req.type:
+    if payload.get("purpose") != "dt_import" or payload.get("type") != req.type.value:
         raise BusinessException(
             code=BusinessErrorCode.VALIDATION_FAILED,
             message="导入令牌类型不匹配",
@@ -157,7 +140,7 @@ async def import_commit(
             status_code=400,
         )
     result = await dt.commit_import(
-        db, req.type, p.id, payload.get("rows", []), payload.get("min_date")
+        db, req.type.value, p.id, payload.get("rows", []), payload.get("min_date")
     )
     return result
 
@@ -172,21 +155,20 @@ router_dt_global = APIRouter(
 
 @router_dt_global.get("/template")
 async def download_template(
-    type: str = "securityTrades",
+    type: ImportType = ImportType.SECURITY_TRADES,
     format: str = "csv",
     _: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    _assert_import_type(type)
     fmt = _fmt_ok(format)
     # 模板列 = 导入列
     from app.services.data_transfer import _FIELD_KIND
 
-    columns = list(_FIELD_KIND[type].keys())
-    sample = [dt.example_row(type)]
-    fname = f"template-{type}.{fmt}"
+    columns = list(_FIELD_KIND[type.value].keys())
+    sample = [dt.example_row(type.value)]
+    fname = f"template-{type.value}.{fmt}"
     if fmt == "csv":
-        content = dt.to_csv(columns, sample, f"template for {type}; first row is example")
+        content = dt.to_csv(columns, sample, f"template for {type.value}; first row is example")
         return Response(
             content=content,
             media_type="text/csv; charset=utf-8",

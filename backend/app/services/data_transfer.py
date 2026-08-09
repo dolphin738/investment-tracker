@@ -28,6 +28,8 @@ from app.core.config import get_settings
 from app.core.date_utils import today_app_tz
 from app.core.enums import BusinessErrorCode
 from app.core.exceptions import BusinessException
+from app.models.enums import ExportType, ImportErrorCode, ImportType
+from app.schemas_resp import ImportRowError
 from app.models import (
     AssetSnapshot,
     CashBalance,
@@ -51,16 +53,8 @@ MAX_ROWS = 10000
 TOKEN_TTL_MIN = 10
 ALLOWED_EXT = {".csv", ".xlsx", ".xls"}
 
-EXPORT_TYPES = {
-    "securities",
-    "securityTrades",
-    "cashFlows",
-    "cashBalances",
-    "securityPrices",
-    "assetSnapshots",
-    "navSeries",
-}
-IMPORT_TYPES = {"securityTrades", "cashFlows", "assetSnapshots"}
+EXPORT_TYPES = {e.value for e in ExportType}
+IMPORT_TYPES = {e.value for e in ImportType}
 
 # 导入字段规格：字段 -> 类型（date/decimal/enum/security/text）
 _FIELD_KIND = {
@@ -201,8 +195,8 @@ def _check_no_oversell(trades: list) -> str | None:
     return None
 
 
-def _err(row, field, code, message) -> dict:
-    return {"row": row, "field": field, "code": code, "message": message}
+def _err(row, field, code: ImportErrorCode, message) -> ImportRowError:
+    return ImportRowError(row=row, field=field, code=code, message=message)
 
 
 def validate_and_build(
@@ -217,7 +211,7 @@ def validate_and_build(
     errors：含全局错误（row=null）与行级错误。
     sample：前 10 行原始字符串样例（列->值）。
     """
-    errors: list[dict] = []
+    errors: list[ImportRowError] = []
     fields = _FIELD_KIND[type_]
     col_order = list(fields.keys())
     header_lower = {h.lower(): i for i, h in enumerate(header)}
@@ -226,12 +220,12 @@ def validate_and_build(
     # 必需列缺失（全局错误）
     for col in _REQUIRED[type_]:
         if idx[col] is None:
-            errors.append(_err(None, col, "MISSING_REQUIRED_COLUMN", f"缺少必需列：{col}"))
+            errors.append(_err(None, col, ImportErrorCode.MISSING_REQUIRED_COLUMN, f"缺少必需列：{col}"))
 
     # 文件过大
     if len(rows) > MAX_ROWS:
         errors.append(
-            _err(None, None, "TOO_MANY_ROWS", f"行数超过上限 {MAX_ROWS}")
+            _err(None, None, ImportErrorCode.TOO_MANY_ROWS, f"行数超过上限 {MAX_ROWS}")
         )
 
     valid_rows: list[dict] = []
@@ -245,7 +239,7 @@ def validate_and_build(
             if kind == "date":
                 d = _parse_date(raw)
                 if d is None:
-                    row_errs.append(_err(i, col, "INVALID_DATE_FORMAT", f"{col} 日期格式无效：{raw}"))
+                    row_errs.append(_err(i, col, ImportErrorCode.INVALID_DATE_FORMAT, f"{col} 日期格式无效：{raw}"))
                 else:
                     parsed[col] = d.isoformat()
             elif kind == "decimal":
@@ -256,18 +250,18 @@ def validate_and_build(
                 max_scale = 6 if col in ("quantity", "costPrice") else 2
                 d = _parse_decimal(raw, max_scale=max_scale)
                 if d is None:
-                    row_errs.append(_err(i, col, "INVALID_DECIMAL_PRECISION", f"{col} 数值无效（最多 {max_scale} 位小数）：{raw}"))
+                    row_errs.append(_err(i, col, ImportErrorCode.INVALID_DECIMAL_PRECISION, f"{col} 数值无效（最多 {max_scale} 位小数）：{raw}"))
                 else:
                     parsed[col] = str(d)
             elif kind == "enum":
                 if raw not in _ENUM_VALUES[col]:
-                    row_errs.append(_err(i, col, "INVALID_ENUM_VALUE", f"{col} 取值无效：{raw}"))
+                    row_errs.append(_err(i, col, ImportErrorCode.INVALID_ENUM_VALUE, f"{col} 取值无效：{raw}"))
                 else:
                     parsed[col] = raw
             elif kind == "security":
                 sid = security_map.get(raw)
                 if sid is None:
-                    row_errs.append(_err(i, col, "SECURITY_NOT_FOUND", f"标的代码不存在于本组合：{raw}"))
+                    row_errs.append(_err(i, col, ImportErrorCode.SECURITY_NOT_FOUND, f"标的代码不存在于本组合：{raw}"))
                 else:
                     parsed["security_id"] = sid
             else:  # text
@@ -277,7 +271,7 @@ def validate_and_build(
         if type_ == "assetSnapshots" and "date" in parsed:
             d = parsed["date"]
             if d in seen_snap_dates:
-                row_errs.append(_err(i, "date", "DUPLICATE_SNAPSHOT_DATE", f"同一日期出现多次：{d}"))
+                row_errs.append(_err(i, "date", ImportErrorCode.DUPLICATE_SNAPSHOT_DATE, f"同一日期出现多次：{d}"))
             else:
                 seen_snap_dates[d] = i
 
@@ -510,7 +504,7 @@ async def commit_import(
     min_date: str | None,
 ) -> dict:
     inserted = updated = skipped = 0
-    failed: list[dict] = []
+    failed: list[ImportRowError] = []
 
     if type_ == "securityTrades":
         # L2：导入卖出硬校验（与手动 create_trade 一致），超额 SELL 整批拒绝

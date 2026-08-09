@@ -13,6 +13,7 @@ from typing import Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.core.types import DecimalStr
+from app.models.enums import ImportType
 
 
 # ── 认证 ──
@@ -233,5 +234,5 @@ class DividendPatchReq(BaseModel):
 
 # ── 数据导入提交 §4.2.17 ──
 class ImportCommitReq(BaseModel):
-    type: str
+    type: ImportType
     token: str

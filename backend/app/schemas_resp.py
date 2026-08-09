@@ -16,6 +16,18 @@ from typing import Any, Generic, Optional, TypeVar
 
 from pydantic import BaseModel
 
+from app.models.enums import (
+    CashFlowType,
+    DividendType,
+    ExportType,
+    ImportErrorCode,
+    ImportType,
+    SecuritySide,
+    SecurityType,
+    SnapshotSource,
+    SnapshotValuation,
+)
+
 T = TypeVar("T")
 
 
@@ -66,7 +78,7 @@ class CashflowOut(BaseModel):
     id: str
     portfolioId: str
     date: date
-    type: str
+    type: CashFlowType
     amount: str
     note: Optional[str] = None
     createdAt: datetime
@@ -77,7 +89,7 @@ class SecurityOut(BaseModel):
     id: str
     code: str
     name: str
-    type: str
+    type: SecurityType
     currency: str
     createdAt: datetime
     updatedAt: datetime
@@ -87,7 +99,7 @@ class TradeOut(BaseModel):
     id: str
     securityId: str
     date: date
-    side: str
+    side: SecuritySide
     quantity: str
     costPrice: str
     commission: str
@@ -124,8 +136,8 @@ class SnapshotOut(BaseModel):
     totalAsset: Optional[str] = None
     marketValue: Optional[str] = None
     cashBalance: Optional[str] = None
-    source: str
-    valuationFlag: str
+    source: SnapshotSource
+    valuationFlag: SnapshotValuation
     note: Optional[str] = None
     recordedAt: datetime
     createdAt: datetime
@@ -142,7 +154,7 @@ class DividendOut(BaseModel):
     amount: str
     tax: str
     netAmount: str
-    type: str
+    type: DividendType
     note: Optional[str] = None
     createdAt: datetime
     updatedAt: datetime
@@ -273,12 +285,21 @@ class AccountStatsOut(BaseModel):
 
 
 # ───────────────────────── 数据导入导出 ─────────────────────────
+class ImportRowError(BaseModel):
+    """导入行级错误（§4.2.17）。`code` 为 ImportErrorCode 命名枚举。"""
+
+    row: Optional[int] = None
+    field: Optional[str] = None
+    code: ImportErrorCode
+    message: str
+
+
 class ImportPreviewOut(BaseModel):
-    type: str
+    type: ImportType
     totalRows: int
     validRows: int
     sample: list[dict[str, Any]] = []
-    errors: list[dict[str, Any]] = []
+    errors: list[ImportRowError] = []
     minDate: Optional[date] = None
     token: str
 
@@ -287,5 +308,5 @@ class ImportCommitOut(BaseModel):
     inserted: int
     updated: int
     skipped: int
-    failed: list[dict[str, Any]] = []
+    failed: list[ImportRowError] = []
     recalculated: Optional[dict[str, Any]] = None
