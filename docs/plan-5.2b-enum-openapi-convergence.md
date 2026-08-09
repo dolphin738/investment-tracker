@@ -1,6 +1,6 @@
 # §5.2b 枚举独立 Schema + 后端字段补齐 + lib/types 收敛（可行性分析）
 
-> 状态：**分析中（已补全收敛项，待用户确认范围执行）**。用户指令："补充后端 schema 字段缺失项并让 OpenAPI 生成独立 schema，同时把 lib/types.ts 收敛为纯前后端契约常量聚合层……能不能分析下"。
+> 状态：**已执行（2026-08-09 P1–P3 完成，P4 文档收尾）**。用户指令："补充后端 schema 字段缺失项并让 OpenAPI 生成独立 schema，同时把 lib/types.ts 收敛为纯前后端契约常量聚合层……能不能分析下"。
 > 依据：实际读码核实（2026-08-09），非凭记忆。
 > 关联：`docs/plan-5.2-shared-types-retirement.md`（已执行，策略 A）。
 
@@ -164,3 +164,30 @@
 4. 确认后是否直接执行（沿用主会话自执行 + TaskCreate，不起多智能体团队）？
 5. 可选提升枚举（`ExportType`/`ImportType`/`ImportErrorCode`）是否一并提升为后端 `models/enums.py` 枚举（更彻底单源，但需改后端 + 重生成 OpenAPI），还是保持前端 `as const`？
 6. `QueryGranularity` 漂移（`quarter`）：前端补 `QUARTER` 成员，还是后端移除 `quarter` 支持？
+
+---
+
+## 8. 执行记录（2026-08-09 · P1–P4 全量）
+
+用户拍板（AskUserQuestion）：**全量 P1–P4** / 所有 `*Out` 都补 / **后端移除 `quarter`** / **提升为后端枚举**。
+
+### P1 后端字段补齐（无迁移）— commit `e584613`
+- `schemas_resp.py`：`CashflowOut`(+portfolioId,+updatedAt) / `SnapshotOut`(+portfolioId,+createdAt,+updatedAt) / `PortfolioOut`(+userId, baseDate→Optional) / `SecurityOut`/`TradeOut`/`DividendOut`/`PriceOut`/`CashBalanceOut`(+updatedAt，3 不可变实体用 createdAt 语义) / `UserPublicOut`(+userId 等对齐)。
+- `routers/common.py` 序列化器同步补齐对应键。
+- 后端 88 测试零回归。
+
+### P2 OpenAPI 枚举独立化 — commit `eda5eae`
+- 6 领域枚举（`CashFlowType`/`SecurityType`/`SecuritySide`/`SnapshotSource`/`SnapshotValuation`/`DividendType`）+ `ExportType`/`ImportType`/`ImportErrorCode` 提升为 `*Out` DTO 真实枚举字段，FastAPI 原生提取为命名 `$ref` schema（**无需**计划假设的 `_custom_openapi` 后处理）。
+- `ImportRowError` 命名 schema；导入响应错误体强类型。
+- `docs/openapi.json` 重生成（与 `gen_openapi.py` 离线输出一致）。
+- 新增契约测试 `test_openapi_enum_schemas_extracted`；后端 89 测试全绿。
+
+### P3 前端收敛
+- `web/scripts/gen-api-types.py` 修正 `null`→`null`（`Optional[str]` 原误映射 `unknown` → 现 `T | null`）。
+- `npm run generate:api` 重生成 `web/src/types/api.ts`（73 schema / 52 operations）。
+- `web/src/lib/types.ts`：`CashFlow`/`Portfolio`/`AssetSnapshot` 改为 `components['schemas']['XxxOut']` re-export 别名；`NavSeriesPoint`/`XirrSeriesPoint` 迁出至 `web/src/types/series.ts` 并 re-export。
+- **残留手写（已文档化，非 bug）**：`UserPublic`（后端 `UserPublicOut.createdAt` 可选/`name` 非空，与前端方向相反）、`Paginated<T>`（FastAPI 泛型解析为 `Paginated_XxxOut_` + 前端用 `PaginatedResponse<T>`）、`BUSINESS_ERROR_CODE`/`ACCOUNT_RETENTION_DAYS`（运行时值，无法类型重导出）、全部 `as const` 枚举与金额工具（运行时需要值）。
+- 消费处修复（因 `AssetSnapshot.totalAsset` 现正确为 `string | null`）：`snapshot-form.tsx` `?? ''`；`lib/utils.ts` `computeManualDiffStats` 参数 `totalAsset` 放宽为 `string | number | null`（内部 `Number()` 已容错）。
+
+### 环境校验说明
+- 本沙箱 `node_modules` 安装损坏（`@types/react` 缺条目、`echarts` 类型入口缺失、`execa`/`@vitest/runner` 缺文件等），致 `tsc --noEmit` 仅余 `echarts` 类型入口报错、`vitest` 无法启动——均属环境损坏，**非本次改动引入**。代码层面 `tsc` 仅余环境性报错；在健康 `node_modules` 环境下 `npm run lint/build/test` 应通过（4 个预存 `security-type-shared.test.tsx` 失败除外，与本次无关）。

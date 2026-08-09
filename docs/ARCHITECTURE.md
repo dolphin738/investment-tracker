@@ -727,16 +727,17 @@ classDiagram
 
 ### 5.2 共享 TypeScript 类型（已退役 · 2026-08-09）
 
-> **退役状态：已完成**（数值策略 A）。`@investment-tracker/shared` 别名与 `web/src/shared/index.ts` 垫片均已物理删除，全前端 ~60 处 `import` 已改写为 `@/lib/types`；`tsc -b` 类型零错误、`vite build` 成功、`vitest` 457/461 通过（4 失败为退役前既存的 `security-type-shared.test.tsx` 预存在问题，与本次无关）。
+> **退役状态：已完成**（数值策略 A）；**契约收敛 §5.2b 已完成**（2026-08-09 P1–P3）：后端 `*Out` 已补齐缺字段（portfolioId / userId / updatedAt 等）并将 6 领域枚举 + `ExportType`/`ImportType`/`ImportErrorCode` 提升为独立命名 schema（`types/api.ts` 生成 `components['schemas']['Xxx']` 联合类型），`lib/types.ts` 实体类型现可安全重导出。原 `shared` 别名与 `web/src/shared/index.ts` 垫片均已删除，全前端 ~60 处 `import` 改写为 `@/lib/types`；原测试 457/461 通过（4 失败为既存 `security-type-shared.test.tsx` 预存在问题）。
 
-- **`web/src/types/api.ts`**：由 `docs/openapi.json`（OpenAPI 3.1）经 `web/scripts/gen-api-types.py` 生成，产出 `components['schemas']`（全部 `*Out` 响应模型）与 `operations` 映射。`npm run generate:api` 可重新生成。后端是这些 schema 的权威实现（`models/enums.py` 6 枚举 / `core/enums.py` `BusinessErrorCode` / `schemas_resp.py` `*Out` DTO），OpenAPI 即其导出。
-- **`web/src/lib/types.ts`**：退役后的**前端契约聚合层（唯一类型真相源）**。它取代原 `shared/index.ts` 垫片，按三类维护（详见文件头注释）：
-  1. **实体类型**（`Portfolio` / `UserPublic` / `AssetSnapshot` / `CashFlow` 等）= 后端 `*Out` schema 的**对齐镜像**，金额字段一律 `string` 透传（Decimal→str 铁律 C-02）。因后端 schema 字段（如 cashflow 无 `portfolioId`、portfolio 无 `userId`、缺 `updatedAt`）与前端视图模型不完全一致，且 OpenAPI 把枚举/导入 DTO 内联为字符串字面量、未生成独立 schema，故**不**用 `export type X = components['schemas']['XOut']` 直接重导出（否则 60 处引用会因缺字段编译失败）；实体类型以「后端契约为准 + 前端补充视图字段」手动维护。
-  2. **枚举 / 业务错误码 / 金额工具**（`SecurityType` / `CashFlowType` / `SecuritySide` / `SnapshotSource` / `SnapshotValuation` / `DividendType` / `BUSINESS_ERROR_CODE` / `isMoneyString` / `computeNetAmount` / …）= 前后端约定常量 `as const`。后端枚举值已逐对校验一致（`SecuritySide=BUY_SEC/SELL_SEC` 等）；字符串字面量枚举需前端持有运行时值，故保留为前端常量。
-  3. **`NavSeriesPoint` / `XirrSeriesPoint`** = **number 版展示类型**（ECharts 只认 number）。后端返回 `string`（`NavPointOut` / `XirrPointOut`，字段名 `value` / `cumulativeNav` 等），由 `api/query.api.ts` 在取数边界用 `toNumberOrNull`（**策略 A**：后端保 string、边界统一 `string→number` 一次，图表零改）转换产出。
+- **`web/src/types/api.ts`**：由 `docs/openapi.json`（OpenAPI 3.1）经 `web/scripts/gen-api-types.py` 生成，产出 `components['schemas']`（全部 `*Out` 响应模型）与 `operations` 映射。`npm run generate:api` 可重新生成。后端是这些 schema 的权威实现（`models/enums.py` 6 领域枚举 / `ExportType`/`ImportType`/`ImportErrorCode` / `core/enums.py` `BusinessErrorCode` / `schemas_resp.py` `*Out` DTO），OpenAPI 即其导出。生成器已修正 `null` 类型映射（`Optional[str]` → `T | null`，原误映射为 `unknown`），可选字段更准确。
+- **`web/src/lib/types.ts`**：前端契约聚合层（唯一类型真相源），按四类维护（详见文件头注释）：
+  1. **实体类型**：`CashFlow` / `Portfolio` / `AssetSnapshot` 已改为 `components['schemas']['XxxOut']` 的 **re-export 别名**（§5.2b：P1 补齐后端缺字段、P2 枚举独立 schema 后 DTO 与前端视图模型 1:1 对齐）。`UserPublic` 因后端 `UserPublicOut.createdAt` 为可选、`name` 非空，与前端 `createdAt: string` / `name: string|null` 方向相反，**保留手写**（残留项，字段漂移风险极低）。金额字段一律 `string` 透传（Decimal→str 铁律 C-02）。
+  2. **枚举 / 业务错误码 / 金额工具**（`SecurityType` / `CashFlowType` / `SecuritySide` / `SnapshotSource` / `SnapshotValuation` / `DividendType` / `BUSINESS_ERROR_CODE` / `isMoneyString` / `computeNetAmount` / …）= 前后端约定常量 `as const`。后端枚举值已逐对校验一致；枚举的**运行时 `as const` 对象**仍留本文件（下拉遍历需要值），与 `types/api.ts` 生成的联合类型值一致。`BUSINESS_ERROR_CODE` / `ACCOUNT_RETENTION_DAYS` 因是**运行时值**（非类型），无法以 OpenAPI 类型重导出，保留手写（残留项）。
+  3. **`Paginated<T>`**：FastAPI 将泛型解析为 `Paginated_XxxOut_` 命名 schema，且前端实际消费 `api/types.ts` 的 `PaginatedResponse<T>`，故 `lib/types.ts` 的 `Paginated<T>` 为残留手写（结构一致，低风险）。
+  4. **`NavSeriesPoint` / `XirrSeriesPoint`** = **number 版展示类型**（ECharts 只认 number），移入 `web/src/types/series.ts`，`lib/types.ts` re-export 维持历史 import 点。后端返回 `string`（`NavPointOut` / `XirrPointOut`，字段名 `value` / `cumulativeNav` 等），由 `api/query.api.ts` 在取数边界用 `toNumberOrNull`（策略 A）转换产出。
 - **边界转换函数** `toNumberOrNull(v: unknown): number | null`（`lib/types.ts`，null 安全、非有限数返回 null）是策略 A 的唯一转换点；所有 `NavSeriesPoint` / `XirrSeriesPoint` 消费方均经此函数，无残留裸 `Number()` 直读后端 `string`。
 
-**退役后同步约定**：后端改实体/枚举后，先 `npm run generate:api` 更新 `types/api.ts`，再人工比对 `lib/types.ts` 对应镜像（字段增减、枚举值）手动同步——这是退役后唯一的同步点。详情见 `docs/plan-5.2-shared-types-retirement.md`。
+**同步约定**：后端改实体/枚举后，先 `npm run generate:api` 更新 `types/api.ts`，再确认 `lib/types.ts` 的 re-export 别名与新增命名字段/枚举同步——这是退役 + 收敛后的唯一同步点。详情见 `docs/plan-5.2b-enum-openapi-convergence.md`。
 
 ---
 
