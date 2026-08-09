@@ -477,8 +477,9 @@ describe('DashboardPage 布局打磨（f1013f3）', () => {
 
       const up = statCardByTitle('累计收益率').querySelector('svg');
       const down = statCardByTitle('当年收益率').querySelector('svg');
-      expect(up?.getAttribute('class')).toContain('text-red-600');
-      expect(down?.getAttribute('class')).toContain('text-emerald-600');
+      // 项目统一语义类（index.css → text-up/text-down，分别映射到 hsl(var(--color-up/down)) = 红/绿）
+      expect(up?.getAttribute('class')).toContain('text-up');
+      expect(down?.getAttribute('class')).toContain('text-down');
 
       // 金额类恒 neutral → 卡头无箭头图标
       expect(statCardByTitle('当前总资产').querySelector('svg')).toBeNull();

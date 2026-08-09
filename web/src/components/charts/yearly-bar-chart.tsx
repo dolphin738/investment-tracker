@@ -39,8 +39,10 @@ export interface YearlyBarChartProps {
 function getThemeColors() {
   const root = document.documentElement;
   const style = getComputedStyle(root);
-  const upHsl = style.getPropertyValue('--color-up').trim();
-  const downHsl = style.getPropertyValue('--color-down').trim();
+  // 兜底默认值：jsdom 等无 CSS 变量环境 getComputedStyle 取不到自定义属性，
+  // 须回退到与 index.css 一致的硬编码值，否则 hsl() 拼接出空串、柱色丢失。
+  const upHsl = style.getPropertyValue('--color-up').trim() || '0 84% 48%';
+  const downHsl = style.getPropertyValue('--color-down').trim() || '142 71% 38%';
   return {
     up: `hsl(${upHsl.replace(/\s+/g, ', ')})`,
     down: `hsl(${downHsl.replace(/\s+/g, ', ')})`,

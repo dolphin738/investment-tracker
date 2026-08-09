@@ -272,30 +272,31 @@ describe('证券买卖表单「新建标的」类型下拉（shared SecurityType
     expect(getTypeSelect().value).toBe('STOCK');
   });
 
-  it('类型下拉 5 个选项齐全（股票/基金/债券/现金/其他），且值取自 shared', async () => {
+  it('类型下拉 4 个选项齐全（股票/基金/债券/其他），且值取自 shared', async () => {
     renderWithClient(<SecurityTradeForm portfolioId="pf-1" />);
     await openNewSecurityPanel();
 
     const options = Array.from(getTypeSelect().querySelectorAll('option')).filter(
       (o) => o.value !== '',
     );
-    expect(options).toHaveLength(5);
+    // 手动新建证券刻意排除 CASH：现金作为余额管理，不属可手动创建的证券类型
+    // （security-trade-form.tsx 自初始提交即 .filter(([k]) => k !== 'CASH')）
+    expect(options).toHaveLength(4);
     expect(options.map((o) => o.value).sort()).toEqual(
-      Object.values(SharedSecurityType).slice().sort(),
+      ['BOND', 'FUND', 'OTHER', 'STOCK'].sort(),
     );
     expect(options.map((o) => o.textContent)).toEqual([
       '股票',
       '基金',
       '债券',
-      '现金',
       '其他',
     ]);
+    expect(options.map((o) => o.value)).not.toContain('CASH');
   });
 
   it.each([
     ['基金', 'FUND'],
     ['债券', 'BOND'],
-    ['现金', 'CASH'],
     ['其他', 'OTHER'],
     ['股票', 'STOCK'],
   ])(
