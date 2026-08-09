@@ -1,0 +1,110 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ===========================================================================
+ * shadcn/ui CSS 变量主题
+ * 基于 HSL 色值，支持 light/dark 模式切换
+ * =========================================================================== */
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+
+    --primary: 222.2 47.4% 11.2%;
+    --primary-foreground: 210 40% 98%;
+
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+
+    --accent: 210 40% 96.1%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 222.2 84% 4.9%;
+
+    --radius: 0.5rem;
+
+    /* ── A股涨跌配色（PRD §9.5: 正红负绿）── */
+    --color-up: 0 84% 48%;        /* 红色 - 正向（上涨/盈利/存入） */
+    --color-up-soft: 0 84% 95%;   /* 红色浅底 */
+    --color-down: 142 71% 38%;    /* 绿色 - 负向（下跌/亏损/取出） */
+    --color-down-soft: 142 71% 95%; /* 绿色浅底 */
+  }
+
+  .dark {
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+
+    --card: 222.2 84% 4.9%;
+    --card-foreground: 210 40% 98%;
+
+    --popover: 222.2 84% 4.9%;
+    --popover-foreground: 210 40% 98%;
+
+    --primary: 210 40% 98%;
+    --primary-foreground: 222.2 47.4% 11.2%;
+
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 210 40% 98%;
+
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+
+    --accent: 217.2 32.6% 17.5%;
+    --accent-foreground: 210 40% 98%;
+
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    --ring: 212.7 26.8% 83.9%;
+
+    /* ── 暗色模式涨跌配色 ── */
+    --color-up: 0 84% 58%;        /* 红色 - 正向 */
+    --color-up-soft: 0 84% 15%;
+    --color-down: 142 61% 48%;    /* 绿色 - 负向 */
+    --color-down-soft: 142 61% 15%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: 'rlig' 1, 'calt' 1;
+  }
+}
+
+/* ── 全局涨跌色工具类（PRD §9.5: A股正红负绿）── */
+@layer utilities {
+  .text-up {
+    color: hsl(var(--color-up));
+  }
+  .text-down {
+    color: hsl(var(--color-down));
+  }
+  .bg-up-soft {
+    background-color: hsl(var(--color-up-soft));
+  }
+  .bg-down-soft {
+    background-color: hsl(var(--color-down-soft));
+  }
+}

@@ -115,7 +115,7 @@ backend/app/
 | 类型来源 | `docs/openapi.json` 经 `web/scripts/gen-api-types.py`（等价 openapi-typescript）生成 `web/src/types/api.ts` |
 | 测试 | 后端 pytest + pytest-asyncio + httpx（TestClient）；前端 Vitest + Testing Library |
 
-> 已彻底移除：NestJS / Prisma / TypeScript 后端栈 / @prisma/client / 原 shared 工作区包（改为 web 本地 `shared/index.ts` 垫片）。
+> 已彻底移除：NestJS / Prisma / TypeScript 后端栈 / @prisma/client / 原 shared 工作区包（曾改为 web 本地 `shared/index.ts` 垫片，已于 2026-08-09 退役，收敛到 `web/src/lib/types.ts`）。
 
 ---
 
@@ -725,20 +725,18 @@ classDiagram
     Security "1" --> "*" DividendRecord : dividends
 ```
 
-### 5.2 共享 TypeScript 类型
+### 5.2 共享 TypeScript 类型（已退役 · 2026-08-09）
 
-- **`web/src/types/api.ts`**：由 `docs/openapi.json`（OpenAPI 3.1）经 `web/scripts/gen-api-types.py` 生成，产出 `components['schemas']`（全部 `*Out` 响应模型）与 `operations` 映射，是**实体响应 schema 的权威来源**。`npm run generate:api` 可重新生成。
-- **`web/src/shared/index.ts`**：迁移期**临时垫片**（shim），逐字复制原 `app/packages/shared` 中被 web 实际 import 的部分——枚举（`SecurityType` / `CashFlowType` / `SecuritySide` / `SnapshotSource` / `SnapshotValuation` / `DividendType`）、金额工具（`isMoneyString` 等）、业务错误码 `BUSINESS_ERROR_CODE`、少量纯数据类型（`Portfolio` / `UserPublic` / `NavSeriesPoint` / `XirrSeriesPoint` / `Import*` 等）。保留原因：OpenAPI `*Out` 与 web 图表/导入层既有契约在数值类型（nav/xirr 为 `number` 而非 `string`）、字段增减、枚举值形态上存在差异；垫片以老 shared 为准顶住迁移期，避免一次性大重构。**关键点**：这些概念在 Python 后端均有权威实现（`models/enums.py` 的 6 枚举、`core/enums.py` 的 `BusinessErrorCode`、`schemas_resp.py` 的 `*Out` DTO），OpenAPI 即其导出——所谓「不能通过 Python 实现」不成立，垫片只是**前端 `.ts` 契约的迁移期来源**，并非后端实现方式。`isMoneyString` 等纯前端工具无后端对应物（Python 侧一律用 `Decimal`），退役后转 web 本地 `lib/` 工具。
-- 前端通过 `tsconfig` / `vite.config` 的 `paths` 将 `@investment-tracker/shared` 指向本地垫片，**彻底移除对外部工作区包的依赖**。
+> **退役状态：已完成**（数值策略 A）。`@investment-tracker/shared` 别名与 `web/src/shared/index.ts` 垫片均已物理删除，全前端 ~60 处 `import` 已改写为 `@/lib/types`；`tsc -b` 类型零错误、`vite build` 成功、`vitest` 457/461 通过（4 失败为退役前既存的 `security-type-shared.test.tsx` 预存在问题，与本次无关）。
 
-**垫片退役时机（Web 前端重建 · 契约对齐）**：
+- **`web/src/types/api.ts`**：由 `docs/openapi.json`（OpenAPI 3.1）经 `web/scripts/gen-api-types.py` 生成，产出 `components['schemas']`（全部 `*Out` 响应模型）与 `operations` 映射。`npm run generate:api` 可重新生成。后端是这些 schema 的权威实现（`models/enums.py` 6 枚举 / `core/enums.py` `BusinessErrorCode` / `schemas_resp.py` `*Out` DTO），OpenAPI 即其导出。
+- **`web/src/lib/types.ts`**：退役后的**前端契约聚合层（唯一类型真相源）**。它取代原 `shared/index.ts` 垫片，按三类维护（详见文件头注释）：
+  1. **实体类型**（`Portfolio` / `UserPublic` / `AssetSnapshot` / `CashFlow` 等）= 后端 `*Out` schema 的**对齐镜像**，金额字段一律 `string` 透传（Decimal→str 铁律 C-02）。因后端 schema 字段（如 cashflow 无 `portfolioId`、portfolio 无 `userId`、缺 `updatedAt`）与前端视图模型不完全一致，且 OpenAPI 把枚举/导入 DTO 内联为字符串字面量、未生成独立 schema，故**不**用 `export type X = components['schemas']['XOut']` 直接重导出（否则 60 处引用会因缺字段编译失败）；实体类型以「后端契约为准 + 前端补充视图字段」手动维护。
+  2. **枚举 / 业务错误码 / 金额工具**（`SecurityType` / `CashFlowType` / `SecuritySide` / `SnapshotSource` / `SnapshotValuation` / `DividendType` / `BUSINESS_ERROR_CODE` / `isMoneyString` / `computeNetAmount` / …）= 前后端约定常量 `as const`。后端枚举值已逐对校验一致（`SecuritySide=BUY_SEC/SELL_SEC` 等）；字符串字面量枚举需前端持有运行时值，故保留为前端常量。
+  3. **`NavSeriesPoint` / `XirrSeriesPoint`** = **number 版展示类型**（ECharts 只认 number）。后端返回 `string`（`NavPointOut` / `XirrPointOut`，字段名 `value` / `cumulativeNav` 等），由 `api/query.api.ts` 在取数边界用 `toNumberOrNull`（**策略 A**：后端保 string、边界统一 `string→number` 一次，图表零改）转换产出。
+- **边界转换函数** `toNumberOrNull(v: unknown): number | null`（`lib/types.ts`，null 安全、非有限数返回 null）是策略 A 的唯一转换点；所有 `NavSeriesPoint` / `XirrSeriesPoint` 消费方均经此函数，无残留裸 `Number()` 直读后端 `string`。
 
-`shared/index.ts` 不是长期方案，其生命周期绑定到 Web 前端重建阶段（即前端从 `app/packages/web` 平移并对齐 Python OpenAPI 契约的工作），分三步退役：
-1. **对齐**：补齐 `api.ts` 与 web 图表/导入层的契约差异——统一数值类型（nav/xirr 作为 `string` 带入金额精度，图表层本地 `Decimal` 化）、枚举值形态、字段集。
-2. **过渡**：将垫片内每个导出改为薄重导出 `export type X = components['schemas']['XOut']`（或等价 `api.ts` 别名），web 代码无需改动即可切换真相源；`isMoneyString` 等纯前端工具迁入 `web/src/lib/`。
-3. **清除**：全量 `import ... from '@investment-tracker/shared'` 改写为 `from '@/types/api'` / `from '@/lib'`，删除 `shared/index.ts` 与 `paths` 别名映射。
-
-Web 前端重建启动即开始第 1 步；该阶段收尾前必须完成第 3 步——届时前端类型真相源唯一收敛到 Python 后端导出的 OpenAPI。
+**退役后同步约定**：后端改实体/枚举后，先 `npm run generate:api` 更新 `types/api.ts`，再人工比对 `lib/types.ts` 对应镜像（字段增减、枚举值）手动同步——这是退役后唯一的同步点。详情见 `docs/plan-5.2-shared-types-retirement.md`。
 
 ---
 
@@ -990,7 +988,7 @@ sequenceDiagram
 | api | `src/api/` | API 请求层（按模块拆分 `*.api.ts`，对应后端接口） |
 | stores | `src/stores/` | Zustand 全局态（auth / portfolio / preference） |
 | lib | `src/lib/` | 工具（api-client 信封解包 / url-query / utils / constants） |
-| types / shared | `src/types/api.ts` / `src/shared/index.ts` | OpenAPI 生成类型 / 本地共享契约垫片 |
+| types | `src/types/api.ts` / `src/lib/types.ts` | OpenAPI 生成类型（后端 `*Out` schema） / 前端契约聚合层（唯一类型真相源，取代原 shared 垫片） |
 
 #### 10.1.3 状态管理分工
 
