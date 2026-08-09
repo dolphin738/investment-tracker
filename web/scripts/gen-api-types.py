@@ -9,7 +9,9 @@ Output shape is compatible with openapi-typescript's exported `components`
 namespace, so this file is a drop-in if the real tool is run later.
 """
 import json
+import re
 import sys
+from pathlib import Path
 
 INDENT = "  "
 
@@ -88,6 +90,55 @@ def ts_type(schema: dict, depth: int = 0) -> str:
     return "unknown"
 
 
+def gen_business_error_code() -> list[str]:
+    """Emit a `BUSINESS_ERROR_CODE` const + `BusinessErrorCode` type by parsing
+    the `BusinessErrorCode` IntEnum in backend/app/core/enums.py.
+
+    enums.py is the single source of truth; this keeps the generated
+    web/src/types/api.ts in sync without a hand-maintained duplicate copy.
+    """
+    enums_path = (
+        Path(__file__).resolve().parent.parent.parent
+        / "backend" / "app" / "core" / "enums.py"
+    )
+    text = enums_path.read_text(encoding="utf-8")
+    # Capture the BusinessErrorCode(IntEnum) class body.
+    match = re.search(
+        r"class BusinessErrorCode\(IntEnum\):(.*?)(?=\nclass |\Z)", text, re.S
+    )
+    if not match:
+        raise RuntimeError("BusinessErrorCode not found in enums.py")
+    body = match.group(1)
+    # Enum members are indented exactly 4 spaces. Module-level constants such as
+    # ACCOUNT_RETENTION_DAYS sit at column 0 and must be excluded. A bare `^\s+`
+    # is unsafe here: in MULTILINE mode it absorbs the blank-line newline that
+    # precedes a column-0 constant, falsely treating that constant as indented.
+    # Requiring the literal 4-space indent prevents that and keeps the output to
+    # the 12 BusinessErrorCode members only.
+    members = [
+        (m.group(1), int(m.group(2)))
+        for m in re.finditer(r"^    (\w+)\s*=\s*(\d+)", body, re.M)
+    ]
+    if not members:
+        raise RuntimeError("No BusinessErrorCode members parsed from enums.py")
+
+    gen_lines: list[str] = []
+    gen_lines.append("")
+    gen_lines.append(
+        "// ── Generated from backend/app/core/enums.py BusinessErrorCode "
+        "(single source of truth) ──"
+    )
+    gen_lines.append("export const BUSINESS_ERROR_CODE = {")
+    for name, value in members:
+        gen_lines.append(f"{INDENT}{name}: {value},")
+    gen_lines.append("} as const;")
+    gen_lines.append(
+        "export type BusinessErrorCode = "
+        "(typeof BUSINESS_ERROR_CODE)[keyof typeof BUSINESS_ERROR_CODE];"
+    )
+    return gen_lines
+
+
 def main():
     src = sys.argv[1]
     out = sys.argv[2]
@@ -143,6 +194,10 @@ def main():
     else:
         lines.append(f"{INDENT}{INDENT}[op: string]: unknown;")
     lines.append(f"{INDENT}}};")
+
+    # Business error codes — parsed from backend/app/core/enums.py (single source
+    # of truth) so the generated file stays in sync with the Python backend.
+    lines.extend(gen_business_error_code())
 
     with open(out, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")

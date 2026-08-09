@@ -8,17 +8,19 @@
  * `shared/index.ts` 仅保留为转发 barrel，最终别名也会被移除。
  *
  * 本文件内容分类（退役关键决策 + §5.2b 收敛后现状）：
- * 1. 实体类型：`CashFlow` / `Portfolio` / `AssetSnapshot` 已改为
+ * 1. 实体类型：`CashFlow` / `Portfolio` / `UserPublic` / `AssetSnapshot` 已改为
  *    `components['schemas']['XxxOut']` 的 **re-export 别名**（§5.2b：P1 补齐后端缺字段、
  *    P2 枚举独立 schema 后，DTO 字段与前端视图模型已 1:1 对齐，可安全重导出）。
- *    `UserPublic` 因后端 `UserPublicOut` 把 `createdAt` 声明为可选、且 `name` 非空，
- *    与前端 `createdAt: string` / `name: string|null` 方向相反，**保留手写**（残留项）。
- *    金额字段一律 string 透传（Decimal→str 铁律，C-02）。
- * 2. 枚举 / 业务错误码 / 金额工具（`CashFlowType` / `SecuritySide` / `BUSINESS_ERROR_CODE`
+ *    `UserPublic` 现自后端 `UserPublicOut` 重导出（name 可空、createdAt 必填，与 DTO 已一致）；
+ *    分页统一改用前端 `PaginatedResponse<T>`（`@/api/types`，自 OpenAPI 生成），`Paginated` 残留
+ *    接口已移除。金额字段一律 string 透传（Decimal→str 铁律，C-02）。
+ * 2. 枚举 / 金额工具（`CashFlowType` / `SecuritySide`
  *    / `isMoneyString` / `computeNetAmount` / ...）= 前后端约定常量。后端 6 领域枚举 +
  *    `ExportType`/`ImportType`/`ImportErrorCode` 已由 P2 提升为独立命名 schema
  *    （`types/api.ts` 生成 `components['schemas']['Xxx']` 联合类型）；枚举的**运行时
  *    `as const` 对象**仍留本文件（下拉遍历需要值），与生成类型值一致。
+ *    `BUSINESS_ERROR_CODE`（及 `BusinessErrorCode` 类型）现由 `types/api.ts` 生成层
+ *    自 `backend/app/core/enums.py` 解析产出，本文件仅 re-export 转发，单一事实来源在后端的 enums.py。
  * 3. `NavSeriesPoint` / `XirrSeriesPoint` = **number 版展示类型**（图表/ECharts 只认
  *    number），移入 `types/series.ts`，本文件 re-export 维持历史 import 点。后端返回
  *    string（`NavPointOut`/`XirrPointOut`），由 `api/query.api.ts` 在取数边界用
@@ -239,13 +241,7 @@ export interface PaginationQuery {
   pageSize?: number;
 }
 
-/** 分页响应 */
-export interface Paginated<T> {
-  items: T[];
-  total: number;
-  page: number;
-  pageSize: number;
-}
+// 分页响应统一使用 @/api/types 的 `PaginatedResponse<T>`（OpenAPI 生成），本文件不再定义 `Paginated`。
 
 /** 日期范围查询参数 */
 export interface DateRangeQuery {
@@ -264,22 +260,10 @@ export const SUCCESS_MESSAGE = 'success';
 /** API 成功状态码 */
 export const SUCCESS_CODE = 0;
 
-export const BUSINESS_ERROR_CODE = {
-  SUCCESS: 0,
-  UNAUTHORIZED: 1001,
-  TOKEN_EXPIRED: 1002,
-  EMAIL_TAKEN: 1003,
-  PASSWORD_WRONG: 1004,
-  FILE_INVALID: 1006,
-  PENDING_DELETION: 1007,
-  ACCOUNT_NOT_DELETED: 1008,
-  RESTORE_EXPIRED: 1009,
-  VALIDATION_FAILED: 2000,
-  NOT_FOUND: 3001,
-  INTERNAL_ERROR: 5000,
-} as const;
-export type BusinessErrorCode =
-  (typeof BUSINESS_ERROR_CODE)[keyof typeof BUSINESS_ERROR_CODE];
+// BUSINESS_ERROR_CODE 与 BusinessErrorCode 现由 types/api.ts 生成层自
+// backend/app/core/enums.py 解析产出，本文件仅 re-export 转发（单一事实来源在后端 enums.py）。
+export { BUSINESS_ERROR_CODE } from '@/types/api';
+export type { BusinessErrorCode } from '@/types/api';
 
 /** 账户注销后的软删除保留期（冷静期）天数 */
 export const ACCOUNT_RETENTION_DAYS = 30;
@@ -381,20 +365,10 @@ export type CashFlow = components['schemas']['CashflowOut'];
 
 /**
  * 用户公开信息（API 响应中传输的安全子集，不含 passwordHash）。
- * ⚠️ 故意保留手写接口（§5.2b 收敛的**残留项**）：后端 `UserPublicOut` 将 `createdAt`
- * 声明为可选（`string | null`），但前端依赖 `createdAt: string`（user 行恒有 createdAt）；
- * 且 `name` 在后端正为非空 `str` 而前端允许 null。re-export 会把 `createdAt` 拓宽为可空
- * 并破坏严格消费处，故不自 `UserPublicOut` 重导出（字段漂移风险极低，用户模型稳定）。
+ * 现直接重导出后端 `UserPublicOut`（§5.2b 收敛）：DTO 经修正后 name 可空、createdAt 必填，
+ * 与前端消费一致，无需手写副本。
  */
-export interface UserPublic {
-  id: string;
-  email: string;
-  name: string | null;
-  avatar: string | null;
-  phone: string | null;
-  bio: string | null;
-  createdAt: string;
-}
+export type UserPublic = components['schemas']['UserPublicOut'];
 
 /** 投资组合 — re-export 自后端 `PortfolioOut`（§5.2b 收敛） */
 export type Portfolio = components['schemas']['PortfolioOut'];

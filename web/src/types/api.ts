@@ -792,7 +792,7 @@ export interface components {
         /** Email */
         email: string;
         /** Name */
-        name: string;
+        name: string | null;
         /** Avatar */
         avatar?: string | null;
         /** Phone */
@@ -800,7 +800,7 @@ export interface components {
         /** Bio */
         bio?: string | null;
         /** Createdat */
-        createdAt?: string | null;
+        createdAt: string;
       };
     /** ValidationError */
     ValidationError: {
@@ -887,3 +887,20 @@ export interface operations {
     get_preferences_api_users_preferences_get: components['schemas']['PreferenceOut'];
     patch_preferences_api_users_preferences_patch: components['schemas']['PreferenceOut'];
   };
+
+// ── Generated from backend/app/core/enums.py BusinessErrorCode (single source of truth) ──
+export const BUSINESS_ERROR_CODE = {
+  SUCCESS: 0,
+  UNAUTHORIZED: 1001,
+  TOKEN_EXPIRED: 1002,
+  EMAIL_TAKEN: 1003,
+  PASSWORD_WRONG: 1004,
+  FILE_INVALID: 1006,
+  PENDING_DELETION: 1007,
+  ACCOUNT_NOT_DELETED: 1008,
+  RESTORE_EXPIRED: 1009,
+  VALIDATION_FAILED: 2000,
+  NOT_FOUND: 3001,
+  INTERNAL_ERROR: 5000,
+} as const;
+export type BusinessErrorCode = (typeof BUSINESS_ERROR_CODE)[keyof typeof BUSINESS_ERROR_CODE];
