@@ -31,9 +31,10 @@ class Paginated(BaseModel, Generic[T]):
 # ───────────────────────── 组合 ─────────────────────────
 class PortfolioOut(BaseModel):
     id: str
+    userId: str
     name: str
     description: Optional[str] = None
-    baseDate: date
+    baseDate: Optional[date] = None
     currency: str
     archivedAt: Optional[datetime] = None
     createdAt: datetime
@@ -63,11 +64,13 @@ class AuthTokenOut(BaseModel):
 # ───────────────────────── 数据实体 ─────────────────────────
 class CashflowOut(BaseModel):
     id: str
+    portfolioId: str
     date: date
     type: str
     amount: str
     note: Optional[str] = None
     createdAt: datetime
+    updatedAt: datetime
 
 
 class SecurityOut(BaseModel):
@@ -77,6 +80,7 @@ class SecurityOut(BaseModel):
     type: str
     currency: str
     createdAt: datetime
+    updatedAt: datetime
 
 
 class TradeOut(BaseModel):
@@ -92,6 +96,7 @@ class TradeOut(BaseModel):
     feeTotal: str
     note: Optional[str] = None
     createdAt: datetime
+    updatedAt: datetime
 
 
 class PriceOut(BaseModel):
@@ -100,6 +105,7 @@ class PriceOut(BaseModel):
     price: str
     asOf: date
     createdAt: datetime
+    updatedAt: datetime
 
 
 class CashBalanceOut(BaseModel):
@@ -108,10 +114,12 @@ class CashBalanceOut(BaseModel):
     asOf: date
     note: Optional[str] = None
     createdAt: datetime
+    updatedAt: datetime
 
 
 class SnapshotOut(BaseModel):
     id: str
+    portfolioId: str
     date: date
     totalAsset: Optional[str] = None
     marketValue: Optional[str] = None
@@ -120,6 +128,8 @@ class SnapshotOut(BaseModel):
     valuationFlag: str
     note: Optional[str] = None
     recordedAt: datetime
+    createdAt: datetime
+    updatedAt: datetime
     derivedTotalAsset: Optional[str] = None
 
 
@@ -135,6 +145,7 @@ class DividendOut(BaseModel):
     type: str
     note: Optional[str] = None
     createdAt: datetime
+    updatedAt: datetime
 
 
 class PreferenceOut(BaseModel):

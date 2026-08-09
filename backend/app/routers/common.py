@@ -63,6 +63,7 @@ async def paginate(
 def serialize_portfolio(p: Portfolio) -> dict:
     return {
         "id": p.id,
+        "userId": p.user_id,
         "name": p.name,
         "description": p.description,
         "baseDate": p.base_date,
@@ -76,11 +77,13 @@ def serialize_portfolio(p: Portfolio) -> dict:
 def serialize_cashflow(c: CashFlow) -> dict:
     return {
         "id": c.id,
+        "portfolioId": c.portfolio_id,
         "date": c.date,
         "type": c.type.value,
         "amount": c.amount,
         "note": c.note,
         "createdAt": c.created_at,
+        "updatedAt": c.updated_at,
     }
 
 
@@ -92,6 +95,7 @@ def serialize_security(s: Security) -> dict:
         "type": s.type.value,
         "currency": s.currency,
         "createdAt": s.created_at,
+        "updatedAt": s.updated_at,
     }
 
 
@@ -109,6 +113,7 @@ def serialize_trade(t: SecurityTrade) -> dict:
         "feeTotal": t.fee_total,
         "note": t.note,
         "createdAt": t.created_at,
+        "updatedAt": t.updated_at,
     }
 
 
@@ -119,6 +124,9 @@ def serialize_price(p: SecurityPrice) -> dict:
         "price": p.price,
         "asOf": p.as_of,
         "createdAt": p.created_at,
+        # SecurityPrice 为不可变记录（仅 CreatedAtMixin，无 updated_at 列），
+        # updatedAt 语义等同 createdAt，避免为仅此处新增迁移列。
+        "updatedAt": p.created_at,
     }
 
 
@@ -129,12 +137,15 @@ def serialize_cashbalance(c: CashBalance) -> dict:
         "asOf": c.as_of,
         "note": c.note,
         "createdAt": c.created_at,
+        # CashBalance 为不可变记录（仅 CreatedAtMixin），updatedAt 等同 createdAt。
+        "updatedAt": c.created_at,
     }
 
 
 def serialize_snapshot(s: AssetSnapshot, derived_total=None) -> dict:
     return {
         "id": s.id,
+        "portfolioId": s.portfolio_id,
         "date": s.date,
         "totalAsset": s.total_asset,
         "marketValue": s.market_value,
@@ -143,6 +154,8 @@ def serialize_snapshot(s: AssetSnapshot, derived_total=None) -> dict:
         "valuationFlag": s.valuation_flag.value,
         "note": s.note,
         "recordedAt": s.recorded_at,
+        "createdAt": s.created_at,
+        "updatedAt": s.updated_at,
         "derivedTotalAsset": derived_total,
     }
 
@@ -163,6 +176,8 @@ def serialize_dividend(d, sec=None) -> dict:
         "type": d.type.value if isinstance(d.type, DividendType) else d.type,
         "note": d.note,
         "createdAt": d.created_at,
+        # DividendRecord 为不可变记录（仅 CreatedAtMixin），updatedAt 等同 createdAt。
+        "updatedAt": d.created_at,
     }
 
 

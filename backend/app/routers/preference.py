@@ -21,7 +21,7 @@ from app.schemas_resp import PreferenceOut
 
 # 服务端白名单（裁决 Q-5：保持 String + 校验，零 migration）
 _DATE_RANGES = ["1w", "1m", "3m", "6m", "1y", "ytd", "all"]
-_GRANULARITIES = ["day", "week", "month", "quarter", "year"]
+_GRANULARITIES = ["day", "week", "month", "year"]
 _AGGREGATIONS = ["last", "avg"]
 _THEMES = ["system", "light", "dark"]
 
