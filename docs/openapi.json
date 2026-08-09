@@ -7202,7 +7202,14 @@
             "title": "Email"
           },
           "name": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Name"
           },
           "avatar": {
@@ -7239,14 +7246,7 @@
             "title": "Bio"
           },
           "createdAt": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
+            "type": "string",
             "title": "Createdat"
           }
         },
@@ -7254,7 +7254,8 @@
         "required": [
           "id",
           "email",
-          "name"
+          "name",
+          "createdAt"
         ],
         "title": "UserPublicOut"
       },

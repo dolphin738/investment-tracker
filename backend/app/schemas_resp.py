@@ -61,11 +61,11 @@ class ClearDataOut(BaseModel):
 class UserPublicOut(BaseModel):
     id: str
     email: str
-    name: str
+    name: Optional[str]  # DB 可空；后端恒返回该字段（值可为 null），故 required+nullable
     avatar: Optional[str] = None
     phone: Optional[str] = None
     bio: Optional[str] = None
-    createdAt: Optional[str] = None
+    createdAt: str
 
 
 class AuthTokenOut(BaseModel):
