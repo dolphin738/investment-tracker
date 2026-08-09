@@ -349,7 +349,7 @@ describe('HoldingsPage — I-05 三板块联动', () => {
     expect(screen.getAllByTestId('holdings-unified-filter')).toHaveLength(1);
     // 三板块 Tab 都在
     const tabs = screen.getAllByRole('tab').map((t) => t.textContent?.trim());
-    expect(tabs).toEqual(['持仓', '买卖明细', '分红/费用']);
+    expect(tabs).toEqual(['持仓', '买卖明细', '分红']);
   });
 
   it('默认：range 不写入 URL（等于默认 1y），as-of 默认今日', () => {
@@ -368,8 +368,11 @@ describe('HoldingsPage — I-05 三板块联动', () => {
   it('证券多选 → 三板块同步（持仓 securityId + 买卖明细 securityId + 分红费用 securityIds）', async () => {
     renderPage();
 
-    // 打开证券多选面板并勾选甲股票（第一个 checkbox）
-    fireEvent.click(screen.getByRole('button', { name: /全部证券/ }));
+    // 聚焦证券文本框（文本框模糊匹配，I-05 升级）→ 打开多选面板并勾选甲股票
+    const secInput = screen.getByPlaceholderText(
+      '搜索代码或名称',
+    ) as HTMLInputElement;
+    fireEvent.focus(secInput);
     const checkboxes = document.querySelectorAll(
       '[data-testid="holdings-unified-filter"] input[type="checkbox"]',
     );
@@ -385,7 +388,7 @@ describe('HoldingsPage — I-05 三板块联动', () => {
       expect(capture.tradeQuery?.securityId).toBe('s-a');
     });
     // 分红费用板块：切到 Tab 后 DividendFeeSection 收到 securityIds
-    activateTab('分红/费用');
+    activateTab('分红');
     await waitFor(() => {
       expect(capture.incomeProps?.securityIds).toEqual(['s-a']);
     });
@@ -438,7 +441,7 @@ describe('HoldingsPage — I-05 三板块联动', () => {
     });
 
     // 分红费用板块同步收到日期范围
-    activateTab('分红/费用');
+    activateTab('分红');
     await waitFor(() => {
       expect(capture.incomeProps?.startDate).toBeTruthy();
     });

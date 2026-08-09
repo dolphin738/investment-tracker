@@ -708,7 +708,7 @@ describe('HoldingsPage 阶段 A', () => {
     it('分红入口仅【E】区块「录入分红」', () => {
       renderHoldingsPage();
 
-      activateTab('分红/费用');
+      activateTab('分红');
       expect(screen.getByRole('button', { name: /录入分红/ })).toBeDefined();
     });
   });

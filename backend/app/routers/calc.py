@@ -31,7 +31,7 @@ from app.models import (
 from app.routers.common import get_portfolio
 from app.schemas import RecalculateRangeReq
 from app.schemas_resp import (
-    HoldingOut,
+    HoldingsOut,
     NavPointOut,
     Paginated,
     RecalcOut,
@@ -103,7 +103,7 @@ router_holdings = APIRouter(
 )
 
 
-@router_holdings.get("/{portfolio_id}/holdings", response_model=list[HoldingOut])
+@router_holdings.get("/{portfolio_id}/holdings", response_model=HoldingsOut)
 async def get_holdings(
     p=Depends(get_portfolio),
     db: AsyncSession = Depends(get_db),
@@ -129,27 +129,54 @@ async def get_holdings(
             await db.execute(select(Security).where(Security.portfolio_id == p.id))
         ).scalars().all()
     }
-    out = []
+    # 各标的现价日期（as_of 前最后一条 SecurityPrice.as_of）
+    price_rows = (
+        await db.execute(
+            select(SecurityPrice.security_id, func.max(SecurityPrice.as_of))
+            .where(SecurityPrice.portfolio_id == p.id, SecurityPrice.as_of <= as_of)
+            .group_by(SecurityPrice.security_id)
+        )
+    ).all()
+    price_as_of_map = {sid: d for sid, d in price_rows}
+
+    items: list[dict] = []
+    total_mv = ZERO
+    total_cost = ZERO
+    total_pnl = ZERO
     for v in views:
         pnl = v.market_value - v.cost_total
         ratio = (pnl / v.cost_total) if v.cost_total != ZERO else ZERO
         sec = sec_map.get(v.security_id)
-        out.append(
+        price_as_of = price_as_of_map.get(v.security_id)
+        items.append(
             {
                 "securityId": v.security_id,
-                "code": sec.code if sec else None,
-                "name": sec.name if sec else None,
-                "quantity": v.quantity,
-                "avgCost": v.avg_cost,
-                "costTotal": v.cost_total,
-                "price": v.price,
-                "marketValue": v.market_value,
-                "pnl": pnl,
-                "ratio": ratio,
-                "isCostBased": v.is_cost_based,
+                "securityCode": sec.code if sec else "",
+                "securityName": sec.name if sec else "",
+                "securityType": sec.type.value if sec and sec.type else "",
+                "quantity": str(v.quantity),
+                "avgCost": str(v.avg_cost),
+                "costTotal": str(v.cost_total),
+                "marketPrice": str(v.price) if v.price is not None else None,
+                "priceAsOf": price_as_of.isoformat() if price_as_of else None,
+                "marketValue": str(v.market_value),
+                "pnl": str(pnl),
+                "pnlRate": str(ratio),
+                "flag": "COST_BASED" if v.is_cost_based else "EXACT",
             }
         )
-    return out
+        total_mv += v.market_value
+        total_cost += v.cost_total
+        total_pnl += pnl
+    total_rate = (total_pnl / total_cost) if total_cost != ZERO else ZERO
+    aggregate = {
+        "totalMarketValue": str(total_mv),
+        "totalCost": str(total_cost),
+        "totalProfit": str(total_pnl),
+        "totalProfitRate": str(total_rate),
+        "securityCount": len(items),
+    }
+    return {"items": items, "aggregate": aggregate}
 
 
 # ── XIRR §4.2.19 ──

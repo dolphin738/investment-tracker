@@ -14,7 +14,7 @@ from app.core.envelope import EnvelopeRoute
 from app.core.exceptions import BusinessException
 from app.core.security import CurrentUser, get_current_user
 from app.db.database import get_db
-from app.models import UserPreference
+from app.models import Portfolio, UserPreference
 from app.routers.common import serialize_preference
 from app.schemas_resp import PreferenceOut
 
@@ -98,6 +98,26 @@ async def patch_preferences(
         )
 
     for key, value in body.items():
+        if key == "defaultPortfolioId":
+            # 允许显式 null 取消默认；非 null 需校验该组合属于当前用户
+            if value is None:
+                pref.default_portfolio_id = None
+            else:
+                owned = (
+                    await db.execute(
+                        select(Portfolio).where(
+                            Portfolio.id == value, Portfolio.user_id == user.user_id
+                        )
+                    )
+                ).scalar_one_or_none()
+                if owned is None:
+                    raise BusinessException(
+                        code=BusinessErrorCode.VALIDATION_FAILED,
+                        message="默认组合不存在或不属于当前用户",
+                        status_code=400,
+                    )
+                pref.default_portfolio_id = value
+            continue
         if value is None:
             continue
         if key == "defaultDateRange":

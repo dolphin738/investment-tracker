@@ -182,17 +182,41 @@ class PreferenceOut(BaseModel):
 
 # ───────────────────────── 计算读取 ─────────────────────────
 class HoldingOut(BaseModel):
+    """单标的持仓（对齐前端 HoldingResponse 字段命名）。
+
+    金额/数量均为字符串（Decimal → 字符串，防前端类型漂移，见信封契约）。
+    """
+
     securityId: str
-    code: Optional[str] = None
-    name: Optional[str] = None
+    securityCode: str = ""
+    securityName: str = ""
+    securityType: str = ""
     quantity: str
     avgCost: str
     costTotal: str
-    price: str
+    marketPrice: Optional[str] = None
+    priceAsOf: Optional[str] = None
     marketValue: str
     pnl: str
-    ratio: str
-    isCostBased: bool
+    pnlRate: str
+    flag: str  # EXACT（有现价）/ COST_BASED（回退成本估值）
+
+
+class HoldingsAggregateOut(BaseModel):
+    """持仓汇总（对齐前端 HoldingsAggregate）。"""
+
+    totalMarketValue: str
+    totalCost: str
+    totalProfit: str
+    totalProfitRate: str
+    securityCount: int
+
+
+class HoldingsOut(BaseModel):
+    """持仓列表响应（信封 data 字段）：items + aggregate。"""
+
+    items: list[HoldingOut]
+    aggregate: HoldingsAggregateOut
 
 
 class NavPointOut(BaseModel):

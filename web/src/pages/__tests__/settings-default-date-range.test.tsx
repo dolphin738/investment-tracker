@@ -34,6 +34,8 @@ vi.mock('@/hooks/use-portfolios', () => ({
   useArchivePortfolio: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useDeletePortfolio: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useClearPortfolioData: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  // 项6：默认组合星标 toggle → PATCH /portfolios/:id/default
+  useSetDefaultPortfolio: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
 vi.mock('@/hooks/use-preferences', () => ({

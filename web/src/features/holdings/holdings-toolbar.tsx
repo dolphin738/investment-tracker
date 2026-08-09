@@ -65,9 +65,19 @@ export function HoldingsToolbar({
   className,
 }: HoldingsToolbarProps): JSX.Element {
   const [secOpen, setSecOpen] = useState(false);
+  const [secQuery, setSecQuery] = useState('');
   const [typesOpen, setTypesOpen] = useState(false);
   const [holdingsOpen, setHoldingsOpen] = useState(false);
   const maxDate = todayInAppTzIso();
+
+  // 证券筛选：文本框模糊匹配（code/name，覆盖所有标的类型，I-05 升级）
+  const q = secQuery.trim().toLowerCase();
+  const filteredSecurities = q
+    ? securities.filter(
+        (s) =>
+          s.name.toLowerCase().includes(q) || s.code.toLowerCase().includes(q),
+      )
+    : securities;
 
   // 起止日期回显：range=custom 用 from/to；否则按快捷项解析（含「全部」以 baseDate 为起点）
   const displayRange =
@@ -134,39 +144,36 @@ export function HoldingsToolbar({
           />
         </div>
 
-        {/* ③ 证券多选（含已选计数徽标） */}
+        {/* ③ 证券：文本框模糊匹配（code/name，覆盖全部标的类型；多选保持 sec=ID 契约） */}
         <div className="relative space-y-1.5">
           <Label className="text-xs text-muted-foreground">证券</Label>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="w-[150px] justify-between"
-            onClick={() => setSecOpen((o) => !o)}
-            aria-expanded={secOpen}
-          >
-            <span className="flex items-center gap-1.5">
-              {value.sec.length === 0 ? '全部证券' : `已选 ${value.sec.length} 项`}
-              {value.sec.length > 0 && (
-                <Badge variant="secondary" className="h-4 min-w-4 px-1 text-[10px]">
-                  {value.sec.length}
-                </Badge>
-              )}
-            </span>
-            <ChevronDown className="h-3.5 w-3.5 opacity-60" />
-          </Button>
+          <Input
+            type="text"
+            value={secQuery}
+            placeholder={
+              value.sec.length === 0 ? '搜索代码或名称' : `已选 ${value.sec.length} 项`
+            }
+            onChange={(e) => {
+              setSecQuery(e.target.value);
+              setSecOpen(true);
+            }}
+            onFocus={() => setSecOpen(true)}
+            onBlur={() => window.setTimeout(() => setSecOpen(false), 120)}
+            className="w-[180px]"
+          />
           {secOpen && (
-            <div className="absolute z-20 mt-1 w-[220px] rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md">
-              {securities.length === 0 ? (
+            <div className="absolute z-20 mt-1 max-h-60 w-[240px] overflow-auto rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md">
+              {filteredSecurities.length === 0 ? (
                 <p className="px-2 py-2 text-xs text-muted-foreground">
-                  暂无标的
+                  无匹配标的
                 </p>
               ) : (
-                securities.map((sec) => {
+                filteredSecurities.map((sec) => {
                   const checked = value.sec.includes(sec.id);
                   return (
                     <label
                       key={sec.id}
+                      onMouseDown={(e) => e.preventDefault()}
                       className="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-muted"
                     >
                       <input

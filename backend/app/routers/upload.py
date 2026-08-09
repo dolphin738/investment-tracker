@@ -13,6 +13,7 @@ POST /api/upload/avatar
 from __future__ import annotations
 
 import os
+import re
 import uuid
 from pathlib import Path
 
@@ -53,20 +54,22 @@ def _sniff_ext(content: bytes) -> str | None:
     return None
 
 
-def _remove_old(avatar_url: str | None) -> None:
-    """best-effort 删除旧头像文件（三重校验防穿越）。"""
-    if not avatar_url or not avatar_url.startswith(f"{PREFIX}/{UPLOAD_SUBDIR}/"):
-        return
-    fname = avatar_url.rsplit("/", 1)[-1]
-    import re
+def _remove_old(avatar_value: str | None) -> None:
+    """best-effort 删除旧头像文件（兼容完整 URL / 绝对路径 / 不同前缀；防穿越）。
 
+    只取最后一段文件名定位，避免旧数据里 avatar 存成「完整 URL」或「旧前缀路径」
+    时 startswith 校验不通过而静默漏删（需求项5）。
+    """
+    if not avatar_value:
+        return
+    # 兼容 http(s)://host/... 与绝对/相对路径：只取最后一个 / 或 \\ 之后的文件名
+    fname = avatar_value.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
     if not re.fullmatch(r"[0-9a-f-]{36}\.(jpg|png|webp)", fname):
         return
     base = Path(settings.UPLOAD_DIR)
-    target = (base / UPLOAD_SUBDIR / fname).resolve()
-    if target != (base / UPLOAD_SUBDIR / fname) and not str(target).startswith(
-        str((base / UPLOAD_SUBDIR).resolve())
-    ):
+    allowed = (base / UPLOAD_SUBDIR).resolve()
+    target = (allowed / fname).resolve()
+    if target != allowed and not str(target).startswith(str(allowed)):
         return  # 路径穿越防护
     try:
         os.remove(target)

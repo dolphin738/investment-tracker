@@ -222,10 +222,11 @@ export default function HoldingsPage(): JSX.Element {
   const sortedItems = useMemo(
     () =>
       [...(holdings.data?.items ?? [])].sort((a, b) => {
-        const aOpen = a.quantity > 0 ? 0 : 1;
-        const bOpen = b.quantity > 0 ? 0 : 1;
+        // 后端金额/数量为字符串（Decimal→str 契约），算术前需 Number() 转换
+        const aOpen = Number(a.quantity) > 0 ? 0 : 1;
+        const bOpen = Number(b.quantity) > 0 ? 0 : 1;
         if (aOpen !== bOpen) return aOpen - bOpen;
-        return b.marketValue - a.marketValue;
+        return Number(b.marketValue) - Number(a.marketValue);
       }),
     [holdings.data?.items],
   );
@@ -300,7 +301,7 @@ export default function HoldingsPage(): JSX.Element {
           <TabsTrigger value="holdings">持仓</TabsTrigger>
           <TabsTrigger value="trades">买卖明细</TabsTrigger>
           {/* 【E】HOLD-B-P0-10：分红 / 费用独立记录，不参与收益计算 */}
-          <TabsTrigger value="income">分红/费用</TabsTrigger>
+          <TabsTrigger value="income">分红</TabsTrigger>
         </TabsList>
 
         {/* ============ 持仓 Tab ============ */}
@@ -429,15 +430,15 @@ export default function HoldingsPage(): JSX.Element {
                   <TableBody>
                     {sortedItems.map((h) => {
                       const weight =
-                        aggregate && aggregate.totalMarketValue > 0
-                          ? h.marketValue / aggregate.totalMarketValue
+                        aggregate && Number(aggregate.totalMarketValue) > 0
+                          ? Number(h.marketValue) / Number(aggregate.totalMarketValue)
                           : 0;
                       return (
                         <TableRow key={h.securityId}>
                           <TableCell className="font-medium">
                             <div className="flex items-center gap-2">
                               {h.securityName}
-                              {h.quantity === 0 && (
+                              {Number(h.quantity) === 0 && (
                                 <Badge
                                   variant="outline"
                                   className="text-[10px] text-muted-foreground"

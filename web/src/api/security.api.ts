@@ -13,11 +13,14 @@ import type {
   Security,
   CreateSecurityDto,
   UpdateSecurityDto,
+  PaginatedResponse,
 } from './types';
 
-/** 获取标的列表 */
-export function listSecurities(portfolioId: string): Promise<Security[]> {
-  return http.get<Security[]>(`/portfolios/${portfolioId}/securities`);
+/** 获取标的列表（后端返回分页结构 {items,total,page,pageSize}，hook 层已 select 解包为数组） */
+export function listSecurities(
+  portfolioId: string,
+): Promise<PaginatedResponse<Security>> {
+  return http.get<PaginatedResponse<Security>>(`/portfolios/${portfolioId}/securities`);
 }
 
 /** 新增标的 */

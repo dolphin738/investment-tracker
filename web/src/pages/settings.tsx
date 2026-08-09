@@ -86,6 +86,7 @@ import {
   useClearPortfolioData,
   useDeletePortfolio,
   usePortfolios,
+  useSetDefaultPortfolio,
 } from '@/hooks/use-portfolios';
 import { usePortfolioStore } from '@/stores/portfolio.store';
 import {
@@ -160,6 +161,8 @@ export default function SettingsPage(): JSX.Element {
   const archiveMutation = useArchivePortfolio();
   const currentPortfolioId = usePortfolioStore((s) => s.currentPortfolioId);
   const setCurrentPortfolio = usePortfolioStore((s) => s.setCurrentPortfolio);
+  // 🆕 项6：默认组合星标切换（toggle）→ PATCH /portfolios/:id/default
+  const setDefaultMutation = useSetDefaultPortfolio();
 
   // 数据管理：导入对话框开关（T05）
   const [importOpen, setImportOpen] = useState(false);
@@ -287,28 +290,25 @@ export default function SettingsPage(): JSX.Element {
     prefForm.defaultPortfolioId === portfolioId;
 
   /**
-   * 🆕 组合管理区「设为默认」（SET-P0-06 · §7.8 ④ 操作列）
+   * 🆕 组合管理区「设为默认 / 取消默认」（项6 · SET-P0-06 · §7.8 ④ 操作列）
    *
-   * 与 handleSavePreferences 的默认组合逻辑保持完全一致：
-   * 先写服务端偏好 defaultPortfolioId，成功后把当前视图组合切过去，
-   * 并同步偏好表单，避免「保存偏好」按钮误显示为有未保存变更。
-   * 已归档组合不能作为默认组合（默认组合下拉同样过滤了 archivedAt）。
+   * 改为 toggle：调用 PATCH /portfolios/:id/default，后端已是默认则取消、否则设为默认。
+   * 成功后立即把本地偏好表单 defaultPortfolioId 对齐到返回值（星标与「默认组合」下拉同步高亮），
+   * 并失效偏好查询让 serverPrefs 与后端对齐；若切换为新的默认组合则把当前视图组合切过去。
+   * 已归档组合不能作为默认组合（默认组合下拉同样过滤了 archivedAt），且不可取消默认。
    */
   const handleSetDefaultPortfolio = (portfolio: Portfolio) => {
     if (portfolio.archivedAt) {
       return;
     }
-    updatePrefsMutation.mutate(
-      { defaultPortfolioId: portfolio.id },
-      {
-        onSuccess: () => {
-          setPrefForm((prev) => ({ ...prev, defaultPortfolioId: portfolio.id }));
-          if (portfolio.id !== currentPortfolioId) {
-            setCurrentPortfolio(portfolio.id);
-          }
-        },
+    setDefaultMutation.mutate(portfolio.id, {
+      onSuccess: (pref) => {
+        setPrefForm((prev) => ({
+          ...prev,
+          defaultPortfolioId: pref.defaultPortfolioId ?? '',
+        }));
       },
-    );
+    });
   };
 
   /** 🆕 更新表单单个字段 */
@@ -857,7 +857,7 @@ export default function SettingsPage(): JSX.Element {
                     <TableCell className="text-sm">{p.currency}</TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-1">
-                        {/* 设为默认（SET-P0-06）：写偏好 defaultPortfolioId + 切换当前组合 */}
+                        {/* 设为默认 / 取消默认（项6 · SET-P0-06）：toggle 切换 defaultPortfolioId */}
                         <Button
                           size="icon"
                           variant="ghost"
@@ -866,14 +866,12 @@ export default function SettingsPage(): JSX.Element {
                             p.archivedAt
                               ? '已归档组合不能设为默认'
                               : isDefaultPortfolio(p.id)
-                                ? '当前默认组合'
+                                ? '取消默认'
                                 : '设为默认'
                           }
-                          aria-label="设为默认"
+                          aria-label={isDefaultPortfolio(p.id) ? '取消默认' : '设为默认'}
                           disabled={
-                            Boolean(p.archivedAt) ||
-                            isDefaultPortfolio(p.id) ||
-                            updatePrefsMutation.isPending
+                            Boolean(p.archivedAt) || setDefaultMutation.isPending
                           }
                         >
                           <Star

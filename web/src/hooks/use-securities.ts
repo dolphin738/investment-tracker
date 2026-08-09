@@ -10,13 +10,14 @@ import {
   updateSecurity,
   deleteSecurity,
 } from '@/api/security.api';
-import type { CreateSecurityDto, UpdateSecurityDto } from '@/api/types';
+import type { CreateSecurityDto, PaginatedResponse, Security, UpdateSecurityDto } from '@/api/types';
 
-/** 标的列表 */
+/** 标的列表（后端返回分页结构，select 解包为纯数组，调用方直接用 data 即可） */
 export function useSecurities(portfolioId: string | null) {
-  return useQuery({
+  return useQuery<PaginatedResponse<Security>, Error, Security[]>({
     queryKey: ['securities', 'list', portfolioId],
     queryFn: () => listSecurities(portfolioId!),
+    select: (res) => res?.items ?? [],
     enabled: Boolean(portfolioId),
     staleTime: 60 * 1000,
   });

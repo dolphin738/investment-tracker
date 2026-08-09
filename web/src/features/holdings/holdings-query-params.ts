@@ -72,7 +72,6 @@ export const HOLDINGS_TYPE_OPTIONS: ReadonlyArray<{
   { value: SecurityType.STOCK, label: '股票' },
   { value: SecurityType.FUND, label: '基金' },
   { value: SecurityType.BOND, label: '债券' },
-  { value: SecurityType.CASH, label: '现金' },
   { value: SecurityType.OTHER, label: '其他' },
 ];
 

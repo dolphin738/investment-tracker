@@ -26,9 +26,9 @@ from app.models import (
 )
 from app.core.enums import BusinessErrorCode
 from app.core.exceptions import BusinessException
-from app.routers.common import get_portfolio, serialize_portfolio
+from app.routers.common import get_portfolio, serialize_portfolio, serialize_preference
 from app.schemas import PortfolioArchiveReq, PortfolioCreateReq, PortfolioPatchReq
-from app.schemas_resp import ClearDataOut, PortfolioOut
+from app.schemas_resp import ClearDataOut, PortfolioOut, PreferenceOut
 
 router = APIRouter(prefix="/api", tags=["portfolios"], route_class=EnvelopeRoute)
 
@@ -142,3 +142,27 @@ async def archive_portfolio(
         )
         await db.commit()
     return serialize_portfolio(p)
+
+
+@router.patch("/portfolios/{portfolio_id}/default", response_model=PreferenceOut)
+async def set_default_portfolio(
+    p: Portfolio = Depends(get_portfolio),
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """五角星设为默认 / 再次点击取消默认（toggle，需求项6）。
+
+    复用 get_portfolio 依赖保证归属；单字段天然互斥，无需清空其它组合。
+    """
+    pref = (
+        await db.execute(
+            select(UserPreference).where(UserPreference.user_id == user.user_id)
+        )
+    ).scalar_one_or_none()
+    if pref is None:
+        pref = UserPreference(user_id=user.user_id)
+        db.add(pref)
+    pref.default_portfolio_id = None if pref.default_portfolio_id == p.id else p.id
+    await db.commit()
+    await db.refresh(pref)
+    return serialize_preference(pref)

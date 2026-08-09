@@ -79,13 +79,14 @@ async def test_full_crud_triggers_derived_snapshot_and_calc(client):
     r = await client.get(
         f"/api/portfolios/{pid}/holdings", headers=h, params={"asOf": str(D1)}
     )
-    _, _, holdings, _ = env(r)
+    _, _, data, _ = env(r)
+    holdings = data["items"]
     view = next(v for v in holdings if v["securityId"] == sec_id)
     assert Decimal(view["quantity"]) == Decimal(1000)
     assert Decimal(view["avgCost"]) == Decimal(10)
     assert Decimal(view["marketValue"]) == Decimal("10000")
     assert Decimal(view["pnl"]) == Decimal(0)
-    assert view["isCostBased"] is False
+    assert view["flag"] == "EXACT"
 
     # ③ xirr/latest 与 nav/latest 均应产出数据
     r = await client.get(f"/api/portfolios/{pid}/xirr/latest", headers=h)
@@ -144,7 +145,8 @@ async def test_sell_hard_check_rejects_oversell(client):
     r = await client.get(
         f"/api/portfolios/{pid}/holdings", headers=h, params={"asOf": str(D2)}
     )
-    _, _, holdings, _ = env(r)
+    _, _, data, _ = env(r)
+    holdings = data["items"]
     view = next(v for v in holdings if v["securityId"] == sec_id)
     assert Decimal(view["quantity"]) == Decimal(500)
 

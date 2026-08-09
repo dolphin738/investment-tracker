@@ -19,6 +19,7 @@ import type { DividendQuery } from '@/api/dividend.api';
 import type {
   CreateDividendRecordDto,
   DividendRecord,
+  PaginatedResponse,
   UpdateDividendRecordDto,
 } from '@/api/types';
 
@@ -27,16 +28,20 @@ export const DIVIDENDS_KEY = ['dividends'] as const;
 
 /**
  * 分红记录列表（I-05：支持 securityId 多值 / 日期范围过滤）
+ *
+ * 后端返回分页结构 {items,total,page,pageSize}，select 解包为纯数组，
+ * 调用方直接用 `data` 即可（如 dividend-fee-section 的 `dividends.data`）。
  */
 export function useDividends(
   portfolioId: string | null,
   query: DividendQuery = {},
 ) {
-  return useQuery<DividendRecord[]>({
+  return useQuery<PaginatedResponse<DividendRecord>, Error, DividendRecord[]>({
     queryKey: portfolioId
       ? ['dividends', 'list', portfolioId, query]
       : ['dividends', 'disabled'],
     queryFn: () => listApi(portfolioId!, query),
+    select: (res) => res?.items ?? [],
     enabled: Boolean(portfolioId),
     staleTime: 30 * 1000,
   });

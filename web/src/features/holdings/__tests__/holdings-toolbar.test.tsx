@@ -198,28 +198,33 @@ describe('HoldingsToolbar — I-05 统一筛选器', () => {
     expect(onChange).toHaveBeenCalledWith({ date: '2026-06-01' });
   });
 
-  it('证券多选：勾选/取消回调携带 sec 数组', () => {
+  it('证券多选：文本框模糊匹配 + 勾选回调携带 sec 数组', () => {
+    // 选中态：placeholder 显示已选计数「已选 1 项」（I-05 升级：文本框替代原「全部证券」按钮）
+    const onChangeA = vi.fn();
+    renderToolbar({ sec: ['s-a'] }, onChangeA);
+    expect(screen.getByPlaceholderText('已选 1 项')).toBeDefined();
+
+    // 空态：placeholder 提示「搜索代码或名称」
+    cleanup();
     const onChange = vi.fn();
     renderToolbar({}, onChange);
+    const secInput = screen.getByPlaceholderText(
+      '搜索代码或名称',
+    ) as HTMLInputElement;
+    expect(secInput).toBeDefined();
 
-    // 未选时显示「全部证券」
-    expect(screen.getByText('全部证券')).toBeDefined();
+    // 文本框模糊匹配：输入「股」过滤出甲股票（code/name 覆盖全部标的类型）
+    fireEvent.change(secInput, { target: { value: '股' } });
+    fireEvent.focus(secInput);
+    expect(screen.getByText('甲股票')).toBeDefined();
+    expect(screen.queryByText('乙基金')).toBeNull();
 
-    // 打开证券多选面板 → 勾选第一项（甲股票）
-    fireEvent.click(screen.getByRole('button', { name: /全部证券/ }));
+    // 勾选面板第一项（甲股票）→ onChange({ sec: ['s-a'] })
     const checkboxes = document.querySelectorAll(
       '[data-testid="holdings-unified-filter"] input[type="checkbox"]',
     );
     fireEvent.click(checkboxes[0]);
     expect(onChange).toHaveBeenCalledWith({ sec: ['s-a'] });
-
-    // 已选 1 项时显示计数徽标
-    renderToolbar({ sec: ['s-a'] }, onChange);
-    expect(screen.getByText('已选 1 项')).toBeDefined();
-    const badge = screen.getAllByText('1').find(
-      (el) => el.className.includes('text-[10px]'),
-    );
-    expect(badge).toBeDefined();
   });
 
   it('场景下拉：全部/买入/卖出，变更回调携带 scenario', () => {
@@ -273,7 +278,8 @@ describe('HoldingsToolbar — I-05 统一筛选器', () => {
     });
 
     expect(getAsOfInput().value).toBe('2026-05-01');
-    expect(screen.getByText('已选 1 项')).toBeDefined();
+    // 已选计数反映到文本框 placeholder（I-05 升级：文本框替代原徽标）
+    expect(screen.getByPlaceholderText('已选 1 项')).toBeDefined();
 
     const container = document.querySelector('[data-testid="holdings-unified-filter"]')!;
     const selects = container.querySelectorAll('select');

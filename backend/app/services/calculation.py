@@ -20,7 +20,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.finance_core.nav import NavResult, NavState, compute_daily_nav
 from app.finance_core.xirr import Cashflow, calculate_xirr
-from app.models import AssetSnapshot, CashFlow, CashFlowType, DailyNav, DailyXirr
+from app.models import (
+    AssetSnapshot,
+    CashFlow,
+    CashFlowType,
+    DailyNav,
+    DailyXirr,
+    Portfolio,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +57,15 @@ class CalculationService:
         first_event = min(candidates) if candidates else None
         if first_event is not None and first_event < start:
             start = first_event
+
+        # 项1：组合成立日动态跟踪 —— base_date 始终等于最早事件日（总资产记录 ∪ 出入金），
+        # 与 NAV 计算起点 first_event 完全一致。复用上面已算出的 first_event，避免重复查询；
+        # 通过 identity map 更新内存中的 Portfolio 实例，使同请求内返回的组合 base_date 立即生效。
+        # 单点挂钩：compute_range 是所有数据变更（快照/买卖/现价/现金余额/出入金）经
+        # recalculateNavRange 必达的叶子，由此保证增/删/改任一类事件都会刷新成立日。
+        portfolio = await self.session.get(Portfolio, portfolio_id)
+        if portfolio is not None and portfolio.base_date != first_event:
+            portfolio.base_date = first_event
         snaps = (
             await self.session.execute(
                 select(AssetSnapshot)

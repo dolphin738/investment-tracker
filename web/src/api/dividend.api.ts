@@ -13,6 +13,7 @@ import type {
   DividendRecord,
   CreateDividendRecordDto,
   UpdateDividendRecordDto,
+  PaginatedResponse,
 } from './types';
 
 /** 分红查询参数（I-05：标的多值 / 日期范围） */
@@ -25,12 +26,12 @@ export interface DividendQuery {
   endDate?: string;
 }
 
-/** 获取分红记录列表 */
+/** 获取分红记录列表（后端返回分页结构 {items,total,page,pageSize}，hook 层已 select 解包为数组） */
 export function listDividends(
   portfolioId: string,
   query: DividendQuery = {},
-): Promise<DividendRecord[]> {
-  return http.get<DividendRecord[]>(
+): Promise<PaginatedResponse<DividendRecord>> {
+  return http.get<PaginatedResponse<DividendRecord>>(
     `/portfolios/${portfolioId}/dividends`,
     {
       params: {

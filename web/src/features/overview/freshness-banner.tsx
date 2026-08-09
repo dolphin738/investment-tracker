@@ -42,6 +42,12 @@ export function FreshnessBanner({
 
   if (!freshness.isStale || dismissed) return null;
 
+  // 空组合（未录入任何行情与现金余额记录）：latestPriceAsOf / latestCashAsOf 均为 null，
+  // 此时仅产生「无现金余额记录」类噪声提示且无任何有效操作入口，按「无数据」隐藏（需求项7）。
+  if (freshness.latestPriceAsOf === null && freshness.latestCashAsOf === null) {
+    return null;
+  }
+
   const hasPriceReason = freshness.reasons.some((r) => r.kind === 'PRICE');
   const hasCashReason = freshness.reasons.some((r) => r.kind === 'CASH');
 

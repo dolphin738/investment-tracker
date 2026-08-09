@@ -7,23 +7,36 @@
 #   . .\dev.ps1              # 初始化环境 + 自动安装依赖（幂等，已装则跳过）
 #   . .\dev.ps1 -SkipInstall # 仅设置环境，跳过依赖安装（秒进环境）
 #   . .\dev.ps1 -Force       # 强制重装后端 + 前端依赖
-#   Start-Dev                # 一条命令并发启动前后端（独立窗口）
-#   Stop-Dev                 # 关闭所有开发进程
+#   Start-Dev / Stop-Dev                 # 启停前后端（独立窗口）
+#   Start-Backend / Stop-Backend         # 仅启动/停止后端
+#   Start-Frontend / Stop-Frontend       # 仅启动/停止前端
 #
 #   # 方式二：直接调用（无需先 dot-source，适合一次性启停）
+#   .\dev.ps1               # 无参数 → 初始化 + 弹出数字菜单（输入编号即执行）
 #   .\dev.ps1 start          # 等价于「初始化 + Start-Dev」
 #   .\dev.ps1 stop           # 直接 Stop-Dev（跳过初始化）
 #   .\dev.ps1 start -Force   # 强制重装依赖后启动
+#   .\dev.ps1 restart                 # 重启前后端（跳过依赖安装）
+#   .\dev.ps1 restart backend         # 仅重启后端（前端不受影响）
+#   .\dev.ps1 restart frontend        # 仅重启前端
+#   .\dev.ps1 stop backend / frontend  # 仅停止指定服务
+#
+#   菜单编号（无参数运行 .\dev.ps1 时出现）：
+#     [1]启动前后端  [2]启动后端  [3]启动前端
+#     [4]停止前后端  [5]停止后端  [6]停止前端
+#     [7]重启前后端  [8]重启后端  [9]重启前端
+#     [i]重装依赖   [0]退出
 #
 # 提供能力：
-#   1) 轻量环境设置（被 dot-source 或直接启动时自动执行）：
+#   1) 轻量环境设置（被 dot-source 或直接启动/重启时自动执行）：
 #        - 把 WorkBuddy managed Python 与 Node 加入 PATH
 #        - 清除 NODE_OPTIONS（绕过安全钩子对 pnpm / npm 的拦截）
 #        - 由 uv 管理 backend/.venv（uv sync 自动创建，替代旧的 pip venv）
 #        - 复制 backend/.env.example -> backend/.env（若不存在）
 #   2) Init-Dev —— 重型依赖安装（幂等，可被 -SkipInstall / -Force 控制）
-#   3) Start-Dev —— 一条命令并发启动前后端（各开独立窗口）
-#   4) Stop-Dev  —— 关闭所有开发进程
+#   3) Start-Dev / Start-Backend / Start-Frontend —— 启动（各开独立窗口）
+#   4) Stop-Dev / Stop-Backend / Stop-Frontend —— 关闭（按服务标签 PID 文件）
+#   5) restart —— 先停后起（支持单服务），默认跳过依赖安装（-Force 可强制重装）
 #
 # 设计参考：上级目录 app/dev-env.ps1（仅做 PATH + NODE_OPTIONS 的轻量设置）。
 # 本脚本不修改、不依赖 dev-env.ps1，仅借鉴其"按需、轻量"的理念。
@@ -33,7 +46,8 @@
 param(
     [switch]$SkipInstall,   # 跳过 pip / pnpm / npm 依赖安装（仅设置环境）
     [switch]$Force,         # 强制重装依赖（忽略已安装标记）
-    [string]$Action = ""    # 直接调用时使用：start / stop（空 = 仅初始化，供 dot-source）
+    [string]$Action = "",   # 直接调用时使用：start / stop / restart（空 = 仅初始化，供 dot-source）
+    [string]$Service = ""   # 服务定向：backend / frontend（空 = 前后端都作用）
 )
 
 $ErrorActionPreference = "Stop"
@@ -64,7 +78,9 @@ $venv       = Join-Path $backend ".venv"
 $pyproject  = Join-Path $backend "pyproject.toml"
 $envExample = Join-Path $backend ".env.example"
 $envFile    = Join-Path $backend ".env"
-$devPidsFile = Join-Path $root ".dev-pids.txt"
+# 每个服务独立的 PID 文件（带标签，避免 stop/restart 误杀另一个服务）
+$backendPidFile  = Join-Path $root ".dev-backend.pid"
+$frontendPidFile = Join-Path $root ".dev-frontend.pid"
 
 # ---------------------------------------------------------------------------
 # 健壮性：必要的目录 / 文件检查
@@ -106,6 +122,10 @@ if (-not $python) {
     Write-Host " 未找到 Python (>=3.11)。请安装 Python 或确认 WorkBuddy managed Python 路径。" -ForegroundColor Red
     return
 }
+
+# $pyDir 必须在任何 Start-* 之前定义：后端子进程命令的 here-string 会把 $pyDir
+# 展开进 $env:PATH，未定义则子进程找不到 uvicorn。与 Action 无关，故无条件计算。
+$pyDir = Split-Path -Parent $python
 
 # ---------------------------------------------------------------------------
 # 2. 依赖安装函数 Init-Dev（基于 uv，幂等，可被 -SkipInstall / -Force 控制）
@@ -188,16 +208,64 @@ function Init-Dev {
 }
 
 # ===========================================================================
-# 函数：Start-Dev —— 并发启动前后端（各开一个独立 PowerShell 窗口）
+# 通用：启动 / 停止单个服务的 helper（各开独立 PowerShell 窗口）
 # ===========================================================================
-function Start-Dev {
-    Write-Host "→ 启动开发服务（前后端并发，各开独立窗口）" -ForegroundColor Cyan
 
+# 启动一个服务：把子进程命令写入临时 .ps1，再用 powershell -File 拉独立窗口，
+# PID 写入指定的 pid 文件（带服务标签）。返回进程对象。
+function Start-Service {
+    param(
+        [string]$Name,     # backend / frontend（用于临时文件名）
+        [string]$Script,   # 子进程要执行的命令（here-string）
+        [string]$PidFile,  # 该服务的 PID 文件
+        [string]$Label     # 中文名，用于打印
+    )
+    $tmpDir = if ($env:TEMP) { $env:TEMP } else { $env:TMPDIR }
+    $scriptFile = Join-Path $tmpDir "dev-$Name-$(Get-Random).ps1"
+    [System.IO.File]::WriteAllText($scriptFile, $Script, (New-Object System.Text.UTF8Encoding $true))
+
+    $proc = Start-Process powershell -ArgumentList "-NoExit", "-File", $scriptFile -PassThru
+    if ($proc) {
+        $proc.Id | Out-File -FilePath $PidFile -Encoding utf8
+        Write-Host "→ $Label 已启动（PID=$($proc.Id)）" -ForegroundColor Green
+    } else {
+        Write-Host "  $Label 启动失败。" -ForegroundColor Red
+    }
+    return $proc
+}
+
+# 停止一个服务：按 pid 文件杀进程树，并删除 pid 文件。
+function Stop-Service {
+    param(
+        [string]$PidFile,
+        [string]$Label
+    )
+    if (-not (Test-Path $PidFile)) {
+        Write-Host "  $Label 未在运行（未找到 $PidFile）。" -ForegroundColor Yellow
+        return
+    }
+    Write-Host "→ 停止 $Label ..." -ForegroundColor Cyan
+    Get-Content $PidFile | ForEach-Object {
+        $pidv = $_.Trim()
+        if ($pidv -match '^\d+$') {
+            & taskkill /PID $pidv /T /F 2>$null
+            Write-Host "  → 已请求关闭进程树 PID=$pidv" -ForegroundColor Gray
+        }
+    }
+    Remove-Item $PidFile -Force -ErrorAction SilentlyContinue
+    Write-Host "→ $Label 已停止。" -ForegroundColor Green
+}
+
+# ===========================================================================
+# 函数：Start-Backend / Start-Frontend / Start-Dev
+# ===========================================================================
+
+function Start-Backend {
     # ---- 后端启动命令（here-string）----
     # 说明：
     #   - 子进程需要自行展开的 $env:PATH / $env:NODE_OPTIONS 用反引号 ` 转义，
     #     避免被“主脚本”提前展开；
-    #   - $pyDir / $nodePath / $backend / $activate / $BackendPort 是主脚本变量，
+    #   - $pyDir / $nodePath / $backend / $BackendPort 是主脚本变量，
     #     在构造 here-string 时由主作用域展开为字面量（路径 / 端口号）。
     $backendCmd = @"
 `$ErrorActionPreference = 'Stop'
@@ -207,7 +275,14 @@ Set-Location "$backend"
 Write-Host "→ 启动后端：uvicorn app.main:app --reload --port $BackendPort" -ForegroundColor Cyan
 uv run uvicorn app.main:app --reload --port $BackendPort
 "@
+    $proc = Start-Service -Name "backend" -Script $backendCmd -PidFile $backendPidFile -Label "后端"
+    if ($proc) {
+        Write-Host "  后端 Swagger : http://localhost:$BackendPort/api/docs" -ForegroundColor Yellow
+    }
+    return $proc
+}
 
+function Start-Frontend {
     # ---- 前端启动命令（here-string）----
     # 前端窗口无需 venv，但需把 managed Node 目录加入 PATH 并清除 NODE_OPTIONS。
     # 优先 pnpm dev，若 pnpm 不可用则回退 npm run dev。
@@ -223,26 +298,17 @@ Set-Location "$web"
 Write-Host "→ 启动前端：$frontendStart (port $FrontendPort)" -ForegroundColor Cyan
 $frontendStart
 "@
+    $proc = Start-Service -Name "frontend" -Script $frontendCmd -PidFile $frontendPidFile -Label "前端"
+    if ($proc) {
+        Write-Host "  前端页面     : http://localhost:$FrontendPort" -ForegroundColor Yellow
+    }
+    return $proc
+}
 
-    # ---- 各开一个独立 PowerShell 窗口（互不干扰、可独立关闭）----
-    # 把子进程要执行的命令写入临时 .ps1 文件，再用 `powershell -File` 启动，
-    # 彻底避免 -Command 把含空格路径 / 中文 / 特殊字符经多层引号传递时
-    # 被误解析（例如 >>> 被当成重定向运算符）。
-    $tmpDir = if ($env:TEMP) { $env:TEMP } else { $env:TMPDIR }
-    $backendScript  = Join-Path $tmpDir "dev-backend-$(Get-Random).ps1"
-    $frontendScript = Join-Path $tmpDir "dev-frontend-$(Get-Random).ps1"
-    [System.IO.File]::WriteAllText($backendScript,  $backendCmd,  (New-Object System.Text.UTF8Encoding $true))
-    [System.IO.File]::WriteAllText($frontendScript, $frontendCmd, (New-Object System.Text.UTF8Encoding $true))
-
-    $backendProc  = Start-Process powershell -ArgumentList "-NoExit", "-File", $backendScript  -PassThru
-    $frontendProc = Start-Process powershell -ArgumentList "-NoExit", "-File", $frontendScript -PassThru
-
-    # ---- 保存 PID 供 Stop-Dev 使用 ----
-    @(
-        if ($backendProc)  { $backendProc.Id }
-        if ($frontendProc) { $frontendProc.Id }
-    ) | Where-Object { $_ } | ForEach-Object { $_ } | Out-File -FilePath $devPidsFile -Encoding utf8
-
+function Start-Dev {
+    Write-Host "→ 启动开发服务（前后端并发，各开独立窗口）" -ForegroundColor Cyan
+    $b = Start-Backend
+    $f = Start-Frontend
     Write-Host ""
     Write-Host "========================================" -ForegroundColor Cyan
     Write-Host "  开发服务已启动" -ForegroundColor Green
@@ -250,45 +316,53 @@ $frontendStart
     Write-Host "  后端 Swagger : http://localhost:$BackendPort/api/docs" -ForegroundColor Yellow
     Write-Host "  前端页面     : http://localhost:$FrontendPort" -ForegroundColor Yellow
     Write-Host "  API 代理     : 前端 /api 已通过 Vite 代理转发到 http://localhost:$BackendPort" -ForegroundColor DarkGray
-    Write-Host "  后端 PID     : $(if ($backendProc) { $backendProc.Id } else { 'N/A' })"
-    Write-Host "  前端 PID     : $(if ($frontendProc) { $frontendProc.Id } else { 'N/A' })"
+    Write-Host "  后端 PID     : $(if ($b) { $b.Id } else { 'N/A' })"
+    Write-Host "  前端 PID     : $(if ($f) { $f.Id } else { 'N/A' })"
     Write-Host "  停止命令     : Stop-Dev（或 .\dev.ps1 stop）" -ForegroundColor Yellow
+    Write-Host "  单服务重启   : .\dev.ps1 restart backend / restart frontend" -ForegroundColor Yellow
     Write-Host "========================================" -ForegroundColor Cyan
 }
 
 # ===========================================================================
-# 函数：Stop-Dev —— 关闭所有开发进程
+# 函数：Stop-Backend / Stop-Frontend / Stop-Dev
 # ===========================================================================
+
+function Stop-Backend  { Stop-Service -PidFile $backendPidFile  -Label "后端" }
+function Stop-Frontend { Stop-Service -PidFile $frontendPidFile -Label "前端" }
 function Stop-Dev {
-    if (-not (Test-Path $devPidsFile)) {
-        Write-Host "没有运行中的开发服务（未找到 $devPidsFile）。" -ForegroundColor Yellow
-        return
-    }
-    Write-Host "→ 停止开发服务..." -ForegroundColor Cyan
-    Get-Content $devPidsFile | ForEach-Object {
-        $pidv = $_.Trim()
-        if ($pidv -match '^\d+$') {
-            & taskkill /PID $pidv /T /F 2>$null
-            Write-Host "  → 已请求关闭进程树 PID=$pidv" -ForegroundColor Gray
-        }
-    }
-    Remove-Item $devPidsFile -Force
-    Write-Host "→ 开发服务已停止。" -ForegroundColor Green
+    Stop-Backend
+    Stop-Frontend
+    # 兼容清理旧版单文件 PID（升级前遗留）；删除失败不阻断停止流程
+    $legacy = Join-Path $root ".dev-pids.txt"
+    if (Test-Path $legacy) { Remove-Item $legacy -Force -ErrorAction SilentlyContinue }
 }
 
 # ===========================================================================
-# 3. 环境初始化（轻量 + 重型，stop 动作时跳过以加速）
+# 3. 环境初始化（轻量 + 重型；stop 跳过以加速，restart 仅做轻量以提速）
 # ===========================================================================
-if ($Action -ne "stop") {
 
-    # ---- 轻量环境设置（必跑）----
-    $pyDir = Split-Path -Parent $python
+# 轻量环境设置（stop 不需要，故抽成函数；start / dot-source / restart 按需调用）
+function Set-LightEnv {
     # 前置 managed Python 目录及其 Scripts（uv 安装于此），确保 uv / pip 可用
     $env:PATH = "$pyDir;$pyDir\Scripts;$env:PATH"
     if (Test-Path "$nodePath\node.exe") {
         $env:PATH = "$nodePath;$env:PATH"
     }
     $env:NODE_OPTIONS = $null   # 绕过安全钩子对 pnpm / npm 的拦截
+}
+
+if ($Action -eq "stop") {
+    # 仅停止，不做任何环境设置（最快）
+} elseif ($Action -eq "restart") {
+    # 重启：仅做轻量环境设置（PATH/NODE_OPTIONS，供子进程 here-string 使用），
+    # 默认跳过 Init-Dev（依赖应已就绪，提速）；-Force 时可强制重装。
+    Set-LightEnv
+    if ($Force) {
+        Init-Dev -Force:$true
+    }
+} else {
+    # start 或直接 dot-source：完整初始化
+    Set-LightEnv
 
     # ---- backend/.venv 由 uv 管理（Init-Dev 中的 uv sync 自动创建，无需手动 venv）----
 
@@ -329,17 +403,92 @@ if ($Action -ne "stop") {
     Write-Host "  . .\dev.ps1 -SkipInstall # 仅设置环境，跳过依赖安装"
     Write-Host "  . .\dev.ps1 -Force       # 强制重装依赖"
     Write-Host "  .\dev.ps1 start          # 直接一键启动（无需先 dot-source）"
-    Write-Host "  .\dev.ps1 stop           # 直接停止"
-    Write-Host "  Init-Dev                 # 手动（重新）安装依赖"
-    Write-Host "  Start-Dev                # 一键并发启动前后端（独立窗口）"
-    Write-Host "  Stop-Dev                 # 停止前后端（基于 .dev-pids.txt）"
+    Write-Host "  .\dev.ps1 stop           # 直接停止（前后端）"
+    Write-Host "  .\dev.ps1 restart        # 重启前后端（跳过依赖安装）"
+    Write-Host "  .\dev.ps1 restart backend   # 仅重启后端"
+    Write-Host "  .\dev.ps1 restart frontend  # 仅重启前端"
+    Write-Host "  .\dev.ps1 stop backend      # 仅停止后端"
+    Write-Host "  .\dev.ps1 stop frontend     # 仅停止前端"
+    Write-Host "  Init-Dev / Start-Dev / Stop-Dev            # 手动（重新）安装 / 启停"
+    Write-Host "  Start-Backend / Stop-Backend               # 仅后端"
+    Write-Host "  Start-Frontend / Stop-Frontend             # 仅前端"
+    Write-Host "  Show-DevMenu                               # 调出数字菜单（dot-source 后可用）"
     Write-Host ""
 }
 
 # ===========================================================================
-# 4. 直接调用时的动作分发（dot-source 时空 Action 不触发，仅定义函数）
+# 4. 交互式菜单（无参数直接运行 .\dev.ps1 时触发；dot-source 不触发）
 # ===========================================================================
-switch ($Action) {
-    "start" { Start-Dev }
-    "stop"  { Stop-Dev }
+# 判断是否 dot-source：dot-source 时 $MyInvocation.InvocationName 为 '.'，
+# 直接运行时为脚本路径。dot-source 的语义是「把函数注入当前会话」，弹菜单会
+# 阻塞会话，故不触发；用户可在 dot-source 后手动输入 Show-DevMenu 调出菜单。
+function Show-DevMenu {
+    # 非交互环境（输入被重定向 / 自动化 / NonInteractive 主机）下跳过菜单，
+    # 避免 Read-Host 卡死。直接 return，函数已定义，不影响后续手动调用。
+    try {
+        if ([Console]::IsInputRedirected) { return }
+    } catch { return }
+
+    while ($true) {
+        Write-Host ""
+        Write-Host "========================================" -ForegroundColor Cyan
+        Write-Host "  开发菜单" -ForegroundColor Green
+        Write-Host "========================================" -ForegroundColor Cyan
+        Write-Host "  [1] 启动前后端          [4] 停止前后端          [7] 重启前后端" -ForegroundColor White
+        Write-Host "  [2] 仅启动后端          [5] 仅停止后端          [8] 仅重启后端" -ForegroundColor White
+        Write-Host "  [3] 仅启动前端          [6] 仅停止前端          [9] 仅重启前端" -ForegroundColor White
+        Write-Host "  [i] 重新安装依赖 (Init-Dev)" -ForegroundColor Yellow
+        Write-Host "  [0] 退出菜单" -ForegroundColor DarkGray
+        Write-Host "========================================" -ForegroundColor Cyan
+        try {
+            $choice = (Read-Host "请输入编号").Trim().ToLower()
+        } catch {
+            # 主机非交互（如 -NonInteractive），无法读取输入，退出菜单
+            Write-Host "→ 当前主机非交互，已退出菜单。" -ForegroundColor DarkGray
+            return
+        }
+        switch ($choice) {
+            "1" { Start-Dev }
+            "2" { Start-Backend }
+            "3" { Start-Frontend }
+            "4" { Stop-Dev }
+            "5" { Stop-Backend }
+            "6" { Stop-Frontend }
+            "7" { Stop-Dev; Start-Dev }
+            "8" { Stop-Backend; Start-Backend }
+            "9" { Stop-Frontend; Start-Frontend }
+            "i" { Init-Dev }
+            "0" { Write-Host "→ 已退出菜单。" -ForegroundColor DarkGray; return }
+            ""  { return }   # 直接回车也退出
+            default { Write-Host "  无效输入：$choice（请输入 0-9 或 i）" -ForegroundColor Red }
+        }
+    }
+}
+
+# ===========================================================================
+# 5. 动作分发（dot-source 时空 Action 仅定义函数不触发动作）
+# ===========================================================================
+$isDotSourced = ($MyInvocation.InvocationName -eq '.')
+
+if ($Action -eq "" -and -not $isDotSourced) {
+    # 无参数直接运行 → 弹交互菜单（初始化已在上面第 3 段完成）
+    Show-DevMenu
+} else {
+    switch ($Action) {
+        "start" {
+            if ($Service -eq "backend")      { Start-Backend }
+            elseif ($Service -eq "frontend") { Start-Frontend }
+            else                             { Start-Dev }
+        }
+        "stop" {
+            if ($Service -eq "backend")      { Stop-Backend }
+            elseif ($Service -eq "frontend") { Stop-Frontend }
+            else                             { Stop-Dev }
+        }
+        "restart" {
+            if ($Service -eq "backend")      { Stop-Backend;  Start-Backend }
+            elseif ($Service -eq "frontend") { Stop-Frontend; Start-Frontend }
+            else                             { Stop-Dev; Start-Dev }
+        }
+    }
 }

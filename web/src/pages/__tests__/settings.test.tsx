@@ -102,6 +102,8 @@ vi.mock('@/hooks/use-portfolios', () => ({
   useDeletePortfolio: () => ({ mutate: vi.fn(), isPending: false }),
   useArchivePortfolio: () => ({ mutate: vi.fn(), isPending: false }),
   useClearPortfolioData: () => ({ mutate: vi.fn(), isPending: false }),
+  // 项6：默认组合星标 toggle → PATCH /portfolios/:id/default
+  useSetDefaultPortfolio: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
 // 必须在 vi.mock 之后再导入被测页面与真实 store

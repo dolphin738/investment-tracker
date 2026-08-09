@@ -123,7 +123,8 @@ async def test_m2_holdings_multi_securityid(client):
         headers=h,
         params={"asOf": str(D1), "securityId": f"{sec_a},{sec_b}"},
     )
-    _, _, holdings, _ = env(r)
+    _, _, data, _ = env(r)
+    holdings = data["items"]
     ids = {v["securityId"] for v in holdings}
     assert sec_a in ids and sec_b in ids
     assert len(holdings) == 2
