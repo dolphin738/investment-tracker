@@ -74,6 +74,8 @@ def ts_type(schema: dict, depth: int = 0) -> str:
             lines.append(f"{INDENT*(depth+2)}{pname}{opt}: {ptype};")
         body = "\n".join(lines)
         return "{\n" + body + f"\n{INDENT*(depth+1)}}}"
+    if t == "null":
+        return "null"
     if t == "string":
         return "string"
     if t in ("integer", "number"):

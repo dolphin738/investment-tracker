@@ -7,25 +7,28 @@
  * 垫片却不同步」的双真相源漂移风险。§5.2 退役将其收敛到本文（明确的聚合层），
  * `shared/index.ts` 仅保留为转发 barrel，最终别名也会被移除。
  *
- * 本文件内容分类（退役关键决策）：
- * 1. 实体类型（Portfolio / UserPublic / AssetSnapshot / CashFlow 等）= 后端 OpenAPI
- *    `*Out` schema 的**对齐镜像**。注意：因后端 schema 字段（如 cashflow 无
- *    portfolioId、portfolio 无 userId、缺 updatedAt）与前端视图模型不完全一致，
- *    且 OpenAPI 未把枚举/导入 DTO 导出为独立 schema，故**不**用
- *    `export type X = components['schemas']['XOut']` 直接重导出（否则 60 处引用
- *    会因缺字段编译失败）。实体类型以「后端契约为准 + 前端补充视图字段」维护，
+ * 本文件内容分类（退役关键决策 + §5.2b 收敛后现状）：
+ * 1. 实体类型：`CashFlow` / `Portfolio` / `AssetSnapshot` 已改为
+ *    `components['schemas']['XxxOut']` 的 **re-export 别名**（§5.2b：P1 补齐后端缺字段、
+ *    P2 枚举独立 schema 后，DTO 字段与前端视图模型已 1:1 对齐，可安全重导出）。
+ *    `UserPublic` 因后端 `UserPublicOut` 把 `createdAt` 声明为可选、且 `name` 非空，
+ *    与前端 `createdAt: string` / `name: string|null` 方向相反，**保留手写**（残留项）。
  *    金额字段一律 string 透传（Decimal→str 铁律，C-02）。
- * 2. 枚举 / 业务错误码 / 金额工具（CashFlowType / SecuritySide / BUSINESS_ERROR_CODE
- *    / isMoneyString / computeNetAmount / ...）= 前后端约定常量。后端枚举值已逐对
- *    校验一致（SecuritySide=BUY_SEC/SELL_SEC 等）；OpenAPI 把枚举内联为字符串字面量，
- *    未生成独立 schema，故前端必须持有 `as const` 运行时值（运行时要用枚举成员）。
- * 3. NavSeriesPoint / XirrSeriesPoint = **number 版展示类型**（图表/ECharts 只认
- *    number）。后端返回 string（NavPointOut / XirrPointOut，字段名 value/cumulativeNav
- *    等），由 `api/query.api.ts` 在取数边界用 `toNumberOrNull`（策略 A）统一转换产出。
+ * 2. 枚举 / 业务错误码 / 金额工具（`CashFlowType` / `SecuritySide` / `BUSINESS_ERROR_CODE`
+ *    / `isMoneyString` / `computeNetAmount` / ...）= 前后端约定常量。后端 6 领域枚举 +
+ *    `ExportType`/`ImportType`/`ImportErrorCode` 已由 P2 提升为独立命名 schema
+ *    （`types/api.ts` 生成 `components['schemas']['Xxx']` 联合类型）；枚举的**运行时
+ *    `as const` 对象**仍留本文件（下拉遍历需要值），与生成类型值一致。
+ * 3. `NavSeriesPoint` / `XirrSeriesPoint` = **number 版展示类型**（图表/ECharts 只认
+ *    number），移入 `types/series.ts`，本文件 re-export 维持历史 import 点。后端返回
+ *    string（`NavPointOut`/`XirrPointOut`），由 `api/query.api.ts` 在取数边界用
+ *    `toNumberOrNull`（策略 A）统一转换产出。
  *
  * 同步约定：后端改实体/枚举后，先 `npm run generate:api` 更新 `types/api.ts`，
- * 再人工比对本文对应镜像（字段增减、枚举值）手动同步——这是退役后唯一的同步点。
+ * 再确认本文件 re-export 别名与新增命名字段/枚举是否同步——这是退役后唯一的同步点。
  */
+
+import type { components } from '@/types/api';
 
 // ============================================================================
 // 金额 / 税 / 费用工具（前后端共用，零依赖）
@@ -373,19 +376,16 @@ export interface ImportCommitResult {
 // 来源：app/packages/shared/src/types.ts + types/user.ts
 // ============================================================================
 
-/** 出入金流水（XIRR 现金流唯一来源） */
-export interface CashFlow {
-  id: string;
-  portfolioId: string;
-  date: string;
-  type: CashFlowType;
-  amount: string;
-  note: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
+/** 出入金流水（XIRR 现金流唯一来源）— re-export 自后端 `CashflowOut`（§5.2b 收敛） */
+export type CashFlow = components['schemas']['CashflowOut'];
 
-/** 用户公开信息（API 响应中传输的安全子集，不含 passwordHash） */
+/**
+ * 用户公开信息（API 响应中传输的安全子集，不含 passwordHash）。
+ * ⚠️ 故意保留手写接口（§5.2b 收敛的**残留项**）：后端 `UserPublicOut` 将 `createdAt`
+ * 声明为可选（`string | null`），但前端依赖 `createdAt: string`（user 行恒有 createdAt）；
+ * 且 `name` 在后端正为非空 `str` 而前端允许 null。re-export 会把 `createdAt` 拓宽为可空
+ * 并破坏严格消费处，故不自 `UserPublicOut` 重导出（字段漂移风险极低，用户模型稳定）。
+ */
 export interface UserPublic {
   id: string;
   email: string;
@@ -396,47 +396,16 @@ export interface UserPublic {
   createdAt: string;
 }
 
-/** 投资组合 */
-export interface Portfolio {
-  id: string;
-  userId: string;
-  name: string;
-  description: string | null;
-  baseDate: string | null;
-  currency: string;
-  archivedAt: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
+/** 投资组合 — re-export 自后端 `PortfolioOut`（§5.2b 收敛） */
+export type Portfolio = components['schemas']['PortfolioOut'];
 
-/** 总资产每日唯一记录（派生层 + 手工） */
-export interface AssetSnapshot {
-  id: string;
-  portfolioId: string;
-  date: string;
-  totalAsset: string;
-  marketValue: string | null;
-  cashBalance: string | null;
-  source: SnapshotSource;
-  valuationFlag: SnapshotValuation;
-  note: string | null;
-  recordedAt: string;
-  createdAt: string;
-  updatedAt: string;
-}
+/**
+ * 总资产每日唯一记录（派生层 + 手工）— re-export 自后端 `SnapshotOut`（§5.2b 收敛）。
+ * 注：后端 `SnapshotOut.totalAsset` 为 `string | null`（MANUAL 快照可能无 user 值），
+ * 比前端原 `string` 更准确；消费处按可空处理。
+ */
+export type AssetSnapshot = components['schemas']['SnapshotOut'];
 
-/** 净值时间序列数据点 */
-export interface NavSeriesPoint {
-  date: string;
-  cumulativeNav: number | null;
-  yearNav: number | null;
-  shares: number | null;
-  label: string;
-}
-
-/** XIRR 时间序列数据点 */
-export interface XirrSeriesPoint {
-  date: string;
-  xirrValue: number | null;
-  label: string;
-}
+// NavSeriesPoint / XirrSeriesPoint 是 number 视图类型（图表/ECharts 只认 number），
+// 不属契约常量，移入 types/series.ts（§5.2b）。此处 re-export 维持历史 import 点不变。
+export type { NavSeriesPoint, XirrSeriesPoint } from '@/types/series';

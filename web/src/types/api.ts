@@ -12,9 +12,9 @@ export interface components {
         /** Totalassets */
         totalAssets: string;
         /** Cumulativexirr */
-        cumulativeXirr?: string | unknown;
+        cumulativeXirr?: string | null;
         /** Yearxirr */
-        yearXirr?: string | unknown;
+        yearXirr?: string | null;
       };
     /** AuthTokenOut */
     AuthTokenOut: {
@@ -24,15 +24,14 @@ export interface components {
       };
     /** Body_import_preview_api_portfolios__portfolio_id__import_preview_post */
     Body_import_preview_api_portfolios__portfolio_id__import_preview_post: {
-        /** Type */
-        type: string;
+        type: components['schemas']['ImportType'];
         /** File */
         file: string;
       };
     /** Body_upload_avatar_api_upload_avatar_post */
     Body_upload_avatar_api_upload_avatar_post: {
         /** File */
-        file?: string | unknown;
+        file?: string | null;
       };
     /** CashBalanceCreateReq */
     CashBalanceCreateReq: {
@@ -41,7 +40,7 @@ export interface components {
         /** Asof */
         asOf: string;
         /** Note */
-        note?: string | unknown;
+        note?: string | null;
       };
     /** CashBalanceOut */
     CashBalanceOut: {
@@ -52,17 +51,21 @@ export interface components {
         /** Asof */
         asOf: string;
         /** Note */
-        note?: string | unknown;
+        note?: string | null;
         /** Createdat */
         createdAt: string;
+        /** Updatedat */
+        updatedAt: string;
       };
     /** CashBalancePatchReq */
     CashBalancePatchReq: {
         /** Amount */
-        amount?: string | unknown;
+        amount?: string | null;
         /** Note */
-        note?: string | unknown;
+        note?: string | null;
       };
+    /** CashFlowType */
+    CashFlowType: 'BUY' | 'SELL';
     /** CashflowCreateReq */
     CashflowCreateReq: {
         /** Date */
@@ -72,33 +75,36 @@ export interface components {
         /** Amount */
         amount: string;
         /** Note */
-        note?: string | unknown;
+        note?: string | null;
       };
     /** CashflowOut */
     CashflowOut: {
         /** Id */
         id: string;
+        /** Portfolioid */
+        portfolioId: string;
         /** Date */
         date: string;
-        /** Type */
-        type: string;
+        type: components['schemas']['CashFlowType'];
         /** Amount */
         amount: string;
         /** Note */
-        note?: string | unknown;
+        note?: string | null;
         /** Createdat */
         createdAt: string;
+        /** Updatedat */
+        updatedAt: string;
       };
     /** CashflowPatchReq */
     CashflowPatchReq: {
         /** Date */
-        date?: unknown;
+        date?: string | null;
         /** Type */
-        type?: string | unknown;
+        type?: string | null;
         /** Amount */
-        amount?: string | unknown;
+        amount?: string | null;
         /** Note */
-        note?: string | unknown;
+        note?: string | null;
       };
     /** ClearDataOut */
     ClearDataOut: {
@@ -114,11 +120,11 @@ export interface components {
         /** Amount */
         amount: string;
         /** Tax */
-        tax?: string | unknown;
+        tax?: string | null;
         /** Type */
-        type?: string | unknown;
+        type?: string | null;
         /** Note */
-        note?: string | unknown;
+        note?: string | null;
       };
     /** DividendOut */
     DividendOut: {
@@ -127,9 +133,9 @@ export interface components {
         /** Securityid */
         securityId: string;
         /** Securitycode */
-        securityCode?: string | unknown;
+        securityCode?: string | null;
         /** Securityname */
-        securityName?: string | unknown;
+        securityName?: string | null;
         /** Date */
         date: string;
         /** Amount */
@@ -138,36 +144,39 @@ export interface components {
         tax: string;
         /** Netamount */
         netAmount: string;
-        /** Type */
-        type: string;
+        type: components['schemas']['DividendType'];
         /** Note */
-        note?: string | unknown;
+        note?: string | null;
         /** Createdat */
         createdAt: string;
+        /** Updatedat */
+        updatedAt: string;
       };
     /** DividendPatchReq */
     DividendPatchReq: {
         /** Securityid */
-        securityId?: string | unknown;
+        securityId?: string | null;
         /** Date */
-        date?: unknown;
+        date?: string | null;
         /** Amount */
-        amount?: string | unknown;
+        amount?: string | null;
         /** Tax */
-        tax?: string | unknown;
+        tax?: string | null;
         /** Type */
-        type?: string | unknown;
+        type?: string | null;
         /** Note */
-        note?: string | unknown;
+        note?: string | null;
       };
+    /** DividendType */
+    DividendType: 'CASH' | 'STOCK_DIVIDEND';
     /** DrawdownPointOut */
     DrawdownPointOut: {
         /** Date */
         date: string;
         /** Drawdown */
-        drawdown?: string | unknown;
+        drawdown?: string | null;
         /** Peakdate */
-        peakDate?: string | unknown;
+        peakDate?: string | null;
         /** Label */
         label: string;
       };
@@ -178,6 +187,8 @@ export interface components {
         /** Newemail */
         newEmail: string;
       };
+    /** 数据导出类型（§4.2.17）。值即路由/服务层使用的字符串标识。 */
+    ExportType: 'securities' | 'securityTrades' | 'cashFlows' | 'cashBalances' | 'securityPrices' | 'assetSnapshots' | 'navSeries';
     /** FreshnessOut */
     FreshnessOut: {
         /** Staledays */
@@ -185,13 +196,13 @@ export interface components {
         /** Isstale */
         isStale: boolean;
         /** Latestpriceasof */
-        latestPriceAsOf?: string | unknown;
+        latestPriceAsOf?: string | null;
         /** Latestpricelagdays */
-        latestPriceLagDays?: number | unknown;
+        latestPriceLagDays?: number | null;
         /** Latestcashasof */
-        latestCashAsOf?: string | unknown;
+        latestCashAsOf?: string | null;
         /** Latestcashlagdays */
-        latestCashLagDays?: number | unknown;
+        latestCashLagDays?: number | null;
         /** Reasons */
         reasons?: string[];
       };
@@ -205,9 +216,9 @@ export interface components {
         /** Securityid */
         securityId: string;
         /** Code */
-        code?: string | unknown;
+        code?: string | null;
         /** Name */
-        name?: string | unknown;
+        name?: string | null;
         /** Quantity */
         quantity: string;
         /** Avgcost */
@@ -234,21 +245,21 @@ export interface components {
         /** Skipped */
         skipped: number;
         /** Failed */
-        failed?: Record<string, unknown>[];
+        failed?: components['schemas']['ImportRowError'][];
         /** Recalculated */
-        recalculated?: Record<string, unknown> | unknown;
+        recalculated?: Record<string, unknown> | null;
       };
     /** ImportCommitReq */
     ImportCommitReq: {
-        /** Type */
-        type: string;
+        type: components['schemas']['ImportType'];
         /** Token */
         token: string;
       };
+    /** 导入行级错误码（§4.2.17 校验阶段产生）。值即响应错误 dict 的 `code`。 */
+    ImportErrorCode: 'MISSING_REQUIRED_COLUMN' | 'TOO_MANY_ROWS' | 'INVALID_DATE_FORMAT' | 'INVALID_DECIMAL_PRECISION' | 'INVALID_ENUM_VALUE' | 'SECURITY_NOT_FOUND' | 'DUPLICATE_SNAPSHOT_DATE';
     /** ImportPreviewOut */
     ImportPreviewOut: {
-        /** Type */
-        type: string;
+        type: components['schemas']['ImportType'];
         /** Totalrows */
         totalRows: number;
         /** Validrows */
@@ -256,12 +267,24 @@ export interface components {
         /** Sample */
         sample?: Record<string, unknown>[];
         /** Errors */
-        errors?: Record<string, unknown>[];
+        errors?: components['schemas']['ImportRowError'][];
         /** Mindate */
-        minDate?: string | unknown;
+        minDate?: string | null;
         /** Token */
         token: string;
       };
+    /** 导入行级错误（§4.2.17）。`code` 为 ImportErrorCode 命名枚举。 */
+    ImportRowError: {
+        /** Row */
+        row?: number | null;
+        /** Field */
+        field?: string | null;
+        code: components['schemas']['ImportErrorCode'];
+        /** Message */
+        message: string;
+      };
+    /** 数据导入类型（§4.2.17）。值即路由/服务层使用的字符串标识。 */
+    ImportType: 'securityTrades' | 'cashFlows' | 'assetSnapshots';
     /** LoginReq */
     LoginReq: {
         /** Email */
@@ -274,22 +297,22 @@ export interface components {
         /** Date */
         date: string;
         /** Value */
-        value?: string | unknown;
+        value?: string | null;
         /** Cumulativenav */
-        cumulativeNav?: string | unknown;
+        cumulativeNav?: string | null;
         /** Yearnav */
-        yearNav?: string | unknown;
+        yearNav?: string | null;
         /** Shares */
-        shares?: string | unknown;
+        shares?: string | null;
       };
     /** OverviewOut */
     OverviewOut: {
         /** Totalasset */
-        totalAsset?: string | unknown;
+        totalAsset?: string | null;
         /** Cumulativexirr */
-        cumulativeXirr?: string | unknown;
+        cumulativeXirr?: string | null;
         /** Yearxirr */
-        yearXirr?: string | unknown;
+        yearXirr?: string | null;
         /** Navseries */
         navSeries?: components['schemas']['NavPointOut'][];
         /** Recentcashflows */
@@ -405,14 +428,14 @@ export interface components {
     /** 归档请求：archived 缺省或 true → 归档；false → 取消归档。 */
     PortfolioArchiveReq: {
         /** Archived */
-        archived?: boolean | unknown;
+        archived?: boolean | null;
       };
     /** PortfolioCreateReq */
     PortfolioCreateReq: {
         /** Name */
         name: string;
         /** Description */
-        description?: string | unknown;
+        description?: string | null;
         /** Currency */
         currency?: string;
       };
@@ -420,16 +443,18 @@ export interface components {
     PortfolioOut: {
         /** Id */
         id: string;
+        /** Userid */
+        userId: string;
         /** Name */
         name: string;
         /** Description */
-        description?: string | unknown;
+        description?: string | null;
         /** Basedate */
-        baseDate: string;
+        baseDate?: string | null;
         /** Currency */
         currency: string;
         /** Archivedat */
-        archivedAt?: string | unknown;
+        archivedAt?: string | null;
         /** Createdat */
         createdAt: string;
         /** Updatedat */
@@ -438,31 +463,64 @@ export interface components {
     /** PortfolioPatchReq */
     PortfolioPatchReq: {
         /** Name */
-        name?: string | unknown;
+        name?: string | null;
         /** Description */
-        description?: string | unknown;
+        description?: string | null;
       };
     /** PortfolioSummaryOut */
     PortfolioSummaryOut: {
         /** Cumulativexirr */
-        cumulativeXirr?: string | unknown;
+        cumulativeXirr?: string | null;
         /** Totalreturnrate */
-        totalReturnRate?: string | unknown;
+        totalReturnRate?: string | null;
         /** Yearreturnrate */
-        yearReturnRate?: string | unknown;
+        yearReturnRate?: string | null;
         /** Maxdrawdown */
-        maxDrawdown?: string | unknown;
+        maxDrawdown?: string | null;
         /** Latestdate */
-        latestDate?: string | unknown;
+        latestDate?: string | null;
         /** Inceptiondate */
         inceptionDate: string;
+      };
+    /** 全部组合摘要行（GET /portfolios/summary · Web 客户端绑定此路径）。
+
+与 PortfolioSummaryOut（单组合 Dashboard 卡片）是不同契约，不可混淆。 */
+    PortfolioSummaryRow: {
+        /** Id */
+        id: string;
+        /** Name */
+        name: string;
+        /** Totalasset */
+        totalAsset: string;
+        /** Holdingscount */
+        holdingsCount: number;
+        /** Lastupdatedat */
+        lastUpdatedAt?: string | null;
+        /** Basedate */
+        baseDate?: string | null;
+        /** Currency */
+        currency: string;
+        /** Createdat */
+        createdAt: string;
+        /** Cumulativenav */
+        cumulativeNav?: string | null;
+        /** Yearreturnrate */
+        yearReturnRate?: string | null;
+        /** Cumulativereturnrate */
+        cumulativeReturnRate?: string | null;
+        /** Xirr */
+        xirr?: string | null;
+        /** Netinvested */
+        netInvested: string;
+        /** Floatingprofit */
+        floatingProfit?: string | null;
       };
     /** PreferenceOut */
     PreferenceOut: {
         /** Id */
         id: string;
         /** Defaultportfolioid */
-        defaultPortfolioId?: string | unknown;
+        defaultPortfolioId?: string | null;
         /** Defaultgranularity */
         defaultGranularity: string;
         /** Defaultdaterange */
@@ -515,20 +573,22 @@ export interface components {
         asOf: string;
         /** Createdat */
         createdAt: string;
+        /** Updatedat */
+        updatedAt: string;
       };
     /** PricePatchReq */
     PricePatchReq: {
         /** Price */
-        price?: string | unknown;
+        price?: string | null;
         /** Asof */
-        asOf?: string | unknown;
+        asOf?: string | null;
       };
     /** ProfilePatchReq */
     ProfilePatchReq: {
         /** Name */
-        name?: string | unknown;
+        name?: string | null;
         /** Avatar */
-        avatar?: string | unknown;
+        avatar?: string | null;
       };
     /** RecalcOut */
     RecalcOut: {
@@ -540,9 +600,9 @@ export interface components {
     /** RecalculateRangeReq */
     RecalculateRangeReq: {
         /** Startdate */
-        startDate?: string | unknown;
+        startDate?: string | null;
         /** Enddate */
-        endDate?: string | unknown;
+        endDate?: string | null;
       };
     /** RegisterReq */
     RegisterReq: {
@@ -551,7 +611,7 @@ export interface components {
         /** Password */
         password: string;
         /** Name */
-        name?: string | unknown;
+        name?: string | null;
       };
     /** RestoreReq */
     RestoreReq: {
@@ -567,7 +627,7 @@ export interface components {
         /** Name */
         name: string;
         /** Type */
-        type?: string | unknown;
+        type?: string | null;
         /** Currency */
         currency?: string;
       };
@@ -579,20 +639,25 @@ export interface components {
         code: string;
         /** Name */
         name: string;
-        /** Type */
-        type: string;
+        type: components['schemas']['SecurityType'];
         /** Currency */
         currency: string;
         /** Createdat */
         createdAt: string;
+        /** Updatedat */
+        updatedAt: string;
       };
     /** SecurityPatchReq */
     SecurityPatchReq: {
         /** Name */
-        name?: string | unknown;
+        name?: string | null;
         /** Type */
-        type?: string | unknown;
+        type?: string | null;
       };
+    /** SecuritySide */
+    SecuritySide: 'BUY_SEC' | 'SELL_SEC';
+    /** SecurityType */
+    SecurityType: 'STOCK' | 'FUND' | 'BOND' | 'OTHER' | 'CASH';
     /** SnapshotCreateReq */
     SnapshotCreateReq: {
         /** Date */
@@ -600,46 +665,54 @@ export interface components {
         /** Totalasset */
         totalAsset: string;
         /** Marketvalue */
-        marketValue?: string | unknown;
+        marketValue?: string | null;
         /** Cashbalance */
-        cashBalance?: string | unknown;
+        cashBalance?: string | null;
         /** Note */
-        note?: string | unknown;
+        note?: string | null;
       };
     /** SnapshotOut */
     SnapshotOut: {
         /** Id */
         id: string;
+        /** Portfolioid */
+        portfolioId: string;
         /** Date */
         date: string;
         /** Totalasset */
-        totalAsset?: string | unknown;
+        totalAsset?: string | null;
         /** Marketvalue */
-        marketValue?: string | unknown;
+        marketValue?: string | null;
         /** Cashbalance */
-        cashBalance?: string | unknown;
-        /** Source */
-        source: string;
-        /** Valuationflag */
-        valuationFlag: string;
+        cashBalance?: string | null;
+        source: components['schemas']['SnapshotSource'];
+        valuationFlag: components['schemas']['SnapshotValuation'];
         /** Note */
-        note?: string | unknown;
+        note?: string | null;
         /** Recordedat */
         recordedAt: string;
+        /** Createdat */
+        createdAt: string;
+        /** Updatedat */
+        updatedAt: string;
         /** Derivedtotalasset */
-        derivedTotalAsset?: string | unknown;
+        derivedTotalAsset?: string | null;
       };
     /** SnapshotPatchReq */
     SnapshotPatchReq: {
         /** Totalasset */
-        totalAsset?: string | unknown;
+        totalAsset?: string | null;
         /** Marketvalue */
-        marketValue?: string | unknown;
+        marketValue?: string | null;
         /** Cashbalance */
-        cashBalance?: string | unknown;
+        cashBalance?: string | null;
         /** Note */
-        note?: string | unknown;
+        note?: string | null;
       };
+    /** SnapshotSource */
+    SnapshotSource: 'DERIVED' | 'MANUAL';
+    /** SnapshotValuation */
+    SnapshotValuation: 'EXACT' | 'CARRIED_FORWARD' | 'COST_BASED' | 'MANUAL_INPUT';
     /** TradeCreateReq */
     TradeCreateReq: {
         /** Date */
@@ -650,12 +723,18 @@ export interface components {
         side: string;
         /** Quantity */
         quantity: string;
-        /** Price */
-        price: string;
-        /** Fee */
-        fee?: string | unknown;
+        /** Costprice */
+        costPrice: string;
+        /** Feetotal */
+        feeTotal?: string | null;
+        /** Commission */
+        commission?: string | null;
+        /** Stamptax */
+        stampTax?: string | null;
+        /** Other */
+        other?: string | null;
         /** Note */
-        note?: string | unknown;
+        note?: string | null;
       };
     /** TradeOut */
     TradeOut: {
@@ -665,29 +744,46 @@ export interface components {
         securityId: string;
         /** Date */
         date: string;
-        /** Side */
-        side: string;
+        side: components['schemas']['SecuritySide'];
         /** Quantity */
         quantity: string;
-        /** Price */
-        price: string;
-        /** Fee */
-        fee: string;
+        /** Costprice */
+        costPrice: string;
+        /** Commission */
+        commission: string;
+        /** Stamptax */
+        stampTax: string;
+        /** Other */
+        other: string;
+        /** Feetotal */
+        feeTotal: string;
         /** Note */
-        note?: string | unknown;
+        note?: string | null;
         /** Createdat */
         createdAt: string;
+        /** Updatedat */
+        updatedAt: string;
       };
     /** TradePatchReq */
     TradePatchReq: {
         /** Date */
-        date?: unknown;
+        date?: string | null;
+        /** Side */
+        side?: string | null;
         /** Quantity */
-        quantity?: string | unknown;
-        /** Price */
-        price?: string | unknown;
-        /** Fee */
-        fee?: string | unknown;
+        quantity?: string | null;
+        /** Costprice */
+        costPrice?: string | null;
+        /** Feetotal */
+        feeTotal?: string | null;
+        /** Commission */
+        commission?: string | null;
+        /** Stamptax */
+        stampTax?: string | null;
+        /** Other */
+        other?: string | null;
+        /** Note */
+        note?: string | null;
       };
     /** UserPublicOut */
     UserPublicOut: {
@@ -698,7 +794,13 @@ export interface components {
         /** Name */
         name: string;
         /** Avatar */
-        avatar?: string | unknown;
+        avatar?: string | null;
+        /** Phone */
+        phone?: string | null;
+        /** Bio */
+        bio?: string | null;
+        /** Createdat */
+        createdAt?: string | null;
       };
     /** ValidationError */
     ValidationError: {
@@ -718,69 +820,70 @@ export interface components {
         /** Date */
         date: string;
         /** Xirrvalue */
-        xirrValue?: string | unknown;
+        xirrValue?: string | null;
       };
     /** XirrPointOut */
     XirrPointOut: {
         /** Date */
         date: string;
         /** Value */
-        value?: string | unknown;
+        value?: string | null;
       };
   };
 }
 
 /** operationId -> response schema name (HTTP 200, application/json). */
 export interface operations {
-    register_api_auth_register_post: components['schemas']['UserPublicOut'];
-    login_api_auth_login_post: components['schemas']['AuthTokenOut'];
-    restore_api_auth_account_restore_post: components['schemas']['AuthTokenOut'];
-    me_api_auth_me_get: components['schemas']['UserPublicOut'];
-    profile_api_auth_profile_patch: components['schemas']['UserPublicOut'];
-    change_password_api_auth_password_patch: components['schemas']['AuthTokenOut'];
-    change_email_api_auth_email_patch: components['schemas']['AuthTokenOut'];
-    summary_api_portfolios__portfolio_id__summary_get: components['schemas']['PortfolioSummaryOut'];
-    overview_api_portfolios__portfolio_id__overview_get: components['schemas']['OverviewOut'];
     account_stats_api_account_stats_get: components['schemas']['AccountStatsOut'];
+    restore_api_auth_account_restore_post: components['schemas']['AuthTokenOut'];
+    change_email_api_auth_email_patch: components['schemas']['AuthTokenOut'];
+    login_api_auth_login_post: components['schemas']['AuthTokenOut'];
+    me_api_auth_me_get: components['schemas']['UserPublicOut'];
+    change_password_api_auth_password_patch: components['schemas']['AuthTokenOut'];
+    get_profile_api_auth_profile_get: components['schemas']['UserPublicOut'];
+    profile_api_auth_profile_patch: components['schemas']['UserPublicOut'];
+    register_api_auth_register_post: components['schemas']['UserPublicOut'];
     create_portfolio_api_portfolios_post: components['schemas']['PortfolioOut'];
     get_portfolio_detail_api_portfolios__portfolio_id__get: components['schemas']['PortfolioOut'];
     patch_portfolio_api_portfolios__portfolio_id__patch: components['schemas']['PortfolioOut'];
-    clear_data_api_portfolios__portfolio_id__data_delete: components['schemas']['ClearDataOut'];
     archive_portfolio_api_portfolios__portfolio_id__archive_patch: components['schemas']['PortfolioOut'];
+    list_cashbalances_api_portfolios__portfolio_id__cash_balances_get: components['schemas']['Paginated_CashBalanceOut_'];
+    create_cashbalance_api_portfolios__portfolio_id__cash_balances_post: components['schemas']['CashBalanceOut'];
+    patch_cashbalance_api_portfolios__portfolio_id__cash_balances__cb_id__patch: components['schemas']['CashBalanceOut'];
     list_cashflows_api_portfolios__portfolio_id__cashflows_get: components['schemas']['Paginated_CashflowOut_'];
     create_cashflow_api_portfolios__portfolio_id__cashflows_post: components['schemas']['CashflowOut'];
     get_cashflow_api_portfolios__portfolio_id__cashflows__cf_id__get: components['schemas']['CashflowOut'];
     patch_cashflow_api_portfolios__portfolio_id__cashflows__cf_id__patch: components['schemas']['CashflowOut'];
+    clear_data_api_portfolios__portfolio_id__data_delete: components['schemas']['ClearDataOut'];
+    list_dividends_api_portfolios__portfolio_id__dividends_get: components['schemas']['Paginated_DividendOut_'];
+    create_dividend_api_portfolios__portfolio_id__dividends_post: components['schemas']['DividendOut'];
+    patch_dividend_api_portfolios__portfolio_id__dividends__div_id__patch: components['schemas']['DividendOut'];
+    import_commit_api_portfolios__portfolio_id__import_commit_post: components['schemas']['ImportCommitOut'];
+    import_preview_api_portfolios__portfolio_id__import_preview_post: components['schemas']['ImportPreviewOut'];
+    get_nav_history_api_portfolios__portfolio_id__nav_history_get: components['schemas']['Paginated_NavPointOut_'];
+    get_nav_latest_api_portfolios__portfolio_id__nav_latest_get: components['schemas']['NavPointOut'];
+    overview_api_portfolios__portfolio_id__overview_get: components['schemas']['OverviewOut'];
+    recalculate_full_api_portfolios__portfolio_id__recalculate_post: components['schemas']['RecalcOut'];
+    recalculate_range_api_portfolios__portfolio_id__recalculate_range_post: components['schemas']['RecalcOut'];
     list_securities_api_portfolios__portfolio_id__securities_get: components['schemas']['Paginated_SecurityOut_'];
     create_security_api_portfolios__portfolio_id__securities_post: components['schemas']['SecurityOut'];
     get_security_api_portfolios__portfolio_id__securities__sec_id__get: components['schemas']['SecurityOut'];
     patch_security_api_portfolios__portfolio_id__securities__sec_id__patch: components['schemas']['SecurityOut'];
+    list_prices_api_portfolios__portfolio_id__security_prices_get: components['schemas']['Paginated_PriceOut_'];
+    create_price_api_portfolios__portfolio_id__security_prices_post: components['schemas']['PriceOut'];
+    patch_price_api_portfolios__portfolio_id__security_prices__price_id__patch: components['schemas']['PriceOut'];
     list_trades_api_portfolios__portfolio_id__security_trades_get: components['schemas']['Paginated_TradeOut_'];
     create_trade_api_portfolios__portfolio_id__security_trades_post: components['schemas']['TradeOut'];
     get_trade_api_portfolios__portfolio_id__security_trades__trade_id__get: components['schemas']['TradeOut'];
     patch_trade_api_portfolios__portfolio_id__security_trades__trade_id__patch: components['schemas']['TradeOut'];
-    list_prices_api_portfolios__portfolio_id__security_prices_get: components['schemas']['Paginated_PriceOut_'];
-    create_price_api_portfolios__portfolio_id__security_prices_post: components['schemas']['PriceOut'];
-    patch_price_api_portfolios__portfolio_id__security_prices__price_id__patch: components['schemas']['PriceOut'];
-    list_cashbalances_api_portfolios__portfolio_id__cash_balances_get: components['schemas']['Paginated_CashBalanceOut_'];
-    create_cashbalance_api_portfolios__portfolio_id__cash_balances_post: components['schemas']['CashBalanceOut'];
-    patch_cashbalance_api_portfolios__portfolio_id__cash_balances__cb_id__patch: components['schemas']['CashBalanceOut'];
     list_snapshots_api_portfolios__portfolio_id__snapshots_get: components['schemas']['Paginated_SnapshotOut_'];
     create_snapshot_api_portfolios__portfolio_id__snapshots_post: components['schemas']['SnapshotOut'];
     get_snapshot_by_date_api_portfolios__portfolio_id__snapshots__snap_date__get: components['schemas']['SnapshotOut'];
-    patch_snapshot_api_portfolios__portfolio_id__snapshots__snap_id__patch: components['schemas']['SnapshotOut'];
     reset_snapshot_api_portfolios__portfolio_id__snapshots__snap_date__reset_post: components['schemas']['SnapshotOut'];
-    list_dividends_api_portfolios__portfolio_id__dividends_get: components['schemas']['Paginated_DividendOut_'];
-    create_dividend_api_portfolios__portfolio_id__dividends_post: components['schemas']['DividendOut'];
-    patch_dividend_api_portfolios__portfolio_id__dividends__div_id__patch: components['schemas']['DividendOut'];
-    import_preview_api_portfolios__portfolio_id__import_preview_post: components['schemas']['ImportPreviewOut'];
-    import_commit_api_portfolios__portfolio_id__import_commit_post: components['schemas']['ImportCommitOut'];
+    patch_snapshot_api_portfolios__portfolio_id__snapshots__snap_id__patch: components['schemas']['SnapshotOut'];
+    summary_api_portfolios__portfolio_id__summary_get: components['schemas']['PortfolioSummaryOut'];
+    get_xirr_history_api_portfolios__portfolio_id__xirr_history_get: components['schemas']['Paginated_XirrPointOut_'];
+    get_xirr_latest_api_portfolios__portfolio_id__xirr_latest_get: components['schemas']['XirrLatestOut'];
     get_preferences_api_users_preferences_get: components['schemas']['PreferenceOut'];
     patch_preferences_api_users_preferences_patch: components['schemas']['PreferenceOut'];
-    get_xirr_latest_api_portfolios__portfolio_id__xirr_latest_get: components['schemas']['XirrLatestOut'];
-    get_xirr_history_api_portfolios__portfolio_id__xirr_history_get: components['schemas']['Paginated_XirrPointOut_'];
-    get_nav_latest_api_portfolios__portfolio_id__nav_latest_get: components['schemas']['NavPointOut'];
-    get_nav_history_api_portfolios__portfolio_id__nav_history_get: components['schemas']['Paginated_NavPointOut_'];
-    recalculate_range_api_portfolios__portfolio_id__recalculate_range_post: components['schemas']['RecalcOut'];
-    recalculate_full_api_portfolios__portfolio_id__recalculate_post: components['schemas']['RecalcOut'];
   };

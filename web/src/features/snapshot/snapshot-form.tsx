@@ -86,7 +86,7 @@ export function SnapshotForm({
     if (snapshot) {
       reset({
         date: snapshot.date,
-        totalAsset: snapshot.totalAsset,
+        totalAsset: snapshot.totalAsset ?? '',
         marketValue: snapshot.marketValue ?? '',
         cashBalance: snapshot.cashBalance ?? '',
         note: snapshot.note ?? '',

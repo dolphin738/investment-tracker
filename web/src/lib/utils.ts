@@ -227,7 +227,7 @@ export interface ManualDiffStats {
 export function computeManualDiffStats(
   items: ReadonlyArray<{
     date: string;
-    totalAsset: string | number;
+    totalAsset?: string | number | null;
     source: string;
   }>,
   systemValueMap: ReadonlyMap<string, number> | null | undefined,
