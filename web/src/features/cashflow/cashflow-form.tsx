@@ -77,7 +77,8 @@ export function CashflowForm({
     resolver: zodResolver(cashflowSchema),
     defaultValues: {
       date: today,
-      type: CashFlowType.BUY,
+      // 编辑态首帧即按 cashflow.type 回填（避免类型栏空白「选择类型」）；新建默认存入
+      type: cashflow?.type ?? CashFlowType.BUY,
       amount: '',
       note: '',
     },
@@ -135,7 +136,7 @@ export function CashflowForm({
         <div className="space-y-2">
           <Label htmlFor="cf-type">类型</Label>
           <Select
-            value={typeValue}
+            value={typeValue || cashflow?.type}
             onValueChange={(v) =>
               setValue(
                 'type',

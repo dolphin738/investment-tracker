@@ -198,11 +198,31 @@ export default function HoldingsPage(): JSX.Element {
   });
   const securities = useSecurities(currentPortfolioId);
 
-  // 【买卖明细板块】证券多值 + 场景→side + 日期范围
+  // 【买卖明细板块】类型多选 → 有效证券 ID（与持仓板块共用 types 筛选，缺陷4 修复）
+  // - 未选类型：仅按已选证券 sec 过滤
+  // - 仅选类型：该类型下全部证券
+  // - 二者皆选：交集（既在 sec 内又属选中类型）
+  // securities 未加载完成时先不施加类型过滤，避免误显示全部记录；加载后精确收敛。
+  const effectiveSecIds = useMemo(() => {
+    const secList = securities.data ?? [];
+    const typeIds =
+      holdingsQuery.types.length > 0 && !securities.isLoading
+        ? secList
+            .filter((s) => holdingsQuery.types.includes(s.type))
+            .map((s) => s.id)
+        : null;
+    const secSet = holdingsQuery.sec;
+    if (typeIds === null) return secSet;
+    if (secSet.length === 0) return typeIds;
+    const typeIdSet = new Set(typeIds);
+    return secSet.filter((id) => typeIdSet.has(id));
+  }, [holdingsQuery.sec, holdingsQuery.types, securities.data, securities.isLoading]);
+
+  // 【买卖明细板块】有效证券 ID + 场景→side + 日期范围
   const tradeQuery: SecurityTradeQuery = useMemo(() => {
     const q: SecurityTradeQuery = {};
-    if (holdingsQuery.sec.length > 0) {
-      q.securityId = holdingsQuery.sec.join(',');
+    if (effectiveSecIds.length > 0) {
+      q.securityId = effectiveSecIds.join(',');
     }
     if (holdingsQuery.scenario === 'BUY') {
       q.side = SecuritySide.BUY_SEC;
@@ -213,7 +233,7 @@ export default function HoldingsPage(): JSX.Element {
     q.startDate = startDate;
     q.endDate = endDate;
     return q;
-  }, [holdingsQuery.sec, holdingsQuery.scenario, startDate, endDate]);
+  }, [effectiveSecIds, holdingsQuery.scenario, startDate, endDate]);
 
   /**
    * 【A4】持仓列表前端排序（决策 Q-5 甲）：默认按市值降序。

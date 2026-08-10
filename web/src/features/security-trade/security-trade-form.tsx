@@ -163,7 +163,8 @@ export function SecurityTradeForm({
     resolver: zodResolver(tradeSchema),
     defaultValues: {
       date: today,
-      side: SecuritySide.BUY_SEC,
+      // 编辑态首帧即按 trade.side 回填（避免方向栏空白「选择方向」）；新建默认买入
+      side: trade?.side ?? SecuritySide.BUY_SEC,
       securityId: '',
       quantity: '',
       tradeAmount: '',
@@ -377,7 +378,7 @@ export function SecurityTradeForm({
         <div className="space-y-2">
           <Label htmlFor="st-side">方向 *</Label>
           <Select
-            value={sideValue}
+            value={sideValue ?? trade?.side}
             onValueChange={(v) =>
               setValue(
                 'side',

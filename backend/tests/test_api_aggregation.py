@@ -91,6 +91,9 @@ async def test_overview(client):
     assert len(data["recentCashflows"]) >= 1
     assert data["recentCashflows"][0]["type"] == "BUY"
     assert Decimal(data["recentCashflows"][0]["amount"]) == Decimal("100000.00")
+    # 缺陷1 回归：概览必须返回净投入（Σ存入−Σ取出），否则前端「净投入」卡显示「暂无数据」
+    assert "netInvested" in data, "netInvested"
+    assert Decimal(data["netInvested"]) == Decimal("100000.00")
 
     fr = data["freshness"]
     for k in ("staleDays", "isStale", "latestPriceAsOf", "latestCashAsOf", "reasons"):

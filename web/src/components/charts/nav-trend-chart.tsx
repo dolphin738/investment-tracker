@@ -181,7 +181,13 @@ export function NavTrendChart({
         ) : !data || data.length === 0 ? (
           <EmptyState />
         ) : (
-          <ReactECharts option={option} style={{ height: 260, width: '100%' }} />
+          // notMerge：ECharts 默认 merge 旧 option，切换 metric 时旧 series 不会被移除，
+          // 表现为「第二次点击显示全部曲线」。notMerge 让每次渲染整体替换 option。
+          <ReactECharts
+            option={option}
+            notMerge
+            style={{ height: 260, width: '100%' }}
+          />
         )}
       </CardContent>
     </Card>

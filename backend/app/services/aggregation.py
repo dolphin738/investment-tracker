@@ -125,10 +125,23 @@ class AggregationService:
         recent = await self._recent_cashflows(p.id, 10)
         fresh = await self.freshness(p, p.user_id)
 
+        # 净投入 = Σ存入 − Σ取出（概览 8 卡之「净投入」；summary_list 已算，此处补齐）
+        cf_rows = (
+            await self.session.execute(
+                select(CashFlow).where(CashFlow.portfolio_id == p.id)
+            )
+        ).scalars().all()
+        net_invested = sum(
+            (cf.amount if cf.type is CashFlowType.BUY else -cf.amount for cf in cf_rows),
+            Decimal(0),
+        )
+
         return {
             "totalAsset": snap.total_asset if snap else None,
             "cumulativeXirr": cumulative_xirr,
             "yearXirr": year_xirr,
+            # 净值口径对齐：概览页「净投入」卡的原始值（金额类，必填；无出入金为 '0'）
+            "netInvested": str(net_invested),
             "holdingsSummary": holdings_summary,
             "navSeries": nav_series,
             "recentCashflows": recent,
