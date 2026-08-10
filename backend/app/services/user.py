@@ -177,6 +177,52 @@ class UserService:
         user.deleted_at = datetime.now(timezone.utc)
         await self.session.commit()
 
+    async def get_profile(self, user_id: str) -> User:
+        """读取当前用户完整资料（含 avatar/phone/bio/createdAt）。
+
+        收口原 auth router 内联的 select(User)...scalar_one()，使读归属统一到
+        UserService（对齐 app 的 AuthService 全服务化）。
+        """
+        user = (
+            await self.session.execute(select(User).where(User.id == user_id))
+        ).scalar_one_or_none()
+        if user is None:
+            raise BusinessException(
+                code=BusinessErrorCode.UNAUTHORIZED,
+                message="账户不可用",
+                status_code=401,
+            )
+        return user
+
+    async def update_profile(
+        self, user_id: str, name: str | None, avatar: str | None
+    ) -> User:
+        """更新资料：name 可选；avatar 变化时清理旧头像文件（best-effort）。
+
+        收口原 auth router 内联的资料更新逻辑（含 _remove_old 守卫）。
+        """
+        user = (
+            await self.session.execute(select(User).where(User.id == user_id))
+        ).scalar_one_or_none()
+        if user is None:
+            raise BusinessException(
+                code=BusinessErrorCode.UNAUTHORIZED,
+                message="账户不可用",
+                status_code=401,
+            )
+        if avatar is not None and avatar != user.avatar:
+            # 仅当头像真正变化时清理旧文件：上传接口已即时落库生效（user.avatar 即新值），
+            # 若「保存」时新旧值相同（刚上传未改），跳过 _remove_old，避免误删刚上传的文件。
+            from app.services.upload import _remove_old
+
+            _remove_old(user.avatar)
+            user.avatar = avatar
+        if name is not None:
+            user.name = name
+        await self.session.commit()
+        await self.session.refresh(user)
+        return user
+
     def _assert_restore_window(self, user: User) -> None:
         """已注销用户访问：未超期 → 1007（带剩余天数）；超期 → 1009。"""
         deadline = user.deleted_at + timedelta(days=ACCOUNT_RETENTION_DAYS)

@@ -561,6 +561,7 @@ User (1) ──< Portfolio (N)
 - 🔴 **单次重算铁律**：commit 事务提交后，**全流程仅调用 1 次** `recalculateNavRange(portfolio_id, minDate)`（`[minDate, today]`），严禁逐行触发。
 - 冲突策略：`securityTrades` / `cashFlows` 纯 insert 不去重；`assetSnapshots` 按 `(portfolio_id, date)` upsert，`source` 强制 `MANUAL`、`valuationFlag='MANUAL_INPUT'`（遵守每日唯一约束）。
 - 跨组合安全：export / preview / commit 均校验 `portfolio_id` 归属当前用户。上传限制：`.csv` / `.xlsx` / `.xls`（MIME + 后缀双校验）、≤ 5MB、行数 ≤ 10000。
+- 🔧 **写入归属（2026-08-10 收口）**：`commit_import` 三类分支不再内联构造 ORM，统一委托 `CashflowService.bulk_create` / `TradeService.bulk_create` / `SnapshotService.bulk_upsert`；`auth` 的 `me` / `get_profile` / `profile` 委托 `UserService.get_profile` / `update_profile`。详见 §8.4。
 
 #### 4.2.18 分红记录（`/dividends` · HOLD-B-P0-10）
 
@@ -837,7 +838,7 @@ sequenceDiagram
     P-->>U: 信封 {data:{token, sample, errors}}
     U->>C: POST /import/commit {token, type}
     C->>DT: decode_token + commit_import (单事务)
-    DT->>DB: INSERT 实体行
+    DT->>DB: INSERT 实体行（经 CashflowService / TradeService / SnapshotService 委托，data_transfer 不内联构造 ORM）
     C->>RC: recalculateNavRange(id, minDate)  (单次)
     C-->>U: 信封 {data:{imported, minDate}}
     Note over U: 导出: GET /export 直接返回 CSV/XLSX 文件(绕过信封)
@@ -913,6 +914,21 @@ sequenceDiagram
 
 - 列表/详情读取当日那一行；若当日为 MANUAL，同时附 `derivedTotalAsset`（由 `computeDerived` 计算，供「差异提示」与「↺ 重置」对比）。
 - 读路径不出现 `source` 条件（MANUAL / DERIVED 同表同口径）。
+
+### 8.4 写入归属收口状态（2026-08-10 全服务化完成）
+
+`services/data_transfer.py` 的 `commit_import` 与 `routers/auth.py` 原存在「绕过 Service 直接造 ORM / 内联 DB」的旁路，构成 comparison 文档 §8.4 指出的「半服务化 / 双真源」。已于 2026-08-10 全部收口：
+
+| 写入路径 | 收口前（双真源） | 收口后（现状） |
+|----------|------------------|----------------|
+| 导入 `cashFlows` | `data_transfer` 内联 `CashFlow(...)` + 复制 M1 校验 | `CashflowService.bulk_create`（M1 校验单点 `assert_first_must_be_deposit`，构造 + add，不 commit） |
+| 导入 `securityTrades` | `data_transfer` 内联 `SecurityTrade(...)` + 复制卖出硬校验 | `TradeService.bulk_create`（卖出硬校验 `_check_no_oversell` 迁入 Service，构造 + add，不 commit） |
+| 导入 `assetSnapshots` | `data_transfer` 直接调 `AssetValuationService.upsertManual` + 内联 `select` 计数 | `SnapshotService.bulk_upsert`（同源 upsert + 计数，不 commit） |
+| auth `me` / `get_profile` / `profile` | router 内联 `select(User)` + `db.commit()` | `UserService.get_profile` / `update_profile`（头像变化才清旧文件） |
+
+**契约约束（与现有 Service 一致）**：批量导入的 `commit` 仍由 `commit_import` 在末尾统一做（`bulk_*` 仅构造 + add，不各自提交）；单条 REST 写入的 `commit` 仍由各自 Service 内部做。`tests/test_arch_boundaries.py` / `test_import_linter.py` 以 AST 禁止在 `data_transfer` 内实例化上述 ORM，防止回归。
+
+**现状**：后端写入路径与 app/（NestJS 瘦 Controller + 胖 Service）等价，comparison §8.4 的「半服务源」已解除。
 
 ---
 

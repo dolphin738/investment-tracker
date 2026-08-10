@@ -5,13 +5,11 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.envelope import EnvelopeRoute
 from app.core.security import CurrentUser, get_current_user
 from app.db.database import get_db
-from app.models import User
 from app.schemas import (
     EmailPatchReq,
     LoginReq,
@@ -57,9 +55,7 @@ async def me(
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    u = (
-        await db.execute(select(User).where(User.id == user.user_id))
-    ).scalar_one()
+    u = await UserService(db).get_profile(user.user_id)
     return {"id": u.id, "email": u.email, "name": u.name}
 
 
@@ -71,10 +67,9 @@ async def get_profile(
     """当前用户完整资料（Web 客户端绑定此路径读取当前用户）。
 
     返回 id/email/name/avatar/phone/bio/createdAt，与 PATCH /profile 对称。
+    读操作收口到 UserService.get_profile，router 仅做序列化。
     """
-    u = (
-        await db.execute(select(User).where(User.id == user.user_id))
-    ).scalar_one()
+    u = await UserService(db).get_profile(user.user_id)
     return {
         "id": u.id,
         "email": u.email,
@@ -92,19 +87,7 @@ async def profile(
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    u = (
-        await db.execute(select(User).where(User.id == user.user_id))
-    ).scalar_one()
-    if req.name is not None:
-        u.name = req.name
-    if req.avatar is not None and req.avatar != u.avatar:
-        # 仅当头像真正变化时清理旧文件：上传接口已即时落库生效（u.avatar 即新值），
-        # 若「保存」时新旧值相同（刚上传未改），跳过 _remove_old，避免误删刚上传的文件。
-        from app.services.upload import _remove_old
-
-        _remove_old(u.avatar)
-        u.avatar = req.avatar
-    await db.commit()
+    u = await UserService(db).update_profile(user.user_id, req.name, req.avatar)
     return {"id": u.id, "email": u.email, "name": u.name, "avatar": u.avatar}
 
 

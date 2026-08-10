@@ -26,6 +26,32 @@ from app.services.holding import HoldingService
 from app.services.recalculation import RecalculationService
 
 
+def _check_no_oversell(trades: list) -> str | None:
+    """回放全部证券买卖，校验任意时点持仓不为负（导入批量 SELL 硬校验，对齐 §9.2）。
+
+    与手动 create_trade 的 _assert_sell_ok 口径一致：quantity 恒正、side 区分买卖。
+    同日期 BUY 先于 SELL，允许当日买入即卖出。返回错误字符串；无超额返回 None。
+    """
+    by_sec: dict[str, list] = {}
+    for t in trades:
+        by_sec.setdefault(t.security_id, []).append(t)
+    for sec_id, items in by_sec.items():
+        ordered = sorted(
+            items,
+            key=lambda t: (t.date, 0 if t.side is SecuritySide.BUY_SEC else 1),
+        )
+        held = Decimal(0)
+        for t in ordered:
+            delta = t.quantity if t.side is SecuritySide.BUY_SEC else -t.quantity
+            held += delta
+            if held < 0:
+                return (
+                    f"证券 {sec_id} 在 {t.date.isoformat()} 卖出超额："
+                    f"累计持仓将变为 {held}，不能为负"
+                )
+    return None
+
+
 class TradeService(PortfolioChildService):
     async def list_stmt(
         self,
@@ -142,6 +168,39 @@ class TradeService(PortfolioChildService):
             portfolio_id, req.date, force_dates=force
         )
         return trade
+
+    async def bulk_create(self, portfolio_id: str, rows: list[dict]) -> int:
+        """导入批量写入：构造 + 卖出硬校验（对齐 §9.2）+ add，不 commit
+        （commit 由 data_transfer.commit_import 在末尾统一做）。返回写入条数。
+
+        与 REST 单条 create 收敛到同一 Service，消除导入路径的双真源。
+        """
+        existing = (
+            await self.session.execute(
+                select(SecurityTrade).where(SecurityTrade.portfolio_id == portfolio_id)
+            )
+        ).scalars().all()
+        batch = [
+            SecurityTrade(
+                portfolio_id=portfolio_id,
+                security_id=r["security_id"],
+                date=date.fromisoformat(r["date"]),
+                side=SecuritySide(r["side"]),
+                quantity=Decimal(r["quantity"]),
+                cost_price=Decimal(r["costPrice"]),
+                fee_total=Decimal(r.get("feeTotal") or "0"),
+                note=r.get("note") or None,
+            )
+            for r in rows
+        ]
+        oversell = _check_no_oversell(list(existing) + batch)
+        if oversell:
+            raise BusinessException(
+                BusinessErrorCode.VALIDATION_FAILED, oversell, status_code=400
+            )
+        for t in batch:
+            self.session.add(t)
+        return len(batch)
 
     async def patch(
         self, portfolio_id: str, trade_id: str, req: TradePatchReq

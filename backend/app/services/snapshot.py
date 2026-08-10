@@ -126,6 +126,42 @@ class SnapshotService(PortfolioChildService):
         ).total_asset
         return snap, derived
 
+    async def bulk_upsert(
+        self, portfolio_id: str, rows: list[dict]
+    ) -> tuple[int, int]:
+        """导入批量写入：逐行 upsertManual（手工快照），不 commit（由
+        commit_import 末尾统一提交）；返回 (inserted, updated) 计数。
+
+        与 REST 单条 create 收敛到同一 Service，消除导入路径的双真源。
+        """
+        av = AssetValuationService(self.session)
+        inserted = updated = 0
+        for r in rows:
+            d = date.fromisoformat(r["date"])
+            mv = Decimal(r["marketValue"]) if r.get("marketValue") else None
+            cb = Decimal(r["cashBalance"]) if r.get("cashBalance") else None
+            existing = (
+                await self.session.execute(
+                    select(AssetSnapshot.id).where(
+                        AssetSnapshot.portfolio_id == portfolio_id,
+                        AssetSnapshot.date == d,
+                    )
+                )
+            ).scalar_one_or_none()
+            await av.upsertManual(
+                portfolio_id,
+                d,
+                Decimal(r["totalAsset"]),
+                mv,
+                cb,
+                r.get("note") or None,
+            )
+            if existing is not None:
+                updated += 1
+            else:
+                inserted += 1
+        return inserted, updated
+
     async def patch(
         self, portfolio_id: str, snap_id: str, req: SnapshotPatchReq
     ) -> tuple[AssetSnapshot, Decimal]:
