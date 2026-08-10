@@ -4,31 +4,18 @@
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
 from fastapi import APIRouter, Depends
-from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.envelope import EnvelopeRoute
 from app.core.security import CurrentUser, get_current_user
 from app.db.database import get_db
-from app.models import (
-    AssetSnapshot,
-    CashBalance,
-    CashFlow,
-    DailyNav,
-    DailyXirr,
-    Portfolio,
-    SecurityPrice,
-    SecurityTrade,
-    UserPreference,
-)
-from app.core.enums import BusinessErrorCode
-from app.core.exceptions import BusinessException
-from app.routers.common import get_portfolio, serialize_portfolio, serialize_preference
+from app.models import Portfolio
+from app.routers.common import get_portfolio
+from app.serializers import serialize_portfolio, serialize_preference
 from app.schemas import PortfolioArchiveReq, PortfolioCreateReq, PortfolioPatchReq
 from app.schemas_resp import ClearDataOut, PortfolioOut, PreferenceOut
+from app.services.portfolio import PortfolioService
 
 router = APIRouter(prefix="/api", tags=["portfolios"], route_class=EnvelopeRoute)
 
@@ -38,13 +25,7 @@ async def list_portfolios(
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list:
-    rows = (
-        await db.execute(
-            select(Portfolio)
-            .where(Portfolio.user_id == user.user_id)
-            .order_by(Portfolio.created_at.desc())
-        )
-    ).scalars().all()
+    rows = await PortfolioService(db).list_for_user(user.user_id)
     return [serialize_portfolio(p) for p in rows]
 
 
@@ -54,15 +35,7 @@ async def create_portfolio(
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    p = Portfolio(
-        user_id=user.user_id,
-        name=req.name,
-        description=req.description,
-        currency=req.currency,
-    )
-    db.add(p)
-    await db.commit()
-    await db.refresh(p)
+    p = await PortfolioService(db).create(user.user_id, req)
     return serialize_portfolio(p)
 
 
@@ -77,11 +50,7 @@ async def patch_portfolio(
     p: Portfolio = Depends(get_portfolio),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    if req.name is not None:
-        p.name = req.name
-    if req.description is not None:
-        p.description = req.description
-    await db.commit()
+    p = await PortfolioService(db).patch(p, req)
     return serialize_portfolio(p)
 
 
@@ -90,8 +59,7 @@ async def delete_portfolio(
     p: Portfolio = Depends(get_portfolio),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    await db.delete(p)
-    await db.commit()
+    await PortfolioService(db).delete(p)
     return None
 
 
@@ -101,19 +69,7 @@ async def clear_data(
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """清空组合所有数据（保留组合本身）。级联删除子表。"""
-    counts: dict[str, int] = {}
-    for tbl in (
-        DailyXirr,
-        DailyNav,
-        AssetSnapshot,
-        CashFlow,
-        SecurityTrade,
-        SecurityPrice,
-        CashBalance,
-    ):
-        res = await db.execute(delete(tbl).where(tbl.portfolio_id == p.id))
-        counts[tbl.__tablename__] = int(res.rowcount or 0)
-    await db.commit()
+    counts = await PortfolioService(db).clear_data(p)
     return {"deletedCount": counts}
 
 
@@ -128,19 +84,7 @@ async def archive_portfolio(
     archived 缺省或 true → archivedAt = now；false → 置空。
     归档时若该组合为用户偏好默认组合，则同步置空（被隐藏的组合不能再当默认）。
     """
-    archiving = req.archived is not False
-    p.archived_at = datetime.now(timezone.utc) if archiving else None
-    await db.commit()
-    if archiving:
-        await db.execute(
-            update(UserPreference)
-            .where(
-                UserPreference.user_id == p.user_id,
-                UserPreference.default_portfolio_id == p.id,
-            )
-            .values(default_portfolio_id=None)
-        )
-        await db.commit()
+    p = await PortfolioService(db).archive(p, req)
     return serialize_portfolio(p)
 
 
@@ -150,19 +94,6 @@ async def set_default_portfolio(
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """五角星设为默认 / 再次点击取消默认（toggle，需求项6）。
-
-    复用 get_portfolio 依赖保证归属；单字段天然互斥，无需清空其它组合。
-    """
-    pref = (
-        await db.execute(
-            select(UserPreference).where(UserPreference.user_id == user.user_id)
-        )
-    ).scalar_one_or_none()
-    if pref is None:
-        pref = UserPreference(user_id=user.user_id)
-        db.add(pref)
-    pref.default_portfolio_id = None if pref.default_portfolio_id == p.id else p.id
-    await db.commit()
-    await db.refresh(pref)
+    """五角星设为默认 / 再次点击取消默认（toggle，需求项6）。"""
+    pref = await PortfolioService(db).set_default(p, user.user_id)
     return serialize_preference(pref)

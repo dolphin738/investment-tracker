@@ -35,7 +35,7 @@ from app.models import (
     User,
     UserPreference,
 )
-from app.routers.common import serialize_cashflow
+from app.serializers import serialize_cashflow
 from app.services.holding import HoldingService
 
 

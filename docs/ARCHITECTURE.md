@@ -68,7 +68,7 @@
 | 层 | 目录 | 职责 |
 |----|------|------|
 | 表现 / API | `web/` + `backend/app/routers/` | 前端页面与交互；后端路由负责参数校验、归属隔离、编排 service、返回信封数据 |
-| 业务逻辑 | `backend/app/services/` | 计算编排、派生、重算、聚合、导入导出、用户；**唯一**业务规则落点 |
+| 业务逻辑 | `backend/app/services/` | **唯一**业务规则落点。含 10 个资源 Service（Cashflow/Security/Trade/Price/CashBalance/Snapshot/Dividend/Portfolio/Preference/Upload，均继承 `PortfolioChildService` 基类做归属 404 / 枚举 coerce / 分页去重）+ 领域/聚合 Service（Recalculation/AssetValuation/Holding/Calculation/Aggregation/DataTransfer/User） |
 | 计算内核 | `backend/app/finance_core/` | 无副作用纯函数：XIRR（pyxirr）、净值（单位份额法）、持仓推导（交易回放） |
 | ORM / 模型 | `backend/app/models/` + `backend/app/db/` | SQLAlchemy 2.0 async 声明模型；`Base` / `pk_uuid()` / `TimestampMixin` |
 | 基础设施 | `backend/app/core/` | JWT 鉴权、统一信封、异常→信封、业务错误码、配置 |
@@ -89,9 +89,13 @@ backend/app/
 ├── schemas.py           # 请求体 Pydantic DTO（金额统一 DecimalStr）
 ├── schemas_resp.py      # 响应体 Pydantic DTO（*Out，OpenAPI 单一真相源）
 ├── finance_core/        # 纯函数：xirr.py / nav.py / holding.py
-├── services/            # calculation / holding / asset_valuation / recalculation
-│                       #   / aggregation / data_transfer / user
-└── routers/             # health / auth / portfolios / aggregation / data(6 子路由)
+├── services/            # 资源 Service(10): cashflow / security / trade / price
+│                       #   / cashbalance / snapshot / dividend / portfolio
+│                       #   / preference / upload + 基类 base(PortfolioChildService)
+│                       #   + 领域/聚合: calculation / holding / asset_valuation
+│                       #   / recalculation / aggregation / data_transfer / user
+└── routers/             # 薄委托层：参数校验 + 归属隔离 + 调 service + 信封
+                        #   health / auth / portfolios / aggregation / data(6 子路由)
                         #   / dividend / calc / data_transfer / preference / upload / common
 ```
 
@@ -366,12 +370,22 @@ User (1) ──< Portfolio (N)
 
 | Method | Path | 说明 | 请求体 / 参数 | 响应 data |
 |--------|------|------|--------------|-----------|
-| GET | `/api/portfolios/:id/cashflows` | 出入金列表（筛选/排序/分页，写入 URL query） | `?startDate&endDate&type&page&pageSize` | `Paginated<CashFlow>` |
-| POST | `/api/portfolios/:id/cashflows` | 录入出入金 | `{ date, type: BUY\|SELL, amount, note? }` | `CashFlow` |
-| PATCH | `/api/portfolios/:id/cashflows/:cfId` | 编辑出入金 | `{ date?, type?, amount?, note? }` | `CashFlow` |
-| DELETE | `/api/portfolios/:id/cashflows/:cfId` | 删除出入金 | — | `null` |
+| GET | `/api/portfolios/:id/cashflows` | 出入金列表（筛选/排序/分页，写入 URL query） | `?startDate&endDate&type&page&pageSize` | `Paginated<CashFlow>`（**无** `recalculation`） |
+| POST | `/api/portfolios/:id/cashflows` | 录入出入金 | `{ date, type: BUY\|SELL, amount, note? }` | `CashFlow` **+ `recalculation`** |
+| PATCH | `/api/portfolios/:id/cashflows/:cfId` | 编辑出入金 | `{ date?, type?, amount?, note? }` | `CashFlow` **+ `recalculation`** |
+| DELETE | `/api/portfolios/:id/cashflows/:cfId` | 删除出入金 | — | `null`，`data` 体仅含 **`recalculation`** |
 
 > **副作用**：经 `RecalculationService` 统一入口触发区间重建（见 §7.3）。出入金不含证券明细，现金流口径以 `amount` 唯一（PRD C-02）。保存成功后提示「是否同步调整现金余额」（仅软提示，绝不自动修改，PRD CASH-P0-05 / FLOW-P0-06）。
+>
+> **`recalculation` 响应字段（D3 修复 · 完整对齐 app/）**：仅出现在**写操作**端点（POST / PATCH 内嵌于 `CashFlow`；DELETE 独立返回，无 `CashFlow` 主体）。结构为 `RecalculationMeta`：
+> ```json
+> {
+>   "fromDate": "2026-01-05",   // 重算区间起点（date）
+>   "affectedDays": 12,         // 受影响（被重算）的天数（int）
+>   "skippedManualDays": 0      // 因当日存在 MANUAL 记录而跳过的天数（int）
+> }
+> ```
+> 含义：写入出入金后系统自动从 `fromDate` 起重算 NAV/XIRR，`affectedDays` 报告被覆盖的派生天数，`skippedManualDays` 报告因手工总资产（`valuationFlag=MANUAL_INPUT`）而保留、未覆盖的天数（对应 `asset_valuation.persistDerived` 双保险②，PRD C-09 / REG-06）。列表（GET）与读操作不携带该字段。
 
 #### 4.2.4 总资产记录管理（`/snapshots` · 每日唯一）
 
@@ -398,7 +412,7 @@ User (1) ──< Portfolio (N)
 | GET | `/api/portfolios/:id/securities` | 标的列表 | `?page&pageSize` | `Paginated<Security>` |
 | POST | `/api/portfolios/:id/securities` | 新建标的（`type` 隐藏 `CASH` 选项） | `{ code, name, type?, currency? }` | `Security` |
 | PATCH | `/api/portfolios/:id/securities/:secId` | 编辑标的 | `{ name?, type? }` | `Security` |
-| DELETE | `/api/portfolios/:id/securities/:secId` | 删除标的（级联删其 trades/prices） | — | `null` |
+| DELETE | `/api/portfolios/:id/securities/:secId` | 删除标的（级联删其 trades/prices） | — | `null`，若存在成交日则返回 **`recalculation`**（否则纯 `null`，保持原契约） |
 
 #### 4.2.6 证券买卖流水（`/security-trades` · 方案 B 持仓推导来源）
 
@@ -875,16 +889,16 @@ sequenceDiagram
 
 ### 8.1 核心函数（2 纯计算 + 3 手工路径）
 
-| 函数 | 落库 | 语义 | 计算层级联 |
+| 函数 | 落库 | 语义 | 重算触发（调用方） |
 |------|------|------|-----------|
 | `computeDerived(portfolio_id, date)` | ❌ 纯计算 | 返回 `{ total_asset, market_value, cash_balance, valuation_flag }`，不写库；「系统本应算出多少」的唯一来源 | 无 |
 | `computeDerivedBatch(portfolio_id, dates[])` | ❌ 纯计算 | 批量派生：N 日恒 3 次查库（trades/prices/cashbalances），规避 N+1 | 无 |
 | `persistDerived(portfolio_id, date)` | ✅ | 逐事件日 upsert `DERIVED`；遇当日 `MANUAL` **跳过、不覆盖** | 由 `recalculateRange` 编排 |
-| `upsertManual(portfolio_id, date, ...)` | ✅ | **无条件覆盖**当日行，`source=MANUAL`、`valuation_flag=MANUAL_INPUT` | 🔴 须 `recalculateNavRange(id, date)` |
-| `deleteRecord(portfolio_id, date)` | ✅ | **事务内三删**：`asset_snapshots` + `daily_nav` + `daily_xirr`（避免幽灵 prevNav）；若当日仍为事件日则回填 DERIVED | 🔴 须 `recalculateNavRange(id, date)` |
-| `resetToDerived(portfolio_id, date)` | ✅ | 「↺ 重置为自动值」：原地覆盖该行，`source` 置回 `DERIVED`（非 DELETE+persist） | 🔴 须 `recalculateNavRange(id, date)` |
+| `upsertManual(portfolio_id, date, ...)` | ✅ | **无条件覆盖**当日行，`source=MANUAL`、`valuation_flag=MANUAL_INPUT` | 调用方(`SnapshotService`)写入后显式 `RecalculationService.recalculateNavRange(id, date)` |
+| `deleteRecord(portfolio_id, date)` | ✅ | **事务内三删**：`asset_snapshots` + `daily_nav` + `daily_xirr`（避免幽灵 prevNav）；若当日仍为事件日则回填 DERIVED | 调用方(`SnapshotService`)写入后显式 `RecalculationService.recalculateNavRange(id, date)` |
+| `resetToDerived(portfolio_id, date)` | ✅ | 「↺ 重置为自动值」：原地覆盖该行，`source` 置回 `DERIVED`（非 DELETE+persist） | 调用方(`SnapshotService`)写入后显式 `RecalculationService.recalculateNavRange(id, date)` |
 
-> 双保险：① 区间重建 `DELETE ... AND source='DERIVED'`（不误删 MANUAL）；② `persistDerived` 遇 MANUAL 跳过。手工三路径（upsertManual / deleteRecord / resetToDerived）均须在完成快照层写入后调用 `recalculateNavRange(portfolio_id, date)`（REG-06）。改日期时级联起点取 `min(旧日期, 新日期)`。
+> 双保险：① 区间重建 `DELETE ... AND source='DERIVED'`（不误删 MANUAL）；② `persistDerived` 遇 MANUAL 跳过。🔴 **单向依赖（2026-08-10 收敛）**：`AssetValuationService` 三手工路径**不再内部级联**重算（已移除 `cascade` 参数与对 `RecalculationService` 的反向调用）；级联由调用方（`SnapshotService` 在每条手工路径写入后、或 `RecalculationService` 编排）显式触发 `recalculateNavRange(portfolio_id, date)`（REG-06）。改日期时级联起点取 `min(旧日期, 新日期)`。
 
 ### 8.2 `valuation_flag` 四值
 
@@ -934,7 +948,7 @@ sequenceDiagram
 
 - 卖出数量 > 该日持仓数量 → 拒绝（**2000 VALIDATION_FAILED**，见 §16.4），提示「当前持有 X，最多可卖 X」。
 - 插入历史日期流水时，校验后续日期（含未来）不出现负持仓，否则一并拒绝。
-- 实现：`routers/data.py._assert_sell_ok` 在创建 / 修改 SELL_SEC 前调用 `HoldingService.derive` 回放校验。
+- 实现：`services/trade.py` 的 `TradeService._assert_sell_ok`（2026-08-10 从 `routers/data.py` 迁入）在创建 / 修改 SELL_SEC 前调用 `HoldingService.derive` 回放校验。
 
 ### 9.3 行级派生值不落库
 

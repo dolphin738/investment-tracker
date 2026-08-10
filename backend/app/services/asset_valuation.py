@@ -6,7 +6,8 @@
 写入分两类：
 - 派生路径 persistDerived：遇当日 MANUAL 跳过、不覆盖（双保险②）。
 - 手工三路径 upsertManual / deleteRecord / resetToDerived：无条件覆盖当日一行，
-  各方法内部 cascade=True 时自动调用 recalculateNavRange（REG-06）。
+  不再反向调用 recalculateNavRange；重算由调用方经 RecalculationService 显式编排
+  （单向依赖：recalculation → valuation，valuation 不再依赖 recalculation）。
 """
 from __future__ import annotations
 
@@ -124,10 +125,10 @@ class AssetValuationService:
         return out
 
     # ── 落库：DERIVED 写入（遇 MANUAL 跳过）──
-    async def persistDerived(self, portfolio_id: str, d: date) -> None:
+    async def persistDerived(self, portfolio_id: str, d: date) -> int:
         existing = await self._get_snapshot(portfolio_id, d)
         if existing is not None and existing.source is SnapshotSource.MANUAL:
-            return  # 双保险②：不覆盖手工
+            return 1  # 双保险②：不覆盖手工，记 1 天（供 recalculateRange 统计 skippedManualDays，修复 D3）
         derived = await self.computeDerived(portfolio_id, d)
         if existing is not None:
             existing.total_asset = derived.total_asset
@@ -153,6 +154,7 @@ class AssetValuationService:
                 index_elements=["portfolio_id", "date"]
             )
             await self.session.execute(stmt)
+        return 0
 
     # ── 落库：手工三路径 ──
     async def upsertManual(
@@ -163,7 +165,6 @@ class AssetValuationService:
         market_value: Decimal | None,
         cash_balance: Decimal | None,
         note: str | None,
-        cascade: bool = True,
     ) -> AssetSnapshot:
         existing = await self._get_snapshot(portfolio_id, d)
         if existing is not None:
@@ -188,14 +189,10 @@ class AssetValuationService:
                 recorded_at=datetime.now(timezone.utc),
             )
             self.session.add(snap)
-        if cascade:
-            from app.services.recalculation import RecalculationService
-
-            await RecalculationService(self.session).recalculateNavRange(portfolio_id, d)
         return snap
 
     async def resetToDerived(
-        self, portfolio_id: str, d: date, cascade: bool = True
+        self, portfolio_id: str, d: date
     ) -> AssetSnapshot:
         """↺ 重置为自动值：原地覆盖该行（非删除），source 置回 DERIVED。"""
         derived = await self.computeDerived(portfolio_id, d)
@@ -222,16 +219,15 @@ class AssetValuationService:
                 recorded_at=datetime.now(timezone.utc),
             )
             self.session.add(snap)
-        if cascade:
-            from app.services.recalculation import RecalculationService
-
-            await RecalculationService(self.session).recalculateNavRange(portfolio_id, d)
         return snap
 
     async def deleteRecord(
-        self, portfolio_id: str, d: date, cascade: bool = True
+        self, portfolio_id: str, d: date
     ) -> None:
-        """事务内三删：快照 + daily_nav + daily_xirr（避免幽灵 prevNav）。"""
+        """事务内三删：快照 + daily_nav + daily_xirr（避免幽灵 prevNav）。
+
+        重算由调用方显式编排（RecalculationService），本方法不再反向依赖 recalc。
+        """
         await self.session.execute(
             delete(AssetSnapshot).where(
                 AssetSnapshot.portfolio_id == portfolio_id,
@@ -251,10 +247,6 @@ class AssetValuationService:
         # 若当日仍为事件日 → 立即回填 DERIVED；否则留空（读路径前值填充）
         if await self._is_event_date(portfolio_id, d):
             await self.persistDerived(portfolio_id, d)
-        if cascade:
-            from app.services.recalculation import RecalculationService
-
-            await RecalculationService(self.session).recalculateNavRange(portfolio_id, d)
 
     async def _delete_derived_day(self, portfolio_id: str, d: date) -> None:
         """事务内三删：DERIVED 快照 + daily_nav + daily_xirr（避免幽灵 prevNav）。"""
@@ -286,7 +278,8 @@ class AssetValuationService:
           （如删现金余额后当日只剩出入金）以及「今日 0 值快照」。0 值快照不携带任何
           信息，恒为删除产物。
 
-        清理后重算 [since, today] 的 NAV/XIRR，修复断链的 prevNav。
+        清理后需由调用方显式重算 [since, today] 的 NAV/XIRR（通常在调用本方法前已
+        经 RecalculationService.recalculateRange 覆盖，故此处不再反向依赖 recalc）。
         """
         today = today_app_tz()
         # ① 删除日若已非事件日 → 删其 DERIVED（陈旧即便非 0）
@@ -306,9 +299,6 @@ class AssetValuationService:
         ).scalars().all()
         for snap in zero_rows:
             await self._delete_derived_day(portfolio_id, snap.date)
-        from app.services.recalculation import RecalculationService
-
-        await RecalculationService(self.session).recalculateNavRange(portfolio_id, since)
 
     # ── 内部工具 ──
     async def _get_snapshot(

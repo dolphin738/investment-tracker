@@ -393,11 +393,6 @@ export interface TransactionResponse {
   date: string;
   type: 'BUY' | 'SELL';
   amount: string;
-  securityId: string | null;
-  securityName: string | null;
-  quantity: string | null;
-  price: string | null;
-  fee: string | null;
   note: string | null;
   createdAt: string;
   updatedAt: string;

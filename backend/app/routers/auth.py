@@ -100,7 +100,7 @@ async def profile(
     if req.avatar is not None and req.avatar != u.avatar:
         # 仅当头像真正变化时清理旧文件：上传接口已即时落库生效（u.avatar 即新值），
         # 若「保存」时新旧值相同（刚上传未改），跳过 _remove_old，避免误删刚上传的文件。
-        from app.routers.upload import _remove_old
+        from app.services.upload import _remove_old
 
         _remove_old(u.avatar)
         u.avatar = req.avatar

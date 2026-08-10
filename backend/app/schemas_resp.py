@@ -74,6 +74,14 @@ class AuthTokenOut(BaseModel):
 
 
 # ───────────────────────── 数据实体 ─────────────────────────
+class RecalculationMeta(BaseModel):
+    """重算反馈（完整对齐 app/ 的 recalculation 字段，修复 D3）。"""
+
+    fromDate: date
+    affectedDays: int
+    skippedManualDays: int
+
+
 class CashflowOut(BaseModel):
     id: str
     portfolioId: str
@@ -83,6 +91,7 @@ class CashflowOut(BaseModel):
     note: Optional[str] = None
     createdAt: datetime
     updatedAt: datetime
+    recalculation: Optional[RecalculationMeta] = None
 
 
 class SecurityOut(BaseModel):

@@ -338,7 +338,7 @@ async def recalculate_range(
         return {"affectedDates": 0, "duration": 0}
     end = req.endDate
     t0 = time.perf_counter()
-    n = await RecalculationService(db).recalculateRange(p.id, start, end)
+    n = (await RecalculationService(db).recalculateRange(p.id, start, end)).affected_days
     duration = int((time.perf_counter() - t0) * 1000)
     return {"affectedDates": n, "duration": duration}
 
@@ -349,7 +349,7 @@ async def recalculate_full(p=Depends(get_portfolio), db: AsyncSession = Depends(
     if start is None:
         return {"affectedDates": 0, "duration": 0}
     t0 = time.perf_counter()
-    n = await RecalculationService(db).recalculateRange(p.id, start)
+    n = (await RecalculationService(db).recalculateRange(p.id, start)).affected_days
     duration = int((time.perf_counter() - t0) * 1000)
     return {"affectedDates": n, "duration": duration}
 
