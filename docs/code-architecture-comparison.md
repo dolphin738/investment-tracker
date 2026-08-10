@@ -99,16 +99,16 @@
 
 ## 6. 配置与错误处理策略
 
-| 维度 | 旧项目（NestJS） | 新项目（FastAPI） |
-|------|------------------|-------------------|
-| 配置来源 | `ConfigModule.forRoot({isGlobal:true})` 读 `.env` | `pydantic_settings.BaseSettings`，`env_file=".env"`，`get_settings()` 带 `@lru_cache` |
-| 类型安全 | `ConfigService.get<string>('JWT_SECRET')` 等字符串读取，默认散落各 `useFactory`；`JWT_SECRET` 缺失时 `JwtStrategy` 构造**抛错** | `Settings` 类字段带类型与默认值（`JWT_SECRET: str = "change-me-in-prod"`、`ACCESS_TOKEN_EXPIRE_MINUTES: int = 60*24*7`），启动即校验 |
-| 配置项 | `JWT_SECRET`/`JWT_EXPIRES_IN`/`PORT`/`STORAGE_DRIVER`/`UPLOAD_DIR`/`CORS` | `JWT_SECRET`/`JWT_ALGORITHM`/`ACCESS_TOKEN_EXPIRE_MINUTES`/`DATABASE_URL`/`UPLOAD_DIR`/`CORS_ORIGINS`/`ACCOUNT_RETENTION_DAYS` |
-| 统一响应信封 | `ResponseInterceptor`：成功 → `{code:0,data,message:'ok'}`；已是信封则透传（防套娃） | `EnvelopeRoute` + `EnvelopeJSONResponse`：成功 → `{code:0,data,message:'ok'}`；已是信封 dict 则透传（`_is_envelope` 判 `number code`） |
-| 异常→信封 | `HttpExceptionFilter`（`@Catch()` 全局）：业务码优先取主动抛的 `HttpException({code,...})`，否则按 HTTP 状态映射（400→2000、401→1001、404→3001、409→1003、500→5000） | `business_exception_handler` 等：捕获 `BusinessException(code,message,data,status_code)` → 原样透传；`HTTPException`→按 `HTTP_STATUS_TO_CODE` 映射；`RequestValidationError`→2000；兜底→5000 |
-| 主动业务异常 | `throw new HttpException({code:1004,message},400)` / 自定义异常类（如 `AccountPendingDeletionException`） | `raise BusinessException(BusinessErrorCode.PENDING_DELETION, ..., data={'remainingDays':n}, status_code=409)`（子类 `AccountPendingDeletionException`） |
-| 错误码单一来源 | `@investment-tracker/shared` 的 `BUSINESS_ERROR_CODE`（`packages/shared/src/types/api.ts`） | `core/enums.BusinessErrorCode(IntEnum)` + `HTTP_STATUS_TO_CODE` / `CODE_TO_HTTP_STATUS` 双向映射表（注释声明是 shared 的镜像） |
-| 校验错误 | `ValidationPipe`（class-validator） | Pydantic v2 自动（请求体/查询参数） |
+| 维度      | 旧项目（NestJS）                                                                                                                             | 新项目（FastAPI）                                                                                                                                                                 |
+| ------- | --------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 配置来源    | `ConfigModule.forRoot({isGlobal:true})` 读 `.env`                                                                                        | `pydantic_settings.BaseSettings`，`env_file=".env"`，`get_settings()` 带 `@lru_cache`                                                                                           |
+| 类型安全    | `ConfigService.get<string>('JWT_SECRET')` 等字符串读取，默认散落各 `useFactory`；`JWT_SECRET` 缺失时 `JwtStrategy` 构造**抛错**                             | `Settings` 类字段带类型与默认值（`JWT_SECRET: str = "change-me-in-prod"`、`ACCESS_TOKEN_EXPIRE_MINUTES: int = 60*24*7`），启动即校验                                                            |
+| 配置项     | `JWT_SECRET`/`JWT_EXPIRES_IN`/`PORT`/`STORAGE_DRIVER`/`UPLOAD_DIR`/`CORS`                                                               | `JWT_SECRET`/`JWT_ALGORITHM`/`ACCESS_TOKEN_EXPIRE_MINUTES`/`DATABASE_URL`/`UPLOAD_DIR`/`CORS_ORIGINS`/`ACCOUNT_RETENTION_DAYS`                                               |
+| 统一响应信封  | `ResponseInterceptor`：成功 → `{code:0,data,message:'ok'}`；已是信封则透传（防套娃）                                                                    | `EnvelopeRoute` + `EnvelopeJSONResponse`：成功 → `{code:0,data,message:'ok'}`；已是信封 dict 则透传（`_is_envelope` 判 `number code`）                                                     |
+| 异常→信封   | `HttpExceptionFilter`（`@Catch()` 全局）：业务码优先取主动抛的 `HttpException({code,...})`，否则按 HTTP 状态映射（400→2000、401→1001、404→3001、409→1003、500→5000） | `business_exception_handler` 等：捕获 `BusinessException(code,message,data,status_code)` → 原样透传；`HTTPException`→按 `HTTP_STATUS_TO_CODE` 映射；`RequestValidationError`→2000；兜底→5000 |
+| 主动业务异常  | `throw new HttpException({code:1004,message},400)` / 自定义异常类（如 `AccountPendingDeletionException`）                                        | `raise BusinessException(BusinessErrorCode.PENDING_DELETION, ..., data={'remainingDays':n}, status_code=409)`（子类 `AccountPendingDeletionException`）                          |
+| 错误码单一来源 | `@investment-tracker/shared` 的 `BUSINESS_ERROR_CODE`（`packages/shared/src/types/api.ts`）                                                | `core/enums.BusinessErrorCode(IntEnum)` + `HTTP_STATUS_TO_CODE` / `CODE_TO_HTTP_STATUS` 双向映射表（注释声明是 shared 的镜像）                                                              |
+| 校验错误    | `ValidationPipe`（class-validator）                                                                                                       | Pydantic v2 自动（请求体/查询参数）                                                                                                                                                     |
 
 **观察结论**：信封契约与错误码二者**逐字对齐**（新代码注释多次写"镜像 app"）。配置层面新项目更类型安全（pydantic），旧项目更松散（ConfigService 字符串 + 运行期抛错）。错误处理都收敛到"信封 + 业务码"单一出口，但实现机制不同（全局过滤器/拦截器 vs 全局异常处理器 + 自定义 Route）。
 
