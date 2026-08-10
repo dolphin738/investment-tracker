@@ -27,7 +27,14 @@ router = APIRouter(prefix="/api/auth", tags=["auth"], route_class=EnvelopeRoute)
 @router.post("/register", response_model=UserPublicOut)
 async def register(req: RegisterReq, db: AsyncSession = Depends(get_db)) -> dict:
     user = await UserService(db).register(req.email, req.password, req.name)
-    return {"id": user.id, "email": user.email, "name": user.name}
+    return {
+        "id": user.id,
+        "email": user.email,
+        "name": user.name,
+        "avatar": user.avatar,
+        "phone": user.phone,
+        "bio": user.bio,
+    }
 
 
 @router.post("/login", response_model=AuthTokenOut)
@@ -36,7 +43,14 @@ async def login(req: LoginReq, db: AsyncSession = Depends(get_db)) -> dict:
     token = UserService.issue_token(user)
     return {
         "accessToken": token,
-        "user": {"id": user.id, "email": user.email, "name": user.name},
+        "user": {
+            "id": user.id,
+            "email": user.email,
+            "name": user.name,
+            "avatar": user.avatar,
+            "phone": user.phone,
+            "bio": user.bio,
+        },
     }
 
 
@@ -46,7 +60,14 @@ async def restore(req: RestoreReq, db: AsyncSession = Depends(get_db)) -> dict:
     token = UserService.issue_token(user)
     return {
         "accessToken": token,
-        "user": {"id": user.id, "email": user.email, "name": user.name},
+        "user": {
+            "id": user.id,
+            "email": user.email,
+            "name": user.name,
+            "avatar": user.avatar,
+            "phone": user.phone,
+            "bio": user.bio,
+        },
     }
 
 
@@ -56,7 +77,14 @@ async def me(
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     u = await UserService(db).get_profile(user.user_id)
-    return {"id": u.id, "email": u.email, "name": u.name}
+    return {
+        "id": u.id,
+        "email": u.email,
+        "name": u.name,
+        "avatar": u.avatar,
+        "phone": u.phone,
+        "bio": u.bio,
+    }
 
 
 @router.get("/profile", response_model=UserPublicOut)
@@ -87,8 +115,17 @@ async def profile(
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    u = await UserService(db).update_profile(user.user_id, req.name, req.avatar)
-    return {"id": u.id, "email": u.email, "name": u.name, "avatar": u.avatar}
+    u = await UserService(db).update_profile(
+        user.user_id, req.name, req.avatar, req.phone, req.bio
+    )
+    return {
+        "id": u.id,
+        "email": u.email,
+        "name": u.name,
+        "avatar": u.avatar,
+        "phone": u.phone,
+        "bio": u.bio,
+    }
 
 
 @router.patch("/password", response_model=AuthTokenOut)
@@ -102,7 +139,14 @@ async def change_password(
     )
     return {
         "accessToken": UserService.issue_token(u),
-        "user": {"id": u.id, "email": u.email, "name": u.name},
+        "user": {
+            "id": u.id,
+            "email": u.email,
+            "name": u.name,
+            "avatar": u.avatar,
+            "phone": u.phone,
+            "bio": u.bio,
+        },
     }
 
 
@@ -117,7 +161,14 @@ async def change_email(
     )
     return {
         "accessToken": UserService.issue_token(u),
-        "user": {"id": u.id, "email": u.email, "name": u.name},
+        "user": {
+            "id": u.id,
+            "email": u.email,
+            "name": u.name,
+            "avatar": u.avatar,
+            "phone": u.phone,
+            "bio": u.bio,
+        },
     }
 
 

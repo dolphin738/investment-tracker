@@ -254,6 +254,20 @@ class RecalcOut(BaseModel):
 
 
 # ───────────────────────── 聚合 ─────────────────────────
+class FreshnessReasonOut(BaseModel):
+    """单条「数据不新鲜」原因（对齐前端 FreshnessReason）。
+
+    - kind: ``PRICE`` / ``CASH``，驱动前端「去更新行情 / 去更新现金余额」按钮。
+    - asOf / lagDays: 该维度最新数据日期与滞后天数（``None`` 表示缺失记录）。
+    - label: 给前端展示的本地化文案。
+    """
+
+    kind: str
+    asOf: Optional[date] = None
+    lagDays: Optional[int] = None
+    label: str
+
+
 class FreshnessOut(BaseModel):
     staleDays: int
     isStale: bool
@@ -261,7 +275,7 @@ class FreshnessOut(BaseModel):
     latestPriceLagDays: Optional[int] = None
     latestCashAsOf: Optional[date] = None
     latestCashLagDays: Optional[int] = None
-    reasons: list[str] = []
+    reasons: list[FreshnessReasonOut] = []
 
 
 class PortfolioSummaryOut(BaseModel):

@@ -244,8 +244,10 @@ class AssetValuationService:
                 DailyXirr.portfolio_id == portfolio_id, DailyXirr.date == d
             )
         )
-        # 若当日仍为事件日 → 立即回填 DERIVED；否则留空（读路径前值填充）
-        if await self._is_event_date(portfolio_id, d):
+        # 若当日（或之前）仍存在可派生的底层数据 → 立即回填 DERIVED 自动记录，
+        # 否则留空（读路径前值填充）。修复缺陷5：删除手工快照后，即便当日无事件、
+        # 但历史存在交易/现金/行情/出入金，也必须补回当日自动记录，保障 XIRR/净值链完整。
+        if await self.has_any_event_upto(portfolio_id, d):
             await self.persistDerived(portfolio_id, d)
 
     async def _delete_derived_day(self, portfolio_id: str, d: date) -> None:
@@ -410,6 +412,41 @@ class AssetValuationService:
             await self.session.execute(
                 select(CashFlow.id)
                 .where(CashFlow.portfolio_id == portfolio_id, CashFlow.date == d)
+                .limit(1)
+            )
+        ).first()
+        return exists is not None
+
+    async def has_any_event_upto(
+        self, portfolio_id: str, d: date
+    ) -> bool:
+        """是否存在任何事件（交易/现金/行情/出入金）日期 ≤ d。
+
+        用于删除手工快照后判断当日是否仍可派生自动记录：只要组合在 d 当日或之前
+        有过任何数据，当日就应有 DERIVED 自动快照（由历史数据向前沿用），删除手工
+        记录后必须补回，保障 XIRR/净值链不断（修复缺陷5）。与 ``_is_event_date``
+        （要求事件恰好落在 d）不同，本方法用 ``<= d`` 放宽到「历史存在即可」。
+        """
+        for tbl, col in (
+            (SecurityTrade, SecurityTrade.date),
+            (CashBalance, CashBalance.as_of),
+            (SecurityPrice, SecurityPrice.as_of),
+        ):
+            exists = (
+                await self.session.execute(
+                    select(tbl.id)
+                    .where(tbl.portfolio_id == portfolio_id, col <= d)
+                    .limit(1)
+                )
+            ).first()
+            if exists is not None:
+                return True
+        from app.models import CashFlow
+
+        exists = (
+            await self.session.execute(
+                select(CashFlow.id)
+                .where(CashFlow.portfolio_id == portfolio_id, CashFlow.date <= d)
                 .limit(1)
             )
         ).first()

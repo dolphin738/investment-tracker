@@ -378,19 +378,50 @@ class AggregationService:
         cash_lag: Optional[int] = (today - cash_asof).days if cash_asof else None
 
         is_stale = False
-        reasons: list[str] = []
+        # 对齐前端 FreshnessReason（{kind, asOf, lagDays, label}）；此前误将 reasons
+        # 返回为纯字符串数组，导致 FreshnessBanner 取不到 r.label（空白内容）与
+        # r.kind（无法渲染「去更新行情 / 现金余额」按钮），只剩「本次会话不再提示」。
+        reasons: list[dict] = []
         if held and price_asof is None:
             is_stale = True
-            reasons.append("持仓标的中存在无行情记录")
+            reasons.append(
+                {
+                    "kind": "PRICE",
+                    "asOf": None,
+                    "lagDays": None,
+                    "label": "持仓标的中存在无行情记录",
+                }
+            )
         elif price_asof and price_lag is not None and price_lag > stale_days:
             is_stale = True
-            reasons.append(f"行情已滞后 {price_lag} 天（阈值 {stale_days} 天）")
+            reasons.append(
+                {
+                    "kind": "PRICE",
+                    "asOf": price_asof,
+                    "lagDays": price_lag,
+                    "label": f"行情已滞后 {price_lag} 天（阈值 {stale_days} 天）",
+                }
+            )
         if cash_asof is None:
             is_stale = True
-            reasons.append("无现金余额记录")
+            reasons.append(
+                {
+                    "kind": "CASH",
+                    "asOf": None,
+                    "lagDays": None,
+                    "label": "无现金余额记录",
+                }
+            )
         elif cash_lag is not None and cash_lag > stale_days:
             is_stale = True
-            reasons.append(f"现金余额已滞后 {cash_lag} 天（阈值 {stale_days} 天）")
+            reasons.append(
+                {
+                    "kind": "CASH",
+                    "asOf": cash_asof,
+                    "lagDays": cash_lag,
+                    "label": f"现金余额已滞后 {cash_lag} 天（阈值 {stale_days} 天）",
+                }
+            )
 
         return {
             "staleDays": stale_days,

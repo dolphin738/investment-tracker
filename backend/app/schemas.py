@@ -31,6 +31,8 @@ class LoginReq(BaseModel):
 class ProfilePatchReq(BaseModel):
     name: Optional[str] = None
     avatar: Optional[str] = None
+    phone: Optional[str] = None
+    bio: Optional[str] = None
 
 
 class RestoreReq(BaseModel):

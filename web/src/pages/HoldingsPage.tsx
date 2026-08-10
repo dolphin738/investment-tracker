@@ -159,16 +159,20 @@ export default function HoldingsPage(): JSX.Element {
     sortOrder: 'asc',
   });
   const currentPortfolio = portfolios.find((p) => p.id === currentPortfolioId);
+  // 组合首个交易日（baseDate，服务端计算、最可靠）。必须置于 minDate 之前声明，
+  // 否则 minDate 的 useMemo 在依赖/函数体里引用 baseDate 会命中暂时性死区（TDZ）报错。
+  const baseDate = usePortfolioBaseDate();
+
+  // 持仓日期 as-of 下限：优先用 baseDate，其次首笔交易查询，再次组合创建日，最后回落今天。
+  // 修复缺陷3：原逻辑在首笔交易查询为空且无 createdAt 时会退化为今天，导致无法选择历史日期（as-of 被 min 卡死）。
   const minDate = useMemo(() => {
+    if (baseDate) return baseDate;
     const firstTradeDate = firstTradeQuery.data?.items?.[0]?.date;
     if (firstTradeDate) return firstTradeDate;
     return currentPortfolio?.createdAt
       ? toIsoDate(new Date(currentPortfolio.createdAt))
       : today;
-  }, [firstTradeQuery.data, currentPortfolio, today]);
-
-  // 「全部」快捷项起点 = 组合首个交易日（问题②）
-  const baseDate = usePortfolioBaseDate();
+  }, [baseDate, firstTradeQuery.data, currentPortfolio, today]);
 
   // I-05 三板块联动：日期范围解析（range=custom 用 from/to；否则按快捷项）
   const { startDate, endDate } = useMemo(() => {

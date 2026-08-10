@@ -708,3 +708,87 @@ async def test_p4_holdings_type_filter(client):
     )
     _, _, both, _ = env(r)
     assert len(both["items"]) == 2
+
+
+# ── 用户缺陷5：删除手工总资产记录后必须补回当日 DERIVED 自动记录 ────────────
+async def test_userbug5_delete_manual_snapshot_regenerates_derived(client):
+    """删除某日（如 8/10）误编辑的手工记录后，系统必须自动补回当日 DERIVED 自动记录，
+    否则该日无任何快照 → XIRR/净值断链、截止当日收益无法产出。
+
+    场景：D1 为完整事件日（持仓+现金），D2 仅有一条手工总资产记录（当日无底层事件）。
+    删除 D2 手工记录后，因 D1 事件 ≤ D2，has_any_event_upto(D2)=True，
+    必须重新落库 D2 的 DERIVED 快照，且 /xirr 能计算到 D2。
+    """
+    creds = await register_login(client, "ub5@example.com", "pw123456")
+    h = auth(creds["token"])
+    pid = await _create_portfolio(client, h, "UB5组合")
+    await _seed_position(client, h, pid)  # D1 事件日：市值10000+现金90000=100000
+    # D2 仅手工记录（无当日事件）
+    r = await client.post(
+        f"/api/portfolios/{pid}/snapshots", headers=h,
+        json={"date": str(D2), "totalAsset": 110000},
+    )
+    assert env(r)[0] == 200
+    # 确认写入的是 MANUAL
+    r = await client.get(f"/api/portfolios/{pid}/snapshots/{D2}", headers=h)
+    status, _, snap, _ = env(r)
+    assert status == 200
+    assert snap["source"] == "MANUAL"
+    snap_id = snap["id"]
+    # 删除该手工记录
+    r = await client.delete(
+        f"/api/portfolios/{pid}/snapshots/{snap_id}", headers=h
+    )
+    assert env(r)[0] == 200
+    # 删除后：D2 必须重新出现 DERIVED 自动记录（补回）
+    r = await client.get(f"/api/portfolios/{pid}/snapshots/{D2}", headers=h)
+    status, _, snap, _ = env(r)
+    assert status == 200, "删除手工记录后当日自动记录必须补回（不应 404）"
+    assert snap["source"] == "DERIVED"
+    # XIRR/净值链不断：时间序列应覆盖 D2
+    r = await client.get(f"/api/portfolios/{pid}/xirr", headers=h)
+    _, _, series, _ = env(r)
+    assert str(D2) in {p["date"] for p in series}
+
+
+# ── 用户缺陷2：概览 freshness.reasons 必须为结构化对象数组 ──────────────────
+async def test_userbug2_freshness_reasons_structured(client):
+    """概览 freshness.reasons 必须为结构化对象数组（含 kind/label），
+    否则前端 FreshnessBanner 取 r.label → undefined（空白内容）、r.kind 命中不了
+    PRICE/CASH（无法渲染「去更新行情/现金余额」按钮），只剩「本次会话不再提示」。
+
+    此前后端误将 reasons 返回为纯字符串数组（list[str]），与前端契约
+    FreshnessReason{kind,asOf,lagDays,label} 错配。
+    """
+    creds = await register_login(client, "ub2@example.com", "pw123456")
+    h = auth(creds["token"])
+    pid = await _create_portfolio(client, h, "UB2组合")
+    # 录入持仓但无现价 → 触发 PRICE 维度陈旧（isStale=True）
+    await client.post(
+        f"/api/portfolios/{pid}/cashflows", headers=h,
+        json={"date": str(D1), "type": "BUY", "amount": 100000},
+    )
+    await client.post(
+        f"/api/portfolios/{pid}/cash-balances", headers=h,
+        json={"asOf": str(D1), "amount": 90000},
+    )
+    sec = (await client.post(
+        f"/api/portfolios/{pid}/securities", headers=h,
+        json={"code": "600000", "name": "x", "type": "STOCK"},
+    )).json()["data"]
+    await client.post(
+        f"/api/portfolios/{pid}/security-trades", headers=h,
+        json={"date": str(D1), "securityId": sec["id"], "side": "BUY_SEC",
+              "quantity": 100, "costPrice": 10},
+    )
+    r = await client.get(f"/api/portfolios/{pid}/overview", headers=h)
+    status, code, data, _ = env(r)
+    assert status == 200 and code == 0
+    assert data["freshness"]["isStale"] is True
+    reasons = data["freshness"]["reasons"]
+    assert reasons, "应为陈旧维度产出 reasons"
+    # 不再是纯字符串数组：每条必须是含 kind/label 的对象
+    assert isinstance(reasons[0], dict)
+    assert "kind" in reasons[0] and "label" in reasons[0]
+    assert reasons[0]["kind"] in ("PRICE", "CASH")
+    assert isinstance(reasons[0]["label"], str) and bool(reasons[0]["label"])

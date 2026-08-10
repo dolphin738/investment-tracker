@@ -200,11 +200,17 @@ class UserService:
         return user
 
     async def update_profile(
-        self, user_id: str, name: str | None, avatar: str | None
+        self,
+        user_id: str,
+        name: str | None,
+        avatar: str | None,
+        phone: str | None = None,
+        bio: str | None = None,
     ) -> User:
         """更新资料：name 可选；avatar 变化时清理旧头像文件（best-effort）。
 
         收口原 auth router 内联的资料更新逻辑（经存储抽象安全闸门清旧文件）。
+        新增 phone / bio 字段（缺陷4），与 ProfilePatchReq 对齐。
         """
         user = (
             await self.session.execute(select(User).where(User.id == user_id))
@@ -223,6 +229,10 @@ class UserService:
             self.storage.remove(old_avatar)
         if name is not None:
             user.name = name
+        if phone is not None:
+            user.phone = phone
+        if bio is not None:
+            user.bio = bio
         await self.session.commit()
         await self.session.refresh(user)
         return user
