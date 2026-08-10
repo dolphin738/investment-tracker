@@ -1,8 +1,12 @@
 /**
  * components/charts/monthly-heatmap.tsx — 月度收益热力图（ECharts）
  *
- * 横轴 1-12 月，纵轴年份，颜色映射月度收益率。
- * 数据来源：日维度 NavSeriesPoint，按 (年, 月) 聚合计算月度收益率 = 月末当年净值 - 上月末当年净值。
+ * 横轴恒定 1–12 月，纵轴年份，颜色映射月度收益率（PRD §9.5 正红负绿）。
+ * 数据来源：日维度 NavSeriesPoint，按 (年, 月) 聚合计算
+ * 月度收益率 = 月末当年净值 − 同年上月末当年净值（年内首月的基准取年初 1.0）。
+ *
+ * 月份轴恒定，不随数据收敛：只有 8 月有数据时，仍完整渲染 1–12 月，
+ * 无数据月份留空（不着色、无 tooltip），避免出现「整张图只有一列 8 月」。
  */
 
 import ReactECharts from 'echarts-for-react';
@@ -26,29 +30,51 @@ interface HeatCell {
   rate: number | null;
 }
 
-/** 从日维度净值序列计算月度收益率 */
+/** 月份轴：恒定 1–12，不由数据推导（导出供测试与调用方复用） */
+export const HEATMAP_MONTHS: readonly number[] = Array.from(
+  { length: 12 },
+  (_, i) => i + 1,
+);
+
+/**
+ * 年初基准「当年净值」。
+ *
+ * 后端 `finance_core/nav.py` 约定：跨年首个交易日 `year_nav` 重置为 1.0，
+ * 当年其余交易日 `year_nav = cumulative_nav / 上年末累计净值`。
+ * 因此「年内首个有数据月份」的月度收益应以 1.0 为基准，而不是拿上一年 12 月的
+ * `year_nav`（那会把整年累计涨幅当成 1 月的跌幅）。
+ */
+const YEAR_START_NAV = 1;
+
+/** 分组键：月份必须补零，否则 '2025-10' 会字典序排在 '2025-2' 之前，环比配对整体错位 */
+function monthKey(year: number, month: number): string {
+  return `${year}-${String(month).padStart(2, '0')}`;
+}
+
+/** 从日维度净值序列计算月度收益率（年份轴由数据推导，月份轴恒定 1–12） */
 function computeMonthlyReturns(data: NavSeriesPoint[]): {
   years: number[];
-  months: number[];
   cells: HeatCell[];
 } {
   if (!data || data.length === 0) {
-    return { years: [], months: [], cells: [] };
+    return { years: [], cells: [] };
   }
   // 按日期排序
   const sorted = [...data].sort((a, b) => a.date.localeCompare(b.date));
 
   // 按 (year, month) 分组，取该月最后一条记录的 yearNav
-  const monthlyMap = new Map<string, { year: number; month: number; yearNav: number | null }>();
+  const monthlyMap = new Map<
+    string,
+    { year: number; month: number; yearNav: number | null }
+  >();
   for (const point of sorted) {
     const d = new Date(point.date);
     const year = d.getFullYear();
     const month = d.getMonth() + 1;
-    monthlyMap.set(`${year}-${month}`, { year, month, yearNav: point.yearNav });
+    monthlyMap.set(monthKey(year, month), { year, month, yearNav: point.yearNav });
   }
 
   const yearsSet = new Set<number>();
-  const monthSet = new Set<number>();
   const cells: HeatCell[] = [];
 
   // 按 (year, month) 顺序计算环比
@@ -57,19 +83,17 @@ function computeMonthlyReturns(data: NavSeriesPoint[]): {
   for (const key of sortedKeys) {
     const cur = monthlyMap.get(key)!;
     yearsSet.add(cur.year);
-    monthSet.add(cur.month);
-    if (prev && cur.yearNav !== null && prev.yearNav !== null && prev.yearNav !== 0) {
-      const rate = cur.yearNav - prev.yearNav;
-      cells.push({ year: cur.year, month: cur.month, rate });
-    } else {
-      cells.push({ year: cur.year, month: cur.month, rate: null });
-    }
+    // 基准：同年上一个有数据的月末 year_nav；年内首月（含跨年）回落到年初基准 1.0
+    const base =
+      prev !== null && prev.year === cur.year ? prev.yearNav : YEAR_START_NAV;
+    const rate =
+      cur.yearNav !== null && base !== null ? cur.yearNav - base : null;
+    cells.push({ year: cur.year, month: cur.month, rate });
     prev = cur;
   }
 
   const years = Array.from(yearsSet).sort((a, b) => a - b);
-  const months = Array.from(monthSet).sort((a, b) => a - b);
-  return { years, months, cells };
+  return { years, cells };
 }
 
 /**
@@ -96,17 +120,18 @@ export function MonthlyHeatmap({
   title = '月度收益热力图',
   className,
 }: MonthlyHeatmapProps): JSX.Element {
-  const { years, months, cells } = useMemo(() => computeMonthlyReturns(data), [data]);
+  const { years, cells } = useMemo(() => computeMonthlyReturns(data), [data]);
 
   const option = useMemo(() => {
-    const monthLabels = months.map((m) => `${m}月`);
+    const monthLabels = HEATMAP_MONTHS.map((m) => `${m}月`);
     const yearLabels = years.map((y) => y.toString());
     const seriesData: [number, number, number | string][] = [];
     let maxAbs = 0;
     cells.forEach((cell) => {
-      const x = months.indexOf(cell.month);
+      // 月份轴恒定 1–12，x 由月份直接定位，不再 indexOf 有数据月份集合
+      const x = cell.month - 1;
       const y = years.indexOf(cell.year);
-      if (x >= 0 && y >= 0) {
+      if (x >= 0 && x < HEATMAP_MONTHS.length && y >= 0) {
         if (cell.rate !== null) {
           maxAbs = Math.max(maxAbs, Math.abs(cell.rate));
           seriesData.push([x, y, cell.rate]);
@@ -124,7 +149,7 @@ export function MonthlyHeatmap({
         formatter: (params: { value: [number, number, number | string] }) => {
           const [x, y, v] = params.value;
           const year = years[y];
-          const month = months[x];
+          const month = HEATMAP_MONTHS[x];
           if (v === '-' || v === null || typeof v !== 'number') {
             return `${year}年 ${month}月: 数据不足`;
           }
@@ -137,7 +162,8 @@ export function MonthlyHeatmap({
         type: 'category',
         data: monthLabels,
         splitArea: { show: true },
-        axisLabel: { fontSize: 11 },
+        // interval: 0 强制 12 个月标签全显示，禁止 ECharts 因宽度紧张自动隔项抽稀
+        axisLabel: { fontSize: 11, interval: 0 },
       },
       yAxis: {
         type: 'category',
@@ -170,7 +196,7 @@ export function MonthlyHeatmap({
         },
       ],
     };
-  }, [years, months, cells]);
+  }, [years, cells]);
 
   return (
     <Card className={className}>
