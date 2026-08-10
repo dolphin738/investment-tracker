@@ -9,10 +9,12 @@
 """
 from __future__ import annotations
 
+from datetime import date
 from typing import Optional, Type, TypeVar
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.date_utils import today_app_tz
 from app.core.enums import BusinessErrorCode
 from app.core.exceptions import BusinessException
 
@@ -64,3 +66,18 @@ def split_ids(raw: Optional[str]) -> Optional[list[str]]:
     if not raw:
         return None
     return [x for x in raw.split(",") if x]
+
+
+def validate_date_not_future(d: date) -> None:
+    """拒绝未来日期（UTC+8 应用日口径，对齐 app/ validateDateNotFuture）。
+
+    app/ 在 cashflow / security-trade / snapshot 的 create+patch（以及
+    cash-balance / security-price 的 upsert）均做同等校验：当天允许，
+    次日及以后拒绝。本 helper 统一收敛到 base，供各资源 Service 复用。
+    """
+    if d > today_app_tz():
+        raise BusinessException(
+            BusinessErrorCode.VALIDATION_FAILED,
+            "日期不能为未来日期",
+            status_code=400,
+        )

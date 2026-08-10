@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import CashBalance
 from app.schemas import CashBalanceCreateReq, CashBalancePatchReq
 from app.services.asset_valuation import AssetValuationService
-from app.services.base import PortfolioChildService
+from app.services.base import PortfolioChildService, validate_date_not_future
 from app.services.recalculation import RecalculationService
 
 
@@ -41,6 +41,8 @@ class CashBalanceService(PortfolioChildService):
     async def create(
         self, portfolio_id: str, req: CashBalanceCreateReq
     ) -> CashBalance:
+        # D1：日期不能为未来（对齐 app/ cash-balance upsert 的内联校验）
+        validate_date_not_future(req.asOf)
         existing = (
             await self.session.execute(
                 select(CashBalance).where(
@@ -75,6 +77,8 @@ class CashBalanceService(PortfolioChildService):
     ) -> CashBalance:
         cb = await self.get_scoped(CashBalance, cb_id, portfolio_id)
         old_as_of = cb.as_of
+        if req.asOf is not None:
+            validate_date_not_future(req.asOf)
         if req.amount is not None:
             cb.amount = req.amount
         if req.note is not None:

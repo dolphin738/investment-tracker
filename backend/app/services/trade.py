@@ -21,7 +21,7 @@ from app.finance_core.holding import ZERO
 from app.models import SecurityTrade
 from app.models.enums import SecuritySide
 from app.schemas import TradeCreateReq, TradePatchReq
-from app.services.base import PortfolioChildService, coerce_enum, split_ids
+from app.services.base import PortfolioChildService, coerce_enum, split_ids, validate_date_not_future
 from app.services.holding import HoldingService
 from app.services.recalculation import RecalculationService
 
@@ -143,6 +143,8 @@ class TradeService(PortfolioChildService):
         self, portfolio_id: str, req: TradeCreateReq
     ) -> SecurityTrade:
         side = coerce_enum(SecuritySide, req.side, "side")
+        # D1：日期不能为未来（对齐 app/ validateDateNotFuture）
+        validate_date_not_future(req.date)
         if side is SecuritySide.SELL_SEC:
             await self._assert_sell_ok(
                 portfolio_id, req.securityId, req.date, req.quantity
@@ -214,6 +216,8 @@ class TradeService(PortfolioChildService):
             else trade.side
         )
         new_qty = req.quantity if req.quantity is not None else trade.quantity
+        if req.date is not None:
+            validate_date_not_future(new_date)
         if new_side is SecuritySide.SELL_SEC:
             await self._assert_sell_ok(
                 portfolio_id,

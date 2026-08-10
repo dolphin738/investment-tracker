@@ -92,11 +92,25 @@ async def test_clear_data_keeps_portfolio(client):
         headers=h,
         json={"date": "2024-01-02", "type": "BUY", "amount": 1000},
     )
+    # D2：造一条分红记录（需先有标的），验证清空数据含 dividend_records
+    sec = (
+        await client.post(
+            f"/api/portfolios/{pid}/securities",
+            headers=h,
+            json={"code": "600519", "name": "贵州茅台"},
+        )
+    ).json()["data"]["id"]
+    await client.post(
+        f"/api/portfolios/{pid}/dividends",
+        headers=h,
+        json={"securityId": sec, "date": "2024-06-01", "amount": 50, "type": "CASH"},
+    )
     r = await client.delete(f"/api/portfolios/{pid}/data", headers=h)
     status, code, data, _ = env(r)
     assert status == 200 and code == 0
     counts = data["deletedCount"]
     assert counts["cashflows"] >= 1
+    assert counts["dividend_records"] >= 1  # D2
 
     # 组合仍在
     r = await client.get(f"/api/portfolios/{pid}", headers=h)

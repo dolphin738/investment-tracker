@@ -22,7 +22,7 @@ from app.models import AssetSnapshot
 from app.models.enums import SnapshotSource
 from app.schemas import SnapshotCreateReq, SnapshotPatchReq
 from app.services.asset_valuation import AssetValuationService
-from app.services.base import PortfolioChildService
+from app.services.base import PortfolioChildService, validate_date_not_future
 from app.services.recalculation import RecalculationService
 
 
@@ -112,6 +112,8 @@ class SnapshotService(PortfolioChildService):
     async def create(
         self, portfolio_id: str, req: SnapshotCreateReq
     ) -> tuple[AssetSnapshot, Decimal]:
+        # D1：手工快照日期不能为未来（对齐 app/ snapshot upsert 的 validateDateNotFuture）
+        validate_date_not_future(req.date)
         av = AssetValuationService(self.session)
         snap = await av.upsertManual(
             portfolio_id, req.date, req.totalAsset, req.marketValue,

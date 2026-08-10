@@ -19,7 +19,7 @@ from app.core.exceptions import BusinessException
 from app.models import CashFlow, CashFlowType
 from app.schemas import CashflowCreateReq, CashflowPatchReq
 from app.services.asset_valuation import AssetValuationService
-from app.services.base import PortfolioChildService, coerce_enum
+from app.services.base import PortfolioChildService, coerce_enum, validate_date_not_future
 from app.services.recalculation import RecalculationResult, RecalculationService
 
 
@@ -70,6 +70,8 @@ class CashflowService(PortfolioChildService):
         self, portfolio_id: str, req: CashflowCreateReq
     ) -> tuple[CashFlow, RecalculationResult]:
         cf_type = coerce_enum(CashFlowType, req.type, "type")
+        # D1：日期不能为未来（对齐 app/ validateDateNotFuture）
+        validate_date_not_future(req.date)
         # M1：PRD §3.6 首笔出入金必须为存入；若组合尚无任何现金流且本次为取出，拒绝
         if cf_type is CashFlowType.SELL:
             has_existing = (
@@ -105,6 +107,7 @@ class CashflowService(PortfolioChildService):
         cf = await self.get_scoped(CashFlow, cf_id, portfolio_id)
         old_date = cf.date
         if req.date is not None:
+            validate_date_not_future(req.date)
             cf.date = req.date
         if req.type is not None:
             cf.type = coerce_enum(CashFlowType, req.type, "type")

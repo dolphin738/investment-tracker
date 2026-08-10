@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import SecurityPrice
 from app.schemas import PriceCreateReq, PricePatchReq
 from app.services.asset_valuation import AssetValuationService
-from app.services.base import PortfolioChildService, split_ids
+from app.services.base import PortfolioChildService, split_ids, validate_date_not_future
 from app.services.recalculation import RecalculationService
 
 
@@ -40,6 +40,8 @@ class PriceService(PortfolioChildService):
         return await self.get_scoped(SecurityPrice, price_id, portfolio_id)
 
     async def create(self, portfolio_id: str, req: PriceCreateReq) -> SecurityPrice:
+        # D1：日期不能为未来（对齐 app/ security-price upsert 的内联校验）
+        validate_date_not_future(req.asOf)
         existing = (
             await self.session.execute(
                 select(SecurityPrice).where(
@@ -74,6 +76,8 @@ class PriceService(PortfolioChildService):
     ) -> SecurityPrice:
         price = await self.get_scoped(SecurityPrice, price_id, portfolio_id)
         old_as_of = price.as_of
+        if req.asOf is not None:
+            validate_date_not_future(req.asOf)
         new_as_of = req.asOf if req.asOf is not None else price.as_of
         if req.price is not None:
             price.price = req.price
