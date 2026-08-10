@@ -38,6 +38,11 @@ class Settings(BaseSettings):
     # 账户注销冷静期（天），与 shared ACCOUNT_RETENTION_DAYS 同源
     ACCOUNT_RETENTION_DAYS: int = 30
 
+    # 内部定时清理端点保护令牌：外部 cron（k8s CronJob / 系统 crontab）调用
+    # POST /api/internal/cleanup 时携带 X-Internal-Token 头。为空或未匹配则 403。
+    # 生产环境必须改为强随机值（对齐「受保护内部端点」）。
+    INTERNAL_CLEANUP_TOKEN: str = "change-me-internal"
+
 
 @lru_cache
 def get_settings() -> Settings:
