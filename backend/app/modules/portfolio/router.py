@@ -11,7 +11,7 @@ from app.core.envelope import EnvelopeRoute
 from app.core.security import CurrentUser, get_current_user
 from app.db.database import get_db
 from app.models import Portfolio
-from app.routers.common import get_portfolio
+from app.common import get_portfolio
 from app.serializers import serialize_portfolio, serialize_preference
 from app.schemas import PortfolioArchiveReq, PortfolioCreateReq, PortfolioPatchReq
 from app.schemas_resp import ClearDataOut, PortfolioOut, PreferenceOut

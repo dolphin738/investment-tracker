@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.envelope import EnvelopeRoute
 from app.db.database import get_db
 from app.models.enums import SnapshotSource
-from app.routers.common import get_portfolio, paginate
+from app.common import get_portfolio, paginate
 from app.serializers import (
     serialize_cashbalance,
     serialize_cashflow,

@@ -10,15 +10,15 @@ root_packages =
     app
 
 [importlinter:models_no_upward]
-name = models 不得反向依赖 services / routers
+name = models 不得反向依赖 services / modules
 type = forbidden
 source_modules = app.models
 forbidden_modules =
     app.services
-    app.routers
+    app.modules
 
 [importlinter:services_no_routers]
-name = services 不得依赖 routers
+name = services 不得依赖 modules（路由层）
 type = forbidden
 source_modules = app.services
-forbidden_modules = app.routers
+forbidden_modules = app.modules

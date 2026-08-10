@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.envelope import EnvelopeRoute
 from app.db.database import get_db
 from app.models import Security
-from app.routers.common import get_portfolio
+from app.common import get_portfolio
 from app.serializers import serialize_dividend
 from app.schemas import DividendCreateReq, DividendPatchReq
 from app.schemas_resp import DividendOut, Paginated

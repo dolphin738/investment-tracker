@@ -28,7 +28,7 @@ from app.models import (
     SecurityPrice,
     SecurityTrade,
 )
-from app.routers.common import get_portfolio
+from app.common import get_portfolio
 from app.schemas import RecalculateRangeReq
 from app.schemas_resp import (
     HoldingsOut,

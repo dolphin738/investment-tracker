@@ -24,15 +24,16 @@ from app.core.exceptions import (
     unhandled_exception_handler,
     validation_exception_handler,
 )
-from app.routers import (
+from app.modules import (
     aggregation,
     auth,
-    calc,
+    calculation,
     data,
     data_transfer,
     dividend,
     health,
-    portfolios,
+    internal,
+    portfolio,
     preference,
     upload,
 )
@@ -82,7 +83,7 @@ app.include_router(auth.router)
 # ⚠️ aggregation 必须在 portfolios 之前注册：/comparison 字面路由需优先于 /{portfolio_id}
 app.include_router(aggregation.router_aggregation)
 app.include_router(aggregation.router_account)
-app.include_router(portfolios.router)
+app.include_router(portfolio.router)
 app.include_router(data.router_cashflows)
 app.include_router(data.router_securities)
 app.include_router(data.router_trades)
@@ -94,10 +95,11 @@ app.include_router(data_transfer.router_dt_portfolio)
 app.include_router(data_transfer.router_dt_global)
 app.include_router(preference.router)
 app.include_router(upload.router)
-app.include_router(calc.router_holdings)
-app.include_router(calc.router_xirr)
-app.include_router(calc.router_nav)
-app.include_router(calc.router_recalculate)
+app.include_router(calculation.router_holdings)
+app.include_router(calculation.router_xirr)
+app.include_router(calculation.router_nav)
+app.include_router(calculation.router_recalculate)
+app.include_router(internal.router)
 
 
 def _custom_openapi() -> dict:

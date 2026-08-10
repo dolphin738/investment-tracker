@@ -24,7 +24,7 @@ from app.core.security import CurrentUser, get_current_user
 from app.db.database import get_db
 from app.models import Security
 from app.models.enums import ExportType, ImportType
-from app.routers.common import get_portfolio
+from app.common import get_portfolio
 from app.schemas import ImportCommitReq
 from app.schemas_resp import ImportCommitOut, ImportPreviewOut
 from app.services import data_transfer as dt
