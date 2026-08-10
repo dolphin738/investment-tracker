@@ -1,22 +1,28 @@
 /**
- * pages/transactions.tsx — 出入金管理页（PRD §7.1）
+ * pages/transactions.tsx — 出入金管理页（PRD §7.1 · 改版：统一筛选器 + Tab 分页）
  *
  * 注：原【A】总资产展示卡片（当前总资产 / 持仓市值 / 近30日走势图 / 手工记录标记）
  * 已按 docs/designs/overview-fusion-2026-08-06.md 整体
  * 迁移至概览页（dashboard），本页不再展示总资产。
- * 【B】现金余额（手工维护）：当前余额展示行 + ⓘ 提示 + 金额/生效日期/保存（调 cash-balance API）
- * 【C】出入金流水列表：类型多选 checkbox（全不勾=全部）+ 日期范围 + 排序 + 分页（20/50/100）
- *   —— 筛选/排序/分页全部写入 URL query（FLOW-P0-02 验收2：刷新/分享保持）
+ *
+ * 【改版要点】对齐持仓页 HoldingsPage 的「统一筛选器 + Tabs」范式：
+ * 1. **筛选器合并**：页面顶部单一筛选器，取代原先「出入金流水」「现金余额」各自
+ *    独立的两套筛选。日期范围对**两个页签同时生效**；类型多选与排序仅作用于
+ *    「出入金流水」（现金余额没有类型/排序维度 —— 后端 CashBalanceQuery 只有
+ *    startDate/endDate/page/pageSize），控件上就近标注作用范围，避免误解。
+ * 2. **Tab 分页切换**：【出入金流水】/【现金余额】两个页签，复用与持仓页同一套
+ *    `components/ui/tabs`。Tabs 受控（useState）——FLOW-P0-06 软提示需要程序化
+ *    切到「现金余额」页签并打开录入弹窗。
+ * 3. **现金余额页签版式**参照「买卖明细」：上方当前余额（+ⓘ 提示），下方余额变更
+ *    历史表格，每条支持编辑 / 删除（删除触发后端重算 + 前端缓存失效）。
+ * 4. **录入弹窗**：现金余额新增改为弹出对话框；编辑同一弹窗复用 `CashBalanceForm`。
+ *
+ * 筛选/排序/分页仍全部写入 URL query（FLOW-P0-02 验收2：刷新/分享保持）。
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import {
-  Camera,
-  Info,
-  Plus,
-  RotateCcw,
-} from 'lucide-react';
+import { Info, Plus, RotateCcw } from 'lucide-react';
 import {
   Card,
   CardContent,
@@ -25,7 +31,6 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
   Select,
@@ -40,9 +45,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Skeleton } from '@/components/ui/skeleton';
 import { CashflowForm } from '@/features/cashflow/cashflow-form';
 import { CashflowList } from '@/features/cashflow/cashflow-list';
+import { CashBalanceForm } from '@/features/cashflow/cash-balance-form';
 import { CashBalanceHistory } from '@/features/cashflow/cash-balance-history';
 import {
   parseTransactionSearchParams,
@@ -58,7 +65,7 @@ import {
 } from '@/stores/portfolio.store';
 import { usePreferenceStore } from '@/stores/preference.store';
 import { usePortfolios } from '@/hooks/use-portfolios';
-import { useLatestCashBalance, useUpsertCashBalance } from '@/hooks/use-cash-balances';
+import { useLatestCashBalance } from '@/hooks/use-cash-balances';
 import { DateRangeQuickPicker } from '@/components/date/date-range-quick-picker';
 import { resolveQuickRange } from '@/features/query/quick-range';
 import { useDefaultDateRange } from '@/features/query/use-default-date-range';
@@ -68,9 +75,11 @@ import {
   ENTRY_BUTTON_SIZE,
   ENTRY_BUTTON_VARIANT,
 } from '@/constants/entry-button-labels';
-import { toIsoDate } from '@/lib/constants';
 import { formatCurrency, formatDate } from '@/lib/utils';
-import type { TransactionQuery } from '@/api/types';
+import type { CashBalanceResponse, TransactionQuery } from '@/api/types';
+
+/** 页签标识（不写 URL，与持仓页 Tabs 同口径） */
+type TransactionTab = 'cashflow' | 'balance';
 
 export default function TransactionsPage(): JSX.Element {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -83,9 +92,18 @@ export default function TransactionsPage(): JSX.Element {
   const getPreference = usePreferenceStore((s) => s.getPreference);
   const amountThousands = getPreference('amountThousands');
   const amountAbbrev = getPreference('amountAbbrev');
-  const [open, setOpen] = useState(false);
 
-  // ── 【C】筛选/排序/分页 ← URL query（FLOW-P0-02 验收2：刷新/分享保持） ──
+  /** 当前页签（受控：软提示需要程序化切到「现金余额」） */
+  const [tab, setTab] = useState<TransactionTab>('cashflow');
+  /** 出入金录入弹窗 */
+  const [open, setOpen] = useState(false);
+  /** 现金余额录入/编辑弹窗（editingBalance 为 null 即新增） */
+  const [balanceDialogOpen, setBalanceDialogOpen] = useState(false);
+  const [editingBalance, setEditingBalance] = useState<CashBalanceResponse | null>(
+    null,
+  );
+
+  // ── 统一筛选/排序/分页 ← URL query（FLOW-P0-02 验收2：刷新/分享保持） ──
   const parsed = useMemo(
     () => parseTransactionSearchParams(searchParams),
     [searchParams],
@@ -152,9 +170,9 @@ export default function TransactionsPage(): JSX.Element {
   };
 
   /** 重置：清空全部筛选/排序/分页参数（回落到 全部 + date desc + 第 1 页 + 20 条） */
-  const handleResetFilter = () => {
+  const handleResetFilter = useCallback(() => {
     setSearchParams({});
-  };
+  }, [setSearchParams]);
 
   /** 排序切换（value = `${sortBy}:${sortOrder}`，如 date:desc） */
   const handleSortChange = (v: string) => {
@@ -171,7 +189,7 @@ export default function TransactionsPage(): JSX.Element {
   };
 
   /**
-   * 传给列表的查询参数：日期范围 + 非默认排序。
+   * 传给出入金流水列表的查询参数：日期范围 + 非默认排序。
    * F5 仅非默认时透传（默认 date desc 与后端现状一致，避免后端 F5 未落盘时白名单 400）。
    */
   const listQuery: TransactionQuery = useMemo(() => {
@@ -186,41 +204,30 @@ export default function TransactionsPage(): JSX.Element {
   }, [filterStartDate, filterEndDate, sortBy, sortOrder]);
 
   const latestBalance = useLatestCashBalance(currentPortfolioId);
+  const cashBalance = latestBalance.data?.amount;
 
-  // ── 【B】现金余额维护 ──
-  const [balanceAmount, setBalanceAmount] = useState('');
-  const [balanceDate, setBalanceDate] = useState(toIsoDate(new Date()));
-  const upsertBalanceMutation = useUpsertCashBalance();
-  const balanceAmountRef = useRef<HTMLInputElement>(null);
+  /** 打开现金余额新增弹窗 */
+  const openCreateBalance = useCallback(() => {
+    setEditingBalance(null);
+    setBalanceDialogOpen(true);
+  }, []);
 
-  // FLOW-P0-06：监听软提示「去更新」事件 → 聚焦【B】金额输入框
-  // （只聚焦，绝不自动修改 CashBalance；事件由 use-transactions 的 soft hint action 派发）
+  /** 打开现金余额编辑弹窗（复用同一表单组件） */
+  const openEditBalance = useCallback((row: CashBalanceResponse) => {
+    setEditingBalance(row);
+    setBalanceDialogOpen(true);
+  }, []);
+
+  // FLOW-P0-06：监听软提示「去更新」事件 → 切到「现金余额」页签并打开录入弹窗
+  // （只引导，绝不自动修改 CashBalance；事件由 use-transactions 的 soft hint action 派发）
   useEffect(() => {
     const handler = () => {
-      balanceAmountRef.current?.focus();
-      balanceAmountRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      setTab('balance');
+      openCreateBalance();
     };
     window.addEventListener(CASH_BALANCE_FOCUS_EVENT, handler);
     return () => window.removeEventListener(CASH_BALANCE_FOCUS_EVENT, handler);
-  }, []);
-
-  const cashBalance = latestBalance.data?.amount;
-
-  const handleSaveBalance = () => {
-    const amount = Number(balanceAmount);
-    if (!balanceAmount || !Number.isFinite(amount) || amount < 0) return;
-    if (!balanceDate) return;
-    upsertBalanceMutation.mutate(
-      {
-        portfolioId: currentPortfolioId!,
-        payload: { asOf: balanceDate, amount },
-      },
-      {
-        // 保存后清空输入；latestBalance 因 useUpsertCashBalance invalidate 自动刷新 → 展示最新余额
-        onSuccess: () => setBalanceAmount(''),
-      },
-    );
-  };
+  }, [openCreateBalance]);
 
   // ===== 加载态 =====
   if (portfoliosLoading) {
@@ -260,7 +267,7 @@ export default function TransactionsPage(): JSX.Element {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">出入金管理</h1>
           <p className="text-sm text-muted-foreground">
-            管理存入/取出现金流，系统据此计算净值与 XIRR
+            管理存入/取出现金流与现金余额，系统据此计算净值与 XIRR
           </p>
         </div>
         {/* INC-05：与概览页「录入买卖」同规格（主色 + sm + Plus），文案取统一字典 */}
@@ -274,99 +281,15 @@ export default function TransactionsPage(): JSX.Element {
         </Button>
       </div>
 
-      {/* 【B】现金余额（手工维护） */}
+      {/* ============ 统一筛选器（两个页签共享，变更即写入 URL query） ============ */}
       <Card>
-        <CardHeader>
-          <CardTitle className="text-base">现金余额（手工维护）</CardTitle>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">筛选</CardTitle>
           <CardDescription>
-            维护组合现金余额，生效日起前向沿用；保存后触发净值/XIRR 重算
+            日期范围对「出入金流水」与「现金余额」同时生效；类型与排序仅作用于出入金流水
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {/* 当前余额展示行（CASH-P0-02 验收1） */}
-          <div className="mb-4 rounded-lg bg-muted/40 p-4">
-            <p className="text-xs text-muted-foreground">当前余额</p>
-            <p className="mt-1 text-xl font-bold tabular-nums">
-              {cashBalance !== undefined && cashBalance !== null
-                ? formatCurrency(cashBalance, 2, { thousands: amountThousands, abbreviate: amountAbbrev })
-                : '未维护，可在下方录入'}
-            </p>
-            {cashBalance !== undefined && cashBalance !== null && latestBalance.data && (
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                自 {formatDate(latestBalance.data.asOf)} 起沿用
-              </p>
-            )}
-          </div>
-
-          {/* CASH-P0-03 两条 ⓘ 提示 */}
-          <ul className="mb-4 space-y-1.5 text-xs text-muted-foreground">
-            <li className="flex items-start gap-1.5">
-              <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-              <span>存取与证券买卖不会自动调整此值，请在操作后自行更新。</span>
-            </li>
-            <li className="flex items-start gap-1.5">
-              <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-              <span>修改后自该日起的自动总资产记录将重新计算（您手工记录的日期会被跳过）。</span>
-            </li>
-          </ul>
-
-          {/* CASH-P1-01 / T04：现金余额变更历史展开器（默认收起，不写 URL） */}
-          <CashBalanceHistory portfolioId={currentPortfolioId} className="mb-3" />
-
-          <div className="flex flex-wrap items-end gap-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="balance-amount" className="text-xs">
-                金额（元）
-              </Label>
-              <Input
-                id="balance-amount"
-                ref={balanceAmountRef}
-                type="number"
-                step="0.01"
-                min="0"
-                className="w-[160px]"
-                placeholder="0.00"
-                value={balanceAmount}
-                onChange={(e) => setBalanceAmount(e.target.value)}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="balance-date" className="text-xs">
-                生效日期
-              </Label>
-              <Input
-                id="balance-date"
-                type="date"
-                className="w-[160px]"
-                max={toIsoDate(new Date())}
-                value={balanceDate}
-                onChange={(e) => setBalanceDate(e.target.value)}
-              />
-            </div>
-            <Button
-              onClick={handleSaveBalance}
-              disabled={
-                upsertBalanceMutation.isPending ||
-                !balanceAmount ||
-                Number(balanceAmount) < 0 ||
-                !balanceDate
-              }
-            >
-              <Camera className="mr-2 h-4 w-4" />
-              保存
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* 【C】出入金流水列表 */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">出入金流水</CardTitle>
-          <CardDescription>支持按日期范围与类型多选筛选、排序；编辑/删除将触发重算</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {/* 筛选栏（变更即写入 URL query，FLOW-P0-02 验收2） */}
           <div className="flex flex-wrap items-end gap-3">
             {/*
               问题⑥：把「不勾选 = 全部」并入 Label。原先它是控件下方独立的 <p>，
@@ -375,7 +298,7 @@ export default function TransactionsPage(): JSX.Element {
               都是「Label + h-9 控件」的等高结构，天然对齐。
             */}
             <div className="space-y-1.5">
-              <Label className="text-xs">类型（不勾选 = 全部）</Label>
+              <Label className="text-xs">类型（不勾选 = 全部 · 仅流水）</Label>
               <div className="flex h-9 items-center gap-4 rounded-md border border-input px-3">
                 {TRANSACTION_TYPE_OPTIONS.map((t) => (
                   <label
@@ -412,7 +335,7 @@ export default function TransactionsPage(): JSX.Element {
               }
             />
             <div className="space-y-1.5">
-              <Label className="text-xs">排序</Label>
+              <Label className="text-xs">排序（仅流水）</Label>
               <Select value={`${sortBy}:${sortOrder}`} onValueChange={handleSortChange}>
                 <SelectTrigger className="w-[130px]">
                   <SelectValue />
@@ -433,19 +356,109 @@ export default function TransactionsPage(): JSX.Element {
               </Button>
             </div>
           </div>
-
-          <CashflowList
-            portfolioId={currentPortfolioId}
-            query={listQuery}
-            types={types}
-            page={page}
-            pageSize={pageSize}
-            onPageChange={handlePageChange}
-            onPageSizeChange={handlePageSizeChange}
-            onClearFilter={handleResetFilter}
-          />
         </CardContent>
       </Card>
+
+      {/* ============ 页签：出入金流水 / 现金余额 ============ */}
+      <Tabs value={tab} onValueChange={(v) => setTab(v as TransactionTab)}>
+        <TabsList>
+          <TabsTrigger value="cashflow">出入金流水</TabsTrigger>
+          <TabsTrigger value="balance">现金余额</TabsTrigger>
+        </TabsList>
+
+        {/* ---------- 出入金流水 ---------- */}
+        <TabsContent value="cashflow" className="mt-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">出入金流水</CardTitle>
+              <CardDescription>
+                按顶部统一筛选器的日期范围 / 类型 / 排序展示；编辑/删除将触发重算
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <CashflowList
+                portfolioId={currentPortfolioId}
+                query={listQuery}
+                types={types}
+                page={page}
+                pageSize={pageSize}
+                onPageChange={handlePageChange}
+                onPageSizeChange={handlePageSizeChange}
+                onClearFilter={handleResetFilter}
+              />
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ---------- 现金余额（版式参照「买卖明细」：上当前值 + 下变更历史） ---------- */}
+        <TabsContent value="balance" className="mt-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">现金余额（手工维护）</CardTitle>
+              <CardDescription>
+                维护组合现金余额，生效日起前向沿用；保存/删除均触发净值/XIRR 重算
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {/* 当前余额展示行（CASH-P0-02 验收1） */}
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-muted/40 p-4">
+                <div>
+                  <p className="text-xs text-muted-foreground">当前余额</p>
+                  <p className="mt-1 text-xl font-bold tabular-nums">
+                    {cashBalance !== undefined && cashBalance !== null
+                      ? formatCurrency(cashBalance, 2, {
+                          thousands: amountThousands,
+                          abbreviate: amountAbbrev,
+                        })
+                      : '未维护，请点击右侧按钮录入'}
+                  </p>
+                  {cashBalance !== undefined &&
+                    cashBalance !== null &&
+                    latestBalance.data && (
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        自 {formatDate(latestBalance.data.asOf)} 起沿用
+                      </p>
+                    )}
+                </div>
+                <Button
+                  onClick={openCreateBalance}
+                  variant={ENTRY_BUTTON_VARIANT}
+                  size={ENTRY_BUTTON_SIZE}
+                >
+                  <Plus className={ENTRY_BUTTON_ICON_CLASS} />
+                  {ENTRY_BUTTON_LABELS.cashBalance}
+                </Button>
+              </div>
+
+              {/* CASH-P0-03 两条 ⓘ 提示 */}
+              <ul className="space-y-1.5 text-xs text-muted-foreground">
+                <li className="flex items-start gap-1.5">
+                  <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  <span>存取与证券买卖不会自动调整此值，请在操作后自行更新。</span>
+                </li>
+                <li className="flex items-start gap-1.5">
+                  <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  <span>
+                    修改后自该日起的自动总资产记录将重新计算（您手工记录的日期会被跳过）。
+                  </span>
+                </li>
+              </ul>
+
+              {/* 余额变更历史（受顶部统一筛选器的日期范围约束，每条可编辑/删除） */}
+              <div>
+                <p className="mb-2 text-sm font-medium">余额变更历史</p>
+                <CashBalanceHistory
+                  portfolioId={currentPortfolioId}
+                  startDate={filterStartDate}
+                  endDate={filterEndDate}
+                  onEdit={openEditBalance}
+                  onClearFilter={handleResetFilter}
+                />
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
 
       {/* 录入/编辑出入金弹窗 */}
       <Dialog open={open} onOpenChange={setOpen}>
@@ -456,6 +469,31 @@ export default function TransactionsPage(): JSX.Element {
           <CashflowForm
             portfolioId={currentPortfolioId}
             onSuccess={() => setOpen(false)}
+          />
+        </DialogContent>
+      </Dialog>
+
+      {/* 录入/编辑现金余额弹窗（新增与编辑复用同一表单组件） */}
+      <Dialog
+        open={balanceDialogOpen}
+        onOpenChange={(o) => {
+          setBalanceDialogOpen(o);
+          if (!o) setEditingBalance(null);
+        }}
+      >
+        <DialogContent className="max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              {editingBalance ? '编辑现金余额' : ENTRY_BUTTON_LABELS.cashBalance}
+            </DialogTitle>
+          </DialogHeader>
+          <CashBalanceForm
+            portfolioId={currentPortfolioId}
+            balance={editingBalance}
+            onSuccess={() => {
+              setBalanceDialogOpen(false);
+              setEditingBalance(null);
+            }}
           />
         </DialogContent>
       </Dialog>
