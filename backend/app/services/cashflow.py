@@ -129,3 +129,31 @@ class CashflowService(PortfolioChildService):
         # prune 已不再内部重算：清理 0 值孤儿后需再重算一次 nav 链，保证断链修复
         await RecalculationService(self.session).recalculateNavRange(portfolio_id, d)
         return rec
+
+    async def bulk_create(
+        self, portfolio_id: str, rows: list[dict]
+    ) -> list[CashFlow]:
+        """CSV/批量导入的现金流水写入（收口 data_transfer 原内联逻辑）。
+
+        仅构造 + add，不 commit、不重算——事务提交与区间重算由 data_transfer
+        在整批末尾统一编排，保持「全有或全无」语义。M1 首笔必须存入校验复用
+        assert_first_must_be_deposit，消除与 REST 写入（create）的双真源（D10）。
+        rows 每项含 date/type/amount/note；type 为 CashFlowType 的 value 字符串。
+        """
+        ordered = sorted(rows, key=lambda x: x["date"])
+        await self.assert_first_must_be_deposit(
+            portfolio_id,
+            [(date.fromisoformat(r["date"]), CashFlowType(r["type"])) for r in ordered],
+        )
+        built: list[CashFlow] = []
+        for r in rows:
+            cf = CashFlow(
+                portfolio_id=portfolio_id,
+                date=date.fromisoformat(r["date"]),
+                type=CashFlowType(r["type"]),
+                amount=Decimal(r["amount"]),
+                note=r.get("note") or None,
+            )
+            self.session.add(cf)
+            built.append(cf)
+        return built

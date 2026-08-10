@@ -1,0 +1,24 @@
+# import-linter 架构边界配置（INI 格式；import-linter 对 .importlinter 用 INI 解析）。
+# 运行：`lint-imports`（自动读取本文件）；亦由 tests/test_import_linter.py 接入 pytest。
+#
+# 仅声明「反向依赖」类契约——models 不得依赖上层、services 不得依赖 routers。
+# 说明：本项目的 service 合法依赖自身领域 model（含构造 ORM），故不采用「layers」
+# 契约（那会误伤所有 service）。更精细的「service 不得直接构造*他域* ORM 模型」
+# 由 tests/test_arch_boundaries.py（AST 静态检查）承担。
+[importlinter]
+root_packages =
+    app
+
+[importlinter:models_no_upward]
+name = models 不得反向依赖 services / routers
+type = forbidden
+source_modules = app.models
+forbidden_modules =
+    app.services
+    app.routers
+
+[importlinter:services_no_routers]
+name = services 不得依赖 routers
+type = forbidden
+source_modules = app.services
+forbidden_modules = app.routers

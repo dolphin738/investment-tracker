@@ -44,6 +44,7 @@ from app.models import (
 )
 from app.models.enums import CashFlowType, SecuritySide
 from app.services.asset_valuation import AssetValuationService
+from app.services.cashflow import CashflowService
 from app.services.recalculation import RecalculationService
 
 settings = get_settings()
@@ -535,38 +536,10 @@ async def commit_import(
             db.add(t)
             inserted += 1
     elif type_ == "cashFlows":
-        # D10：导入补齐 M1（首笔必须为存入），与 UI 创建口径一致。
-        # 整批预校验（与 trades oversell 同款「全有或全无」模式）：
-        # 若组合 DB 尚无任何 CashFlow，且按日期排序后首条为 SELL，则拒绝。
-        db_has = (
-            await db.execute(
-                select(CashFlow.id)
-                .where(CashFlow.portfolio_id == portfolio_id)
-                .limit(1)
-            )
-        ).scalar_one_or_none() is not None
-        seen_deposit = db_has
-        for r in sorted(rows, key=lambda x: x["date"]):
-            t = r["type"]
-            if t == CashFlowType.SELL.value and not seen_deposit:
-                raise BusinessException(
-                    BusinessErrorCode.VALIDATION_FAILED,
-                    "首笔出入金必须为存入（买入），不能为取出（卖出）",
-                    status_code=400,
-                )
-            if t == CashFlowType.BUY.value:
-                seen_deposit = True
-        for r in rows:
-            db.add(
-                CashFlow(
-                    portfolio_id=portfolio_id,
-                    date=date.fromisoformat(r["date"]),
-                    type=CashFlowType(r["type"]),
-                    amount=Decimal(r["amount"]),
-                    note=r.get("note") or None,
-                )
-            )
-            inserted += 1
+        # 收口：现金流水批量写入统一走 CashflowService（M1 校验 + 构造），
+        # 不再在导入层直接构造 ORM 模型，消除与 REST 写入的双真源（D10）。
+        await CashflowService(db).bulk_create(portfolio_id, rows)
+        inserted += len(rows)
     elif type_ == "assetSnapshots":
         av = AssetValuationService(db)
         for r in rows:
