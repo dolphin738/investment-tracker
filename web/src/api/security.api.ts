@@ -16,11 +16,25 @@ import type {
   PaginatedResponse,
 } from './types';
 
+/**
+ * 标的列表默认拉取条数上限。
+ *
+ * 后端 `GET /securities` 默认 `pageSize=20`；而前端把标的列表当作「全量字典」用
+ * （类型筛选 type→securityId 映射、明细表标的名回显、筛选器证券多选）。
+ * 不显式传 pageSize 时，标的超过 20 个的组合会拿到被截断的字典，
+ * 导致类型筛选漏掉标的、明细表标的列显示 '-'。
+ */
+const SECURITY_LIST_PAGE_SIZE = 500;
+
 /** 获取标的列表（后端返回分页结构 {items,total,page,pageSize}，hook 层已 select 解包为数组） */
 export function listSecurities(
   portfolioId: string,
+  pageSize: number = SECURITY_LIST_PAGE_SIZE,
 ): Promise<PaginatedResponse<Security>> {
-  return http.get<PaginatedResponse<Security>>(`/portfolios/${portfolioId}/securities`);
+  return http.get<PaginatedResponse<Security>>(
+    `/portfolios/${portfolioId}/securities`,
+    { params: { page: 1, pageSize } },
+  );
 }
 
 /** 新增标的 */

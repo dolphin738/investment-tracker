@@ -44,14 +44,32 @@ import type {
   SecurityTradeResponse,
 } from '@/api/types';
 
+/**
+ * 外部筛选条件的就绪状态。
+ *
+ * 背景（缺陷4 二次修复）：本组件的标的过滤完全依赖调用方传入的 `query.securityId`。
+ * 若调用方把「类型筛选没命中任何标的」或「标的字典尚未加载」错误地表达成
+ * 「不传 securityId」，后端就会返回**全部**记录，用户看到的现象是「筛选器无效」。
+ * 因此把这两种非常规状态显式建模，由本组件短路处理，禁止退化成无条件查询。
+ *
+ * - `ready`：筛选条件已确定，按 `query` 正常查询
+ * - `loading`：外部依赖（如标的字典）仍在加载，展示骨架且**不发查询**
+ * - `empty`：筛选条件已确定且无任何匹配标的，展示空态且**不发查询**
+ */
+export type TradeFilterState = 'ready' | 'loading' | 'empty';
+
 export interface SecurityTradeListProps {
   portfolioId: string;
   /** 查询参数（标的/日期范围；分页在组件内维护） */
   query?: SecurityTradeQuery;
   /** 方向筛选（'all' | 'BUY_SEC' | 'SELL_SEC'；后端按 side 参数过滤） */
   sideFilter?: string;
+  /** 外部筛选就绪状态（默认 'ready'），见 {@link TradeFilterState} */
+  filterState?: TradeFilterState;
   className?: string;
   emptyText?: string;
+  /** filterState==='empty' 时的空态文案（默认与 emptyText 一致） */
+  filteredEmptyText?: string;
 }
 
 const PAGE_SIZE = 20;
@@ -60,14 +78,23 @@ export function SecurityTradeList({
   portfolioId,
   query,
   sideFilter = 'all',
+  filterState = 'ready',
   className,
   emptyText = '暂无买卖流水',
+  filteredEmptyText,
 }: SecurityTradeListProps): JSX.Element {
   const [page, setPage] = useState(1);
   const [editing, setEditing] = useState<SecurityTradeResponse | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  const { data, isLoading, isError } = useSecurityTrades(portfolioId, {
+  // filterState !== 'ready' 时传 null 关闭查询（useSecurityTrades 内部 enabled: Boolean(portfolioId)），
+  // 避免「筛选无匹配 / 字典未就绪」被后端理解为「无筛选条件」而返回全量数据。
+  const queryEnabled = filterState === 'ready';
+  const {
+    data,
+    isLoading: tradesLoading,
+    isError,
+  } = useSecurityTrades(queryEnabled ? portfolioId : null, {
     ...query,
     ...(sideFilter !== 'all' ? { side: sideFilter as SecuritySide } : {}),
     page,
@@ -76,9 +103,13 @@ export function SecurityTradeList({
   const deleteMutation = useDeleteSecurityTrade();
   const { data: securities = [] } = useSecurities(portfolioId);
 
+  const isLoading = filterState === 'loading' || tradesLoading;
+  const resolvedEmptyText =
+    filterState === 'empty' ? (filteredEmptyText ?? emptyText) : emptyText;
+
   const securityMap = new Map(securities.map((s) => [s.id, s]));
-  const items = data?.items ?? [];
-  const total = data?.total ?? 0;
+  const items = queryEnabled ? (data?.items ?? []) : [];
+  const total = queryEnabled ? (data?.total ?? 0) : 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   /** 当前页统计：买入金额（含费成交额）/ 卖出金额（含费成交额）/ 累计费用合计 */
@@ -113,7 +144,7 @@ export function SecurityTradeList({
         </div>
       ) : items.length === 0 ? (
         <div className="py-10 text-center text-sm text-muted-foreground">
-          {emptyText}
+          {resolvedEmptyText}
         </div>
       ) : (
         <>

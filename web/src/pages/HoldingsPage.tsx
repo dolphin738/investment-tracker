@@ -49,6 +49,7 @@ import { DividendFeeSection } from '@/features/security-income/dividend-fee-sect
 import { HoldingsToolbar } from '@/features/holdings/holdings-toolbar';
 import { createHoldingsSchema } from '@/features/holdings/holdings-query-params';
 import type { HoldingsFilterState } from '@/features/holdings/holdings-query-params';
+import { deriveTradeSecurityFilter } from '@/features/holdings/trade-security-filter';
 import { resolveQuickRange } from '@/features/query/quick-range';
 import { useDefaultDateRange } from '@/features/query/use-default-date-range';
 import {
@@ -198,31 +199,33 @@ export default function HoldingsPage(): JSX.Element {
   });
   const securities = useSecurities(currentPortfolioId);
 
-  // 【买卖明细板块】类型多选 → 有效证券 ID（与持仓板块共用 types 筛选，缺陷4 修复）
-  // - 未选类型：仅按已选证券 sec 过滤
-  // - 仅选类型：该类型下全部证券
-  // - 二者皆选：交集（既在 sec 内又属选中类型）
-  // securities 未加载完成时先不施加类型过滤，避免误显示全部记录；加载后精确收敛。
-  const effectiveSecIds = useMemo(() => {
-    const secList = securities.data ?? [];
-    const typeIds =
-      holdingsQuery.types.length > 0 && !securities.isLoading
-        ? secList
-            .filter((s) => holdingsQuery.types.includes(s.type))
-            .map((s) => s.id)
-        : null;
-    const secSet = holdingsQuery.sec;
-    if (typeIds === null) return secSet;
-    if (secSet.length === 0) return typeIds;
-    const typeIdSet = new Set(typeIds);
-    return secSet.filter((id) => typeIdSet.has(id));
-  }, [holdingsQuery.sec, holdingsQuery.types, securities.data, securities.isLoading]);
+  /**
+   * 【买卖明细板块】类型多选 + 证券多选 → 有效证券 ID 及其就绪状态（缺陷4 二次修复）。
+   *
+   * 派生规则与三态语义见 `deriveTradeSecurityFilter` 的文档注释；
+   * 这里只负责把 hooks 数据喂进纯函数，便于单测覆盖。
+   */
+  const tradeSecurityFilter = useMemo(
+    () =>
+      deriveTradeSecurityFilter({
+        types: holdingsQuery.types,
+        sec: holdingsQuery.sec,
+        securities: securities.data ?? [],
+        securitiesLoading: securities.isLoading,
+      }),
+    [
+      holdingsQuery.sec,
+      holdingsQuery.types,
+      securities.data,
+      securities.isLoading,
+    ],
+  );
 
   // 【买卖明细板块】有效证券 ID + 场景→side + 日期范围
   const tradeQuery: SecurityTradeQuery = useMemo(() => {
     const q: SecurityTradeQuery = {};
-    if (effectiveSecIds.length > 0) {
-      q.securityId = effectiveSecIds.join(',');
+    if (tradeSecurityFilter.ids.length > 0) {
+      q.securityId = tradeSecurityFilter.ids.join(',');
     }
     if (holdingsQuery.scenario === 'BUY') {
       q.side = SecuritySide.BUY_SEC;
@@ -233,7 +236,7 @@ export default function HoldingsPage(): JSX.Element {
     q.startDate = startDate;
     q.endDate = endDate;
     return q;
-  }, [effectiveSecIds, holdingsQuery.scenario, startDate, endDate]);
+  }, [tradeSecurityFilter.ids, holdingsQuery.scenario, startDate, endDate]);
 
   /**
    * 【A4】持仓列表前端排序（决策 Q-5 甲）：默认按市值降序。
@@ -562,6 +565,8 @@ export default function HoldingsPage(): JSX.Element {
             portfolioId={currentPortfolioId}
             query={tradeQuery}
             sideFilter="all"
+            filterState={tradeSecurityFilter.state}
+            filteredEmptyText="当前筛选条件下没有匹配的标的，暂无买卖流水"
           />
         </TabsContent>
 
