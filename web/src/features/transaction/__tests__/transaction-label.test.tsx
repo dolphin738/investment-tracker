@@ -23,15 +23,11 @@ import type { TransactionResponse } from '@/api/types';
 
 // ---------------------------------------------------------------------------
 // 测试夹具（vi.hoisted：vi.mock 工厂被提升到 import 之前执行）
-// 一条 BUY、一条 SELL，用 securityName 作为行定位锚点
+// 一条 BUY、一条 SELL，用日期作为行定位锚点（cashflow 不含标的/数量/单价/费用）
 // ---------------------------------------------------------------------------
 const fixtures = vi.hoisted(() => {
   const base = {
     portfolioId: 'pf-1',
-    securityId: null,
-    quantity: null,
-    price: null,
-    fee: null,
     note: null,
     createdAt: '2024-01-01T00:00:00.000Z',
     updatedAt: '2024-01-01T00:00:00.000Z',
@@ -44,7 +40,6 @@ const fixtures = vi.hoisted(() => {
       date: '2024-03-01',
       type: 'BUY' as const,
       amount: '1000.00',
-      securityName: '标的-BUY',
     },
     {
       ...base,
@@ -52,7 +47,6 @@ const fixtures = vi.hoisted(() => {
       date: '2024-03-02',
       type: 'SELL' as const,
       amount: '500.00',
-      securityName: '标的-SELL',
     },
   ];
 
@@ -125,11 +119,11 @@ function renderList() {
   );
 }
 
-/** 按标的名定位到所在的表格行 */
-function rowOf(securityName: string): HTMLElement {
-  const cell = screen.getByText(securityName);
+/** 按日期定位到所在的表格行 */
+function rowOf(date: string): HTMLElement {
+  const cell = screen.getByText(date);
   const row = cell.closest('tr');
-  if (!row) throw new Error(`未找到 ${securityName} 所在的表格行`);
+  if (!row) throw new Error(`未找到 ${date} 所在的表格行`);
   return row as HTMLElement;
 }
 
@@ -160,11 +154,11 @@ describe('TransactionList — 交易类型展示文案（存入/取出）', () =
   it('枚举与文案绑定正确：BUY 行显示「存入」，SELL 行显示「取出」（防映射写反）', () => {
     renderList();
 
-    const buyRow = rowOf('标的-BUY');
+    const buyRow = rowOf('2024-03-01');
     expect(within(buyRow).getByText('存入')).toBeDefined();
     expect(within(buyRow).queryByText('取出')).toBeNull();
 
-    const sellRow = rowOf('标的-SELL');
+    const sellRow = rowOf('2024-03-02');
     expect(within(sellRow).getByText('取出')).toBeDefined();
     expect(within(sellRow).queryByText('存入')).toBeNull();
   });

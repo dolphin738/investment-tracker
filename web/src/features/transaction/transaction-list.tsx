@@ -1,9 +1,9 @@
 /**
- * features/transaction/transaction-list.tsx — 交易记录表格
+ * features/transaction/transaction-list.tsx — 出入金（现金流）交易记录表格
  *
- * 支持编辑（弹出 Dialog）、删除（确认 AlertDialog）。
- *
- * 🆕 T05：新增标的/数量/价格/手续费列
+ * 数据来自后端 cashflow 接口，记录仅含 日期 / 类型 / 金额 / 备注（不包含标的、
+ * 数量、单价、手续费——这些属于证券买卖 Trade，而非出入金）。支持编辑（弹出
+ * Dialog）、删除（确认 AlertDialog）。
  */
 
 import { useState } from 'react';
@@ -93,11 +93,7 @@ export function TransactionList({
               <TableRow>
                 <TableHead className="w-[100px]">日期</TableHead>
                 <TableHead className="w-[60px]">类型</TableHead>
-                <TableHead className="w-[120px]">标的</TableHead>
-                <TableHead className="w-[80px] text-right">数量</TableHead>
-                <TableHead className="w-[90px] text-right">单价</TableHead>
                 <TableHead className="w-[100px] text-right">金额</TableHead>
-                <TableHead className="w-[70px] text-right">费用</TableHead>
                 <TableHead className="w-[120px]">备注</TableHead>
                 <TableHead className="w-[70px] text-right">操作</TableHead>
               </TableRow>
@@ -124,25 +120,8 @@ export function TransactionList({
                         {txResp.type === CashFlowType.BUY ? '存入' : '取出'}
                       </Badge>
                     </TableCell>
-                    <TableCell className="text-sm whitespace-nowrap">
-                      {txResp.securityName ?? '-'}
-                    </TableCell>
-                    <TableCell className="text-right font-mono text-sm whitespace-nowrap">
-                      {txResp.quantity
-                        ? Number(txResp.quantity).toLocaleString('zh-CN', {
-                            minimumFractionDigits: 0,
-                            maximumFractionDigits: 2,
-                          })
-                        : '-'}
-                    </TableCell>
-                    <TableCell className="text-right font-mono text-sm whitespace-nowrap">
-                      {txResp.price ? formatCurrency(txResp.price) : '-'}
-                    </TableCell>
                     <TableCell className="text-right font-mono whitespace-nowrap">
                       {formatCurrency(txResp.amount)}
-                    </TableCell>
-                    <TableCell className="text-right font-mono text-sm whitespace-nowrap">
-                      {txResp.fee ? formatCurrency(txResp.fee) : '-'}
                     </TableCell>
                     <TableCell className="max-w-[120px] truncate text-sm text-muted-foreground">
                       {txResp.note || '-'}
