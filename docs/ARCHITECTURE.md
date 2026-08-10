@@ -41,7 +41,7 @@
                               │  统一信封 { code, data, message }
 ┌───────────────────────────▼──────────────────────────────────┐
 │  FastAPI 应用 (uvicorn)                                         │
-│  ├─ routers/      API 路由层（get_portfolio 归属隔离 / 分页）      │
+│  ├─ modules/      API 路由层（get_portfolio 归属隔离 / 分页）     │
 │  ├─ services/     业务逻辑层（calculation / recalculation /        │
 │  │                asset_valuation / holding / aggregation /       │
 │  │                data_transfer / user）                          │
@@ -67,8 +67,8 @@
 
 | 层 | 目录 | 职责 |
 |----|------|------|
-| 表现 / API | `web/` + `backend/app/routers/` | 前端页面与交互；后端路由负责参数校验、归属隔离、编排 service、返回信封数据 |
-| 业务逻辑 | `backend/app/services/` | **唯一**业务规则落点。含 10 个资源 Service（Cashflow/Security/Trade/Price/CashBalance/Snapshot/Dividend/Portfolio/Preference/Upload，均继承 `PortfolioChildService` 基类做归属 404 / 枚举 coerce / 分页去重）+ 领域/聚合 Service（Recalculation/AssetValuation/Holding/Calculation/Aggregation/DataTransfer/User） |
+| 表现 / API | `web/` + `backend/app/modules/` | 前端页面与交互；后端路由按功能模块分 `modules/<feature>/router.py`（11 模块），负责参数校验、归属隔离、编排 service、返回信封数据 |
+| 业务逻辑 | `backend/app/services/` | **唯一**业务规则落点。含 10 个资源 Service（Cashflow/Security/Trade/Price/CashBalance/Snapshot/Dividend/Portfolio/Preference/Upload，均继承 `PortfolioChildService` 基类做归属 404 / 枚举 coerce / 分页去重）+ 领域/聚合 Service（Recalculation/AssetValuation/Holding/Calculation/Aggregation/DataTransfer/User/Cleanup） |
 | 计算内核 | `backend/app/finance_core/` | 无副作用纯函数：XIRR（pyxirr）、净值（单位份额法）、持仓推导（交易回放） |
 | ORM / 模型 | `backend/app/models/` + `backend/app/db/` | SQLAlchemy 2.0 async 声明模型；`Base` / `pk_uuid()` / `TimestampMixin` |
 | 基础设施 | `backend/app/core/` | JWT 鉴权、统一信封、异常→信封、业务错误码、配置 |
@@ -93,10 +93,12 @@ backend/app/
 │                       #   / cashbalance / snapshot / dividend / portfolio
 │                       #   / preference / upload + 基类 base(PortfolioChildService)
 │                       #   + 领域/聚合: calculation / holding / asset_valuation
-│                       #   / recalculation / aggregation / data_transfer / user
-└── routers/             # 薄委托层：参数校验 + 归属隔离 + 调 service + 信封
+│                       #   / recalculation / aggregation / data_transfer / user / cleanup
+├── storage/             # 存储抽象层：StorageService ABC / LocalDiskStorage / get_storage_driver 工厂（STORAGE_DRIVER 配置）
+└── modules/             # 按功能模块分 router.py（11 模块）；common 提升到 app/common.py
                         #   health / auth / portfolios / aggregation / data(6 子路由)
-                        #   / dividend / calc / data_transfer / preference / upload / common
+                        #   / dividend / calc / data_transfer / preference / upload / internal
+                        #   薄委托层：参数校验 + 归属隔离 + 调 service + 信封（EnvelopeRoute）
 ```
 
 ---
@@ -332,7 +334,7 @@ User (1) ──< Portfolio (N)
 
 ### 4.2 API 接口列表（每模块子节 · 与真实路由对齐）
 
-> 模块按 `routers/` 分组；`{portfolio_id}` 等为路径参数。路径参数占位沿用 PRD `/:id` 形式，与 OpenAPI `{portfolio_id}` 等价。
+> 模块按 `modules/` 分组（11 个功能模块，每个含 `router.py`，`common` 提升到 `app/common.py`）；`{portfolio_id}` 等为路径参数。路径参数占位沿用 PRD `/:id` 形式，与 OpenAPI `{portfolio_id}` 等价。
 
 #### 4.2.1 认证模块（`/api/auth`）
 
@@ -583,6 +585,17 @@ User (1) ──< Portfolio (N)
 | POST | `/api/upload/avatar` | 头像上传（魔数 + 类型双校验，2MB 上限） | `multipart/form-data`：`file` | `{ url }`（相对路径 `/api/uploads/avatar/<uuid>.<ext>`） |
 
 > 详见 §19 附录 B。落盘后更新 `users.avatar`；「移除头像」仅把 `avatar` 置 NULL 并删磁盘文件。
+
+#### 4.2.20 内部运维模块（`/api/internal`）
+
+> 对齐 app 的 `@Cron` 定时任务，但**不在进程内调度**：改为由部署侧外部 cron（crontab / k8s CronJob）按频率分别调用受保护端点，作业幂等、多副本天然不重复。端点受 `X-Internal-Token` 头保护（`settings.INTERNAL_CLEANUP_TOKEN`），缺失 / 不符 → 403。
+
+| Method | Path | 频率 | 说明 | 响应 data |
+|--------|------|------|------|-----------|
+| POST | `/api/internal/cleanup/accounts` | 每日 | 物理删除过冷静期（`deleted_at < now - 保留期`）的软删账户（级联清子表），幂等 | `{ deletedUsers }` |
+| POST | `/api/internal/cleanup/avatars` | 每 3 月 | 清理 `uploads/avatar/` 下未被 `user.avatar` 引用的孤儿文件（`<uuid>.<ext>` 正则 + `resolve` 防穿越），幂等 | `{ removedAvatars }` |
+
+> 由 `CleanupService`（领域 Service）实现；保留期 / 令牌见 `core/config`。软删除 + 冷静期自助恢复语义见 PRD SYS-P1-02 / SET-P1-06。
 
 ---
 
@@ -1275,7 +1288,7 @@ sequenceDiagram
 
 ## 19. 附录 B：头像上传模块
 
-> 已实现：`routers/upload.py`（`POST /api/upload/avatar`）。头像设置两种方式并列（PRD SET-P0-01 / §7.9）：① 本地文件上传（本接口返回相对路径写入 `user.avatar`）；② 外部 URL 直填（经 `PATCH /api/auth/profile` 的 `avatar` 字段，与上传并列）。「移除头像」仅把 `avatar` 置 NULL（派生功能，非 PRD 强制）。
+> 已实现：`modules/upload/router.py`（`POST /api/upload/avatar`）。头像设置两种方式并列（PRD SET-P0-01 / §7.9）：① 本地文件上传（本接口返回相对路径写入 `user.avatar`）；② 外部 URL 直填（经 `PATCH /api/auth/profile` 的 `avatar` 字段，与上传并列）。「移除头像」仅把 `avatar` 置 NULL（派生功能，非 PRD 强制）。
 
 | 项      | 值                                                                                         | 说明                                              |
 | ------ | ----------------------------------------------------------------------------------------- | ----------------------------------------------- |
@@ -1284,6 +1297,7 @@ sequenceDiagram
 | 静态资源前缀 | `/api/uploads/`                                                                           | 由 `main.py` 挂载 `StaticFiles`，前缀含 `/api` 与全局前缀一致 |
 | 返回 URL | `/api/uploads/avatar/<uuid>.<ext>`                                                        | 相对路径，同源 / 经 vite `/api` 代理                      |
 | 落盘路径   | `<UPLOAD_DIR>/avatar/<uuid>.<ext>`                                                        | `UPLOAD_DIR` 默认 `<cwd>/uploads`                 |
+| 存储抽象 | `StorageService` 抽象（`storage/base.py`）+ `LocalDiskStorage` 实现 | 经 `storage/factory.get_storage_driver` 选择驱动，`STORAGE_DRIVER=local` 默认，cos/s3 预留；`can_remove`/`remove` 复用删旧文件三重校验，`UploadService`/`UserService` 构造注入存储层 |
 | 类型白名单  | `image/jpeg` `image/png` `image/webp`                                                     | MIME 快筛 + **魔数嗅探**双重校验（杜绝伪装）                    |
 | 大小上限   | 2 MB                                                                                      | 超出 → 1006（HTTP 400）                             |
 | 错误码    | `1006`（HTTP 400）                                                                          | 类型 / 大小 / 内容不符 / 缺失统一用 1006                     |
