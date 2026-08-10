@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     # 上传（头像静态资源，URL 前缀必须以 /api 开头，与 vite 代理对齐）
     UPLOAD_DIR: str = "uploads"
     STATIC_ASSETS_PREFIX: str = "/api/uploads"
+    # 存储驱动：local（默认）/ cos / s3（预留，尚未实现）；由 storage/factory.py 选择实现
+    STORAGE_DRIVER: str = "local"
 
     # CORS（vite dev server）
     CORS_ORIGINS: list[str] = ["http://localhost:5173"]

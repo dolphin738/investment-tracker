@@ -22,13 +22,18 @@ from app.core.exceptions import (
     AccountPendingDeletionException,
     BusinessException,
 )
+from app.core.config import get_settings
 from app.core.security import create_access_token, hash_password, verify_password
 from app.models import User, UserPreference
+from app.storage import StorageService, get_storage_driver
 
 
 class UserService:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(
+        self, session: AsyncSession, storage: StorageService | None = None
+    ) -> None:
         self.session = session
+        self.storage = storage or get_storage_driver(get_settings())
 
     async def register(self, email: str, password: str, name: str | None) -> User:
         existing = (
@@ -199,7 +204,7 @@ class UserService:
     ) -> User:
         """更新资料：name 可选；avatar 变化时清理旧头像文件（best-effort）。
 
-        收口原 auth router 内联的资料更新逻辑（含 _remove_old 守卫）。
+        收口原 auth router 内联的资料更新逻辑（经存储抽象安全闸门清旧文件）。
         """
         user = (
             await self.session.execute(select(User).where(User.id == user_id))
@@ -212,11 +217,10 @@ class UserService:
             )
         if avatar is not None and avatar != user.avatar:
             # 仅当头像真正变化时清理旧文件：上传接口已即时落库生效（user.avatar 即新值），
-            # 若「保存」时新旧值相同（刚上传未改），跳过 _remove_old，避免误删刚上传的文件。
-            from app.services.upload import _remove_old
-
-            _remove_old(user.avatar)
+            # 若「保存」时新旧值相同（刚上传未改），跳过移除，避免误删刚上传的文件。
+            old_avatar = user.avatar
             user.avatar = avatar
+            self.storage.remove(old_avatar)
         if name is not None:
             user.name = name
         await self.session.commit()

@@ -7,11 +7,6 @@
 """
 from __future__ import annotations
 
-import os
-import re
-import uuid
-from pathlib import Path
-
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,13 +15,12 @@ from app.core.enums import BusinessErrorCode
 from app.core.exceptions import BusinessException
 from app.models import User
 from app.services.base import PortfolioChildService
+from app.storage import StorageService, get_storage_driver
 
 settings = get_settings()
 
 MAX_BYTES = 2 * 1024 * 1024  # 2MB
 ALLOWED_MIME = {"image/jpeg", "image/png", "image/webp"}
-PREFIX = settings.STATIC_ASSETS_PREFIX  # /api/uploads
-UPLOAD_SUBDIR = "avatar"
 
 
 def _sniff_ext(content: bytes) -> str | None:
@@ -40,25 +34,13 @@ def _sniff_ext(content: bytes) -> str | None:
     return None
 
 
-def _remove_old(avatar_value: str | None) -> None:
-    """best-effort 删除旧头像文件（兼容完整 URL / 绝对路径 / 不同前缀；防穿越）。"""
-    if not avatar_value:
-        return
-    fname = avatar_value.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
-    if not re.fullmatch(r"[0-9a-f-]{36}\.(jpg|png|webp)", fname):
-        return
-    base = Path(settings.UPLOAD_DIR)
-    allowed = (base / UPLOAD_SUBDIR).resolve()
-    target = (allowed / fname).resolve()
-    if target != allowed and not str(target).startswith(str(allowed)):
-        return  # 路径穿越防护
-    try:
-        os.remove(target)
-    except OSError:
-        pass  # 失败仅告警
-
-
 class UploadService(PortfolioChildService):
+    def __init__(
+        self, session: AsyncSession, storage: StorageService | None = None
+    ) -> None:
+        super().__init__(session)
+        self.storage = storage or get_storage_driver(get_settings())
+
     async def upload_avatar(
         self, user_id: str, file
     ) -> tuple[User, str]:
@@ -87,10 +69,7 @@ class UploadService(PortfolioChildService):
                 status_code=400,
             )
 
-        dest_dir = Path(settings.UPLOAD_DIR) / UPLOAD_SUBDIR
-        dest_dir.mkdir(parents=True, exist_ok=True)
-        fname = f"{uuid.uuid4()}.{ext}"
-        (dest_dir / fname).write_bytes(content)
+        url = self.storage.save(content, ext)
 
         u = (
             await self.session.execute(
@@ -98,9 +77,8 @@ class UploadService(PortfolioChildService):
             )
         ).scalar_one()
         old_avatar = u.avatar
-        url = f"{PREFIX}/{UPLOAD_SUBDIR}/{fname}"
         u.avatar = url
         await self.session.commit()
-        # 清旧文件（fire-and-forget）
-        _remove_old(old_avatar)
+        # 清旧文件（fire-and-forget，经抽象安全闸门）
+        self.storage.remove(old_avatar)
         return u, url
