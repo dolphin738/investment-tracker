@@ -27,7 +27,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MockInstance } from 'vitest';
 import type { ReactNode } from 'react';
-import { renderHook, waitFor } from '@testing-library/react';
+import { renderHook } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 // ---------------------------------------------------------------------------
@@ -48,9 +48,6 @@ vi.mock('@tanstack/react-query', async (importOriginal) => {
     ...actual,
     useMutation: (options: Record<string, unknown>) => {
       // 按 mutationFn 的引用区分是 archive 还是 delete（源码里两者函数体不同）
-      const fn = options.mutationFn as ((...a: unknown[]) => unknown) | undefined;
-      // 简单区分：archive 的 mutationFn 签名是 ({id,archived})，delete 是 (id)
-      // 这里统一捕获，供用例里按被调用的 hook 取用。
       capturedArchive.options = options;
       capturedDelete.options = options;
       return actual.useMutation(options);

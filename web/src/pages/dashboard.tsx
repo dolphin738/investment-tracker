@@ -130,7 +130,7 @@ interface OnboardingStep {
   title: string;
   /** 步骤说明 */
   description: string;
-  /** 可选行动按钮文案；缺省表示该步无按钮（如「创建组合」在设置页完成） */
+  /** 可选行动按钮文案；缺省表示该步无按钮（如「创建组合」在账户页「我的组合」完成） */
   actionLabel?: string;
   /** 行动类型，决定点击后打开哪个录入弹窗 */
   action?: 'cashflow' | 'trade';

@@ -21,7 +21,6 @@ import {
   enumCodec,
 } from '@/lib/url-query';
 import type { UrlStateSchema } from '@/lib/url-query';
-import { FeeScenario } from '@/api/types';
 
 /** 范围白名单（QUICK_RANGE_OPTIONS 7 项 + custom；与概览页 OVERVIEW_RANGE_VALUES 同构） */
 export const HOLDINGS_RANGE_VALUES = [

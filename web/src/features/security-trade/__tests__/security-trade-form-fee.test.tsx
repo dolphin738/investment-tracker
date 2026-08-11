@@ -13,7 +13,6 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { SecurityTradeResponse } from '@/api/types';
-import { SecuritySide } from '@/lib/types';
 
 const mocks = vi.hoisted(() => ({
   createTrade: vi.fn(),

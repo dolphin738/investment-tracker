@@ -192,8 +192,6 @@ export function SecurityTradeList({
                 const qty = Number(t.quantity);
                 /** 成本价（含费单价，INC-03 由 price 重命名） */
                 const costPrice = Number(t.costPrice);
-                /** 费用合计 = commission + stampTax + other（INC-04 物理并表） */
-                const feeTotal = Number(t.feeTotal);
                 /** 成交额（含费）= 数量 × 含费单价 */
                 const amount = qty * costPrice;
                 return (

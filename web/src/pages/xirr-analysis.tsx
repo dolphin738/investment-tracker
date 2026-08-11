@@ -135,7 +135,7 @@ export default function XirrAnalysisPage(): JSX.Element {
 
   // 年度聚合数据（用于柱状图）
   const yearlyData: XirrSeriesPoint[] = seriesData.filter(
-    (p) => dimension.granularity !== QueryGranularity.YEAR,
+    () => dimension.granularity !== QueryGranularity.YEAR,
   );
 
   return (

@@ -63,7 +63,7 @@ export function SnapshotForm({
   const upsertMutation = useUpsertSnapshot();
   const updateMutation = useUpdateSnapshot();
   const isManualEdit = Boolean(snapshot && snapshot.source === 'MANUAL');
-  const [submitting, setSubmitting] = useState(false);
+  const [, setSubmitting] = useState(false);
 
   const {
     register,
