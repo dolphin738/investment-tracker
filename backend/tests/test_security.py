@@ -41,23 +41,19 @@ async def _set_role_and_token(client, email: str, role: str) -> str:
 
 async def test_role_user_denied_403(client):
     token = await _set_role_and_token(client, "u_user@example.com", UserRole.USER.value)
-    r = await client.get(
-        "/api/admin/system-config/securities_quote_api_base_url", headers=auth(token)
-    )
+    r = await client.get("/api/admin/quote-providers", headers=auth(token))
     status, code, _, _ = env(r)
     assert status == 403
     assert code == BusinessErrorCode.FORBIDDEN
 
 
 async def test_role_admin_allowed(client):
-    # admin 通过 require_admin 后，白名单内 key 尚未配置 → 200 + value=null（不再 404）
+    # admin 通过 require_admin 后，可读取多提供方列表（无提供方时为 200 + 空列表）
     token = await _set_role_and_token(client, "u_admin@example.com", UserRole.ADMIN.value)
-    r = await client.get(
-        "/api/admin/system-config/securities_quote_api_base_url", headers=auth(token)
-    )
+    r = await client.get("/api/admin/quote-providers", headers=auth(token))
     status, _, data, _ = env(r)
     assert status == 200
-    assert data["value"] is None
+    assert isinstance(data, list)
 
 
 async def test_stale_admin_token_rejected_after_demotion(client):
@@ -71,7 +67,7 @@ async def test_stale_admin_token_rejected_after_demotion(client):
         await s.commit()
     # 旧 admin token 仍尝试访问受保护端点 → 必须被拒
     r = await client.get(
-        "/api/admin/system-config/securities_quote_api_base_url", headers=auth(admin_token)
+        "/api/admin/quote-providers", headers=auth(admin_token)
     )
     status, code, _, _ = env(r)
     assert status == 403

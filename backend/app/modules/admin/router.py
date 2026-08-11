@@ -15,9 +15,10 @@ is_default / is_active 的「全局至多一个」由服务层写入时保证（
 """
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -83,8 +84,8 @@ class QuoteProviderOut(BaseModel):
     is_active: bool
     enabled: bool
     description: Optional[str]
-    created_at: str
-    updated_at: str
+    created_at: datetime
+    updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -104,7 +105,7 @@ async def list_quote_providers(
     return [QuoteProviderOut.model_validate(p) for p in providers]
 
 
-@router_admin.post("/quote-providers", status_code=status.HTTP_201_CREATED)
+@router_admin.post("/quote-providers")
 async def create_quote_provider(
     body: QuoteProviderCreate,
     current: CurrentUser = Depends(require_admin),
