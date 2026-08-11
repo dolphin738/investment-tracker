@@ -368,7 +368,15 @@ export type CashFlow = components['schemas']['CashflowOut'];
  * 现直接重导出后端 `UserPublicOut`（§5.2b 收敛）：DTO 经修正后 name 可空、createdAt 必填，
  * 与前端消费一致，无需手写副本。
  */
-export type UserPublic = components['schemas']['UserPublicOut'];
+/** 用户角色（RBAC）—— 与后端 `UserRole` 枚举值一致 */
+export type UserRole = 'user' | 'admin';
+
+/**
+ * 用户公开信息（API 响应中传输的安全子集，不含 passwordHash）。
+ * 现直接重导出后端 `UserPublicOut`（§5.2b 收敛），并补充 `role` 字段
+ * （后端 `UserPublicOut` 已加 `role: str = "user"`，交集扩展避免重复维护）。
+ */
+export type UserPublic = components['schemas']['UserPublicOut'] & { role: UserRole };
 
 /** 投资组合 — re-export 自后端 `PortfolioOut`（§5.2b 收敛） */
 export type Portfolio = components['schemas']['PortfolioOut'];

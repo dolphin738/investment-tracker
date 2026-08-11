@@ -43,6 +43,7 @@ const XirrAnalysisPage = lazy(() => import('@/pages/xirr-analysis'));
 const NavAnalysisPage = lazy(() => import('@/pages/nav-analysis'));
 const AccountPage = lazy(() => import('@/pages/AccountPage'));
 const SettingsPage = lazy(() => import('@/pages/settings'));
+const AdminPage = lazy(() => import('@/pages/admin'));
 const NotFoundPage = lazy(() => import('@/pages/not-found'));
 
 /** 页面加载中 fallback */
@@ -162,6 +163,14 @@ const router = createBrowserRouter([
         element: (
           <Suspense fallback={<PageLoading />}>
             <SettingsPage />
+          </Suspense>
+        ),
+      },
+      {
+        path: 'admin',
+        element: (
+          <Suspense fallback={<PageLoading />}>
+            <AdminPage />
           </Suspense>
         ),
       },

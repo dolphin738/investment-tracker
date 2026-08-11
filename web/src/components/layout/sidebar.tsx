@@ -5,6 +5,7 @@
  */
 
 import { NavLink } from 'react-router-dom';
+import type { LucideIcon } from 'lucide-react';
 import {
   LayoutDashboard,
   Briefcase,
@@ -14,11 +15,21 @@ import {
   LineChart,
   User,
   Settings,
+  Shield,
 } from 'lucide-react';
 import { ROUTE_PATH } from '@/lib/constants';
 import { cn } from '@/lib/utils';
+import { useIsAdmin } from '@/stores/auth.store';
 
-const NAV_ITEMS = [
+interface NavItem {
+  to: string;
+  label: string;
+  icon: LucideIcon;
+  /** 仅管理员可见的导航项（如「系统管理」） */
+  admin?: boolean;
+}
+
+const NAV_ITEMS: NavItem[] = [
   { to: ROUTE_PATH.DASHBOARD, label: '概览', icon: LayoutDashboard },
   { to: ROUTE_PATH.HOLDINGS, label: '持仓', icon: Briefcase },
   { to: ROUTE_PATH.TRANSACTIONS, label: '出入金', icon: ArrowLeftRight },
@@ -27,7 +38,8 @@ const NAV_ITEMS = [
   { to: ROUTE_PATH.NAV_ANALYSIS, label: '净值分析', icon: LineChart },
   { to: ROUTE_PATH.ACCOUNT, label: '账户', icon: User },
   { to: ROUTE_PATH.SETTINGS, label: '设置', icon: Settings },
-] as const;
+  { to: ROUTE_PATH.ADMIN, label: '系统管理', icon: Shield, admin: true },
+];
 
 export interface SidebarProps {
   className?: string;
@@ -36,9 +48,12 @@ export interface SidebarProps {
 }
 
 export function Sidebar({ className, onNavigate }: SidebarProps): JSX.Element {
+  // 非管理员过滤掉 admin 标记的入口，避免越权可见（后端同样按 require_admin 拦截）
+  const isAdmin = useIsAdmin();
+  const visibleItems = NAV_ITEMS.filter((item) => !item.admin || isAdmin);
   return (
     <nav className={cn('flex flex-col space-y-1 p-3', className)}>
-      {NAV_ITEMS.map((item) => {
+      {visibleItems.map((item) => {
         const Icon = item.icon;
         return (
           <NavLink

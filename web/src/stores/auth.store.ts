@@ -103,3 +103,12 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ user: normalized });
   },
 }));
+
+/**
+ * 当前登录用户是否为管理员（role === 'admin'）。
+ *
+ * 供侧边栏「系统管理」入口过滤、AdminPage 权限门控、useSystemConfig 的
+ * `enabled` 等 RBAC 场景复用。防御性判断：user 缺失或 role 非 'admin' 时均判否。
+ */
+export const useIsAdmin = (): boolean =>
+  useAuthStore((s) => s.user?.role === 'admin');

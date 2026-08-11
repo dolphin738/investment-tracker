@@ -29,6 +29,7 @@ export const ROUTE_PATH = {
   NAV_ANALYSIS: '/analysis/nav',
   ACCOUNT: '/account',
   SETTINGS: '/settings',
+  ADMIN: '/admin',
 } as const;
 
 // ===== 查询维度选项（用于 UI 下拉/Tab） =====

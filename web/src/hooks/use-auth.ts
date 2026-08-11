@@ -5,6 +5,7 @@
  * - useProfile：query，获取当前用户信息
  */
 
+import { useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -57,10 +58,21 @@ export function useRegister() {
 
 /** 获取当前用户信息 query */
 export function useProfile() {
-  return useQuery({
+  const query = useQuery({
     queryKey: ['auth', 'profile'],
     queryFn: () => getProfile(),
     enabled: Boolean(typeof window !== 'undefined' && localStorage.getItem('investment_tracker_token')),
     staleTime: 5 * 60 * 1000,
   });
+
+  // TanStack Query v5 已移除 useQuery 的 onSuccess 回调，改用 useEffect 在拿到
+  // 最新用户数据时回写 auth store（含 role 等字段），保证 RBAC 依赖（useIsAdmin）
+  // 在「角色变更 / 重新登录」后实时生效，而无需刷新页面。
+  useEffect(() => {
+    if (query.data) {
+      useAuthStore.getState().setUser(query.data);
+    }
+  }, [query.data]);
+
+  return query;
 }
