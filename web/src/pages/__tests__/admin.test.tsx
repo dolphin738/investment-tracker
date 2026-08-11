@@ -1,15 +1,16 @@
 /**
- * pages/__tests__/admin.test.tsx — 系统管理页 RBAC 与表单行为验收
+ * pages/__tests__/admin.test.tsx — 系统管理页（多提供方）RBAC 与表单行为验收
  *
  * 验收点：
- * 1. 非管理员：页面不渲染「证券行情 API 地址」配置卡，改为展示「无权限访问」；
+ * 1. 非管理员：页面不渲染「新增提供方」按钮，改为展示「无权限访问」；
  *    且侧边栏不展示「系统管理」入口（useIsAdmin === false → 过滤 admin 项）。
- * 2. 管理员：配置卡可见，表单回填已保存的 url；点击「保存」调用 admin 端点
- *    updateSystemConfig(key, { url })。
+ * 2. 管理员：表格可见并列出提供方，且展示「新增提供方」按钮。
+ * 3. 管理员：点击「新增提供方」打开对话框，填写并提交调用 createQuoteProvider
+ *    且请求体含 name / provider_type / access_method=https / config.base_url / enabled。
  *
  * Mock 策略（稳健模式）：
  * - @/stores/auth.store：useIsAdmin 由模块级 adminFlag 控制，useAuthStore 提供空实现；
- * - @/api/admin.api：importOriginal + 内部 vi.fn() 覆盖，断言走 vi.mocked(...)；
+ * - @/api/quote-provider.api：importOriginal + 内部 vi.fn() 覆盖各读写函数，断言走 vi.mocked(...)；
  * - sonner：toast 置空实现，避免副作用。
  */
 
@@ -22,13 +23,21 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 // 模块级开关：控制 useIsAdmin 的返回值（在测试间切换）
 let adminFlag = false;
 
-const QUOTE_KEY = 'securities_quote_api_base_url';
-const SAMPLE_CONFIG = {
-  key: QUOTE_KEY,
-  value: { url: 'https://old.example.com/api' },
-  description: null,
-  updatedAt: null,
-};
+const SAMPLE_LIST = [
+  {
+    id: 'p1',
+    name: '新浪财经',
+    provider_type: 'stock',
+    access_method: 'https',
+    config: { base_url: 'https://finance.sina.com.cn/api' },
+    is_default: true,
+    is_active: false,
+    enabled: true,
+    description: '默认源',
+    created_at: '2026-01-01T00:00:00Z',
+    updated_at: '2026-01-01T00:00:00Z',
+  },
+];
 
 vi.mock('@/stores/auth.store', () => ({
   useIsAdmin: () => adminFlag,
@@ -42,12 +51,16 @@ vi.mock('@/stores/auth.store', () => ({
   }),
 }));
 
-vi.mock('@/api/admin.api', async (importOriginal) => {
+vi.mock('@/api/quote-provider.api', async (importOriginal) => {
   const actual = await importOriginal();
   return {
     ...(actual as Record<string, unknown>),
-    getSystemConfig: vi.fn(),
-    updateSystemConfig: vi.fn(),
+    listQuoteProviders: vi.fn(),
+    createQuoteProvider: vi.fn(),
+    updateQuoteProvider: vi.fn(),
+    deleteQuoteProvider: vi.fn(),
+    setDefaultQuoteProvider: vi.fn(),
+    setActiveQuoteProvider: vi.fn(),
   };
 });
 
@@ -57,7 +70,10 @@ vi.mock('sonner', () => ({
 
 import AdminPage from '@/pages/admin';
 import { Sidebar } from '@/components/layout/sidebar';
-import { getSystemConfig, updateSystemConfig } from '@/api/admin.api';
+import {
+  listQuoteProviders,
+  createQuoteProvider,
+} from '@/api/quote-provider.api';
 
 function renderWithProviders(ui: ReactElement) {
   const queryClient = new QueryClient({
@@ -70,11 +86,15 @@ function renderWithProviders(ui: ReactElement) {
   );
 }
 
-describe('AdminPage — RBAC 与表单', () => {
+describe('AdminPage — 多提供方管理 RBAC 与表单', () => {
   beforeEach(() => {
     adminFlag = false;
-    vi.mocked(getSystemConfig).mockResolvedValue(SAMPLE_CONFIG);
-    vi.mocked(updateSystemConfig).mockResolvedValue(SAMPLE_CONFIG);
+    vi.mocked(listQuoteProviders).mockResolvedValue(SAMPLE_LIST as never);
+    vi.mocked(createQuoteProvider).mockResolvedValue({
+      ...SAMPLE_LIST[0],
+      id: 'new',
+      name: '新建源',
+    } as never);
   });
 
   afterEach(() => {
@@ -82,10 +102,10 @@ describe('AdminPage — RBAC 与表单', () => {
     vi.clearAllMocks();
   });
 
-  it('① 非管理员：不渲染配置卡，展示「无权限访问」', () => {
+  it('① 非管理员：不渲染「新增提供方」，展示「无权限访问」', () => {
     adminFlag = false;
     renderWithProviders(<AdminPage />);
-    expect(screen.queryByText('证券行情 API 地址')).toBeNull();
+    expect(screen.queryByText('新增提供方')).toBeNull();
     expect(screen.getByText('无权限访问该页面')).toBeTruthy();
   });
 
@@ -99,36 +119,58 @@ describe('AdminPage — RBAC 与表单', () => {
     expect(screen.queryByText('系统管理')).toBeNull();
   });
 
-  it('③ 管理员：配置卡可见，且表单回填已保存的 url', async () => {
+  it('③ 管理员：表格可见并列出提供方，且展示「新增提供方」按钮', async () => {
     adminFlag = true;
     renderWithProviders(<AdminPage />);
-    expect(await screen.findByText('证券行情 API 地址')).toBeTruthy();
-    const input = (await screen.findByLabelText('API 基础地址')) as HTMLInputElement;
-    expect(input.value).toBe('https://old.example.com/api');
+    expect(await screen.findByText('新浪财经')).toBeTruthy();
+    expect(
+      screen.getByRole('button', { name: '新增提供方' }),
+    ).toBeTruthy();
   });
 
-  it('④ 管理员：点击「保存」调用 admin 端点 updateSystemConfig(key, { url })', async () => {
+  it('④ 管理员：新增提供方填写并提交调用 createQuoteProvider', async () => {
     adminFlag = true;
     renderWithProviders(<AdminPage />);
-    // 等待表单与数据就绪：input 出现即代表数据已加载、url 已通过 useEffect 回填（见 ③）。
-    await screen.findByLabelText('API 基础地址');
-    // 确保 React 完成所有 pending 更新（含 useEffect 回填与 mutation 绑定）。
+    // 等待列表加载完成
+    await screen.findByText('新浪财经');
+
+    const addBtn = screen.getByRole('button', { name: '新增提供方' });
     await act(async () => {
-      await Promise.resolve();
+      fireEvent.click(addBtn);
+    });
+
+    // 对话框表单出现（input 的 Label 关联）
+    const nameInput = (await screen.findByLabelText('名称')) as HTMLInputElement;
+    await act(async () => {
+      fireEvent.change(nameInput, { target: { value: '新建源' } });
+    });
+    const typeInput = (await screen.findByLabelText('类型')) as HTMLInputElement;
+    await act(async () => {
+      fireEvent.change(typeInput, { target: { value: 'stock' } });
+    });
+    const urlInput = (await screen.findByLabelText(
+      'API 基础地址',
+    )) as HTMLInputElement;
+    await act(async () => {
+      fireEvent.change(urlInput, { target: { value: 'https://x.com/api' } });
     });
 
     const saveBtn = screen.getByRole('button', { name: '保存' });
-    // 将 click 包在 act 中，确保 mutate 触发的状态更新与异步调度被 flush。
     await act(async () => {
       fireEvent.click(saveBtn);
     });
 
-    // 全量测试在慢速环境下需更大超时；mutate 必然触发 mutationFn。
     await waitFor(
       () => {
-        expect(vi.mocked(updateSystemConfig)).toHaveBeenCalledWith(QUOTE_KEY, {
-          url: 'https://old.example.com/api',
-        });
+        expect(vi.mocked(createQuoteProvider)).toHaveBeenCalledWith(
+          expect.objectContaining({
+            name: '新建源',
+            provider_type: 'stock',
+            access_method: 'https',
+            config: { base_url: 'https://x.com/api' },
+            enabled: true,
+          }),
+        );
       },
       { timeout: 5000 },
     );
