@@ -327,10 +327,18 @@ User (1) ──< Portfolio (N)
 
 - **全局前缀**：所有业务接口以 `/api` 为前缀（OpenAPI 文档 `/api/docs`，原始 schema `/api/openapi.json`）。
 - **统一信封**：所有响应经 `EnvelopeRoute` 包裹为 `{ code, data, message }`（见 §16.5）。`code: 0` 成功；非 0 错误，`data` 为 null 或结构化对象。
-- **鉴权**：受保护接口需 `Authorization: Bearer <JWT>`；缺失 / 失效 → 1001 / 1002。JWT 为 HS256，`payload={sub, email, iat, exp}`，后端验签后查库确认用户存在且未软删。
+- **鉴权**：受保护接口需 `Authorization: Bearer <JWT>`；缺失 / 失效 → 1001 / 1002。JWT 为 HS256，`payload={sub, email, iat, exp}`（+ `role`，仅前端显示用，后端授权见 §4.1.1），后端验签后查库确认用户存在且未软删。
 - **分页**：列表接口统一 `page`（默认 1）/ `pageSize`（默认 20，部分 50）Query 参数；响应 `{ items, total, page, pageSize }`。
 - **金额 / 日期**：请求体金额可为数字或字符串（经 `DecimalStr` 校验），日期 `YYYY-MM-DD`；响应金额一律字符串，日期 ISO 序列化。
 - **归属隔离**：`{portfolio_id}` 经 `get_portfolio` 校验；`{security_id}` 等二级资源再校验所属组合。
+
+#### 4.1.1 角色模型（新增）
+
+> 2026-08-11 新增（方案 `docs/plan-admin-quote-api-config-2026-08-11.md`）。**源真相在 DB，JWT 仅缓存 `role` 供前端显示，后端授权以查库为准**。
+
+- **`User.role`**：`users` 表新增列 `String(20)`，默认 `'user'`，非空；取值由 Python 枚举 `UserRole(user="user", admin="admin")` 约束（选用 `String` + Python 枚举，**非** §3.1.5 的原生 PG 枚举类型，便于未来加角色只改枚举不动库表）。注册默认 `role='user'`。
+- **JWT payload 含 `role`**：`create_access_token(sub, email, role)` 在 `payload` 追加 `"role": role`（仅前端判断显示 / 入口隐藏用，**不用于后端授权**）；现有 `payload={sub, email, iat, exp}` 其余不变。
+- **`require_admin` 查库校验**：`require_admin(current: CurrentUser = Depends(get_current_user))` 校验 `current_user.role == "admin"`，否则抛 `FORBIDDEN = 4001`（HTTP 403）；避免「改了角色但旧 JWT 仍有效」的陈旧授权绕过（路由见 §4.2.21，对应 PRD `AUTH-P0-01`）。
 
 ### 4.2 API 接口列表（每模块子节 · 与真实路由对齐）
 
@@ -540,6 +548,7 @@ User (1) ──< Portfolio (N)
 > - `/account` **除「我的组合」块外只读**（个人信息 / 资产全景 / 数据统计三块只读契约不变）。
 > - **组合 CRUD 由账户页承接**（唯一 UI 平面，PRD `ACC-P0-04`）：`POST /api/portfolios`、`PATCH /api/portfolios/:id`、`DELETE /api/portfolios/:id`、`PATCH /api/portfolios/:id/archive`、`PATCH /api/portfolios/:id/default`（见 §4.2.2）。
 > - **账户资料 / 头像 / 偏好 / 密码 / 邮箱 / 注销仍统一收口 `/settings`**，经 `PATCH /api/auth/profile` + `POST /api/upload/avatar` + `GET/PATCH /api/users/preferences` + `PATCH /api/auth/password` + `PATCH /api/auth/email` + `DELETE /api/auth/account`（与 §10.1 前端职责一致）。
+> - **管理员专属配置收口 `/api/admin` 与 `/admin` 页**：普通用户不可见不可改；`require_admin` 查库校验为最终防线，前端隐藏（侧边栏「系统管理」入口 / `/admin` 页 / `useSystemConfig` 的 `enabled: isAdmin`）仅作体验优化（PRD `AUTH-P0-01` / `SYS-P0-08`）。
 
 | Method | Path | 说明 | 请求参数 / 体 | 响应 data |
 |--------|------|------|--------------|-----------|
@@ -602,6 +611,15 @@ User (1) ──< Portfolio (N)
 | POST | `/api/internal/cleanup/avatars` | 每 3 月 | 清理 `uploads/avatar/` 下未被 `user.avatar` 引用的孤儿文件（`<uuid>.<ext>` 正则 + `resolve` 防穿越），幂等 | `{ removedAvatars }` |
 
 > 由 `CleanupService`（领域 Service）实现；保留期 / 令牌见 `core/config`。软删除 + 冷静期自助恢复语义见 PRD SYS-P1-02 / SET-P1-06。
+
+#### 4.2.21 管理员系统配置（`/api/admin` · 仅 admin）
+
+> 模块定位：全局管理员配置（当前仅「证券行情 API 地址」），**仅 admin 可见可改**。后端以 `Depends(require_admin)` 查库校验为最终防线（普通用户 → `FORBIDDEN 4001/403`）；前端侧边栏「系统管理」入口与 `/admin` 页仅 admin 可见，`useSystemConfig` 以 `enabled: isAdmin` 守护普通用户不发请求（纵深防御）。配置存 `system_configs` 全局表（非 `UserPreference`）。对应 PRD `AUTH-P0-01` / `SYS-P0-08`。
+
+| Method | Path | 说明 | 请求体 / 参数 | 响应 data |
+|--------|------|------|--------------|-----------|
+| GET | `/api/admin/system-config/{key}` | 读取全局配置（如 `securities_quote_api_base_url`） | `key`（路径参数） | `SystemConfigOut`（`{ key, config_value, description, updated_by, updated_at }`） |
+| PATCH | `/api/admin/system-config/{key}` | 写入全局配置 | `{ config_value }`（`JSONB`，如 `{ "url": "https://..." }`）；`updated_by` 由 `require_admin` 当前用户填充 | `SystemConfigOut` |
 
 ---
 
@@ -1020,6 +1038,7 @@ sequenceDiagram
 /analysis/nav           → 净值分析页
 /account                → 账户页（只读展示：个人信息 / 资产全景 / 数据统计 ＋ 可写：我的组合＝组合 CRUD 唯一平面）
 /settings               → 设置页（偏好 / 资料 / 头像 / 触发重置重算 / 登出 / 注销；**不含组合管理**）
+/admin                  → 系统管理页（AuthGuard 包裹；**仅 admin 可见**：证券行情 API 地址配置；普通用户侧边栏无入口、直接访问被后端 `require_admin` 403 拦截）
 *                       → 404 (not-found)
 ```
 
@@ -1232,6 +1251,7 @@ sequenceDiagram
 | 1009 | 恢复期已过（数据不可找回） | 410 |
 | 2000 | 参数 / 业务规则校验失败（含卖出数量超过持仓、取出超过当日总资产等硬性校验） | 400 |
 | 3001 | 资源不存在（组合/标的/记录） | 404 |
+| 4001 | 无权限（FORBIDDEN：非 admin 访问 admin 端点 / 角色不足，见 §4.1.1 / §4.2.21） | 403 |
 | 5000 | 服务器内部错误 | 500 |
 
 > 1007 / 1008 / 1009 刻意不使用 401，否则会被前端拦截器当「登录失效」清 token 踢回登录页（见 §4.2.1）。
