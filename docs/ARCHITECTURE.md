@@ -1054,7 +1054,7 @@ sequenceDiagram
 | features | `src/features/` | 业务功能（dashboard 卡片、交易表单、统一筛选器、导入导出等），含业务逻辑 |
 | components/ui | `src/components/ui/` | shadcn/ui 基础组件（纯展示） |
 | components/charts | `src/components/charts/` | ECharts 封装（nav-trend / xirr-trend / yearly-bar / monthly-heatmap / stat-card / chart-grid / total-asset-trend / holding-donut / portfolio-compare） |
-| components/layout | `src/components/layout/` | 布局组件（`app-layout` 外壳 / `sidebar` 8 项导航 / `portfolio-selector` 组合切换 / `portfolio-dialog` 新建组合） |
+| components/layout | `src/components/layout/` | 布局组件（`app-layout` 外壳 / `sidebar` 9 项导航 / `portfolio-selector` 组合切换 / `portfolio-dialog` 新建组合） |
 | hooks | `src/hooks/` | 数据获取 / 变更 / 缓存（useHoldings、useSnapshots、usePreferences…） |
 | api | `src/api/` | API 请求层（按模块拆分 `*.api.ts`，对应后端接口） |
 | stores | `src/stores/` | Zustand 全局态（auth / portfolio / preference） |
