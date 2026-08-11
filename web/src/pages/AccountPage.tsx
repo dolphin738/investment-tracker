@@ -1,37 +1,51 @@
 /**
- * pages/AccountPage.tsx — 账户中心（PRD v3.1.8 §7.7：账户页 = 看，纯只读聚合视图）
+ * pages/AccountPage.tsx — 账户中心（PRD v3.1.8 §7.7 · 组合管理平面收敛后的新契约）
  *
- * 四张只读卡（草图逐项对齐）：
- * - 👤 个人信息（ACC-P0-02）：头像 / 昵称 / 邮箱 / 手机（脱敏）/ 简介 / 注册时间，卡内零修改控件
- * - 📊 资产全景（ACC-P0-03）：组合数 / 合计总资产 / 合计净投入 / 合计浮动盈亏
- * - 📈 数据统计（ACC-P0-06）：出入金笔数 / 证券买卖笔数 / 总资产记录天数 / 数据区间 / 账户使用天数
- * - 💼 我的组合（ACC-P0-04）：点击行 = 切换组合并跳转概览；右上 [+新建组合]
+ * 【只读契约（已调整）】账户页整体仍是只读聚合视图，**唯一例外是「我的组合」卡**：
+ * 该卡是全站唯一的组合管理平面，承接组合 CRUD（新建 / 编辑 / 归档 / 删除 / 设为默认）。
+ * 其余三张卡（个人信息 / 资产全景 / 数据统计）保持零修改控件，不得新增任何写入入口。
  *
- * 账户页保留「+新建组合」快捷入口（复用 PortfolioDialog 打开新建组合弹窗）；
- * 完整的组合管理（设为默认 / 归档 / 删除）在设置页 `/settings` 的组合管理区。
- * 退出登录、注销账户等其余修改入口同样在设置页（ACC-P0-05）。
+ * 四张卡（草图逐项对齐）：
+ * - 👤 个人信息（ACC-P0-02，**只读**）：头像 / 昵称 / 邮箱 / 手机（脱敏）/ 简介 / 注册时间；
+ *      资料与安全修改仍在设置页，卡内只保留「前往设置修改 →」跳转链接
+ * - 📊 资产全景（ACC-P0-03，**只读**）：组合数 / 合计总资产 / 合计净投入 / 合计浮动盈亏
+ * - 📈 数据统计（ACC-P0-06，**只读**）：出入金笔数 / 证券买卖笔数 / 总资产记录天数 / 数据区间 / 账户使用天数
+ * - 💼 我的组合（ACC-P0-04，**唯一可写块**）：统一表格 = 业绩列 + 管理操作列；
+ *      点击组合名 = 切换当前组合并跳转概览；右上 [+新建组合]；行尾 设为默认 / 编辑 / 归档 / 删除
  *
- * 数据来源（T03 接真值后，组合列表以 summary 为单一数据源，不再用 usePortfolios 兜底）：
+ * 数据来源（「我的组合」按 id 前端合并两个数据源）：
  * - GET /api/auth/profile        — 用户信息（优先于 auth store，避免旧 localStorage 缓存缺 createdAt）
  * - GET /api/account/stats       — 账户统计（cashflowCount / tradeCount）
- * - GET /api/portfolios/summary  — 资产全景（跨组合）+ 组合列表（成立日 / 币种 / 净值 / 当年% / 净投入 / 浮动盈亏）
+ * - GET /api/portfolios/summary  — 资产全景（跨组合）+ 组合业绩列（成立日 / 币种 / 净值 / 当年% / 净投入 / 浮动盈亏）
+ * - GET /api/portfolios          — 组合元信息（description / archivedAt），经 usePortfolios() 读缓存
+ *
+ * 【为什么能安全按 id 合并】后端 `PortfolioService.list_for_user` 与
+ * `AggregationService.summary_list` 都是 `select(Portfolio).where(user_id==…).order_by(created_at.desc())`，
+ * 同一集合、同一排序、都不过滤归档；且 usePortfolios() 已被布局层组合选择器调用（staleTime 60s），
+ * 本页复用缓存不产生额外请求。极端情况下某 id 在元信息里缺失时，管理列降级为
+ * 「描述显示 -、不显示归档标记、按钮仍可点」，绝不抛错。
  *
  * 金融口径约定：金额/净值/收益率以 string 跨网；「无数据」为 null，渲染「—」或「未成立」，
  * 禁止把 null 渲染成 0（SYS-P0-05 四态）。跨组合仅做金额类求和（Q-07：不做合计 XIRR / 合计净值）。
  */
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
+  Archive,
   ArrowRightLeft,
   Calendar,
   CalendarRange,
   Clock,
   LineChart,
+  Loader2,
   Mail,
+  Pencil,
   Phone,
   Plus,
+  Star,
+  Trash2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -43,6 +57,16 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { CardSkeleton } from '@/components/LoadingSpinner';
 import { PageHeader } from '@/components/PageHeader';
 import { UserAvatar } from '@/components/user-avatar';
@@ -57,10 +81,19 @@ import { useAuthStore } from '@/stores/auth.store';
 import { usePortfolioStore } from '@/stores/portfolio.store';
 import { usePreferenceStore } from '@/stores/preference.store';
 import { useProfile } from '@/hooks/use-auth';
+import { usePreferences } from '@/hooks/use-preferences';
+import {
+  useArchivePortfolio,
+  useDeletePortfolio,
+  usePortfolios,
+  useSetDefaultPortfolio,
+} from '@/hooks/use-portfolios';
 import { getAccountStats } from '@/api/account.api';
 import { getPortfoliosSummary } from '@/api/overview.api';
 import { ROUTE_PATH } from '@/lib/constants';
-import { formatCurrency, formatDate, formatDecimal, formatPercent } from '@/lib/utils';
+import { cn, formatCurrency, formatDate, formatDecimal, formatPercent } from '@/lib/utils';
+import type { PortfolioSummary } from '@/api/types';
+import type { Portfolio } from '@/lib/types';
 
 /** 无数据统一占位符（SYS-P0-05 四态：缺数据不白屏、不伪造；null 是「无数据」不是 0） */
 const NO_DATA = '—';
@@ -70,6 +103,22 @@ function maskPhone(phone: string | null | undefined): string {
   if (!phone) return '-';
   if (phone.length < 7) return phone;
   return `${phone.slice(0, 3)}****${phone.slice(-4)}`;
+}
+
+/**
+ * 「我的组合」统一表格的一行：业绩列来自 summary，管理列来自组合元信息。
+ *
+ * `hasMeta = false` 表示该组合在 `usePortfolios()` 结果里缺失（理论上不会发生，
+ * 两个后端查询同集合同排序），此时 `meta` 是由 summary 现场合成的降级对象，
+ * 保证操作列仍可点击、不抛错。
+ */
+interface PortfolioRow {
+  /** 业绩字段（GET /portfolios/summary） */
+  summary: PortfolioSummary;
+  /** 管理字段（GET /portfolios，或缺失时的降级合成对象） */
+  meta: Portfolio;
+  /** 元信息是否真实命中 */
+  hasMeta: boolean;
 }
 
 /** 统计卡单元格 */
@@ -108,8 +157,33 @@ export default function AccountPage(): JSX.Element {
   const amountThousands = getPreference('amountThousands');
   const amountAbbrev = getPreference('amountAbbrev');
 
-  /** [+新建组合]：复用设置页同款 PortfolioDialog，保持创建体验一致 */
+  /** 组合管理弹窗状态（[+新建组合] / 编辑 / 删除二次确认） */
   const [creating, setCreating] = useState<boolean>(false);
+  const [editing, setEditing] = useState<Portfolio | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  // ── 组合管理数据与 mutation ──
+  const { data: portfolios = [] } = usePortfolios();
+  const { data: serverPrefs } = usePreferences();
+  const deleteMutation = useDeletePortfolio();
+  const archiveMutation = useArchivePortfolio();
+  const setDefaultMutation = useSetDefaultPortfolio();
+
+  /**
+   * 当前默认组合 ID（服务端偏好口径）
+   *
+   * 用本地 state 承接而非直接读 serverPrefs，是为了让「设为默认」点击后立即高亮星标
+   * （mutation onSuccess 直接写入返回值），不必等偏好查询失效重取。
+   */
+  const [defaultPortfolioId, setDefaultPortfolioId] = useState<string>('');
+  useEffect(() => {
+    if (serverPrefs) {
+      setDefaultPortfolioId(serverPrefs.defaultPortfolioId ?? '');
+    }
+  }, [serverPrefs]);
+
+  const isDefaultPortfolio = (portfolioId: string): boolean =>
+    defaultPortfolioId === portfolioId;
 
   const stats = useQuery({
     queryKey: ['account', 'stats'],
@@ -121,6 +195,41 @@ export default function AccountPage(): JSX.Element {
     queryFn: () => getPortfoliosSummary(),
     staleTime: 60 * 1000,
   });
+
+  /** 组合元信息索引：id → Portfolio（description / archivedAt 的来源） */
+  const portfolioMetaMap = useMemo(() => {
+    const map = new Map<string, Portfolio>();
+    for (const p of portfolios) {
+      map.set(p.id, p);
+    }
+    return map;
+  }, [portfolios]);
+
+  /**
+   * 统一表格行：以 summary 为遍历主序（后端已按 createdAt desc 排好），
+   * 逐行补挂管理字段；缺失时合成降级对象（描述空、未归档），保证操作列不崩。
+   */
+  const portfolioRows = useMemo<PortfolioRow[]>(() => {
+    if (!summary.data) return [];
+    return summary.data.map((s) => {
+      const meta = portfolioMetaMap.get(s.id);
+      if (meta) {
+        return { summary: s, meta, hasMeta: true };
+      }
+      const fallback: Portfolio = {
+        id: s.id,
+        userId: '',
+        name: s.name,
+        description: null,
+        baseDate: s.baseDate,
+        currency: s.currency,
+        archivedAt: null,
+        createdAt: s.createdAt,
+        updatedAt: s.createdAt,
+      };
+      return { summary: s, meta: fallback, hasMeta: false };
+    });
+  }, [summary.data, portfolioMetaMap]);
 
   /** 合计总资产：仅做金额类求和（Q-07：不做跨组合合计 XIRR / 合计净值） */
   const totalAsset = useMemo(() => {
@@ -177,6 +286,33 @@ export default function AccountPage(): JSX.Element {
     navigate(ROUTE_PATH.DASHBOARD);
   };
 
+  /**
+   * 「设为默认 / 取消默认」（项6 · SET-P0-06 · 自设置页组合管理原样迁移）
+   *
+   * toggle 语义：调用 PATCH /portfolios/:id/default，后端已是默认则取消、否则设为默认。
+   * 成功后把本地 defaultPortfolioId 对齐返回值，星标立即同步；
+   * 已归档组合不能作为默认组合（按钮同时 disabled，此处再做一次防御）。
+   */
+  const handleSetDefaultPortfolio = (portfolio: Portfolio): void => {
+    if (portfolio.archivedAt) {
+      return;
+    }
+    setDefaultMutation.mutate(portfolio.id, {
+      onSuccess: (pref) => {
+        setDefaultPortfolioId(pref.defaultPortfolioId ?? '');
+      },
+    });
+  };
+
+  /** 删除二次确认后的实际删除 */
+  const handleConfirmDelete = (): void => {
+    if (deletingId) {
+      deleteMutation.mutate(deletingId, {
+        onSettled: () => setDeletingId(null),
+      });
+    }
+  };
+
   // 优先用 GET /auth/profile 的新鲜响应：auth store 从 localStorage 恢复的旧缓存
   // user 可能缺 createdAt（后端补投影前的旧缓存），profile.data 恒为最新服务端数据。
   const currentUser = profile.data ?? user;
@@ -212,7 +348,7 @@ export default function AccountPage(): JSX.Element {
     <div className="space-y-6">
       <PageHeader
         title="账户"
-        description="账户中心 · 纯只读聚合视图（修改入口见设置页）"
+        description="账户中心 · 组合管理在「我的组合」卡完成；其余分区为只读聚合视图（资料与安全修改见设置页）"
       />
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-12">
@@ -248,7 +384,7 @@ export default function AccountPage(): JSX.Element {
                 <p className="text-sm text-muted-foreground">{currentUser.bio}</p>
               )}
             </div>
-            {/* 卡内无任何修改控件（§7.7 L1320-1322），仅提供跳转 */}
+            {/* 卡内无任何修改控件（§7.7 L1320-1322）：资料/安全修改仍在设置页，仅提供跳转 */}
             <Button
               variant="link"
               size="sm"
@@ -260,7 +396,7 @@ export default function AccountPage(): JSX.Element {
           </CardContent>
         </Card>
 
-        {/* ===== 资产全景（ACC-P0-03） ===== */}
+        {/* ===== 资产全景（只读 · ACC-P0-03） ===== */}
         <Card className="xl:col-span-5">
           <CardHeader>
             <CardTitle className="text-base">资产全景</CardTitle>
@@ -320,7 +456,7 @@ export default function AccountPage(): JSX.Element {
           </CardContent>
         </Card>
 
-        {/* ===== 数据统计（ACC-P0-06） ===== */}
+        {/* ===== 数据统计（只读 · ACC-P0-06） ===== */}
         <Card className="xl:col-span-4">
           <CardHeader>
             <CardTitle className="text-base">数据统计</CardTitle>
@@ -386,11 +522,14 @@ export default function AccountPage(): JSX.Element {
           </CardContent>
         </Card>
 
-        {/* ===== 我的组合（ACC-P0-04 · 7 列表格独占整行，不可挤 1/3 宽） ===== */}
+        {/* =====================================================================
+            我的组合（ACC-P0-04 · 全站唯一组合管理平面）
+            统一表格 = 业绩列（summary）+ 管理列（组合元信息），独占整行不可挤 1/3 宽
+           ===================================================================== */}
         <Card className="xl:col-span-12">
           <CardHeader className="flex-row items-center justify-between">
             <CardTitle className="text-base">我的组合</CardTitle>
-            {/* INC-05：原 outline，与设置页「新建组合」不一致 → 统一为主色 sm + Plus */}
+            {/* INC-05：与全站录入入口同规格（主色 sm + Plus），文案取自统一字典 */}
             <Button
               size={ENTRY_BUTTON_SIZE}
               variant={ENTRY_BUTTON_VARIANT}
@@ -407,38 +546,51 @@ export default function AccountPage(): JSX.Element {
                   <div key={i} className="h-9 animate-pulse rounded bg-muted" />
                 ))}
               </div>
-            ) : summary.data && summary.data.length > 0 ? (
+            ) : portfolioRows.length > 0 ? (
               <>
                 <Table>
                   <TableHeader>
                     <TableRow>
                       <TableHead>组合名称</TableHead>
+                      <TableHead>描述</TableHead>
                       <TableHead>成立日</TableHead>
                       <TableHead>币种</TableHead>
                       <TableHead className="text-right">最新总资产</TableHead>
                       <TableHead className="text-right">净值</TableHead>
                       <TableHead className="text-right">当年%</TableHead>
                       <TableHead>更新日</TableHead>
+                      <TableHead className="text-right">操作</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {summary.data.map((p) => (
+                    {portfolioRows.map(({ summary: p, meta }) => (
                       <TableRow key={p.id}>
                         <TableCell className="font-medium">
-                          <button
-                            type="button"
-                            className="text-left hover:underline"
-                            onClick={() => handleOpenPortfolio(p.id)}
-                            title="切换到该组合并跳转概览"
-                          >
-                            {p.id === currentPortfolioId ? (
-                              <span className="font-semibold text-primary">
-                                {p.name}
+                          <span className="inline-flex items-center gap-2">
+                            <button
+                              type="button"
+                              className="text-left hover:underline"
+                              onClick={() => handleOpenPortfolio(p.id)}
+                              title="切换到该组合并跳转概览"
+                            >
+                              {p.id === currentPortfolioId ? (
+                                <span className="font-semibold text-primary">
+                                  {p.name}
+                                </span>
+                              ) : (
+                                p.name
+                              )}
+                            </button>
+                            {meta.archivedAt && (
+                              <span className="text-xs text-muted-foreground">
+                                已归档
                               </span>
-                            ) : (
-                              p.name
                             )}
-                          </button>
+                          </span>
+                        </TableCell>
+                        {/* 描述：来自组合元信息；缺失时降级为 '-' */}
+                        <TableCell className="text-sm text-muted-foreground">
+                          {meta.description || '-'}
                         </TableCell>
                         {/* 成立日 = 首笔存入日（FIN-D6）：无存入记录时显示「未成立」，不冒充创建日 */}
                         <TableCell className="text-sm">
@@ -486,12 +638,85 @@ export default function AccountPage(): JSX.Element {
                             ? formatDate(p.lastUpdatedAt)
                             : NO_DATA}
                         </TableCell>
+                        {/* 管理操作列（自设置页组合管理原样迁移：文案 / title / disabled 逐项对齐） */}
+                        <TableCell className="text-right">
+                          <div className="flex justify-end gap-1">
+                            {/* 设为默认 / 取消默认（项6 · SET-P0-06）：toggle 切换 defaultPortfolioId */}
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              onClick={() => handleSetDefaultPortfolio(meta)}
+                              title={
+                                meta.archivedAt
+                                  ? '已归档组合不能设为默认'
+                                  : isDefaultPortfolio(p.id)
+                                    ? '取消默认'
+                                    : '设为默认'
+                              }
+                              aria-label={
+                                isDefaultPortfolio(p.id) ? '取消默认' : '设为默认'
+                              }
+                              disabled={
+                                Boolean(meta.archivedAt) || setDefaultMutation.isPending
+                              }
+                            >
+                              <Star
+                                className={cn(
+                                  'h-4 w-4',
+                                  isDefaultPortfolio(p.id)
+                                    ? 'fill-primary text-primary'
+                                    : '',
+                                )}
+                              />
+                            </Button>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              onClick={() => setEditing(meta)}
+                              title="编辑"
+                              aria-label="编辑"
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              onClick={() =>
+                                archiveMutation.mutate({
+                                  id: p.id,
+                                  archived: !meta.archivedAt,
+                                })
+                              }
+                              title={meta.archivedAt ? '取消归档' : '归档'}
+                              aria-label={meta.archivedAt ? '取消归档' : '归档'}
+                              disabled={archiveMutation.isPending}
+                            >
+                              <Archive
+                                className={cn(
+                                  'h-4 w-4',
+                                  meta.archivedAt ? 'text-primary' : '',
+                                )}
+                              />
+                            </Button>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              onClick={() => setDeletingId(p.id)}
+                              title="删除"
+                              aria-label="删除"
+                            >
+                              <Trash2 className="h-4 w-4 text-red-500" />
+                            </Button>
+                          </div>
+                        </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
                 </Table>
-                <p className="mt-3 text-xs text-muted-foreground">
-                  ⓘ 点击组合名称可切换当前组合并跳转概览
+                <p className="mt-3 space-y-1 text-xs text-muted-foreground">
+                  ⓘ 点击组合名称可切换当前组合并跳转概览；右侧操作列可设为默认 / 编辑 / 归档 / 删除
+                  <br />
+                  ⓘ ★ 设为默认：登录后自动选中该组合（写入偏好 defaultPortfolioId）；已归档组合不能设为默认
                 </p>
               </>
             ) : (
@@ -503,14 +728,47 @@ export default function AccountPage(): JSX.Element {
         </Card>
       </div>
 
-      {/* 新建组合对话框（复用设置页同款组件） */}
+      {/* 新建 / 编辑组合对话框（同一组件双模式：portfolio 非空即编辑） */}
       <PortfolioDialog
-        open={creating}
+        open={creating || Boolean(editing)}
         onOpenChange={(o) => {
-          if (!o) setCreating(false);
+          if (!o) {
+            setCreating(false);
+            setEditing(null);
+          }
         }}
-        portfolio={null}
+        portfolio={editing}
       />
+
+      {/* 删除组合确认（二次确认，文案自设置页原样迁移） */}
+      <AlertDialog
+        open={Boolean(deletingId)}
+        onOpenChange={(o) => !o && setDeletingId(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认删除该组合？</AlertDialogTitle>
+            <AlertDialogDescription>
+              删除组合将级联删除其下所有交易、快照、净值与 XIRR 数据，此操作不可撤销。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteMutation.isPending}>
+              取消
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmDelete}
+              disabled={deleteMutation.isPending}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleteMutation.isPending && (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              )}
+              确认删除
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

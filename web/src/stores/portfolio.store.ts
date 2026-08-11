@@ -41,7 +41,7 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
   },
   setPortfolios: (portfolios) => {
     const { currentPortfolioId } = get();
-    // 只从「未归档」组合里挑选，归档组合仅在设置页组合管理可见、不应被自动选中
+    // 只从「未归档」组合里挑选，归档组合仅在账户页「我的组合」可见、不应被自动选中
     const selectable = portfolios.filter((p) => !p.archivedAt);
 
     // 当前组合仍可选 → 保留用户选择

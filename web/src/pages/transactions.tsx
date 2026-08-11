@@ -244,7 +244,7 @@ export default function TransactionsPage(): JSX.Element {
     return (
       <Card className="mx-auto max-w-md">
         <CardContent className="py-10 text-center text-sm text-muted-foreground">
-          暂无投资组合，请先在设置页创建组合
+          暂无投资组合，请先在账户页「我的组合」创建组合
         </CardContent>
       </Card>
     );

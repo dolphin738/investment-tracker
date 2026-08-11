@@ -1,6 +1,6 @@
 """Phase 1 模型验证：元数据注册 + 真实库 round-trip（异步 ORM 插入/查询/级联删除）。
 
-要求：backend/.env 指向可用的 PostgreSQL（dev-env.ps1 已复制示例）。
+要求：backend/.env 指向可用的 PostgreSQL（dev.ps1 初始化时已复制示例）。
 测试对真实库做自清理（末尾级联删除测试用户），不污染数据。
 """
 from __future__ import annotations

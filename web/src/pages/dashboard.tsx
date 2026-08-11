@@ -140,7 +140,7 @@ const ONBOARDING_STEPS: ReadonlyArray<OnboardingStep> = [
   {
     index: 1,
     title: '创建组合',
-    description: '已完成。可在「设置 → 组合管理」中继续新建或调整组合。',
+    description: '已完成。可在「账户 → 我的组合」中继续新建或调整组合。',
   },
   {
     index: 2,

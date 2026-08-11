@@ -362,7 +362,10 @@ User (1) ──< Portfolio (N)
 | PATCH | `/api/portfolios/:id` | 改名称 / 描述 | `{ name?, description? }` | `Portfolio` |
 | DELETE | `/api/portfolios/:id` | 删除组合（级联） | — | `null` |
 | DELETE | `/api/portfolios/:id/data` | 清空数据（保留组合） | — | `{ deletedCount: {...} }` |
-| PATCH | `/api/portfolios/:id/archive` | 归档 / 取消归档 | — | `Portfolio` |
+| PATCH | `/api/portfolios/:id/archive` | 归档 / 取消归档（归档时若该组合为偏好默认组合，同步置空） | `{ archived? }`（缺省=true） | `Portfolio` |
+| PATCH | `/api/portfolios/:id/default` | 设为默认组合 / 再次调用取消（toggle），写 `UserPreference.defaultPortfolioId` | — | `UserPreference` |
+
+> **消费方（2026-08-11 决议）**：本组端点的 UI 唯一入口 = **账户页 `/account`「我的组合」卡**（PRD `ACC-P0-04`）。设置页「组合管理」卡已移除，不再调用 `POST/PATCH/DELETE /api/portfolios*`；设置页偏好区的「默认组合」下拉走 `PATCH /api/users/preferences`。**本次前端职责迁移不改动任何后端端点**。
 
 > 副作用：`/data` 清空在事务内逐层删（`asset_snapshots` → `cashflows` → `security_trades` → `security_prices` → `dividend_records`），删完后对整个组合触发一次 `recalculateNavRange`（起点=首笔事件日，终点=today），确保 `daily_nav`/`daily_xirr` 清空至初始状态（对应 PRD `SNAP-P0-05` / `SET-P0-05`）。
 
@@ -531,9 +534,12 @@ User (1) ──< Portfolio (N)
 
 > 最大回撤基于 `daily_nav.cumulative_nav` 序列计算（PRD DASH-P1-02）。计算口径在后端，前端仅展示。
 
-#### 4.2.16 账户设置与偏好（`/settings` 写入口）
+#### 4.2.16 账户设置与偏好（`/settings` 账户与偏好写入口）
 
-> **职责重划**：`/account` 为纯只读聚合视图；所有「写」动作（资料、头像、偏好、密码、邮箱、注销）统一收口 `/settings`，经 `PATCH /api/auth/profile` + `GET/PATCH /api/users/preferences` + `DELETE /api/auth/account`（与 §10.1 前端职责一致）。
+> **职责重划（2026-08-11 修订 · 只读粒度由页级收窄为块级）**：
+> - `/account` **除「我的组合」块外只读**（个人信息 / 资产全景 / 数据统计三块只读契约不变）。
+> - **组合 CRUD 由账户页承接**（唯一 UI 平面，PRD `ACC-P0-04`）：`POST /api/portfolios`、`PATCH /api/portfolios/:id`、`DELETE /api/portfolios/:id`、`PATCH /api/portfolios/:id/archive`、`PATCH /api/portfolios/:id/default`（见 §4.2.2）。
+> - **账户资料 / 头像 / 偏好 / 密码 / 邮箱 / 注销仍统一收口 `/settings`**，经 `PATCH /api/auth/profile` + `POST /api/upload/avatar` + `GET/PATCH /api/users/preferences` + `PATCH /api/auth/password` + `PATCH /api/auth/email` + `DELETE /api/auth/account`（与 §10.1 前端职责一致）。
 
 | Method | Path | 说明 | 请求参数 / 体 | 响应 data |
 |--------|------|------|--------------|-----------|
@@ -1012,12 +1018,14 @@ sequenceDiagram
 /snapshots              → 历史总资产记录页（手工 CRUD + 重置 /reset）
 /analysis/xirr          → XIRR 分析页
 /analysis/nav           → 净值分析页
-/account                → 账户页（展示：个人信息 / 资产全景 / 数据统计 / 我的组合）
-/settings               → 设置页（偏好 / 资料 / 头像 / 触发重置重算 / 登出 / 注销）
+/account                → 账户页（只读展示：个人信息 / 资产全景 / 数据统计 ＋ 可写：我的组合＝组合 CRUD 唯一平面）
+/settings               → 设置页（偏好 / 资料 / 头像 / 触发重置重算 / 登出 / 注销；**不含组合管理**）
 *                       → 404 (not-found)
 ```
 
-> 路由严格对齐 PRD §5 / §7 草图：`/cashflows`（`transactions` 路由）、`/analysis/xirr`、`/analysis/nav`。账户 / 设置职责重划：`/account` 仅展示，所有「写」操作（偏好、重置重算、头像上传入口）收口到 `/settings`。
+> 路由严格对齐 PRD §5 / §7 草图：`/cashflows`（`transactions` 路由）、`/analysis/xirr`、`/analysis/nav`。
+>
+> **账户 / 设置职责重划（2026-08-11 修订）**：`/account` 采用**块级只读** —— 个人信息 / 资产全景 / 数据统计三块只读，**仅「我的组合」块可写**，承接组合 CRUD（新建 / 编辑 / 归档 / 删除 / 设为默认，PRD `ACC-P0-04`）；账户资料、头像、偏好、密码、邮箱、重置重算、登出、注销等其余「写」操作仍全部收口 `/settings`（PRD `SET-P0-06` / `SET-P1-04` 已迁出，设置页「组合管理」卡移除，偏好区仅保留「默认组合」下拉）。
 
 #### 10.1.2 组件分层
 
@@ -1072,7 +1080,7 @@ sequenceDiagram
 - **加载 / 空 / 错误三态**：所有数据页统一处理——加载中骨架、空数据引导、请求失败错误提示 + 重试；错误态经信封 `code!==0` 统一触发（PRD §7 各草图）。
 - **导入两阶段**：数据导入为「预览 → 提交」两阶段，预览不落库、返回行级错误（高亮问题行）；提交单事务 + 一次重算（§16.8）。
 - **图表断线**：XIRR / 净值趋势图 `connectNulls=false`（PRD §7.5），现金流失 / 不可计算日（XIRR 为 `null`）断开而非连成直线。
-- **危险区区分**：设置页「清空当前组合数据」（保留账户，软清空业务数据，需输入组合名确认）与「注销账户」（软删账户 + 冷静期，需邮箱 + 法律确认）为两种不同操作，后端对应 `DELETE /api/portfolios/:id/data` 与 `DELETE /api/auth/account`，前端不得混用（PRD §7.8⑤）。
+- **危险区区分**：设置页「清空当前组合数据」（保留账户，软清空业务数据，需输入组合名确认）与「注销账户」（软删账户 + 冷静期，需邮箱 + 法律确认）为两种不同操作，后端对应 `DELETE /api/portfolios/:id/data` 与 `DELETE /api/auth/account`，前端不得混用（PRD §7.8④「危险操作区」，原编号 ⑤，因「组合管理区」移除而前移）。
 - **跨组合聚合语义**：账户页 / 多组合摘要仅对金额类字段求和、**跳过 `null`**、**不合计 XIRR / 净值**（XIRR 为组合级年化指标，跨组合无数学意义）；前端聚合卡须遵循此规则（PRD §7.7）。
 - **旧路由重定向**：`/transactions` 重定向至 `/cashflows`（PRD §5.1 映射）；`*` → 404。
 

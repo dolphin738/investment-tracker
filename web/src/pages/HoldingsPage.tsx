@@ -274,9 +274,10 @@ export default function HoldingsPage(): JSX.Element {
       <EmptyState
         title="暂无投资组合"
         description="创建组合后即可录入买卖并查看持仓"
+        // 组合创建入口已收敛到账户页「我的组合」，这里只做指向、不重复开一个入口
         action={
           <Button onClick={() => setTradeDialogOpen(false)} disabled>
-            请先在设置页创建组合
+            请先在账户页「我的组合」创建组合
           </Button>
         }
       />

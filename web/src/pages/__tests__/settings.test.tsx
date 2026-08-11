@@ -211,8 +211,36 @@ describe('SettingsPage — 无限更新循环回归', () => {
 
     // 关键分区存在，说明整页不是白屏
     expect(screen.getByText('账户')).toBeDefined();
-    expect(screen.getByText('组合管理')).toBeDefined();
     expect(screen.getByText('偏好设置')).toBeDefined();
+    expect(screen.getByText('数据管理')).toBeDefined();
+    expect(screen.getByText('危险操作区')).toBeDefined();
+  });
+
+  /**
+   * 组合管理平面收敛：设置页不再承载组合 CRUD，整块「组合管理」Card 已迁至
+   * 账户页「我的组合」（见 account-portfolio-table.test.tsx）。
+   * 这条断言防止有人「顺手」把组合管理搬回来造成双平面漂移。
+   */
+  it('设置页不再包含「组合管理」模块（已收敛到账户页「我的组合」）', () => {
+    renderSettingsPage();
+
+    expect(screen.queryByText('组合管理')).toBeNull();
+    expect(screen.queryByText('创建、编辑、归档或删除投资组合')).toBeNull();
+    // 组合管理的操作列按钮（aria-label 定位）也应一并消失
+    expect(screen.queryByRole('button', { name: '设为默认' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '取消默认' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '归档' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '删除' })).toBeNull();
+  });
+
+  /**
+   * 收敛的边界：偏好区「默认组合」下拉仍依赖 usePortfolios()，
+   * 删组合管理时若把 usePortfolios 一起删掉，这个下拉会直接空掉。
+   */
+  it('偏好设置的「默认组合」下拉仍保留（usePortfolios 未被误删）', () => {
+    renderSettingsPage();
+
+    expect(screen.getByText('默认组合')).toBeDefined();
   });
 
   it('服务端偏好只同步一次到本地 store（effect 不应反复触发）', () => {
