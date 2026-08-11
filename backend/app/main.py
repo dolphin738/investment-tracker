@@ -25,6 +25,7 @@ from app.core.exceptions import (
     validation_exception_handler,
 )
 from app.modules import (
+    admin,
     aggregation,
     auth,
     calculation,
@@ -100,6 +101,7 @@ app.include_router(calculation.router_xirr)
 app.include_router(calculation.router_nav)
 app.include_router(calculation.router_recalculate)
 app.include_router(internal.router)
+app.include_router(admin.router_admin)
 
 
 def _custom_openapi() -> dict:

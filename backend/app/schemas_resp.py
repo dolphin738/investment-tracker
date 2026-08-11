@@ -65,6 +65,7 @@ class UserPublicOut(BaseModel):
     avatar: Optional[str] = None
     phone: Optional[str] = None
     bio: Optional[str] = None
+    role: str = "user"  # 用户角色（user / admin），前端据此 gate 系统管理入口
     createdAt: str
 
 

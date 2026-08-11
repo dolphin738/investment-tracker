@@ -5,7 +5,20 @@
 """
 from __future__ import annotations
 
-from enum import IntEnum
+from enum import Enum, IntEnum
+
+
+class UserRole(str, Enum):
+    """用户角色（RBAC 最小实现）。
+
+    - USER：普通用户（默认）；
+    - ADMIN：系统管理员（可访问 /api/admin 系统配置等受限端点）。
+
+    值以字符串落库（users.role），与 JWT payload 的 role 字段同源。
+    """
+
+    USER = "user"
+    ADMIN = "admin"
 
 
 class BusinessErrorCode(IntEnum):
@@ -24,6 +37,7 @@ class BusinessErrorCode(IntEnum):
     # 业务 3000-3999
     NOT_FOUND = 3001             # 资源不存在（HTTP 404）
     # 计算 4000-4999
+    FORBIDDEN = 4001            # 权限不足（仅管理员可操作，HTTP 403）
     # 服务器 5000
     INTERNAL_ERROR = 5000        # 服务器内部错误（HTTP 500）
 
@@ -50,6 +64,7 @@ CODE_TO_HTTP_STATUS: dict[int, int] = {
     BusinessErrorCode.RESTORE_EXPIRED: 410,
     BusinessErrorCode.VALIDATION_FAILED: 400,
     BusinessErrorCode.NOT_FOUND: 404,
+    BusinessErrorCode.FORBIDDEN: 403,
     BusinessErrorCode.INTERNAL_ERROR: 500,
 }
 

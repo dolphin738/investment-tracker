@@ -7,6 +7,7 @@ from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, Uni
 from sqlalchemy import JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.core.enums import UserRole
 from app.db.base import Base, TimestampMixin, pk_uuid
 
 
@@ -20,6 +21,9 @@ class User(Base, TimestampMixin):
     avatar: Mapped[str | None] = mapped_column(String(512), nullable=True)
     phone: Mapped[str | None] = mapped_column(String(20), nullable=True)
     bio: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    role: Mapped[str] = mapped_column(
+        String(20), default=UserRole.USER.value, nullable=False
+    )
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     portfolios: Mapped[list["Portfolio"]] = relationship(

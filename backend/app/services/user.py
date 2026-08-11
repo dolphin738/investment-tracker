@@ -35,7 +35,9 @@ class UserService:
         self.session = session
         self.storage = storage or get_storage_driver(get_settings())
 
-    async def register(self, email: str, password: str, name: str | None) -> User:
+    async def register(
+        self, email: str, password: str, name: str | None, role: str = "user"
+    ) -> User:
         existing = (
             await self.session.execute(select(User).where(User.email == email))
         ).scalar_one_or_none()
@@ -45,7 +47,9 @@ class UserService:
                 message="邮箱已被注册",
                 status_code=409,
             )
-        user = User(email=email, password_hash=hash_password(password), name=name)
+        user = User(
+            email=email, password_hash=hash_password(password), name=name, role=role
+        )
         self.session.add(user)
         await self.session.flush()
         # 自动建默认偏好（对齐 app 行为）
@@ -251,4 +255,4 @@ class UserService:
 
     @staticmethod
     def issue_token(user: User) -> str:
-        return create_access_token(user.id, user.email or "")
+        return create_access_token(user.id, user.email or "", user.role)

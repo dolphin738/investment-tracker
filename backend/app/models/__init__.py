@@ -16,6 +16,7 @@ from app.models.enums import (
 from app.models.portfolio import Portfolio
 from app.models.security import Security, SecurityPrice, SecurityTrade
 from app.models.snapshot import AssetSnapshot
+from app.models.system_config import SystemConfig
 from app.models.user import User, UserPreference
 
 __all__ = [
@@ -28,6 +29,7 @@ __all__ = [
     "SecurityTrade",
     "SecurityPrice",
     "AssetSnapshot",
+    "SystemConfig",
     "DailyNav",
     "DailyXirr",
     "DividendRecord",

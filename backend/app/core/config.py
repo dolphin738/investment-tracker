@@ -52,6 +52,11 @@ class Settings(BaseSettings):
     # 生产环境必须改为强随机值（对齐「受保护内部端点」）。
     INTERNAL_CLEANUP_TOKEN: str = "change-me-internal"
 
+    # 证券行情 API 基础地址：系统配置项 securities_quote_api_base_url 的回退默认值。
+    # 优先读 DB 系统配置；DB 无此配置时回退此处（env SECURITIES_QUOTE_API_BASE_URL），
+    # 都没有则用空串（前端按「未配置」处理）。
+    SECURITIES_QUOTE_API_BASE_URL: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:

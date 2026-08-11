@@ -28,11 +28,12 @@ settings = get_settings()
 _bearer = HTTPBearer(auto_error=False)
 
 
-def create_access_token(sub: str, email: str) -> str:
+def create_access_token(sub: str, email: str, role: str = "user") -> str:
     now = datetime.now(timezone.utc)
     payload = {
         "sub": sub,
         "email": email,
+        "role": role,
         "iat": now,
         "exp": now + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
     }
@@ -59,9 +60,10 @@ def verify_password(password: str, hashed: str) -> bool:
 
 
 class CurrentUser:
-    def __init__(self, user_id: str, email: str) -> None:
+    def __init__(self, user_id: str, email: str, role: str = "user") -> None:
         self.user_id = user_id
         self.email = email
+        self.role = role
 
 
 async def get_current_user(
@@ -103,4 +105,19 @@ async def get_current_user(
             message="无效 Token 或账户不可用",
             status_code=401,
         )
-    return CurrentUser(user_id=user.id, email=user.email)
+    return CurrentUser(user_id=user.id, email=user.email, role=user.role)
+
+
+async def require_admin(current: CurrentUser = Depends(get_current_user)) -> CurrentUser:
+    """管理员权限依赖：当前用户 role 必须为 admin。
+
+    鉴权以数据库实时 role 为准（get_current_user 已查库），不信任 JWT payload 的
+    role 字段——被降权的管理员持旧 JWT 无法绕过（陈旧 JWT 不绕过）。
+    """
+    if current.role != "admin":
+        raise BusinessException(
+            code=BusinessErrorCode.FORBIDDEN,
+            message="需要管理员权限",
+            status_code=403,
+        )
+    return current

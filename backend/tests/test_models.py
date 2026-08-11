@@ -44,6 +44,8 @@ def test_metadata_tables_and_enums():
         "daily_xirr",
         "dividend_records",
         "user_preferences",
+        # 增量：系统配置（admin 系统配置功能，含证券行情 API 地址）
+        "system_configs",
     } == tables
 
     enums = {

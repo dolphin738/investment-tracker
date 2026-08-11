@@ -34,6 +34,7 @@ async def register(req: RegisterReq, db: AsyncSession = Depends(get_db)) -> dict
         "avatar": user.avatar,
         "phone": user.phone,
         "bio": user.bio,
+        "role": user.role,
     }
 
 
@@ -50,6 +51,7 @@ async def login(req: LoginReq, db: AsyncSession = Depends(get_db)) -> dict:
             "avatar": user.avatar,
             "phone": user.phone,
             "bio": user.bio,
+            "role": user.role,
         },
     }
 
@@ -67,6 +69,7 @@ async def restore(req: RestoreReq, db: AsyncSession = Depends(get_db)) -> dict:
             "avatar": user.avatar,
             "phone": user.phone,
             "bio": user.bio,
+            "role": user.role,
         },
     }
 
@@ -84,6 +87,7 @@ async def me(
         "avatar": u.avatar,
         "phone": u.phone,
         "bio": u.bio,
+        "role": u.role,
     }
 
 
@@ -94,7 +98,7 @@ async def get_profile(
 ) -> dict:
     """当前用户完整资料（Web 客户端绑定此路径读取当前用户）。
 
-    返回 id/email/name/avatar/phone/bio/createdAt，与 PATCH /profile 对称。
+    返回 id/email/name/avatar/phone/bio/role/createdAt，与 PATCH /profile 对称。
     读操作收口到 UserService.get_profile，router 仅做序列化。
     """
     u = await UserService(db).get_profile(user.user_id)
@@ -105,6 +109,7 @@ async def get_profile(
         "avatar": u.avatar,
         "phone": u.phone,
         "bio": u.bio,
+        "role": u.role,
         "createdAt": u.created_at.isoformat() if u.created_at else None,
     }
 
@@ -125,6 +130,7 @@ async def profile(
         "avatar": u.avatar,
         "phone": u.phone,
         "bio": u.bio,
+        "role": u.role,
     }
 
 
@@ -146,6 +152,7 @@ async def change_password(
             "avatar": u.avatar,
             "phone": u.phone,
             "bio": u.bio,
+            "role": u.role,
         },
     }
 
@@ -168,6 +175,7 @@ async def change_email(
             "avatar": u.avatar,
             "phone": u.phone,
             "bio": u.bio,
+            "role": u.role,
         },
     }
 

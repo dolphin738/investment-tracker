@@ -39,6 +39,7 @@ async def upload_avatar(
                 "email": u.email,
                 "name": u.name,
                 "avatar": u.avatar,
+                "role": u.role,
             },
         },
         "message": "ok",
