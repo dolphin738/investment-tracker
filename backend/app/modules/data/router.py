@@ -11,12 +11,12 @@ from __future__ import annotations
 from datetime import date
 from typing import Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.envelope import EnvelopeRoute
 from app.db.database import get_db
-from app.models.enums import SnapshotSource
+from app.models.enums import CashFlowType, SnapshotSource
 from app.common import get_portfolio, paginate
 from app.serializers import (
     serialize_cashbalance,
@@ -71,10 +71,17 @@ async def list_cashflows(
     db: AsyncSession = Depends(get_db),
     startDate: Optional[date] = None,
     endDate: Optional[date] = None,
+    types: Optional[str] = Query(
+        None, description="逗号分隔类型过滤，如 BUY 或 BUY,SELL；非法值忽略"
+    ),
     page: int = 1,
     pageSize: int = 20,
 ):
-    stmt = await CashflowService(db).list_stmt(p.id, startDate, endDate)
+    # 仅保留白名单内的类型（BUY/SELL），非法片段忽略，避免注入/误过滤
+    type_filter: list[CashFlowType] | None = None
+    if types:
+        type_filter = [CashFlowType(t) for t in types.split(",") if t in ("BUY", "SELL")]
+    stmt = await CashflowService(db).list_stmt(p.id, startDate, endDate, types=type_filter)
     return await paginate(db, stmt, page, pageSize, serialize_cashflow)
 
 

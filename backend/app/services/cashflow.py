@@ -25,14 +25,24 @@ from app.services.recalculation import RecalculationResult, RecalculationService
 
 class CashflowService(PortfolioChildService):
     async def list_stmt(
-        self, portfolio_id: str, start: date | None, end: date | None
+        self,
+        portfolio_id: str,
+        start: date | None,
+        end: date | None,
+        types: list[CashFlowType] | None = None,
     ):
-        """构造带过滤/排序的查询（分页交给 router 的 paginate）。"""
+        """构造带过滤/排序的查询（分页交给 router 的 paginate）。
+
+        types 非空时按类型过滤（BUY=存入 / SELL=取出），对齐前端类型多选
+        筛选器；空列表/None 视为全部（与「不勾选=全部」语义一致）。
+        """
         stmt = select(CashFlow).where(CashFlow.portfolio_id == portfolio_id)
         if start:
             stmt = stmt.where(CashFlow.date >= start)
         if end:
             stmt = stmt.where(CashFlow.date <= end)
+        if types:
+            stmt = stmt.where(CashFlow.type.in_(types))
         stmt = stmt.order_by(CashFlow.date.desc(), CashFlow.created_at.desc())
         return stmt
 
