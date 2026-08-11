@@ -33,7 +33,7 @@
 
 ## 遗留 / 待办
 - **预存 tsc 错误（非本次引入）**：`src/features/transaction/transaction-list.tsx` 用到 `TransactionResponse` 缺失的 `securityName/quantity/price/fee`，疑为 §5.2b 共享类型收敛时遗留，本次未改（超出范围）。已 stash 验证：干净 HEAD 上同样报错，确认与本次无关。**建议另开任务修**，否则 `pnpm build` 会失败。
-- 改动已本地提交（3 commits，author `senior-dev`），**未 push**。需要推送时告知（或按 `scripts/push-all.ps1`）。
+- 改动已本地提交（3 commits，author `senior-dev`），**未 push**。需要推送时告知（或按 `dev-scripts/push-all.ps1`）。
 
 ## 用户下一步
 1. 本地 `pnpm dev` 起前端，到「持仓页」切「买卖明细」验证类型筛选；到「净值分析」看热力图是否 1–12 月完整；到「出入金管理」验证统一筛选器 + Tab + 现金余额录入/编辑/删除。

@@ -68,7 +68,7 @@
 | `backend/app/modules/system_config/router.py` | 新建 admin 路由：`GET /api/admin/system-config/{key}`、`PATCH /api/admin/system-config/{key}`，均依赖 `Depends(require_admin)`；复用 `EnvelopeRoute` + 信封序列化 |
 | `backend/app/main.py`（或 routers 聚合处） | 注册 `system_config` router（路径前缀 `/api/admin`） |
 | `backend/alembic/versions/xxxx_*.py` | 迁移：① `users` 加 `role` 列（含 `server_default='user'` 与回填老数据）② 建 `system_configs` 表；种子写入 `securities_quote_api_base_url` |
-| `scripts/bootstrap_admin.py`（新增） | 一次性脚本：按 `BOOTSTRAP_ADMIN_EMAIL` 将指定用户 `role` 置为 `admin`（首个管理员引导，见 §9-D4，已拍板） |
+| `backend/scripts/bootstrap_admin.py`（新增） | 一次性脚本：按 `BOOTSTRAP_ADMIN_EMAIL` 将指定用户 `role` 置为 `admin`（首个管理员引导，见 §9-D4，已拍板） |
 
 ---
 
@@ -133,7 +133,7 @@
 - 否决：顺带写最小行情 Client（超出「配置模块」范围，引入网络/限流/解析风险；当前后端无任何行情代码，半成品 Client 不如干净骨架 + 明确读取接口）。
 - 后续：完整 AKShare / 行情引擎接入单独立 Phase，届时直接调用 `get_quote_api_base_url()` 即可拿到管理员配的地址。
 
-**D4 · 首个管理员如何产生 — ✅ 已拍板：环境变量 `BOOTSTRAP_ADMIN_EMAIL` + 一次性 `scripts/bootstrap_admin.py`**（见 §4 脚本行）
+**D4 · 首个管理员如何产生 — ✅ 已拍板：环境变量 `BOOTSTRAP_ADMIN_EMAIL` + 一次性 `backend/scripts/bootstrap_admin.py`**（见 §4 脚本行）
 
 ---
 
