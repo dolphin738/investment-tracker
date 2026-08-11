@@ -270,15 +270,26 @@ export default function TransactionsPage(): JSX.Element {
             管理存入/取出现金流与现金余额，系统据此计算净值与 XIRR
           </p>
         </div>
-        {/* INC-05：与概览页「录入买卖」同规格（主色 + sm + Plus），文案取统一字典 */}
-        <Button
-          onClick={() => setOpen(true)}
-          variant={ENTRY_BUTTON_VARIANT}
-          size={ENTRY_BUTTON_SIZE}
-        >
-          <Plus className={ENTRY_BUTTON_ICON_CLASS} />
-          {ENTRY_BUTTON_LABELS.cashFlow}
-        </Button>
+        {/* INC-05：与概览页「录入买卖」同规格（主色 + sm + Plus），文案取统一字典；
+            录入现金余额置于录入出入金左侧，两者水平并排、规格一致便于操作 */}
+        <div className="flex items-center gap-2">
+          <Button
+            onClick={openCreateBalance}
+            variant={ENTRY_BUTTON_VARIANT}
+            size={ENTRY_BUTTON_SIZE}
+          >
+            <Plus className={ENTRY_BUTTON_ICON_CLASS} />
+            {ENTRY_BUTTON_LABELS.cashBalance}
+          </Button>
+          <Button
+            onClick={() => setOpen(true)}
+            variant={ENTRY_BUTTON_VARIANT}
+            size={ENTRY_BUTTON_SIZE}
+          >
+            <Plus className={ENTRY_BUTTON_ICON_CLASS} />
+            {ENTRY_BUTTON_LABELS.cashFlow}
+          </Button>
+        </div>
       </div>
 
       {/* ============ 统一筛选器（两个页签共享，变更即写入 URL query） ============ */}
@@ -400,7 +411,7 @@ export default function TransactionsPage(): JSX.Element {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              {/* 当前余额展示行（CASH-P0-02 验收1） */}
+              {/* 当前余额展示行（CASH-P0-02 验收1）；录入入口已统一到页头按钮组 */}
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-muted/40 p-4">
                 <div>
                   <p className="text-xs text-muted-foreground">当前余额</p>
@@ -410,7 +421,7 @@ export default function TransactionsPage(): JSX.Element {
                           thousands: amountThousands,
                           abbreviate: amountAbbrev,
                         })
-                      : '未维护，请点击右侧按钮录入'}
+                      : '未维护，请点击右上角「录入现金余额」'}
                   </p>
                   {cashBalance !== undefined &&
                     cashBalance !== null &&
@@ -420,14 +431,6 @@ export default function TransactionsPage(): JSX.Element {
                       </p>
                     )}
                 </div>
-                <Button
-                  onClick={openCreateBalance}
-                  variant={ENTRY_BUTTON_VARIANT}
-                  size={ENTRY_BUTTON_SIZE}
-                >
-                  <Plus className={ENTRY_BUTTON_ICON_CLASS} />
-                  {ENTRY_BUTTON_LABELS.cashBalance}
-                </Button>
               </div>
 
               {/* CASH-P0-03 两条 ⓘ 提示 */}
