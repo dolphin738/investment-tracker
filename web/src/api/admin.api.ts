@@ -11,7 +11,8 @@ import { http } from '@/lib/api-client';
 /** 系统配置项（后端 SystemConfig 经信封解包后的结构） */
 export interface SystemConfig {
   key: string;
-  value: Record<string, unknown>;
+  /** 未配置时为 null（白名单内 key 尚未设置），前端据此渲染空输入框 */
+  value: Record<string, unknown> | null;
   description: string | null;
   updatedAt: string | null;
 }

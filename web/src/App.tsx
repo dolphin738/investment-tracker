@@ -194,7 +194,7 @@ const App: FC = () => {
       <ThemeManager />
       <RouterProvider router={router} />
       <Toaster
-        position="top-right"
+        position="top-center"
         richColors
         closeButton
         toastOptions={{
