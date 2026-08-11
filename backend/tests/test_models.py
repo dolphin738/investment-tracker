@@ -12,7 +12,9 @@ import pytest
 from sqlalchemy import select, text
 
 from app.db.base import Base
-from app.db.database import AsyncSessionLocal
+import app.db.database as dbmod  # 用 dbmod.AsyncSessionLocal() 取“调用时”的会话工厂，
+# 以承接 conftest 对测试库的 patch（模块级 `from ... import AsyncSessionLocal` 会
+# 在导入时捕获开发库工厂，绕过测试库隔离）。
 import app.models  # noqa: F401  ensure all models registered
 from app.models import (
     DailyNav,
@@ -70,7 +72,7 @@ def test_metadata_tables_and_enums():
 async def test_orm_roundtrip_and_cascade():
     """异步插入 User→Portfolio→Security→SecurityTrade，查询回环 + ORM 级联删除。"""
     marker = "phase1_test@example.com"
-    async with AsyncSessionLocal() as s:
+    async with dbmod.AsyncSessionLocal() as s:
         # 清理历史遗留
         await s.execute(text("DELETE FROM users WHERE email = :e"), {"e": marker})
         await s.commit()

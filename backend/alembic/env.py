@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from logging.config import fileConfig
 
 from alembic import context
@@ -23,7 +24,11 @@ import app.models  # noqa: F401
 
 config = context.config
 settings = get_settings()
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+# 默认仍指向开发库（ DATABASE_URL ）；测试库引导时由 conftest 注入
+# ALEMBIC_DB_URL 覆盖（不影响开发迁移，dev.ps1 也从不变更此变量）。
+config.set_main_option(
+    "sqlalchemy.url", os.environ.get("ALEMBIC_DB_URL", settings.DATABASE_URL)
+)
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
