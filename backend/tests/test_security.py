@@ -50,13 +50,14 @@ async def test_role_user_denied_403(client):
 
 
 async def test_role_admin_allowed(client):
-    # admin 通过 require_admin 后，因该 key 尚未配置返回 404（说明鉴权已放行）
+    # admin 通过 require_admin 后，白名单内 key 尚未配置 → 200 + value=null（不再 404）
     token = await _set_role_and_token(client, "u_admin@example.com", UserRole.ADMIN.value)
     r = await client.get(
         "/api/admin/system-config/securities_quote_api_base_url", headers=auth(token)
     )
-    status, _, _, _ = env(r)
-    assert status == 404
+    status, _, data, _ = env(r)
+    assert status == 200
+    assert data["value"] is None
 
 
 async def test_stale_admin_token_rejected_after_demotion(client):

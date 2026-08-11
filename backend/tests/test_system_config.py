@@ -85,6 +85,18 @@ async def test_non_admin_write_forbidden(client):
     assert code == BusinessErrorCode.FORBIDDEN
 
 
+async def test_admin_read_unset_returns_200_null(client):
+    """白名单内 key 尚未配置 → 200 + value=null（不弹错误，前端渲染空输入框）。"""
+    token = await _admin_token(client, "cfg_unset@example.com")
+    r = await client.get(
+        "/api/admin/system-config/securities_quote_api_base_url", headers=auth(token)
+    )
+    status, code, data, _ = env(r)
+    assert status == 200 and code == 0
+    assert data["value"] is None
+    assert data["key"] == "securities_quote_api_base_url"
+
+
 async def test_non_whitelist_key_rejected(client):
     token = await _admin_token(client, "cfg_wl@example.com")
     # PATCH 非白名单 key → 400

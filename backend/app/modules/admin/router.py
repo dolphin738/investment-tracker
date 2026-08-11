@@ -5,7 +5,9 @@
 - PATCH /api/admin/system-config/{key}：upsert（Depends(require_admin)）。
 
 安全约束：只允许白名单内的 key 写入 / 读取，避免任意键被写入或探测。
-非白名单 key：GET 返回 404（不存在）、PATCH 返回 400（不被允许）。
+- 非白名单 key：GET 返回 404（不存在）、PATCH 返回 400（不被允许）。
+- 白名单内但库中尚未配置的 key：GET 返回 200 + value=null（前端渲染空输入框），
+  不抛 404，避免进入系统管理页时误弹「配置项不存在」错误提示。
 """
 from __future__ import annotations
 
@@ -48,7 +50,9 @@ async def get_system_config(
     svc = SystemConfigService(db)
     cfg = await svc.get(key)
     if cfg is None:
-        raise HTTPException(status_code=404, detail="配置项不存在")
+        # 白名单内但库中尚未配置：返回 200 + 空值，交由前端渲染空输入框，
+        # 不再以 404 抛错（避免进入系统管理页时误弹「配置项不存在」）。
+        return {"key": key, "value": None, "description": None, "updatedAt": None}
     return _to_response(cfg)
 
 
