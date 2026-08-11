@@ -372,7 +372,7 @@ User (1) ──< Portfolio (N)
 
 | Method | Path | 说明 | 请求体 / 参数 | 响应 data |
 |--------|------|------|--------------|-----------|
-| GET | `/api/portfolios/:id/cashflows` | 出入金列表（筛选/排序/分页，写入 URL query） | `?startDate&endDate&type&page&pageSize` | `Paginated<CashFlow>`（**无** `recalculation`） |
+| GET | `/api/portfolios/:id/cashflows` | 出入金列表（筛选/排序/分页，写入 URL query） | `?startDate&endDate&types&page&pageSize`（`types`=逗号分隔多值 `CashFlowType`，如 `BUY` 或 `BUY,SELL`；仅白名单 `BUY/SELL` 生效，非法片段静默忽略；缺省/空=全部） | `Paginated<CashFlow>`（**无** `recalculation`） |
 | POST | `/api/portfolios/:id/cashflows` | 录入出入金 | `{ date, type: BUY\|SELL, amount, note? }` | `CashFlow` **+ `recalculation`** |
 | PATCH | `/api/portfolios/:id/cashflows/:cfId` | 编辑出入金 | `{ date?, type?, amount?, note? }` | `CashFlow` **+ `recalculation`** |
 | DELETE | `/api/portfolios/:id/cashflows/:cfId` | 删除出入金 | — | `null`，`data` 体仅含 **`recalculation`** |
