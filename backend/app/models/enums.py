@@ -73,3 +73,10 @@ class ImportErrorCode(str, enum.Enum):
     INVALID_ENUM_VALUE = "INVALID_ENUM_VALUE"
     SECURITY_NOT_FOUND = "SECURITY_NOT_FOUND"
     DUPLICATE_SNAPSHOT_DATE = "DUPLICATE_SNAPSHOT_DATE"
+
+
+class QuoteProviderAccessMethod(str, enum.Enum):
+    """证券行情数据提供方接入方式（多提供方管理）。"""
+
+    HTTPS = "https"
+    SDK = "sdk"
