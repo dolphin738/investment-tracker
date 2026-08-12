@@ -3,22 +3,24 @@
  *
  * 通用外壳：左侧分组导航注册表（ADMIN_NAV）。
  *
- * 导航结构（二级分组）：
- *   金融数据接口（group）
- *     ├─ 接口API来源   （quote-provider，原「证券行情设置」）
- *     └─ 接口分类管理   （interface-category）
+ * 导航结构（二级分组，支持展开/收起）：
+ *   系统管理
+ *     └─ 金融数据接口（group，可展开/收起）
+ *          ├─ 接口API来源   （quote-provider，原「证券行情设置」）
+ *          └─ 接口分类管理   （interface-category）
  *
  * - AdminNav 是 AdminGroup 与 AdminSection 的联合类型：group 拥有 children，
  *   leaf 直接持有 component。新增管理板块只需在对应 group 下追加一条 children 注册项，
  *   不改外壳（PRD P0-1/P0-2）。
  * - 非管理员：整页「无权限访问该页面」，且左栏/板块均不渲染。
- * - 管理员：左侧分组导航（左侧栏，group 为标题、children 缩进按钮）+ 右栏渲染选中板块组件。
+ * - 管理员：左侧栏「金融数据接口」为可展开/收起的二级菜单（点击标题切换展开状态，
+ *   带 Chevron 指示）；其下两个子模块即「分页」单元，点击切换即在右栏渲染对应内容。
  * - 默认选中第一个叶子板块（quote-provider）；findActive 按 key 在 group children 中检索，
  *   未命中则回退到第一个叶子板块。
  */
 
 import { useState } from 'react';
-import { Database, ServerCog, Tags } from 'lucide-react';
+import { Database, ServerCog, Tags, ChevronRight, ChevronDown } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import { useIsAdmin } from '@/stores/auth.store';
@@ -85,6 +87,7 @@ function findActive(key: string): AdminSection {
 export default function AdminPage(): JSX.Element {
   const isAdmin = useIsAdmin();
   const [active, setActive] = useState<string>(getFirstLeaf().key);
+  const [expanded, setExpanded] = useState<boolean>(true);
 
   if (!isAdmin) {
     return (
@@ -110,28 +113,42 @@ export default function AdminPage(): JSX.Element {
             if ('children' in nav) {
               return (
                 <div key={nav.key} className="mb-4">
-                  <div className="flex items-center px-2 py-1.5 text-sm font-semibold text-foreground">
-                    {nav.icon}
-                    {nav.label}
-                  </div>
-                  <div className="ml-2 border-l pl-2">
-                    {nav.children.map((child) => (
-                      <button
-                        key={child.key}
-                        type="button"
-                        onClick={() => setActive(child.key)}
-                        className={cn(
-                          'mb-1 flex w-full items-center rounded-md px-2 py-1.5 text-sm transition-colors',
-                          active === child.key
-                            ? 'bg-primary/10 font-medium text-primary'
-                            : 'text-muted-foreground hover:bg-muted hover:text-foreground',
-                        )}
-                      >
-                        {child.icon}
-                        {child.label}
-                      </button>
-                    ))}
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setExpanded((v) => !v)}
+                    aria-expanded={expanded}
+                    className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-sm font-semibold text-foreground transition-colors hover:bg-muted"
+                  >
+                    <span className="flex items-center">
+                      {nav.icon}
+                      {nav.label}
+                    </span>
+                    {expanded ? (
+                      <ChevronDown className="h-4 w-4 shrink-0" />
+                    ) : (
+                      <ChevronRight className="h-4 w-4 shrink-0" />
+                    )}
+                  </button>
+                  {expanded && (
+                    <div className="ml-2 border-l pl-2">
+                      {nav.children.map((child) => (
+                        <button
+                          key={child.key}
+                          type="button"
+                          onClick={() => setActive(child.key)}
+                          className={cn(
+                            'mb-1 flex w-full items-center rounded-md px-2 py-1.5 text-sm transition-colors',
+                            active === child.key
+                              ? 'bg-primary/10 font-medium text-primary'
+                              : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+                          )}
+                        >
+                          {child.icon}
+                          {child.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               );
             }
