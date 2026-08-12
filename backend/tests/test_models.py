@@ -46,6 +46,9 @@ def test_metadata_tables_and_enums():
         "user_preferences",
         # 增量：多提供方证券行情数据提供方（admin 管理页）
         "securities_data_providers",
+        # 增量：系统管理扩展（提供方接口 CRUD + 接口分类后台管理）
+        "quote_provider_interfaces",
+        "quote_provider_interface_categories",
     } == tables
 
     enums = {
@@ -61,6 +64,8 @@ def test_metadata_tables_and_enums():
         "SnapshotSource",
         "SnapshotValuation",
         "DividendType",
+        # 增量：系统管理扩展——接口方向原生枚举
+        "interface_direction",
     } == enums
 
     # 精度对齐 PRD 8.1
