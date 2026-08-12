@@ -37,7 +37,6 @@ class QuoteProviderService:
         self,
         *,
         name: str,
-        provider_type: str,
         access_method: str,
         config: dict,
         enabled: bool = True,
@@ -47,7 +46,6 @@ class QuoteProviderService:
     ) -> SecuritiesDataProvider:
         provider = SecuritiesDataProvider(
             name=name,
-            provider_type=provider_type,
             access_method=access_method,
             config=config,
             enabled=enabled,
@@ -70,7 +68,6 @@ class QuoteProviderService:
         provider: SecuritiesDataProvider,
         *,
         name: Optional[str] = None,
-        provider_type: Optional[str] = None,
         access_method: Optional[str] = None,
         config: Optional[dict] = None,
         enabled: Optional[bool] = None,
@@ -80,8 +77,6 @@ class QuoteProviderService:
     ) -> SecuritiesDataProvider:
         if name is not None:
             provider.name = name
-        if provider_type is not None:
-            provider.provider_type = provider_type
         if access_method is not None:
             provider.access_method = access_method
         if config is not None:

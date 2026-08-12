@@ -117,7 +117,6 @@ export function QuoteProviderSection(): JSX.Element {
         </Button>
       </TableCell>
       <TableCell className="font-medium">{p.name}</TableCell>
-      <TableCell className="text-muted-foreground">{p.provider_type}</TableCell>
       <TableCell>{p.access_method === 'https' ? 'HTTPS' : 'SDK'}</TableCell>
       <TableCell className="max-w-[220px] truncate text-muted-foreground">
         {p.access_method === 'https'
@@ -177,7 +176,7 @@ export function QuoteProviderSection(): JSX.Element {
     </TableRow>
     {expanded[p.id] && (
       <TableRow>
-        <TableCell colSpan={7} className="bg-muted/40 p-3">
+        <TableCell colSpan={6} className="bg-muted/40 p-3">
           <ProviderInterfaces providerId={p.id} />
         </TableCell>
       </TableRow>
@@ -231,7 +230,6 @@ export function QuoteProviderSection(): JSX.Element {
                       <TableRow>
                         <TableHead className="w-10" />
                         <TableHead>名称</TableHead>
-                        <TableHead>类型</TableHead>
                         <TableHead>接入方式</TableHead>
                         <TableHead>连接信息</TableHead>
                         <TableHead>状态</TableHead>
@@ -252,7 +250,6 @@ export function QuoteProviderSection(): JSX.Element {
                       <TableRow>
                         <TableHead className="w-10" />
                         <TableHead>名称</TableHead>
-                        <TableHead>类型</TableHead>
                         <TableHead>接入方式</TableHead>
                         <TableHead>连接信息</TableHead>
                         <TableHead>状态</TableHead>

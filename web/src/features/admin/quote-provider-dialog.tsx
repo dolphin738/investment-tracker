@@ -1,7 +1,7 @@
 /**
  * features/admin/quote-provider-dialog.tsx — 数据来源（提供方）新增/编辑对话框
  *
- * 字段：name、provider_type、access_method（Select）、base_url | sdk_name（按接入方式二选一）、
+ * 字段：name、access_method（Select）、base_url | sdk_name（按接入方式二选一）、
  * description、enabled、is_default。
  * 不含 is_active（运行时独占，由「设为当前」操作设置，UI 不暴露）。
  *
@@ -40,7 +40,6 @@ import { useCreateQuoteProvider, useUpdateQuoteProvider } from '@/hooks/use-quot
 
 interface FormState {
   name: string;
-  providerType: string;
   accessMethod: QuoteProviderAccessMethod;
   baseUrl: string;
   sdkName: string;
@@ -53,7 +52,6 @@ function toForm(edit: QuoteProvider | null): FormState {
   if (!edit) {
     return {
       name: '',
-      providerType: '',
       accessMethod: 'https',
       baseUrl: '',
       sdkName: '',
@@ -64,7 +62,6 @@ function toForm(edit: QuoteProvider | null): FormState {
   }
   return {
     name: edit.name,
-    providerType: edit.provider_type,
     accessMethod: edit.access_method,
     baseUrl: (edit.config?.base_url as string) ?? '',
     sdkName: (edit.config?.sdk_name as string) ?? '',
@@ -97,9 +94,8 @@ export function QuoteProviderDialog({
 
   const handleSubmit = (): void => {
     const name = form.name.trim();
-    const providerType = form.providerType.trim();
-    if (!name || !providerType) {
-      toast.error('请填写名称与类型');
+    if (!name) {
+      toast.error('请填写名称');
       return;
     }
     if (form.accessMethod === 'https' && !form.baseUrl.trim()) {
@@ -116,7 +112,6 @@ export function QuoteProviderDialog({
         : { sdk_name: form.sdkName.trim() };
     const payload = {
       name,
-      provider_type: providerType,
       access_method: form.accessMethod,
       config,
       enabled: form.enabled,
@@ -153,18 +148,6 @@ export function QuoteProviderDialog({
               placeholder="如 新浪财经"
               value={form.name}
               onChange={(e) => setForm({ ...form, name: e.target.value })}
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="qp-type">类型</Label>
-            <Input
-              id="qp-type"
-              placeholder="如 stock / fund / crypto"
-              value={form.providerType}
-              onChange={(e) =>
-                setForm({ ...form, providerType: e.target.value })
-              }
             />
           </div>
 

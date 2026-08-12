@@ -264,7 +264,6 @@ backend/app/
 |----|------|------|------|------|
 | `securities_data_providers` | id | String(36) UUID | PK | 证券行情数据提供方 |
 | | name | String(255) | NOT NULL | 展示名（如「AKShare 官方」） |
-| | provider_type | String(50) | NOT NULL | 类型标识（akshare / tushare / sina / custom） |
 | | access_method | String(20) | NOT NULL | 接入方式（https / sdk，由 `QuoteProviderAccessMethod` 校验） |
 | | config | JSON | NOT NULL default {} | 连接参数（HTTPS 存 `base_url`；SDK 存 `sdk_name`） |
 | | is_default | Boolean | NOT NULL default false | 默认提供方（全局至多一个 true） |
@@ -693,7 +692,7 @@ User (1) ──< Portfolio (N)
 | PATCH | `/api/admin/interface-categories/:id` | 更新分类 | `InterfaceCategoryUpdate` | `InterfaceCategoryOut` |
 | DELETE | `/api/admin/interface-categories/:id` | 删除（**不影响**接口） | `id` | `{ id, deleted }` |
 
-> 校验规则：提供方 `name` 1~255、`provider_type` 1~50；HTTPS 接入必须 `config.base_url` 非空、SDK 接入必须 `config.sdk_name` 非空（路由层 `_check_config` + `QuoteProviderCreate` 归一为 400 / VALIDATION_FAILED）；`http_method` 非法 → 422 归一 400。`interface-categories` 的 `key` 冲突 → 409。`is_default` / `is_active` 的「全局至多一个」由服务层写入时保证（`services/quote_provider.py`）。
+> 校验规则：提供方 `name` 1~255；HTTPS 接入必须 `config.base_url` 非空、SDK 接入必须 `config.sdk_name` 非空（路由层 `_check_config` + `QuoteProviderCreate` 归一为 400 / VALIDATION_FAILED）；`http_method` 非法 → 422 归一 400。`interface-categories` 的 `key` 冲突 → 409。`is_default` / `is_active` 的「全局至多一个」由服务层写入时保证（`services/quote_provider.py`）。
 
 ---
 

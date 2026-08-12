@@ -26,7 +26,6 @@ pytestmark = pytest.mark.asyncio
 
 PROVIDER_BODY = {
     "name": "AKShare",
-    "provider_type": "akshare",
     "access_method": "https",
     "config": {"base_url": "https://api.example.com"},
     "enabled": True,

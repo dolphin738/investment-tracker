@@ -22,7 +22,6 @@ export type QuoteProviderAccessMethod = 'https' | 'sdk';
 export interface QuoteProvider {
   id: string;
   name: string;
-  provider_type: string;
   access_method: QuoteProviderAccessMethod;
   config: Record<string, unknown>;
   is_default: boolean;
@@ -36,7 +35,6 @@ export interface QuoteProvider {
 /** 新增提供方请求体 */
 export interface QuoteProviderCreate {
   name: string;
-  provider_type: string;
   access_method: QuoteProviderAccessMethod;
   config: Record<string, unknown>;
   enabled?: boolean;
@@ -48,7 +46,6 @@ export interface QuoteProviderCreate {
 /** 更新提供方请求体（全字段可选） */
 export interface QuoteProviderUpdate {
   name?: string;
-  provider_type?: string;
   access_method?: QuoteProviderAccessMethod;
   config?: Record<string, unknown>;
   enabled?: boolean;

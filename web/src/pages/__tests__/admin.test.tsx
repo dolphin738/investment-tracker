@@ -6,7 +6,7 @@
  *    且侧边栏不展示「系统管理」入口（useIsAdmin === false → 过滤 admin 项）。
  * 2. 管理员：表格可见并列出提供方，且展示「新增提供方」按钮。
  * 3. 管理员：点击「新增提供方」打开对话框，填写并提交调用 createQuoteProvider
- *    且请求体含 name / provider_type / access_method=https / config.base_url / enabled。
+ *    且请求体含 name / access_method=https / config.base_url / enabled。
  *
  * Mock 策略（稳健模式）：
  * - @/stores/auth.store：useIsAdmin 由模块级 adminFlag 控制，useAuthStore 提供空实现；
@@ -27,7 +27,6 @@ const SAMPLE_LIST = [
   {
     id: 'p1',
     name: '新浪财经',
-    provider_type: 'stock',
     access_method: 'https',
     config: { base_url: 'https://finance.sina.com.cn/api' },
     is_default: true,
@@ -144,10 +143,6 @@ describe('AdminPage — 多提供方管理 RBAC 与表单', () => {
     await act(async () => {
       fireEvent.change(nameInput, { target: { value: '新建源' } });
     });
-    const typeInput = (await screen.findByLabelText('类型')) as HTMLInputElement;
-    await act(async () => {
-      fireEvent.change(typeInput, { target: { value: 'stock' } });
-    });
     const urlInput = (await screen.findByLabelText(
       'API 基础地址',
     )) as HTMLInputElement;
@@ -165,7 +160,6 @@ describe('AdminPage — 多提供方管理 RBAC 与表单', () => {
         expect(vi.mocked(createQuoteProvider)).toHaveBeenCalledWith(
           expect.objectContaining({
             name: '新建源',
-            provider_type: 'stock',
             access_method: 'https',
             config: { base_url: 'https://x.com/api' },
             enabled: true,

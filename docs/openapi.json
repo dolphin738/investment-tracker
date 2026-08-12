@@ -32,6 +32,731 @@
         ]
       }
     },
+    "/api/admin/interface-categories": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "List Interface Categories",
+        "operationId": "list_interface_categories_api_admin_interface_categories_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Create Interface Category",
+        "operationId": "create_interface_category_api_admin_interface_categories_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InterfaceCategoryCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/interface-categories/{category_id}": {
+      "patch": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Update Interface Category",
+        "operationId": "update_interface_category_api_admin_interface_categories__category_id__patch",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "category_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Category Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InterfaceCategoryUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Delete Interface Category",
+        "operationId": "delete_interface_category_api_admin_interface_categories__category_id__delete",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "category_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Category Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/quote-providers": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "List Quote Providers",
+        "operationId": "list_quote_providers_api_admin_quote_providers_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Create Quote Provider",
+        "operationId": "create_quote_provider_api_admin_quote_providers_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QuoteProviderCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/quote-providers/interfaces": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "List All Interfaces",
+        "description": "扁平返回全部接口（顶层按分类汇总所有提供方接口总览）。\n\n注意：必须注册在 `GET /quote-providers/{provider_id}` 之前，否则会被后者按\n路径参数 provider_id='interfaces' 抢匹配。与 `GET /quote-providers/{provider_id}/interfaces`\n段数不同，互不冲突。",
+        "operationId": "list_all_interfaces_api_admin_quote_providers_interfaces_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/quote-providers/interfaces/{interface_id}": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Get Interface",
+        "operationId": "get_interface_api_admin_quote_providers_interfaces__interface_id__get",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "interface_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Interface Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Update Interface",
+        "operationId": "update_interface_api_admin_quote_providers_interfaces__interface_id__patch",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "interface_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Interface Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QuoteInterfaceUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Delete Interface",
+        "operationId": "delete_interface_api_admin_quote_providers_interfaces__interface_id__delete",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "interface_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Interface Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/quote-providers/{provider_id}": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Get Quote Provider",
+        "operationId": "get_quote_provider_api_admin_quote_providers__provider_id__get",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "provider_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Update Quote Provider",
+        "operationId": "update_quote_provider_api_admin_quote_providers__provider_id__patch",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "provider_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QuoteProviderUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Delete Quote Provider",
+        "operationId": "delete_quote_provider_api_admin_quote_providers__provider_id__delete",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "provider_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/quote-providers/{provider_id}/interfaces": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "List Provider Interfaces",
+        "operationId": "list_provider_interfaces_api_admin_quote_providers__provider_id__interfaces_get",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "provider_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Create Provider Interface",
+        "operationId": "create_provider_interface_api_admin_quote_providers__provider_id__interfaces_post",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "provider_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QuoteInterfaceCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/quote-providers/{provider_id}/set-active": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Set Active Quote Provider",
+        "operationId": "set_active_quote_provider_api_admin_quote_providers__provider_id__set_active_post",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "provider_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/quote-providers/{provider_id}/set-default": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Set Default Quote Provider",
+        "operationId": "set_default_quote_provider_api_admin_quote_providers__provider_id__set_default_post",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "provider_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/auth/account": {
       "delete": {
         "tags": [
@@ -272,7 +997,7 @@
           "auth"
         ],
         "summary": "Get Profile",
-        "description": "当前用户完整资料（Web 客户端绑定此路径读取当前用户）。\n\n返回 id/email/name/avatar/phone/bio/createdAt，与 PATCH /profile 对称。",
+        "description": "当前用户完整资料（Web 客户端绑定此路径读取当前用户）。\n\n返回 id/email/name/avatar/phone/bio/role/createdAt，与 PATCH /profile 对称。\n读操作收口到 UserService.get_profile，router 仅做序列化。",
         "operationId": "get_profile_api_auth_profile_get",
         "responses": {
           "200": {
@@ -547,6 +1272,110 @@
             "content": {
               "application/json": {
                 "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ]
+      }
+    },
+    "/api/internal/cleanup/accounts": {
+      "post": {
+        "tags": [
+          "internal"
+        ],
+        "summary": "Trigger Account Cleanup",
+        "operationId": "trigger_account_cleanup_api_internal_cleanup_accounts_post",
+        "parameters": [
+          {
+            "name": "X-Internal-Token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Internal-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ]
+      }
+    },
+    "/api/internal/cleanup/avatars": {
+      "post": {
+        "tags": [
+          "internal"
+        ],
+        "summary": "Trigger Avatar Cleanup",
+        "operationId": "trigger_avatar_cleanup_api_internal_cleanup_avatars_post",
+        "parameters": [
+          {
+            "name": "X-Internal-Token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Internal-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
               }
             }
           }
@@ -1210,6 +2039,24 @@
             }
           },
           {
+            "name": "types",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "逗号分隔类型过滤，如 BUY 或 BUY,SELL；非法值忽略",
+              "title": "Types"
+            },
+            "description": "逗号分隔类型过滤，如 BUY 或 BUY,SELL；非法值忽略"
+          },
+          {
             "name": "page",
             "in": "query",
             "required": false,
@@ -1512,6 +2359,54 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ClearDataOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/portfolios/{portfolio_id}/default": {
+      "patch": {
+        "tags": [
+          "portfolios"
+        ],
+        "summary": "Set Default Portfolio",
+        "description": "五角星设为默认 / 再次点击取消默认（toggle，需求项6）。",
+        "operationId": "set_default_portfolio_api_portfolios__portfolio_id__default_patch",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreferenceOut"
                 }
               }
             }
@@ -1947,6 +2842,22 @@
               "default": false,
               "title": "Includeclosed"
             }
+          },
+          {
+            "name": "types",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Types"
+            }
           }
         ],
         "responses": {
@@ -1955,11 +2866,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/HoldingOut"
-                  },
-                  "title": "Response Get Holdings Api Portfolios  Portfolio Id  Holdings Get"
+                  "$ref": "#/components/schemas/HoldingsOut"
                 }
               }
             }
@@ -3589,6 +4496,22 @@
             }
           },
           {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/SnapshotSource"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source"
+            }
+          },
+          {
             "name": "page",
             "in": "query",
             "required": false,
@@ -4412,37 +5335,54 @@
             "type": "integer",
             "title": "Portfoliocount"
           },
-          "totalAssets": {
-            "type": "string",
-            "title": "Totalassets"
+          "cashflowCount": {
+            "type": "integer",
+            "title": "Cashflowcount"
           },
-          "cumulativeXirr": {
+          "tradeCount": {
+            "type": "integer",
+            "title": "Tradecount"
+          },
+          "snapshotDays": {
+            "type": "integer",
+            "title": "Snapshotdays"
+          },
+          "recordDays": {
+            "type": "integer",
+            "title": "Recorddays"
+          },
+          "firstDate": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "format": "date"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Cumulativexirr"
+            "title": "Firstdate"
           },
-          "yearXirr": {
+          "lastDate": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "format": "date"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Yearxirr"
+            "title": "Lastdate"
           }
         },
         "type": "object",
         "required": [
           "portfolioCount",
-          "totalAssets"
+          "cashflowCount",
+          "tradeCount",
+          "snapshotDays",
+          "recordDays"
         ],
         "title": "AccountStatsOut"
       },
@@ -4695,6 +5635,16 @@
             "type": "string",
             "format": "date-time",
             "title": "Updatedat"
+          },
+          "recalculation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RecalculationMeta"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -5146,7 +6096,7 @@
           },
           "reasons": {
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/FreshnessReasonOut"
             },
             "type": "array",
             "title": "Reasons",
@@ -5159,6 +6109,48 @@
           "isStale"
         ],
         "title": "FreshnessOut"
+      },
+      "FreshnessReasonOut": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "asOf": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asof"
+          },
+          "lagDays": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lagdays"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "label"
+        ],
+        "title": "FreshnessReasonOut",
+        "description": "单条「数据不新鲜」原因（对齐前端 FreshnessReason）。\n\n- kind: ``PRICE`` / ``CASH``，驱动前端「去更新行情 / 去更新现金余额」按钮。\n- asOf / lagDays: 该维度最新数据日期与滞后天数（``None`` 表示缺失记录）。\n- label: 给前端展示的本地化文案。"
       },
       "HTTPValidationError": {
         "properties": {
@@ -5179,27 +6171,20 @@
             "type": "string",
             "title": "Securityid"
           },
-          "code": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Code"
+          "securityCode": {
+            "type": "string",
+            "title": "Securitycode",
+            "default": ""
           },
-          "name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Name"
+          "securityName": {
+            "type": "string",
+            "title": "Securityname",
+            "default": ""
+          },
+          "securityType": {
+            "type": "string",
+            "title": "Securitytype",
+            "default": ""
           },
           "quantity": {
             "type": "string",
@@ -5213,9 +6198,27 @@
             "type": "string",
             "title": "Costtotal"
           },
-          "price": {
-            "type": "string",
-            "title": "Price"
+          "marketPrice": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Marketprice"
+          },
+          "priceAsOf": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Priceasof"
           },
           "marketValue": {
             "type": "string",
@@ -5225,13 +6228,13 @@
             "type": "string",
             "title": "Pnl"
           },
-          "ratio": {
+          "pnlRate": {
             "type": "string",
-            "title": "Ratio"
+            "title": "Pnlrate"
           },
-          "isCostBased": {
-            "type": "boolean",
-            "title": "Iscostbased"
+          "flag": {
+            "type": "string",
+            "title": "Flag"
           }
         },
         "type": "object",
@@ -5240,13 +6243,97 @@
           "quantity",
           "avgCost",
           "costTotal",
-          "price",
           "marketValue",
           "pnl",
-          "ratio",
-          "isCostBased"
+          "pnlRate",
+          "flag"
         ],
-        "title": "HoldingOut"
+        "title": "HoldingOut",
+        "description": "单标的持仓（对齐前端 HoldingResponse 字段命名）。\n\n金额/数量均为字符串（Decimal → 字符串，防前端类型漂移，见信封契约）。"
+      },
+      "HoldingsAggregateOut": {
+        "properties": {
+          "totalMarketValue": {
+            "type": "string",
+            "title": "Totalmarketvalue"
+          },
+          "totalCost": {
+            "type": "string",
+            "title": "Totalcost"
+          },
+          "totalProfit": {
+            "type": "string",
+            "title": "Totalprofit"
+          },
+          "totalProfitRate": {
+            "type": "string",
+            "title": "Totalprofitrate"
+          },
+          "securityCount": {
+            "type": "integer",
+            "title": "Securitycount"
+          }
+        },
+        "type": "object",
+        "required": [
+          "totalMarketValue",
+          "totalCost",
+          "totalProfit",
+          "totalProfitRate",
+          "securityCount"
+        ],
+        "title": "HoldingsAggregateOut",
+        "description": "持仓汇总（对齐前端 HoldingsAggregate）。"
+      },
+      "HoldingsOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/HoldingOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "aggregate": {
+            "$ref": "#/components/schemas/HoldingsAggregateOut"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "aggregate"
+        ],
+        "title": "HoldingsOut",
+        "description": "持仓列表响应（信封 data 字段）：items + aggregate。"
+      },
+      "HoldingsSummaryOut": {
+        "properties": {
+          "totalMarketValue": {
+            "type": "string",
+            "title": "Totalmarketvalue"
+          },
+          "totalCost": {
+            "type": "string",
+            "title": "Totalcost"
+          },
+          "totalProfit": {
+            "type": "string",
+            "title": "Totalprofit"
+          },
+          "securityCount": {
+            "type": "integer",
+            "title": "Securitycount"
+          }
+        },
+        "type": "object",
+        "required": [
+          "totalMarketValue",
+          "totalCost",
+          "totalProfit",
+          "securityCount"
+        ],
+        "title": "HoldingsSummaryOut",
+        "description": "概览页「持仓市值」卡数据来源（缺陷4-A）。"
       },
       "ImportCommitOut": {
         "properties": {
@@ -5428,6 +6515,109 @@
         "title": "ImportType",
         "description": "数据导入类型（§4.2.17）。值即路由/服务层使用的字符串标识。"
       },
+      "InterfaceCategoryCreate": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Key"
+          },
+          "label": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Label"
+          },
+          "icon": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Icon"
+          },
+          "sort_order": {
+            "type": "integer",
+            "title": "Sort Order",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "label"
+        ],
+        "title": "InterfaceCategoryCreate"
+      },
+      "InterfaceCategoryUpdate": {
+        "properties": {
+          "key": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "icon": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Icon"
+          },
+          "sort_order": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sort Order"
+          }
+        },
+        "type": "object",
+        "title": "InterfaceCategoryUpdate"
+      },
+      "InterfaceDirection": {
+        "type": "string",
+        "enum": [
+          "in",
+          "out"
+        ],
+        "title": "InterfaceDirection",
+        "description": "提供方接口方向（入站 / 出站）。\n\nPG 原生枚举类型名 `interface_direction`（由迁移创建）。\n业务当前仅落库使用（默认 in），UI 不暴露该字段。"
+      },
       "LoginReq": {
         "properties": {
           "email": {
@@ -5539,6 +6729,16 @@
               }
             ],
             "title": "Yearxirr"
+          },
+          "holdingsSummary": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HoldingsSummaryOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "navSeries": {
             "items": {
@@ -6424,10 +7624,435 @@
               }
             ],
             "title": "Avatar"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
+          },
+          "bio": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bio"
           }
         },
         "type": "object",
         "title": "ProfilePatchReq"
+      },
+      "QuoteInterfaceCreate": {
+        "properties": {
+          "interface_type": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Interface Type"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "endpoint": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 512
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Endpoint"
+          },
+          "http_method": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "GET",
+                  "POST",
+                  "PUT",
+                  "DELETE",
+                  "PATCH"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Http Method"
+          },
+          "params": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Params"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "default": true
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "direction": {
+            "$ref": "#/components/schemas/InterfaceDirection",
+            "default": "in"
+          },
+          "timeout": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timeout"
+          },
+          "retry_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry Count"
+          },
+          "rate_limit": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate Limit"
+          }
+        },
+        "type": "object",
+        "required": [
+          "interface_type",
+          "name"
+        ],
+        "title": "QuoteInterfaceCreate"
+      },
+      "QuoteInterfaceUpdate": {
+        "properties": {
+          "interface_type": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interface Type"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "endpoint": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 512
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Endpoint"
+          },
+          "http_method": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "GET",
+                  "POST",
+                  "PUT",
+                  "DELETE",
+                  "PATCH"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Http Method"
+          },
+          "params": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Params"
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "direction": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InterfaceDirection"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "timeout": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timeout"
+          },
+          "retry_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry Count"
+          },
+          "rate_limit": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate Limit"
+          }
+        },
+        "type": "object",
+        "title": "QuoteInterfaceUpdate"
+      },
+      "QuoteProviderAccessMethod": {
+        "type": "string",
+        "enum": [
+          "https",
+          "sdk"
+        ],
+        "title": "QuoteProviderAccessMethod",
+        "description": "证券行情数据提供方接入方式（多提供方管理）。"
+      },
+      "QuoteProviderCreate": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "access_method": {
+            "$ref": "#/components/schemas/QuoteProviderAccessMethod"
+          },
+          "config": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Config"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "default": true
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "is_default": {
+            "type": "boolean",
+            "title": "Is Default",
+            "default": false
+          },
+          "is_active": {
+            "type": "boolean",
+            "title": "Is Active",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "access_method",
+          "config"
+        ],
+        "title": "QuoteProviderCreate"
+      },
+      "QuoteProviderUpdate": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "access_method": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QuoteProviderAccessMethod"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "config": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Config"
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "is_default": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Default"
+          },
+          "is_active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Active"
+          }
+        },
+        "type": "object",
+        "title": "QuoteProviderUpdate"
       },
       "RecalcOut": {
         "properties": {
@@ -6476,6 +8101,31 @@
         },
         "type": "object",
         "title": "RecalculateRangeReq"
+      },
+      "RecalculationMeta": {
+        "properties": {
+          "fromDate": {
+            "type": "string",
+            "format": "date",
+            "title": "Fromdate"
+          },
+          "affectedDays": {
+            "type": "integer",
+            "title": "Affecteddays"
+          },
+          "skippedManualDays": {
+            "type": "integer",
+            "title": "Skippedmanualdays"
+          }
+        },
+        "type": "object",
+        "required": [
+          "fromDate",
+          "affectedDays",
+          "skippedManualDays"
+        ],
+        "title": "RecalculationMeta",
+        "description": "重算反馈（完整对齐 app/ 的 recalculation 字段，修复 D3）。"
       },
       "RegisterReq": {
         "properties": {
@@ -7244,6 +8894,11 @@
               }
             ],
             "title": "Bio"
+          },
+          "role": {
+            "type": "string",
+            "title": "Role",
+            "default": "user"
           },
           "createdAt": {
             "type": "string",

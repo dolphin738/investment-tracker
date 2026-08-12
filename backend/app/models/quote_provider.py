@@ -2,7 +2,6 @@
 
 每个提供方描述一个证券行情数据源，含：
 - name：展示名称（如「AKShare 官方」）。
-- provider_type：提供方类型标识（如 akshare / tushare / sina / custom），用于区分不同厂商。
 - access_method：接入方式（HTTPS / SDK），决定 config 的连接参数结构（见 QuoteProviderAccessMethod）。
 - config：JSON 连接参数（按接入方式存不同字段；结构由路由层 pydantic 校验）。
 - is_default：是否为默认提供方（无明确指定时使用）；全局至多一个 true。
@@ -27,7 +26,6 @@ class SecuritiesDataProvider(Base, TimestampMixin):
 
     id: Mapped[str] = pk_uuid()
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    provider_type: Mapped[str] = mapped_column(String(50), nullable=False)
     access_method: Mapped[str] = mapped_column(String(20), nullable=False)
     config: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

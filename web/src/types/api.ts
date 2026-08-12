@@ -9,12 +9,18 @@ export interface components {
     AccountStatsOut: {
         /** Portfoliocount */
         portfolioCount: number;
-        /** Totalassets */
-        totalAssets: string;
-        /** Cumulativexirr */
-        cumulativeXirr?: string | null;
-        /** Yearxirr */
-        yearXirr?: string | null;
+        /** Cashflowcount */
+        cashflowCount: number;
+        /** Tradecount */
+        tradeCount: number;
+        /** Snapshotdays */
+        snapshotDays: number;
+        /** Recorddays */
+        recordDays: number;
+        /** Firstdate */
+        firstDate?: string | null;
+        /** Lastdate */
+        lastDate?: string | null;
       };
     /** AuthTokenOut */
     AuthTokenOut: {
@@ -94,6 +100,7 @@ export interface components {
         createdAt: string;
         /** Updatedat */
         updatedAt: string;
+        recalculation?: components['schemas']['RecalculationMeta'] | null;
       };
     /** CashflowPatchReq */
     CashflowPatchReq: {
@@ -204,37 +211,88 @@ export interface components {
         /** Latestcashlagdays */
         latestCashLagDays?: number | null;
         /** Reasons */
-        reasons?: string[];
+        reasons?: components['schemas']['FreshnessReasonOut'][];
+      };
+    /** 单条「数据不新鲜」原因（对齐前端 FreshnessReason）。
+
+- kind: ``PRICE`` / ``CASH``，驱动前端「去更新行情 / 去更新现金余额」按钮。
+- asOf / lagDays: 该维度最新数据日期与滞后天数（``None`` 表示缺失记录）。
+- label: 给前端展示的本地化文案。 */
+    FreshnessReasonOut: {
+        /** Kind */
+        kind: string;
+        /** Asof */
+        asOf?: string | null;
+        /** Lagdays */
+        lagDays?: number | null;
+        /** Label */
+        label: string;
       };
     /** HTTPValidationError */
     HTTPValidationError: {
         /** Detail */
         detail?: components['schemas']['ValidationError'][];
       };
-    /** HoldingOut */
+    /** 单标的持仓（对齐前端 HoldingResponse 字段命名）。
+
+金额/数量均为字符串（Decimal → 字符串，防前端类型漂移，见信封契约）。 */
     HoldingOut: {
         /** Securityid */
         securityId: string;
-        /** Code */
-        code?: string | null;
-        /** Name */
-        name?: string | null;
+        /** Securitycode */
+        securityCode?: string;
+        /** Securityname */
+        securityName?: string;
+        /** Securitytype */
+        securityType?: string;
         /** Quantity */
         quantity: string;
         /** Avgcost */
         avgCost: string;
         /** Costtotal */
         costTotal: string;
-        /** Price */
-        price: string;
+        /** Marketprice */
+        marketPrice?: string | null;
+        /** Priceasof */
+        priceAsOf?: string | null;
         /** Marketvalue */
         marketValue: string;
         /** Pnl */
         pnl: string;
-        /** Ratio */
-        ratio: string;
-        /** Iscostbased */
-        isCostBased: boolean;
+        /** Pnlrate */
+        pnlRate: string;
+        /** Flag */
+        flag: string;
+      };
+    /** 持仓汇总（对齐前端 HoldingsAggregate）。 */
+    HoldingsAggregateOut: {
+        /** Totalmarketvalue */
+        totalMarketValue: string;
+        /** Totalcost */
+        totalCost: string;
+        /** Totalprofit */
+        totalProfit: string;
+        /** Totalprofitrate */
+        totalProfitRate: string;
+        /** Securitycount */
+        securityCount: number;
+      };
+    /** 持仓列表响应（信封 data 字段）：items + aggregate。 */
+    HoldingsOut: {
+        /** Items */
+        items: components['schemas']['HoldingOut'][];
+        aggregate: components['schemas']['HoldingsAggregateOut'];
+      };
+    /** 概览页「持仓市值」卡数据来源（缺陷4-A）。 */
+    HoldingsSummaryOut: {
+        /** Totalmarketvalue */
+        totalMarketValue: string;
+        /** Totalcost */
+        totalCost: string;
+        /** Totalprofit */
+        totalProfit: string;
+        /** Securitycount */
+        securityCount: number;
       };
     /** ImportCommitOut */
     ImportCommitOut: {
@@ -285,6 +343,33 @@ export interface components {
       };
     /** 数据导入类型（§4.2.17）。值即路由/服务层使用的字符串标识。 */
     ImportType: 'securityTrades' | 'cashFlows' | 'assetSnapshots';
+    /** InterfaceCategoryCreate */
+    InterfaceCategoryCreate: {
+        /** Key */
+        key: string;
+        /** Label */
+        label: string;
+        /** Icon */
+        icon?: string | null;
+        /** Sort Order */
+        sort_order?: number;
+      };
+    /** InterfaceCategoryUpdate */
+    InterfaceCategoryUpdate: {
+        /** Key */
+        key?: string | null;
+        /** Label */
+        label?: string | null;
+        /** Icon */
+        icon?: string | null;
+        /** Sort Order */
+        sort_order?: number | null;
+      };
+    /** 提供方接口方向（入站 / 出站）。
+
+PG 原生枚举类型名 `interface_direction`（由迁移创建）。
+业务当前仅落库使用（默认 in），UI 不暴露该字段。 */
+    InterfaceDirection: 'in' | 'out';
     /** LoginReq */
     LoginReq: {
         /** Email */
@@ -313,6 +398,7 @@ export interface components {
         cumulativeXirr?: string | null;
         /** Yearxirr */
         yearXirr?: string | null;
+        holdingsSummary?: components['schemas']['HoldingsSummaryOut'] | null;
         /** Navseries */
         navSeries?: components['schemas']['NavPointOut'][];
         /** Recentcashflows */
@@ -589,6 +675,92 @@ export interface components {
         name?: string | null;
         /** Avatar */
         avatar?: string | null;
+        /** Phone */
+        phone?: string | null;
+        /** Bio */
+        bio?: string | null;
+      };
+    /** QuoteInterfaceCreate */
+    QuoteInterfaceCreate: {
+        /** Interface Type */
+        interface_type: string;
+        /** Name */
+        name: string;
+        /** Endpoint */
+        endpoint?: string | null;
+        /** Http Method */
+        http_method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH' | null;
+        /** Params */
+        params?: Record<string, unknown> | null;
+        /** Enabled */
+        enabled?: boolean;
+        /** Description */
+        description?: string | null;
+        direction?: components['schemas']['InterfaceDirection'];
+        /** Timeout */
+        timeout?: number | null;
+        /** Retry Count */
+        retry_count?: number | null;
+        /** Rate Limit */
+        rate_limit?: string | null;
+      };
+    /** QuoteInterfaceUpdate */
+    QuoteInterfaceUpdate: {
+        /** Interface Type */
+        interface_type?: string | null;
+        /** Name */
+        name?: string | null;
+        /** Endpoint */
+        endpoint?: string | null;
+        /** Http Method */
+        http_method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH' | null;
+        /** Params */
+        params?: Record<string, unknown> | null;
+        /** Enabled */
+        enabled?: boolean | null;
+        /** Description */
+        description?: string | null;
+        direction?: components['schemas']['InterfaceDirection'] | null;
+        /** Timeout */
+        timeout?: number | null;
+        /** Retry Count */
+        retry_count?: number | null;
+        /** Rate Limit */
+        rate_limit?: string | null;
+      };
+    /** 证券行情数据提供方接入方式（多提供方管理）。 */
+    QuoteProviderAccessMethod: 'https' | 'sdk';
+    /** QuoteProviderCreate */
+    QuoteProviderCreate: {
+        /** Name */
+        name: string;
+        access_method: components['schemas']['QuoteProviderAccessMethod'];
+        /** Config */
+        config: Record<string, unknown>;
+        /** Enabled */
+        enabled?: boolean;
+        /** Description */
+        description?: string | null;
+        /** Is Default */
+        is_default?: boolean;
+        /** Is Active */
+        is_active?: boolean;
+      };
+    /** QuoteProviderUpdate */
+    QuoteProviderUpdate: {
+        /** Name */
+        name?: string | null;
+        access_method?: components['schemas']['QuoteProviderAccessMethod'] | null;
+        /** Config */
+        config?: Record<string, unknown> | null;
+        /** Enabled */
+        enabled?: boolean | null;
+        /** Description */
+        description?: string | null;
+        /** Is Default */
+        is_default?: boolean | null;
+        /** Is Active */
+        is_active?: boolean | null;
       };
     /** RecalcOut */
     RecalcOut: {
@@ -603,6 +775,15 @@ export interface components {
         startDate?: string | null;
         /** Enddate */
         endDate?: string | null;
+      };
+    /** 重算反馈（完整对齐 app/ 的 recalculation 字段，修复 D3）。 */
+    RecalculationMeta: {
+        /** Fromdate */
+        fromDate: string;
+        /** Affecteddays */
+        affectedDays: number;
+        /** Skippedmanualdays */
+        skippedManualDays: number;
       };
     /** RegisterReq */
     RegisterReq: {
@@ -799,6 +980,8 @@ export interface components {
         phone?: string | null;
         /** Bio */
         bio?: string | null;
+        /** Role */
+        role?: string;
         /** Createdat */
         createdAt: string;
       };
@@ -855,9 +1038,11 @@ export interface operations {
     get_cashflow_api_portfolios__portfolio_id__cashflows__cf_id__get: components['schemas']['CashflowOut'];
     patch_cashflow_api_portfolios__portfolio_id__cashflows__cf_id__patch: components['schemas']['CashflowOut'];
     clear_data_api_portfolios__portfolio_id__data_delete: components['schemas']['ClearDataOut'];
+    set_default_portfolio_api_portfolios__portfolio_id__default_patch: components['schemas']['PreferenceOut'];
     list_dividends_api_portfolios__portfolio_id__dividends_get: components['schemas']['Paginated_DividendOut_'];
     create_dividend_api_portfolios__portfolio_id__dividends_post: components['schemas']['DividendOut'];
     patch_dividend_api_portfolios__portfolio_id__dividends__div_id__patch: components['schemas']['DividendOut'];
+    get_holdings_api_portfolios__portfolio_id__holdings_get: components['schemas']['HoldingsOut'];
     import_commit_api_portfolios__portfolio_id__import_commit_post: components['schemas']['ImportCommitOut'];
     import_preview_api_portfolios__portfolio_id__import_preview_post: components['schemas']['ImportPreviewOut'];
     get_nav_history_api_portfolios__portfolio_id__nav_history_get: components['schemas']['Paginated_NavPointOut_'];
@@ -901,6 +1086,7 @@ export const BUSINESS_ERROR_CODE = {
   RESTORE_EXPIRED: 1009,
   VALIDATION_FAILED: 2000,
   NOT_FOUND: 3001,
+  FORBIDDEN: 4001,
   INTERNAL_ERROR: 5000,
 } as const;
 export type BusinessErrorCode = (typeof BUSINESS_ERROR_CODE)[keyof typeof BUSINESS_ERROR_CODE];

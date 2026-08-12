@@ -28,14 +28,12 @@ pytestmark = pytest.mark.asyncio
 
 HTTPS_BODY = {
     "name": "AKShare",
-    "provider_type": "akshare",
     "access_method": "https",
     "config": {"base_url": "https://api.example.com"},
     "enabled": True,
 }
 SDK_BODY = {
     "name": "Tushare",
-    "provider_type": "tushare",
     "access_method": "sdk",
     "config": {"sdk_name": "tushare", "token": "x"},
     "enabled": True,

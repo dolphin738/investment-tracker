@@ -58,7 +58,6 @@ def _check_config(access_method: QuoteProviderAccessMethod, config: dict[str, An
 # --------------------------------------------------------------------------- #
 class QuoteProviderCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
-    provider_type: str = Field(..., min_length=1, max_length=50)
     access_method: QuoteProviderAccessMethod
     config: dict[str, Any]
     enabled: bool = True
@@ -74,7 +73,6 @@ class QuoteProviderCreate(BaseModel):
 
 class QuoteProviderUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=255)
-    provider_type: Optional[str] = Field(None, min_length=1, max_length=50)
     access_method: Optional[QuoteProviderAccessMethod] = None
     config: Optional[dict[str, Any]] = None
     enabled: Optional[bool] = None
@@ -92,7 +90,6 @@ class QuoteProviderUpdate(BaseModel):
 class QuoteProviderOut(BaseModel):
     id: str
     name: str
-    provider_type: str
     access_method: str
     config: dict[str, Any]
     is_default: bool
@@ -212,7 +209,6 @@ async def create_quote_provider(
     svc = QuoteProviderService(db)
     provider = await svc.create(
         name=body.name,
-        provider_type=body.provider_type,
         access_method=body.access_method.value,
         config=body.config,
         enabled=body.enabled,
@@ -310,7 +306,6 @@ async def update_quote_provider(
     provider = await svc.update(
         provider,
         name=body.name,
-        provider_type=body.provider_type,
         access_method=body.access_method.value if body.access_method is not None else None,
         config=body.config,
         enabled=body.enabled,
