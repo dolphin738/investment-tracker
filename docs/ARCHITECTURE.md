@@ -86,6 +86,7 @@ backend/app/
 ├── models/              # SQLAlchemy 2.0 模型（12 表 + 6 枚举）
 │   ├── enums.py  user.py  portfolio.py  security.py
 │   ├── cashflow.py  snapshot.py  calc.py  dividend.py
+│   ├── quote_provider.py  quote_interface.py  interface_category.py   # 系统管理扩展（多提供方）
 ├── schemas.py           # 请求体 Pydantic DTO（金额统一 DecimalStr）
 ├── schemas_resp.py      # 响应体 Pydantic DTO（*Out，OpenAPI 单一真相源）
 ├── finance_core/        # 纯函数：xirr.py / nav.py / holding.py
@@ -94,6 +95,7 @@ backend/app/
 │                       #   / preference / upload + 基类 base(PortfolioChildService)
 │                       #   + 领域/聚合: calculation / holding / asset_valuation
 │                       #   / recalculation / aggregation / data_transfer / user / cleanup
+│                       #   + 系统管理资源 Service: quote_provider / quote_interface / interface_category（独立，不继承 PortfolioChildService）
 ├── storage/             # 存储抽象层：StorageService ABC / LocalDiskStorage / get_storage_driver 工厂（STORAGE_DRIVER 配置）
 └── modules/             # 按功能模块分 router.py（11 模块）；common 提升到 app/common.py
                         #   health / auth / portfolios / aggregation / data(6 子路由)
@@ -129,7 +131,7 @@ backend/app/
 
 ### 3.1 数据模型完整定义（真实态 · SQLAlchemy 2.0）
 
-> 共 **12 张表 + 6 个 PostgreSQL 原生枚举**。所有表名 snake_case 复数；UUID 主键由库端 `gen_random_uuid()` 生成；`created_at` / `updated_at` 由 `TimestampMixin` 维护；软删除仅 `users.deleted_at`。
+> 共 **14 张表 + 7 个 PostgreSQL 原生枚举**（含系统管理扩展的 `securities_data_providers` / `quote_provider_interfaces` / `quote_provider_interface_categories` 与 `interface_direction` 枚举，见 §3.1.6）。所有表名 snake_case 复数；UUID 主键由库端 `gen_random_uuid()` 生成；`created_at` / `updated_at` 由 `TimestampMixin` 维护；软删除仅 `users.deleted_at`。
 
 #### 3.1.1 用户与偏好
 
@@ -238,7 +240,7 @@ backend/app/
 | | type | Enum(DividendType) | default CASH | |
 | | note | Text | NULL | **不参与收益计算** |
 
-#### 3.1.5 6 个枚举（PostgreSQL 原生枚举，与上游 Prisma 类型名一致）
+#### 3.1.5 7 个枚举（PostgreSQL 原生枚举，与上游 Prisma 类型名一致）
 
 | 枚举 | 值 |
 |------|----|
@@ -248,8 +250,47 @@ backend/app/
 | `SnapshotSource` | DERIVED, MANUAL |
 | `SnapshotValuation` | EXACT, CARRIED_FORWARD, COST_BASED, MANUAL_INPUT |
 | `DividendType` | CASH, STOCK_DIVIDEND |
+| `InterfaceDirection` | IN, OUT（系统管理扩展：`quote_provider_interfaces.direction` 列，默认 `in`） |
 
 > 枚举定义：`backend/app/models/enums.py`（Python `str, enum.Enum`）；SQLAlchemy 以 `native_enum=True` 创建原生 PG 枚举类型。`CASH` 枚举值保留（避免破坏性迁移）但标注 `@deprecated`，新建标的隐藏该选项。
+>
+> 另注：`QuoteProviderAccessMethod`（HTTPS / SDK）也是 `enums.py` 中的 Python 枚举，但 `securities_data_providers.access_method` 以 `String(20)` 存储（**非** PG 原生枚举列），仅作接入方式取值校验用（路由层 `_check_config`）。
+
+#### 3.1.6 系统管理扩展表（多提供方证券行情数据）
+
+> 由迁移 `c2d3e4f5a6b7_add_quote_providers_drop_system_configs.py`（创建 `securities_data_providers`、删除旧 `system_configs` 单 URL 表）与 `d3e4f5a6b7c8_add_quote_interfaces_and_categories.py`（新增 `quote_provider_interfaces` / `quote_provider_interface_categories`）落地。取代旧「单 URL system-config」配置（详见 §4.2.21）。
+
+| 表 | 字段 | 类型 | 约束 | 说明 |
+|----|------|------|------|------|
+| `securities_data_providers` | id | String(36) UUID | PK | 证券行情数据提供方 |
+| | name | String(255) | NOT NULL | 展示名（如「AKShare 官方」） |
+| | provider_type | String(50) | NOT NULL | 类型标识（akshare / tushare / sina / custom） |
+| | access_method | String(20) | NOT NULL | 接入方式（https / sdk，由 `QuoteProviderAccessMethod` 校验） |
+| | config | JSON | NOT NULL default {} | 连接参数（HTTPS 存 `base_url`；SDK 存 `sdk_name`） |
+| | is_default | Boolean | NOT NULL default false | 默认提供方（全局至多一个 true） |
+| | is_active | Boolean | NOT NULL default false | 当前运行时使用（全局至多一个 true；禁用者不可设） |
+| | enabled | Boolean | NOT NULL default true | 是否启用（禁用后不参与解析、不可设为当前/默认） |
+| | description | Text | NULL | 备注 |
+| `quote_provider_interfaces` | id | String(36) UUID | PK | 提供方下的接口（如「沪深股票列表」） |
+| | provider_id | String(36) | FK→securities_data_providers.id **CASCADE**, indexed | 所属提供方（删提供方级联删接口） |
+| | interface_type | String(64) | NOT NULL | 分类 key（自由文本，不强制外键到 categories；无匹配分类时 UI 显示 raw key） |
+| | name | String(255) | NOT NULL | 接口名 |
+| | endpoint | String(512) | NULL | 接口地址（HTTPS）或 SDK 函数名（SDK） |
+| | http_method | String(10) | NULL | GET / POST / PUT / DELETE / PATCH（SDK 可空） |
+| | params | JSON | NULL default {} | 请求参数模板 |
+| | enabled | Boolean | NOT NULL default true | 是否启用 |
+| | description | Text | NULL | 备注 |
+| | direction | Enum(interface_direction) | NOT NULL default 'in' | 接口方向（in / out，业务当前仅落库） |
+| | timeout | Integer | NULL | 超时（秒） |
+| | retry_count | Integer | NULL | 重试次数 |
+| | rate_limit | String(64) | NULL | 频率限制（自由文本，如 `100/min`） |
+| `quote_provider_interface_categories` | id | String(36) UUID | PK | 接口分类（后台可配） |
+| | key | String(64) | NOT NULL, **UNIQUE** | 分类唯一 key（如 ashare_list） |
+| | label | String(128) | NOT NULL | 展示名（如 A股列表） |
+| | icon | String(64) | NULL | lucide-react 图标名（如 List / LineChart），UI 动态映射 |
+| | sort_order | Integer | NOT NULL default 0 | 排序权重（升序） |
+
+> 级联语义：删除提供方 → 级联删其下接口（`ON DELETE CASCADE`）；删除分类 → **不影响**任何接口（`interface_type` 仅存自由文本 key，不强制外键）。迁移 `d3e4f5a6b7c8` 升级时预置 7 个分类（A股列表/行情、港股列表/行情、基金列表、可转债列表/行情，sort_order 1~7）。
 
 ### 3.2 设计要点说明
 
@@ -614,12 +655,45 @@ User (1) ──< Portfolio (N)
 
 #### 4.2.21 管理员系统配置（`/api/admin` · 仅 admin）
 
-> 模块定位：全局管理员配置（当前仅「证券行情 API 地址」），**仅 admin 可见可改**。后端以 `Depends(require_admin)` 查库校验为最终防线（普通用户 → `FORBIDDEN 4001/403`）；前端侧边栏「系统管理」入口与 `/admin` 页仅 admin 可见，`useSystemConfig` 以 `enabled: isAdmin` 守护普通用户不发请求（纵深防御）。配置存 `system_configs` 全局表（非 `UserPreference`）。对应 PRD `AUTH-P0-01` / `SYS-P0-08`。
+> 模块定位：全局管理员配置（证券行情**数据来源 / 接口 API 来源 / 接口分类**），**仅 admin 可见可改**。后端以 `Depends(require_admin)` 查库校验为最终防线（普通用户 → `FORBIDDEN 4001/403`）；前端全局主侧边栏「系统管理」为可折叠分组、子项「金融数据接口」进入 `/admin` 页，且 hook 以 `enabled: isAdmin` 守护普通用户不发请求（纵深防御）。
+>
+> 取代旧的「单 URL system-config」配置：旧 `GET/PATCH /api/admin/system-config/{key}` 端点已整体移除（迁移 `c2d3e4f5a6b7` 删 `system_configs` 表），改为**多提供方管理**（见 §3.1.6）。详细规格见 `docs/prd-system-management.md`；对应 PRD `AUTH-P0-01` / `SYS-P0-08`。
+
+**证券行情数据来源（SecuritiesDataProvider）**：
 
 | Method | Path | 说明 | 请求体 / 参数 | 响应 data |
 |--------|------|------|--------------|-----------|
-| GET | `/api/admin/system-config/{key}` | 读取全局配置（如 `securities_quote_api_base_url`） | `key`（路径参数） | `SystemConfigOut`（`{ key, config_value, description, updated_by, updated_at }`） |
-| PATCH | `/api/admin/system-config/{key}` | 写入全局配置 | `{ config_value }`（`JSONB`，如 `{ "url": "https://..." }`）；`updated_by` 由 `require_admin` 当前用户填充 | `SystemConfigOut` |
+| GET | `/api/admin/quote-providers` | 列出全部提供方（含默认 / 当前标记） | — | `QuoteProviderOut[]` |
+| POST | `/api/admin/quote-providers` | 新增提供方（`access_method=https\|sdk`；`config` 按接入方式校验必填字段） | `QuoteProviderCreate` | `QuoteProviderOut` |
+| GET | `/api/admin/quote-providers/:id` | 读取单个 | `id` | `QuoteProviderOut` |
+| PATCH | `/api/admin/quote-providers/:id` | 局部更新 | `QuoteProviderUpdate` | `QuoteProviderOut` |
+| DELETE | `/api/admin/quote-providers/:id` | 删除（级联删其下接口） | `id` | `{ id, deleted }` |
+| POST | `/api/admin/quote-providers/:id/set-default` | 设为默认（全局至多一个默认） | `id` | `QuoteProviderOut` |
+| POST | `/api/admin/quote-providers/:id/set-active` | 设为当前运行时使用（全局至多一个当前；禁用者不可设） | `id` | `QuoteProviderOut` |
+
+**提供方接口（QuoteInterface）**：
+
+| Method | Path | 说明 | 请求体 / 参数 | 响应 data |
+|--------|------|------|--------------|-----------|
+| GET | `/api/admin/quote-providers/:providerId/interfaces` | 列出某提供方全部接口 | `providerId` | `QuoteInterfaceOut[]` |
+| POST | `/api/admin/quote-providers/:providerId/interfaces` | 新增接口（provider 不存在 → 404） | `QuoteInterfaceCreate` | `QuoteInterfaceOut` |
+| GET | `/api/admin/quote-providers/interfaces` | 扁平返回全部接口（顶层按分类汇总所有提供方总览） | — | `QuoteInterfaceOut[]` |
+| GET | `/api/admin/quote-providers/interfaces/:interfaceId` | 读取单个 | `interfaceId` | `QuoteInterfaceOut` |
+| PATCH | `/api/admin/quote-providers/interfaces/:interfaceId` | 局部更新 | `QuoteInterfaceUpdate` | `QuoteInterfaceOut` |
+| DELETE | `/api/admin/quote-providers/interfaces/:interfaceId` | 删除 | `interfaceId` | `{ id, deleted }` |
+
+> ⚠️ `GET /api/admin/quote-providers/interfaces` 必须注册在 `GET /api/admin/quote-providers/:providerId` **之前**，否则会被后者按 `providerId='interfaces'` 抢匹配（二者段数不同、互不冲突）。
+
+**接口分类（InterfaceCategory）**：
+
+| Method | Path | 说明 | 请求体 / 参数 | 响应 data |
+|--------|------|------|--------------|-----------|
+| GET | `/api/admin/interface-categories` | 列出全部分类（按 `sort_order` 升序） | — | `InterfaceCategoryOut[]` |
+| POST | `/api/admin/interface-categories` | 新增分类（`key` 唯一，冲突 → 409 VALIDATION_FAILED） | `InterfaceCategoryCreate` | `InterfaceCategoryOut` |
+| PATCH | `/api/admin/interface-categories/:id` | 更新分类 | `InterfaceCategoryUpdate` | `InterfaceCategoryOut` |
+| DELETE | `/api/admin/interface-categories/:id` | 删除（**不影响**接口） | `id` | `{ id, deleted }` |
+
+> 校验规则：提供方 `name` 1~255、`provider_type` 1~50；HTTPS 接入必须 `config.base_url` 非空、SDK 接入必须 `config.sdk_name` 非空（路由层 `_check_config` + `QuoteProviderCreate` 归一为 400 / VALIDATION_FAILED）；`http_method` 非法 → 422 归一 400。`interface-categories` 的 `key` 冲突 → 409。`is_default` / `is_active` 的「全局至多一个」由服务层写入时保证（`services/quote_provider.py`）。
 
 ---
 
@@ -1038,7 +1112,7 @@ sequenceDiagram
 /analysis/nav           → 净值分析页
 /account                → 账户页（只读展示：个人信息 / 资产全景 / 数据统计 ＋ 可写：我的组合＝组合 CRUD 唯一平面）
 /settings               → 设置页（偏好 / 资料 / 头像 / 触发重置重算 / 登出 / 注销；**不含组合管理**）
-/admin                  → 系统管理页（AuthGuard 包裹；**仅 admin 可见**：证券行情 API 地址配置；普通用户侧边栏无入口、直接访问被后端 `require_admin` 403 拦截）
+/admin                  → 系统管理页（AuthGuard 包裹；**仅 admin 可见**：金融数据接口配置——数据来源（多提供方证券行情）/ 接口 API 来源（提供方接口）/ 接口分类管理；普通用户侧边栏无入口、直接访问被后端 `require_admin` 403 拦截）
 *                       → 404 (not-found)
 ```
 
@@ -1054,7 +1128,7 @@ sequenceDiagram
 | features | `src/features/` | 业务功能（dashboard 卡片、交易表单、统一筛选器、导入导出等），含业务逻辑 |
 | components/ui | `src/components/ui/` | shadcn/ui 基础组件（纯展示） |
 | components/charts | `src/components/charts/` | ECharts 封装（nav-trend / xirr-trend / yearly-bar / monthly-heatmap / stat-card / chart-grid / total-asset-trend / holding-donut / portfolio-compare） |
-| components/layout | `src/components/layout/` | 布局组件（`app-layout` 外壳 / `sidebar` 9 项导航 / `portfolio-selector` 组合切换 / `portfolio-dialog` 新建组合） |
+| components/layout | `src/components/layout/` | 布局组件（`app-layout` 外壳 / `sidebar` 导航——「系统管理」为可折叠分组、子项「金融数据接口」进入 `/admin` / `portfolio-selector` 组合切换 / `portfolio-dialog` 新建组合） |
 | hooks | `src/hooks/` | 数据获取 / 变更 / 缓存（useHoldings、useSnapshots、usePreferences…） |
 | api | `src/api/` | API 请求层（按模块拆分 `*.api.ts`，对应后端接口） |
 | stores | `src/stores/` | Zustand 全局态（auth / portfolio / preference） |

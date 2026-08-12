@@ -599,6 +599,20 @@ totalAsset(D) = marketValue(D) + cashBalance(D)          // 自动派生口径
 
 ---
 
+## 5.9 系统管理（管理员 · `/admin`）
+
+> 仅管理员可见可配。详细规格与五项待定项决策见 `docs/prd-system-management.md`；本节约其要点，保证主 PRD 自洽。
+
+系统管理页承载「金融数据接口」配置，含三个能力：
+
+1. **数据来源（证券行情数据提供方，多提供方）**：取代旧的单 URL 系统配置。每个提供方（`SecuritiesDataProvider`）含 `name` / `provider_type` / `access_method`(https|sdk) / `config`(JSON，HTTPS 存 `base_url`、SDK 存 `sdk_name`) / `is_default` / `is_active` / `enabled` / `description`；解析链「当前(is_active) → 默认(is_default) → None」决定运行时使用哪个提供方（`get_active_provider`）。提供方可设默认 / 设当前（全局至多一个）；删除提供方级联删其接口。
+2. **接口 API 来源（提供方接口）**：每个提供方下可配置多个接口（`QuoteInterface`）：`interface_type`(分类 key) / `name` / `endpoint`(地址或 SDK 函数名) / `http_method`(GET/POST/PUT/DELETE/PATCH，SDK 可空) / `params`(JSON 模板) / `enabled` / `direction`(in/out，默认 in) / `timeout` / `retry_count` / `rate_limit`。顶层 `GET /api/admin/quote-providers/interfaces` 扁平返回全部接口，供「按分类汇总所有提供方」总览。
+3. **接口分类管理（InterfaceCategory）**：后台可配分类（`key` 唯一 / `label` / `icon`(lucide 名) / `sort_order`）；迁移预置 7 类（A股列表/行情、港股列表/行情、基金列表、可转债列表/行情）。`interface_type` 仅存自由文本 key，不强制外键；删除分类不影响接口。
+
+**权限**：所有端点 `require_admin` 查库校验（PRD `AUTH-P0-01` / `SYS-P0-08`）。前端全局主侧边栏「系统管理」为可折叠分组，子项「金融数据接口」进入本页；页面内以标签页呈现「接口 API 来源」「接口分类管理」两个模块。
+
+**运行时配置字段（P0）**：提供方接口表含 `timeout`(秒) / `retry_count` / `rate_limit`(自由文本)，支持 SDK 统一 `endpoint` / `http_method` 字段；分类后台可配（预置 7 类 + 允许自定义）。
+
 # §6 需求池（FIN / FLOW / HOLD-B / CASH / SNAP / DASH / ANL / ACC / SET / SYS）
 
 ## 6.0 优先级定义
@@ -1052,6 +1066,26 @@ totalAsset(D) = marketValue(D) + cashBalance(D)          // 自动派生口径
 - 禁止全站登录/注销链路出现"如需恢复请联系客服"等人工恢复表述。
 
 ---
+
+## 7.11 系统管理页 `/admin`
+
+```
+系统管理（全局主侧边栏 · 可折叠分组）
+ └─ 金融数据接口  → 进入 /admin
+        ┌──────────────────────────────────────────────────────┐
+        │ 金融数据接口                                             │
+        │ [ 接口 API 来源 | 接口分类管理 ]   ← 标签页分页切换       │
+        │ ──────────────────────────────────────────────────── │
+        │ 选中模块内容                                             │
+        │  · 接口 API 来源：数据来源列表 + 各提供方接口表           │
+        │  · 接口分类管理：分类列表（增删改）                       │
+        └──────────────────────────────────────────────────────┘
+```
+
+- 仅管理员可见；非管理员整页「无权限访问该页面」。
+- 板块标题「证券行情数据提供方」已重命名为「数据来源」；新增对话框描述「新增一个证券行情数据提供方」→「新增数据来源」。
+- 提供方删除级联删其接口；分类删除不级联删接口。
+- 接口 API 来源页内提供「按分类汇总所有提供方接口」总览（聚合 `GET /api/admin/quote-providers/interfaces`）。
 
 # §8 计算引擎契约（XIRR / NAV 取数与触发）
 
