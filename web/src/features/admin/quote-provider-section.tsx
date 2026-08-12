@@ -125,7 +125,7 @@ function useCategoryLabelMap(): Map<string, string> {
 export function QuoteProviderSection(): JSX.Element {
   const { data: providers, isLoading, isError } = useQuoteProviders();
   const createMut = useCreateQuoteProvider();
-  const updateMut = useUpdateQuoteProvider('');
+  const updateMut = useUpdateQuoteProvider();
   const deleteMut = useDeleteQuoteProvider();
   const setDefaultMut = useSetDefaultQuoteProvider();
   const setActiveMut = useSetActiveQuoteProvider();
@@ -176,7 +176,7 @@ export function QuoteProviderSection(): JSX.Element {
       is_default: form.is_default,
     };
     if (editingId) {
-      updateMut.mutate(payload, { onSuccess: closeDialog });
+      updateMut.mutate({ id: editingId, body: payload }, { onSuccess: closeDialog });
     } else {
       createMut.mutate(payload, { onSuccess: closeDialog });
     }

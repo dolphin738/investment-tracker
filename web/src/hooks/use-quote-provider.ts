@@ -50,11 +50,12 @@ export function useCreateQuoteProvider() {
   });
 }
 
-/** 更新提供方 */
-export function useUpdateQuoteProvider(id: string) {
+/** 更新提供方（id 在 mutate 时动态传入，避免编辑时 id 为空导致 404） */
+export function useUpdateQuoteProvider() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (body: QuoteProviderUpdate) => updateQuoteProvider(id, body),
+    mutationFn: ({ id, body }: { id: string; body: QuoteProviderUpdate }) =>
+      updateQuoteProvider(id, body),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: quoteProvidersKey() });
       toast.success('已保存');
