@@ -1,10 +1,11 @@
 /**
- * features/admin/quote-provider-section.tsx — 证券行情数据提供方管理（萃取自原 admin.tsx）
+ * features/admin/quote-provider-section.tsx — 数据来源（提供方）管理板块
  *
  * - 提供方按接入方式分组（HTTPS 提供方 / SDK 提供方）。
  * - 每个提供方行：编辑 / 设为默认 / 切换当前 / 删除（沿用现有 hooks）。
  * - 每个提供方展开区：接口子表（按 interface_type 分组，复用 useQuoteInterfaces）+ 新增/编辑/删除接口。
  * - 顶层「按分类汇总所有提供方接口」总览（ InterfacesByCategoryOverview，扁平接口按 interface_type 聚合）。
+ * - 新增 / 编辑提供方走独立对话框组件 QuoteProviderDialog（与同模块其它对话框风格一致）。
  */
 
 import { useMemo, useState } from 'react';
@@ -17,10 +18,6 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Switch } from '@/components/ui/switch';
-import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import {
   Table,
@@ -31,14 +28,6 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -48,16 +37,13 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { toast } from 'sonner';
 import {
   useDeleteQuoteProvider,
   useQuoteProviders,
-  useCreateQuoteProvider,
   useSetActiveQuoteProvider,
   useSetDefaultQuoteProvider,
-  useUpdateQuoteProvider,
 } from '@/hooks/use-quote-provider';
-import type { QuoteProvider, QuoteProviderAccessMethod } from '@/api/quote-provider.api';
+import type { QuoteProvider } from '@/api/quote-provider.api';
 import {
   useCreateInterface,
   useDeleteInterface,
@@ -67,50 +53,7 @@ import {
 import { useInterfaceCategories } from '@/hooks/use-interface-category';
 import type { QuoteInterface } from '@/api/quote-interface.api';
 import { QuoteInterfaceDialog } from './quote-interface-dialog';
-
-/** 表单本地态（config 拆成 base_url / sdk_name，提交时按接入方式组装） */
-interface ProviderForm {
-  name: string;
-  provider_type: string;
-  access_method: QuoteProviderAccessMethod;
-  base_url: string;
-  sdk_name: string;
-  enabled: boolean;
-  description: string;
-  is_default: boolean;
-}
-
-function emptyForm(): ProviderForm {
-  return {
-    name: '',
-    provider_type: '',
-    access_method: 'https',
-    base_url: '',
-    sdk_name: '',
-    enabled: true,
-    description: '',
-    is_default: false,
-  };
-}
-
-function providerToForm(p: QuoteProvider): ProviderForm {
-  return {
-    name: p.name,
-    provider_type: p.provider_type,
-    access_method: p.access_method,
-    base_url: (p.config?.base_url as string) ?? '',
-    sdk_name: (p.config?.sdk_name as string) ?? '',
-    enabled: p.enabled,
-    description: p.description ?? '',
-    is_default: p.is_default,
-  };
-}
-
-function formToConfig(form: ProviderForm): Record<string, unknown> {
-  return form.access_method === 'https'
-    ? { base_url: form.base_url.trim() }
-    : { sdk_name: form.sdk_name.trim() };
-}
+import { QuoteProviderDialog } from './quote-provider-dialog';
 
 /** 分类 key → 展示名（无匹配显示 raw key） */
 function useCategoryLabelMap(): Map<string, string> {
@@ -124,65 +67,30 @@ function useCategoryLabelMap(): Map<string, string> {
 
 export function QuoteProviderSection(): JSX.Element {
   const { data: providers, isLoading, isError } = useQuoteProviders();
-  const createMut = useCreateQuoteProvider();
-  const updateMut = useUpdateQuoteProvider();
   const deleteMut = useDeleteQuoteProvider();
   const setDefaultMut = useSetDefaultQuoteProvider();
   const setActiveMut = useSetActiveQuoteProvider();
 
   const [open, setOpen] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [form, setForm] = useState<ProviderForm>(emptyForm());
+  const [editing, setEditing] = useState<QuoteProvider | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
-  const closeDialog = (): void => {
-    setOpen(false);
-    setEditingId(null);
-    setForm(emptyForm());
-  };
   const openCreate = (): void => {
-    setEditingId(null);
-    setForm(emptyForm());
+    setEditing(null);
     setOpen(true);
   };
   const openEdit = (p: QuoteProvider): void => {
-    setEditingId(p.id);
-    setForm(providerToForm(p));
+    setEditing(p);
     setOpen(true);
   };
-
-  const handleSubmit = (): void => {
-    if (!form.name.trim() || !form.provider_type.trim()) {
-      toast.error('请填写名称与类型');
-      return;
-    }
-    if (form.access_method === 'https' && !form.base_url.trim()) {
-      toast.error('HTTPS 接入方式必须填写 API 基础地址');
-      return;
-    }
-    if (form.access_method === 'sdk' && !form.sdk_name.trim()) {
-      toast.error('SDK 接入方式必须填写 SDK 名称');
-      return;
-    }
-    const config = formToConfig(form);
-    const payload = {
-      name: form.name.trim(),
-      provider_type: form.provider_type.trim(),
-      access_method: form.access_method,
-      config,
-      enabled: form.enabled,
-      description: form.description.trim() || null,
-      is_default: form.is_default,
-    };
-    if (editingId) {
-      updateMut.mutate({ id: editingId, body: payload }, { onSuccess: closeDialog });
-    } else {
-      createMut.mutate(payload, { onSuccess: closeDialog });
+  const handleDialogOpenChange = (v: boolean): void => {
+    if (v) setOpen(true);
+    else {
+      setOpen(false);
+      setEditing(null);
     }
   };
-
-  const pending = createMut.isPending || updateMut.isPending;
 
   const toggleExpand = (id: string): void =>
     setExpanded((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -358,133 +266,12 @@ export function QuoteProviderSection(): JSX.Element {
 
       <InterfacesByCategoryOverview />
 
-      {/* 提供方新增 / 编辑对话框 */}
-      <Dialog
+      {/* 提供方新增 / 编辑对话框（独立组件，风格与同模块其它对话框一致） */}
+      <QuoteProviderDialog
         open={open}
-        onOpenChange={(v) => (v ? setOpen(true) : closeDialog())}
-      >
-        <DialogContent className="max-w-xl">
-          <DialogHeader>
-            <DialogTitle>{editingId ? '编辑提供方' : '新增提供方'}</DialogTitle>
-            <DialogDescription>
-              {editingId
-                ? '修改该行情数据提供方的配置'
-                : '新增数据来源'}
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="qp-name">名称</Label>
-              <Input
-                id="qp-name"
-                placeholder="如 新浪财经"
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="qp-type">类型</Label>
-              <Input
-                id="qp-type"
-                placeholder="如 stock / fund / crypto"
-                value={form.provider_type}
-                onChange={(e) =>
-                  setForm({ ...form, provider_type: e.target.value })
-                }
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="qp-access-method">接入方式</Label>
-              <select
-                id="qp-access-method"
-                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                value={form.access_method}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    access_method: e.target.value as QuoteProviderAccessMethod,
-                  })
-                }
-              >
-                <option value="https">HTTPS（API 地址）</option>
-                <option value="sdk">SDK（如 akshare）</option>
-              </select>
-            </div>
-            {form.access_method === 'https' ? (
-              <div className="space-y-2">
-                <Label htmlFor="qp-base-url">API 基础地址</Label>
-                <Input
-                  id="qp-base-url"
-                  placeholder="https://example.com/api"
-                  value={form.base_url}
-                  onChange={(e) =>
-                    setForm({ ...form, base_url: e.target.value })
-                  }
-                />
-              </div>
-            ) : (
-              <div className="space-y-2">
-                <Label htmlFor="qp-sdk-name">SDK 名称</Label>
-                <Input
-                  id="qp-sdk-name"
-                  placeholder="如 akshare"
-                  value={form.sdk_name}
-                  onChange={(e) =>
-                    setForm({ ...form, sdk_name: e.target.value })
-                  }
-                />
-              </div>
-            )}
-            <div className="space-y-2">
-              <Label htmlFor="qp-desc">描述</Label>
-              <Textarea
-                id="qp-desc"
-                placeholder="可选，备注该提供方用途"
-                value={form.description}
-                onChange={(e) =>
-                  setForm({ ...form, description: e.target.value })
-                }
-              />
-            </div>
-            <div className="flex items-center justify-between rounded-md border p-3">
-              <div className="space-y-0.5">
-                <Label htmlFor="qp-enabled" className="text-sm">
-                  启用
-                </Label>
-                <p className="text-xs text-muted-foreground">
-                  禁用的提供方不能作为当前使用方
-                </p>
-              </div>
-              <Switch
-                id="qp-enabled"
-                checked={form.enabled}
-                onCheckedChange={(v) => setForm({ ...form, enabled: v })}
-              />
-            </div>
-            <div className="flex items-center justify-between rounded-md border p-3">
-              <Label htmlFor="qp-default" className="text-sm">
-                设为默认
-              </Label>
-              <Switch
-                id="qp-default"
-                checked={form.is_default}
-                onCheckedChange={(v) => setForm({ ...form, is_default: v })}
-              />
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button variant="outline" onClick={closeDialog}>
-              取消
-            </Button>
-            <Button onClick={handleSubmit} disabled={pending}>
-              {pending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              保存
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        onOpenChange={handleDialogOpenChange}
+        editing={editing}
+      />
 
       {/* 提供方删除二次确认 */}
       <AlertDialog
@@ -493,9 +280,9 @@ export function QuoteProviderSection(): JSX.Element {
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>确认删除该提供方？</AlertDialogTitle>
+            <AlertDialogTitle>确认删除该数据来源？</AlertDialogTitle>
             <AlertDialogDescription>
-              删除后不可恢复；其下接口将一并删除；若该提供方为「当前 / 默认」方，系统将回退到其它可用方。
+              删除后不可恢复；其下接口将一并删除；若该数据来源为「当前 / 默认」方，系统将回退到其它可用方。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
