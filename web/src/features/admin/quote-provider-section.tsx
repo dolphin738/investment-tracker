@@ -462,6 +462,12 @@ function ProviderInterfaces({ providerId }: { providerId: string }): JSX.Element
 function InterfacesByCategoryOverview(): JSX.Element {
   const { data: interfaces, isLoading } = useQuoteInterfacesAll();
   const labelMap = useCategoryLabelMap();
+  const { data: providers } = useQuoteProviders();
+  const providerMap = useMemo(() => {
+    const m = new Map<string, string>();
+    (providers ?? []).forEach((p) => m.set(p.id, p.name));
+    return m;
+  }, [providers]);
 
   const groups = useMemo(() => {
     const map = new Map<string | null, QuoteInterface[]>();
@@ -503,7 +509,7 @@ function InterfacesByCategoryOverview(): JSX.Element {
                 <TableHeader>
                   <TableRow>
                     <TableHead>名称</TableHead>
-                    <TableHead>提供方 ID</TableHead>
+                    <TableHead>提供方名称</TableHead>
                     <TableHead>调用路径</TableHead>
                     <TableHead>方法</TableHead>
                     <TableHead>启用</TableHead>
@@ -513,8 +519,8 @@ function InterfacesByCategoryOverview(): JSX.Element {
                   {items.map((it) => (
                     <TableRow key={it.id}>
                       <TableCell className="font-medium">{it.name}</TableCell>
-                      <TableCell className="max-w-[160px] truncate font-mono text-xs text-muted-foreground">
-                        {it.provider_id}
+                      <TableCell className="max-w-[160px] truncate text-xs text-muted-foreground">
+                        {providerMap.get(it.provider_id) ?? it.provider_id}
                       </TableCell>
                       <TableCell className="max-w-[200px] truncate text-muted-foreground">
                         {it.endpoint ?? '-'}
