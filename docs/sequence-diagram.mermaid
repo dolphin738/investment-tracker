@@ -1,0 +1,87 @@
+sequenceDiagram
+    autonumber
+    participant UI as QuoteProviderSection
+    participant Hook as useQuoteInterface
+    participant API as quote-interface.api
+    participant HTTP as api-client (envelope)
+    participant R as AdminRouter
+    participant S as QuoteInterfaceService
+    participant DB as PostgreSQL
+
+    Note over UI,DB: 场景A·1 — 列出某提供方下的接口
+    UI->>Hook: useQuoteInterfaces(providerId)
+    Hook->>API: listQuoteInterfaces(providerId)
+    API->>HTTP: http.get(/admin/quote-providers/{pid}/interfaces)
+    HTTP->>R: GET ...
+    R->>S: list_by_provider(provider_id)
+    S->>DB: SELECT ... WHERE provider_id=? ORDER BY interface_type,name
+    DB-->>S: rows
+    S-->>R: list[QuoteInterface]
+    R-->>HTTP: QuoteInterfaceOut[]
+    HTTP-->>UI: data (envelope {code:0,data})
+
+    Note over UI,DB: 场景A·2 — 新增接口
+    UI->>Hook: useCreateQuoteInterface().mutate(body)
+    Hook->>API: createQuoteInterface(providerId, body)
+    API->>HTTP: http.post(/admin/quote-providers/{pid}/interfaces, body)
+    HTTP->>R: POST ...
+    R->>S: create(provider_id=pid, interface_type=..., name=..., ...)
+    S->>DB: INSERT quote_provider_interfaces
+    DB-->>S: row (id, ts)
+    S-->>R: QuoteInterface
+    R-->>HTTP: QuoteInterfaceOut
+    HTTP-->>UI: {code:0,data}
+    Hook->>Hook: invalidateQueries(['admin','quote-providers',pid,'interfaces'])
+
+    Note over UI,DB: 场景A·3 — 删除接口（级联/独立，无外键依赖）
+    UI->>Hook: useDeleteQuoteInterface().mutate(interfaceId)
+    Hook->>API: deleteQuoteInterface(interfaceId)
+    API->>HTTP: http.delete(/admin/quote-providers/interfaces/{iid})
+    HTTP->>R: DELETE ...
+    R->>S: get(interface_id) then delete(iface)
+    S->>DB: DELETE quote_provider_interfaces WHERE id=?
+    R-->>HTTP: {id,deleted:true}
+    HTTP-->>UI: {code:0,data}
+
+---
+
+sequenceDiagram
+    autonumber
+    participant UI as InterfaceCategorySection
+    participant Hook as useInterfaceCategory
+    participant API as interface-category.api
+    participant HTTP as api-client (envelope)
+    participant R as AdminRouter
+    participant S as InterfaceCategoryService
+    participant DB as PostgreSQL
+
+    Note over UI,DB: 场景B·1 — 列出分类（证券板块下拉数据源）
+    UI->>Hook: useInterfaceCategories()
+    Hook->>API: listInterfaceCategories()
+    API->>HTTP: http.get(/admin/interface-categories)
+    HTTP->>R: GET ...
+    R->>S: list()
+    S->>DB: SELECT ... ORDER BY sort_order,label
+    DB-->>S: rows
+    S-->>R: list[InterfaceCategory]
+    R-->>HTTP: InterfaceCategoryOut[]
+    HTTP-->>UI: data
+
+    Note over UI,DB: 场景B·2 — 新增分类（key 唯一）
+    UI->>Hook: useCreateInterfaceCategory().mutate(body)
+    Hook->>API: createInterfaceCategory(body)
+    API->>HTTP: http.post(/admin/interface-categories, body)
+    HTTP->>R: POST ...
+    R->>S: create(key=..., label=..., icon=..., sort_order=...)
+    S->>DB: INSERT quote_provider_interface_categories
+    DB-->>S: row
+    alt key 重复
+        DB-->>S: IntegrityError
+        S-->>R: BusinessException(VALIDATION_FAILED, "接口分类 key 已存在", 409)
+        R-->>HTTP: {code:2000,message} (HTTP 409)
+    else 成功
+        S-->>R: InterfaceCategory
+        R-->>HTTP: InterfaceCategoryOut
+        HTTP-->>UI: {code:0,data}
+        Hook->>Hook: invalidateQueries(['admin','interface-categories'])
+    end

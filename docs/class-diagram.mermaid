@@ -1,0 +1,81 @@
+classDiagram
+    class InterfaceDirection {
+        &lt;&lt;enumeration&gt;&gt;
+        IN = "in"
+        OUT = "out"
+    }
+
+    class SecuritiesDataProvider {
+        +String id
+        +String name
+        +String provider_type
+        +String access_method
+        +dict config
+        +bool is_default
+        +bool is_active
+        +bool enabled
+        +String description
+    }
+
+    class QuoteInterface {
+        +String id
+        +String provider_id
+        +String interface_type
+        +String name
+        +String endpoint
+        +String http_method
+        +dict params
+        +bool enabled
+        +String description
+        +String direction
+        +int timeout
+        +int retry_count
+        +String rate_limit
+        +datetime created_at
+        +datetime updated_at
+    }
+
+    class InterfaceCategory {
+        +String id
+        +String key
+        +String label
+        +String icon
+        +int sort_order
+        +datetime created_at
+        +datetime updated_at
+    }
+
+    class QuoteInterfaceService {
+        +list_by_provider(provider_id) list~QuoteInterface~
+        +get(interface_id) QuoteInterface
+        +create(provider_id, interface_type, name, ...) QuoteInterface
+        +update(iface, ...) QuoteInterface
+        +delete(iface) void
+    }
+
+    class InterfaceCategoryService {
+        +list() list~InterfaceCategory~
+        +get(id) InterfaceCategory
+        +create(key, label, icon, sort_order) InterfaceCategory
+        +update(cat, ...) InterfaceCategory
+        +delete(cat) void
+    }
+
+    class AdminRouter {
+        +GET /quote-providers/{pid}/interfaces
+        +POST /quote-providers/{pid}/interfaces
+        +GET /quote-providers/interfaces/{iid}
+        +PATCH /quote-providers/interfaces/{iid}
+        +DELETE /quote-providers/interfaces/{iid}
+        +GET /interface-categories
+        +POST /interface-categories
+        +PATCH /interface-categories/{id}
+        +DELETE /interface-categories/{id}
+    }
+
+    QuoteInterface "n" --> "1" SecuritiesDataProvider : provider_id (FK, ON DELETE CASCADE)
+    QuoteInterfaceService ..> QuoteInterface : manages
+    InterfaceCategoryService ..> InterfaceCategory : manages
+    AdminRouter ..> QuoteInterfaceService : calls
+    AdminRouter ..> InterfaceCategoryService : calls
+    InterfaceDirection <.. QuoteInterface : direction column (PG enum)
