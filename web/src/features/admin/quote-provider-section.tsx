@@ -8,7 +8,7 @@
  * - 新增 / 编辑提供方走独立对话框组件 QuoteProviderDialog（与同模块其它对话框风格一致）。
  */
 
-import { useMemo, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight, Loader2, Pencil, Plus, Star, Trash2, Zap } from 'lucide-react';
 import {
   Card,
@@ -99,7 +99,8 @@ export function QuoteProviderSection(): JSX.Element {
   const sdkProviders = (providers ?? []).filter((p) => p.access_method === 'sdk');
 
   const renderProviderRow = (p: QuoteProvider): JSX.Element => (
-    <TableRow key={p.id}>
+    <Fragment key={p.id}>
+      <TableRow>
       <TableCell>
         <Button
           variant="ghost"
@@ -174,7 +175,15 @@ export function QuoteProviderSection(): JSX.Element {
         </div>
       </TableCell>
     </TableRow>
-  );
+    {expanded[p.id] && (
+      <TableRow>
+        <TableCell colSpan={7} className="bg-muted/40 p-3">
+          <ProviderInterfaces providerId={p.id} />
+        </TableCell>
+      </TableRow>
+    )}
+  </Fragment>
+);
 
   return (
     <div className="space-y-6">
@@ -253,11 +262,6 @@ export function QuoteProviderSection(): JSX.Element {
                     <TableBody>{sdkProviders.map(renderProviderRow)}</TableBody>
                   </Table>
                 </div>
-              )}
-              {(providers ?? []).map((p) =>
-                expanded[p.id] ? (
-                  <ProviderInterfaces key={`exp-${p.id}`} providerId={p.id} />
-                ) : null,
               )}
             </div>
           )}
