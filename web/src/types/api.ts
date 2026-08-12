@@ -345,8 +345,6 @@ export interface components {
     ImportType: 'securityTrades' | 'cashFlows' | 'assetSnapshots';
     /** InterfaceCategoryCreate */
     InterfaceCategoryCreate: {
-        /** Key */
-        key: string;
         /** Label */
         label: string;
         /** Icon */
@@ -356,8 +354,6 @@ export interface components {
       };
     /** InterfaceCategoryUpdate */
     InterfaceCategoryUpdate: {
-        /** Key */
-        key?: string | null;
         /** Label */
         label?: string | null;
         /** Icon */
@@ -682,8 +678,8 @@ PG 原生枚举类型名 `interface_direction`（由迁移创建）。
       };
     /** QuoteInterfaceCreate */
     QuoteInterfaceCreate: {
-        /** Interface Type */
-        interface_type: string;
+        /** 接口分类 id（UUID，外键→interface_categories.id） */
+        category_id: string;
         /** Name */
         name: string;
         /** Endpoint */
@@ -706,8 +702,8 @@ PG 原生枚举类型名 `interface_direction`（由迁移创建）。
       };
     /** QuoteInterfaceUpdate */
     QuoteInterfaceUpdate: {
-        /** Interface Type */
-        interface_type?: string | null;
+        /** 接口分类 id（UUID），可空表示未分类 */
+        category_id?: string | null;
         /** Name */
         name?: string | null;
         /** Endpoint */

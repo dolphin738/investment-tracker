@@ -272,7 +272,7 @@ backend/app/
 | | description | Text | NULL | 备注 |
 | `quote_provider_interfaces` | id | String(36) UUID | PK | 提供方下的接口（如「沪深股票列表」） |
 | | provider_id | String(36) | FK→securities_data_providers.id **CASCADE**, indexed | 所属提供方（删提供方级联删接口） |
-| | interface_type | String(64) | NOT NULL | 分类 key（自由文本，不强制外键到 categories；无匹配分类时 UI 显示 raw key） |
+| | category_id | String(36) | NULL | 外键→quote_provider_interface_categories.id（ON DELETE SET NULL）；未分类为 NULL |
 | | name | String(255) | NOT NULL | 接口名 |
 | | endpoint | String(512) | NULL | 接口地址（HTTPS）或 SDK 函数名（SDK） |
 | | http_method | String(10) | NULL | GET / POST / PUT / DELETE / PATCH（SDK 可空） |
@@ -284,12 +284,11 @@ backend/app/
 | | retry_count | Integer | NULL | 重试次数 |
 | | rate_limit | String(64) | NULL | 频率限制（自由文本，如 `100/min`） |
 | `quote_provider_interface_categories` | id | String(36) UUID | PK | 接口分类（后台可配） |
-| | key | String(64) | NOT NULL, **UNIQUE** | 分类唯一 key（如 ashare_list） |
 | | label | String(128) | NOT NULL | 展示名（如 A股列表） |
 | | icon | String(64) | NULL | lucide-react 图标名（如 List / LineChart），UI 动态映射 |
 | | sort_order | Integer | NOT NULL default 0 | 排序权重（升序） |
 
-> 级联语义：删除提供方 → 级联删其下接口（`ON DELETE CASCADE`）；删除分类 → **不影响**任何接口（`interface_type` 仅存自由文本 key，不强制外键）。迁移 `d3e4f5a6b7c8` 升级时预置 7 个分类（A股列表/行情、港股列表/行情、基金列表、可转债列表/行情，sort_order 1~7）。
+> 级联语义：删除提供方 → 级联删其下接口（`ON DELETE CASCADE`）；删除分类 → 接口 `category_id` 置 NULL（**不影响**接口存活，仅变为「未分类」）。迁移 `d3e4f5a6b7c8` 升级时预置 7 个分类（A股列表/行情、港股列表/行情、基金列表、可转债列表/行情，sort_order 1~7）。
 
 ### 3.2 设计要点说明
 

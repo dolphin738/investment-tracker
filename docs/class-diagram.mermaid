@@ -19,7 +19,7 @@ classDiagram
     class QuoteInterface {
         +String id
         +String provider_id
-        +String interface_type
+        +String category_id
         +String name
         +String endpoint
         +String http_method
@@ -36,7 +36,6 @@ classDiagram
 
     class InterfaceCategory {
         +String id
-        +String key
         +String label
         +String icon
         +int sort_order
@@ -47,7 +46,7 @@ classDiagram
     class QuoteInterfaceService {
         +list_by_provider(provider_id) list~QuoteInterface~
         +get(interface_id) QuoteInterface
-        +create(provider_id, interface_type, name, ...) QuoteInterface
+        +create(provider_id, category_id, name, ...) QuoteInterface
         +update(iface, ...) QuoteInterface
         +delete(iface) void
     }
@@ -55,7 +54,7 @@ classDiagram
     class InterfaceCategoryService {
         +list() list~InterfaceCategory~
         +get(id) InterfaceCategory
-        +create(key, label, icon, sort_order) InterfaceCategory
+        +create(label, icon, sort_order) InterfaceCategory
         +update(cat, ...) InterfaceCategory
         +delete(cat) void
     }

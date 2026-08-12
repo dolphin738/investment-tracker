@@ -15,7 +15,6 @@ import { http } from '@/lib/api-client';
 /** 接口分类（后端 InterfaceCategoryOut 经信封解包后的结构） */
 export interface InterfaceCategory {
   id: string;
-  key: string;
   label: string;
   icon: string | null;
   sort_order: number;
@@ -25,7 +24,6 @@ export interface InterfaceCategory {
 
 /** 新增分类请求体 */
 export interface InterfaceCategoryCreate {
-  key: string;
   label: string;
   icon?: string | null;
   sort_order?: number;
@@ -33,7 +31,6 @@ export interface InterfaceCategoryCreate {
 
 /** 更新分类请求体（全字段可选） */
 export interface InterfaceCategoryUpdate {
-  key?: string;
   label?: string;
   icon?: string | null;
   sort_order?: number;

@@ -24,7 +24,7 @@ export type InterfaceDirection = 'in' | 'out';
 export interface QuoteInterface {
   id: string;
   provider_id: string;
-  interface_type: string;
+  category_id: string | null;
   name: string;
   endpoint: string | null;
   http_method: HttpMethod | null;
@@ -41,7 +41,7 @@ export interface QuoteInterface {
 
 /** 新增接口请求体（provider_id 取自路径） */
 export interface QuoteInterfaceCreate {
-  interface_type: string;
+  category_id: string;
   name: string;
   endpoint?: string | null;
   http_method?: HttpMethod | null;
@@ -56,7 +56,7 @@ export interface QuoteInterfaceCreate {
 
 /** 更新接口请求体（全字段可选；provider_id 不可改） */
 export interface QuoteInterfaceUpdate {
-  interface_type?: string;
+  category_id?: string;
   name?: string;
   endpoint?: string | null;
   http_method?: HttpMethod | null;

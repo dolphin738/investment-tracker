@@ -31,8 +31,8 @@ PROVIDER_BODY = {
     "enabled": True,
 }
 
-INTERFACE_BODY = {
-    "interface_type": "ashare_list",
+# 接口基础字段（不含 category_id，由各测试先建分类后补 id）
+INTERFACE_BASE = {
     "name": "沪深股票列表",
     "endpoint": "/api/ashare/list",
     "http_method": "GET",
@@ -65,6 +65,18 @@ async def _create_provider(client, token: str, name: str = "AKShare") -> str:
     return env(r)[2]["id"]
 
 
+async def _create_category(
+    client, token: str, label: str = "A股列表", **overrides
+) -> str:
+    body = {"label": label, **overrides}
+    r = await client.post(
+        "/api/admin/interface-categories", json=body, headers=auth(token)
+    )
+    status, code, data, _ = env(r)
+    assert status == 200 and code == 0, data
+    return data["id"]
+
+
 async def test_non_admin_forbidden(client):
     token = await _user_token(client, "qi_user_1@example.com")
     r = await client.get("/api/admin/quote-providers/interfaces", headers=auth(token))
@@ -76,16 +88,17 @@ async def test_non_admin_forbidden(client):
 async def test_create_and_list_by_provider(client):
     token = await _admin_token(client, "qi_admin_1@example.com")
     pid = await _create_provider(client, token)
+    cid = await _create_category(client, token)
     r = await client.post(
         f"/api/admin/quote-providers/{pid}/interfaces",
-        json=INTERFACE_BODY,
+        json={**INTERFACE_BASE, "category_id": cid},
         headers=auth(token),
     )
     status, code, data, _ = env(r)
     assert status == 200 and code == 0
     iid = data["id"]
     assert data["provider_id"] == pid
-    assert data["interface_type"] == "ashare_list"
+    assert data["category_id"] == cid
     assert data["http_method"] == "GET"
     assert data["params"] == {"code": "string"}
     assert data["direction"] == "in"
@@ -99,9 +112,10 @@ async def test_create_and_list_by_provider(client):
 
 async def test_create_requires_existing_provider(client):
     token = await _admin_token(client, "qi_admin_2@example.com")
+    cid = await _create_category(client, token)
     r = await client.post(
         "/api/admin/quote-providers/00000000-0000-0000-0000-000000000000/interfaces",
-        json=INTERFACE_BODY,
+        json={**INTERFACE_BASE, "category_id": cid},
         headers=auth(token),
     )
     status, code, _, _ = env(r)
@@ -112,7 +126,8 @@ async def test_create_requires_existing_provider(client):
 async def test_create_invalid_http_method(client):
     token = await _admin_token(client, "qi_admin_3@example.com")
     pid = await _create_provider(client, token)
-    bad = dict(INTERFACE_BODY, http_method="FOO")
+    cid = await _create_category(client, token)
+    bad = dict(INTERFACE_BASE, category_id=cid, http_method="FOO")
     r = await client.post(
         f"/api/admin/quote-providers/{pid}/interfaces",
         json=bad,
@@ -126,9 +141,10 @@ async def test_create_invalid_http_method(client):
 async def test_get_update_delete(client):
     token = await _admin_token(client, "qi_admin_4@example.com")
     pid = await _create_provider(client, token)
+    cid = await _create_category(client, token)
     r = await client.post(
         f"/api/admin/quote-providers/{pid}/interfaces",
-        json=INTERFACE_BODY,
+        json={**INTERFACE_BASE, "category_id": cid},
         headers=auth(token),
     )
     iid = env(r)[2]["id"]
@@ -170,9 +186,10 @@ async def test_get_not_found(client):
 async def test_provider_delete_cascades_interfaces(client):
     token = await _admin_token(client, "qi_admin_6@example.com")
     pid = await _create_provider(client, token)
+    cid = await _create_category(client, token)
     r = await client.post(
         f"/api/admin/quote-providers/{pid}/interfaces",
-        json=INTERFACE_BODY,
+        json={**INTERFACE_BASE, "category_id": cid},
         headers=auth(token),
     )
     iid = env(r)[2]["id"]
@@ -191,14 +208,16 @@ async def test_list_all_returns_all_interfaces(client):
     token = await _admin_token(client, "qi_admin_7@example.com")
     pid1 = await _create_provider(client, token, name="A")
     pid2 = await _create_provider(client, token, name="B")
+    cid1 = await _create_category(client, token, label="A股列表")
+    cid2 = await _create_category(client, token, label="A股行情")
     await client.post(
         f"/api/admin/quote-providers/{pid1}/interfaces",
-        json=INTERFACE_BODY,
+        json={**INTERFACE_BASE, "category_id": cid1},
         headers=auth(token),
     )
     await client.post(
         f"/api/admin/quote-providers/{pid2}/interfaces",
-        json=dict(INTERFACE_BODY, interface_type="ashare_quote", name="A股日行情"),
+        json={**INTERFACE_BASE, "name": "A股日行情", "category_id": cid2},
         headers=auth(token),
     )
     r = await client.get("/api/admin/quote-providers/interfaces", headers=auth(token))

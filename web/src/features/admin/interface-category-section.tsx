@@ -1,11 +1,12 @@
 /**
  * features/admin/interface-category-section.tsx — 接口分类管理板块
  *
- * 列表（label / key / icon / sort_order）+ 新增 / 编辑 / 删除（删除不影响接口）。
+ * 列表（label / icon / sort_order）+ 新增 / 编辑 / 删除（删除不影响接口）。
  */
 
-import { useState } from 'react';
+import { useState, type ComponentType } from 'react';
 import { Pencil, Plus, Trash2 } from 'lucide-react';
+import * as LucideIcons from 'lucide-react';
 import {
   Card,
   CardContent,
@@ -14,7 +15,6 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import {
   Table,
   TableBody,
@@ -36,6 +36,19 @@ import {
 import type { InterfaceCategory } from '@/api/interface-category.api';
 import { useDeleteInterfaceCategory, useInterfaceCategories } from '@/hooks/use-interface-category';
 import { InterfaceCategoryDialog } from './interface-category-dialog';
+
+/** 动态渲染分类图标：按 c.icon 字符串名从 lucide-react 取组件；缺失或库中不存在回退到 Tag。 */
+function CategoryIcon({ name }: { name: string | null }): JSX.Element {
+  const Icons = LucideIcons as unknown as Record<
+    string,
+    ComponentType<{ className?: string }>
+  >;
+  const Comp = name ? Icons[name] : undefined;
+  if (Comp) {
+    return <Comp className="h-4 w-4" />;
+  }
+  return <LucideIcons.Tag className="h-4 w-4 text-muted-foreground" />;
+}
 
 export function InterfaceCategorySection(): JSX.Element {
   const { data: categories, isLoading } = useInterfaceCategories();
@@ -88,7 +101,6 @@ export function InterfaceCategorySection(): JSX.Element {
             <TableHeader>
               <TableRow>
                 <TableHead>展示名</TableHead>
-                <TableHead>key</TableHead>
                 <TableHead>图标</TableHead>
                 <TableHead>排序</TableHead>
                 <TableHead className="text-right">操作</TableHead>
@@ -98,9 +110,8 @@ export function InterfaceCategorySection(): JSX.Element {
               {categories.map((c) => (
                 <TableRow key={c.id}>
                   <TableCell className="font-medium">{c.label}</TableCell>
-                  <TableCell className="text-muted-foreground">{c.key}</TableCell>
                   <TableCell>
-                    {c.icon ? <Badge variant="outline">{c.icon}</Badge> : '-'}
+                    <CategoryIcon name={c.icon} />
                   </TableCell>
                   <TableCell>{c.sort_order}</TableCell>
                   <TableCell className="text-right">
@@ -145,7 +156,7 @@ export function InterfaceCategorySection(): JSX.Element {
           <AlertDialogHeader>
             <AlertDialogTitle>确认删除该分类？</AlertDialogTitle>
             <AlertDialogDescription>
-              删除后不影响已有的接口（接口按原始 key 显示）。此操作不可恢复。
+              删除后不影响已有的接口（接口变为「未分类」）。此操作不可恢复。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

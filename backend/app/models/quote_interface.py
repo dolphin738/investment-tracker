@@ -4,8 +4,8 @@
 可调用的行情接口（如「沪深股票列表」「A股日行情」）。
 
 - provider_id：外键 → securities_data_providers.id，ON DELETE CASCADE（删除提供方级联删接口）。
-- interface_type：分类 key（自由文本字符串，如 ashare_list）；不强制外键到 interface_categories，
-  分类删除不影响接口，UI 无匹配分类时直接显示 raw key。
+- category_id：外键 → quote_provider_interface_categories.id，ON DELETE SET NULL（删除分类仅使接口
+  变为「未分类」，不影响接口存活）；可空（未分类接口为 NULL）。
 - direction：接口方向（in/out），PG 原生枚举 interface_direction；业务当前仅落库（默认 in）。
 - params：请求参数模板（JSON）；可空，默认空对象。
 - http_method：GET/POST/PUT/DELETE/PATCH 之一（大写），SDK 接口可留空。
@@ -32,7 +32,12 @@ class QuoteInterface(Base, TimestampMixin):
         nullable=False,
         index=True,
     )
-    interface_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    category_id: Mapped[Optional[str]] = mapped_column(
+        String(36),
+        ForeignKey("quote_provider_interface_categories.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     endpoint: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
     http_method: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)

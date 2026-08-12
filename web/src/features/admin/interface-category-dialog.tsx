@@ -1,8 +1,8 @@
 /**
  * features/admin/interface-category-dialog.tsx — 接口分类新增/编辑对话框
  *
- * 字段：key（唯一）、label、icon（lucide 图标名）、sort_order。
- * key 重复时后端返回 409 / VALIDATION_FAILED，拦截器已 toast，此处不二次提示。
+ * 字段：label、icon（lucide 图标名）、sort_order。
+ * label 重复时后端允许（UI 自行去重展示），此处不二次提示。
  */
 
 import { useEffect, useState } from 'react';
@@ -25,7 +25,6 @@ import {
 } from '@/hooks/use-interface-category';
 
 interface FormState {
-  key: string;
   label: string;
   icon: string;
   sortOrder: string;
@@ -33,10 +32,9 @@ interface FormState {
 
 function toForm(edit: InterfaceCategory | null): FormState {
   if (!edit) {
-    return { key: '', label: '', icon: '', sortOrder: '0' };
+    return { label: '', icon: '', sortOrder: '0' };
   }
   return {
-    key: edit.key,
     label: edit.label,
     icon: edit.icon ?? '',
     sortOrder: String(edit.sort_order),
@@ -65,14 +63,10 @@ export function InterfaceCategoryDialog({
   const pending = createMut.isPending || updateMut.isPending;
 
   const handleSubmit = (): void => {
-    if (!form.key.trim()) {
-      return;
-    }
     if (!form.label.trim()) {
       return;
     }
     const payload = {
-      key: form.key.trim(),
       label: form.label.trim(),
       icon: form.icon.trim() || null,
       sort_order: form.sortOrder.trim() ? Number(form.sortOrder) : 0,
@@ -100,20 +94,6 @@ export function InterfaceCategoryDialog({
         </DialogHeader>
 
         <div className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="cat-key">分类 key（唯一）</Label>
-            <Input
-              id="cat-key"
-              placeholder="如 ashare_list"
-              value={form.key}
-              disabled={Boolean(editing)}
-              onChange={(e) => setForm({ ...form, key: e.target.value })}
-            />
-            {editing && (
-              <p className="text-xs text-muted-foreground">key 不可修改</p>
-            )}
-          </div>
-
           <div className="space-y-2">
             <Label htmlFor="cat-label">展示名</Label>
             <Input

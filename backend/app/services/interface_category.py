@@ -1,21 +1,18 @@
 """接口分类服务 — 后台可配置的接口分类（列表 / 增改删）。
 
-与 QuoteProviderService 保持一致的风格。key 唯一（UNIQUE 约束），重复插入/更新为已存在的
-key 时捕获 IntegrityError → 抛 BusinessException(VALIDATION_FAILED, status_code=409)，
-复用 2000 业务码（不新增业务码），由 envelope 归一为 409 / VALIDATION_FAILED(2000)。
+与 QuoteProviderService 保持一致的风格。分类无唯一业务键（仅 label + sort_order），
+label 重复允许（UI 自行去重展示）。
 
-分类删除不影响任何接口：QuoteInterface.interface_type 仅存自由文本 key，无外键约束。
+分类删除不影响任何接口：QuoteInterface.category_id 外键 ON DELETE SET NULL，
+删除分类仅把接口的 category_id 置 NULL，接口本身存活（变为「未分类」）。
 """
 from __future__ import annotations
 
 from typing import Optional
 
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.enums import BusinessErrorCode
-from app.core.exceptions import BusinessException
 from app.models.interface_category import InterfaceCategory
 
 
@@ -24,10 +21,10 @@ class InterfaceCategoryService:
         self.session = session
 
     async def list(self) -> list[InterfaceCategory]:
-        """列出全部分类，按 sort_order 升序、其次 key。"""
+        """列出全部分类，按 sort_order 升序、其次 label。"""
         result = await self.session.execute(
             select(InterfaceCategory).order_by(
-                InterfaceCategory.sort_order, InterfaceCategory.key
+                InterfaceCategory.sort_order, InterfaceCategory.label
             )
         )
         return list(result.scalars().all())
@@ -38,24 +35,13 @@ class InterfaceCategoryService:
     async def create(
         self,
         *,
-        key: str,
         label: str,
         icon: Optional[str] = None,
         sort_order: int = 0,
     ) -> InterfaceCategory:
-        obj = InterfaceCategory(
-            key=key, label=label, icon=icon, sort_order=sort_order
-        )
+        obj = InterfaceCategory(label=label, icon=icon, sort_order=sort_order)
         self.session.add(obj)
-        try:
-            await self.session.flush()
-        except IntegrityError:
-            await self.session.rollback()
-            raise BusinessException(
-                BusinessErrorCode.VALIDATION_FAILED,
-                "接口分类 key 已存在",
-                status_code=409,
-            ) from None
+        await self.session.flush()
         await self.session.refresh(obj)
         return obj
 
@@ -63,28 +49,17 @@ class InterfaceCategoryService:
         self,
         obj: InterfaceCategory,
         *,
-        key: Optional[str] = None,
         label: Optional[str] = None,
         icon: Optional[str] = None,
         sort_order: Optional[int] = None,
     ) -> InterfaceCategory:
-        if key is not None:
-            obj.key = key
         if label is not None:
             obj.label = label
         if icon is not None:
             obj.icon = icon
         if sort_order is not None:
             obj.sort_order = sort_order
-        try:
-            await self.session.flush()
-        except IntegrityError:
-            await self.session.rollback()
-            raise BusinessException(
-                BusinessErrorCode.VALIDATION_FAILED,
-                "接口分类 key 已存在",
-                status_code=409,
-            ) from None
+        await self.session.flush()
         await self.session.refresh(obj)
         return obj
 

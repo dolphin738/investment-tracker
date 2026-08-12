@@ -1,9 +1,8 @@
-"""接口分类 CRUD + key 唯一冲突 + 删除不影响接口 — admin 集成测试。
+"""接口分类 CRUD + 删除不影响接口（SET NULL）— admin 集成测试。
 
 依赖 require_admin（非管理员 → 403）。覆盖：
 - CRUD：create / list（按 sort_order 升序）/ get / update / delete；
-- key 唯一冲突 → 409 / VALIDATION_FAILED(2000)（复用 2000，不新增业务码）；
-- 删除分类不影响接口（接口仍可按 raw key 存活）；
+- 删除分类不影响接口：接口的 category_id 置 NULL（SET NULL），接口仍存活；
 - 非管理员 → 403。
 
 测试库在会话内共享，_clean_db 每个测试前 TRUNCATE 全部表（含迁移种子，故测试内自行创建数据）。
@@ -29,10 +28,14 @@ PROVIDER_BODY = {
     "enabled": True,
 }
 
-INTERFACE_BODY = {
-    "interface_type": "ashare_list",
+INTERFACE_BASE = {
     "name": "沪深股票列表",
+    "endpoint": "/api/ashare/list",
     "http_method": "GET",
+    "params": {"code": "string"},
+    "enabled": True,
+    "description": "A股列表接口",
+    "rate_limit": "100/min",
 }
 
 
@@ -59,6 +62,18 @@ async def _create_provider(client, token: str) -> str:
     return env(r)[2]["id"]
 
 
+async def _create_category(
+    client, token: str, label: str = "A股列表", **overrides
+) -> str:
+    body = {"label": label, **overrides}
+    r = await client.post(
+        "/api/admin/interface-categories", json=body, headers=auth(token)
+    )
+    status, code, data, _ = env(r)
+    assert status == 200 and code == 0, data
+    return data["id"]
+
+
 async def test_non_admin_forbidden(client):
     token = await _user_token(client, "ic_user_1@example.com")
     r = await client.get("/api/admin/interface-categories", headers=auth(token))
@@ -71,13 +86,13 @@ async def test_create_and_list(client):
     token = await _admin_token(client, "ic_admin_1@example.com")
     r = await client.post(
         "/api/admin/interface-categories",
-        json={"key": "ashare_list", "label": "A股列表", "icon": "List", "sort_order": 2},
+        json={"label": "A股列表", "icon": "List", "sort_order": 2},
         headers=auth(token),
     )
     status, code, data, _ = env(r)
     assert status == 200 and code == 0
     cid = data["id"]
-    assert data["key"] == "ashare_list"
+    assert data["label"] == "A股列表"
     assert data["sort_order"] == 2
 
     r2 = await client.get("/api/admin/interface-categories", headers=auth(token))
@@ -85,26 +100,11 @@ async def test_create_and_list(client):
     assert isinstance(data2, list) and any(c["id"] == cid for c in data2)
 
 
-async def test_create_duplicate_key_conflict(client):
-    token = await _admin_token(client, "ic_admin_2@example.com")
-    body = {"key": "dup_test", "label": "冲突测试"}
-    r1 = await client.post(
-        "/api/admin/interface-categories", json=body, headers=auth(token)
-    )
-    assert env(r1)[0] == 200
-    r2 = await client.post(
-        "/api/admin/interface-categories", json=body, headers=auth(token)
-    )
-    status, code, _, _ = env(r2)
-    assert status == 409
-    assert code == BusinessErrorCode.VALIDATION_FAILED
-
-
 async def test_get_update_delete(client):
     token = await _admin_token(client, "ic_admin_3@example.com")
     r = await client.post(
         "/api/admin/interface-categories",
-        json={"key": "hk_list", "label": "港股列表"},
+        json={"label": "港股列表"},
         headers=auth(token),
     )
     cid = env(r)[2]["id"]
@@ -128,32 +128,28 @@ async def test_get_update_delete(client):
     assert isinstance(data, list) and not any(c["id"] == cid for c in data)
 
 
-async def test_delete_category_does_not_delete_interfaces(client):
-    """删除分类不应删除接口：接口 interface_type 仅存自由文本 key，无外键约束。"""
+async def test_delete_category_sets_interface_category_id_null(client):
+    """删除分类不应删除接口：接口 category_id 置 NULL（SET NULL），接口仍存活。"""
     token = await _admin_token(client, "ic_admin_4@example.com")
     pid = await _create_provider(client, token)
-    # 接口使用与分类相同的 key
+    cid = await _create_category(client, token, label="A股列表")
+    # 接口归属该分类
     r = await client.post(
         f"/api/admin/quote-providers/{pid}/interfaces",
-        json=INTERFACE_BODY,
+        json={**INTERFACE_BASE, "category_id": cid},
         headers=auth(token),
     )
     iid = env(r)[2]["id"]
 
-    cat_r = await client.post(
-        "/api/admin/interface-categories",
-        json={"key": "ashare_list", "label": "A股列表"},
-        headers=auth(token),
-    )
-    cid = env(cat_r)[2]["id"]
     # 删除分类
     r = await client.delete(
         f"/api/admin/interface-categories/{cid}", headers=auth(token)
     )
     assert env(r)[0] == 200
-    # 接口仍然存活（按 raw key 显示）
+    # 接口仍然存活，category_id 被置 NULL（未分类）
     r = await client.get(
         f"/api/admin/quote-providers/interfaces/{iid}", headers=auth(token)
     )
     status, _, data, _ = env(r)
-    assert status == 200 and data["interface_type"] == "ashare_list"
+    assert status == 200
+    assert data["category_id"] is None

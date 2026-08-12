@@ -24,11 +24,11 @@ class QuoteInterfaceService:
         self.session = session
 
     async def list_by_provider(self, provider_id: str) -> list[QuoteInterface]:
-        """列出某提供方全部接口，按 interface_type + name 排序。"""
+        """列出某提供方全部接口，按 category_id + name 排序。"""
         result = await self.session.execute(
             select(QuoteInterface)
             .where(QuoteInterface.provider_id == provider_id)
-            .order_by(QuoteInterface.interface_type, QuoteInterface.name)
+            .order_by(QuoteInterface.category_id, QuoteInterface.name)
         )
         return list(result.scalars().all())
 
@@ -37,7 +37,7 @@ class QuoteInterfaceService:
         result = await self.session.execute(
             select(QuoteInterface).order_by(
                 QuoteInterface.provider_id,
-                QuoteInterface.interface_type,
+                QuoteInterface.category_id,
                 QuoteInterface.name,
             )
         )
@@ -50,7 +50,7 @@ class QuoteInterfaceService:
         self,
         *,
         provider_id: str,
-        interface_type: str,
+        category_id: str,
         name: str,
         endpoint: Optional[str] = None,
         http_method: Optional[str] = None,
@@ -64,7 +64,7 @@ class QuoteInterfaceService:
     ) -> QuoteInterface:
         obj = QuoteInterface(
             provider_id=provider_id,
-            interface_type=interface_type,
+            category_id=category_id,
             name=name,
             endpoint=endpoint,
             http_method=http_method,

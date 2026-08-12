@@ -1,7 +1,7 @@
 /**
  * features/admin/quote-interface-dialog.tsx — 提供方接口新增/编辑对话框
  *
- * 字段：interface_type（Select 读分类 + 自定义）、name、endpoint、http_method、
+ * 字段：categoryId（Select 读分类，纯外键，不允许自定义）、name、endpoint、http_method、
  * params（JSON textarea）、enabled、description、timeout、retry_count、rate_limit。
  * 不含 direction（后端落库，UI 暂不暴露）。
  */
@@ -36,12 +36,10 @@ import {
 } from '@/hooks/use-quote-interface';
 import { useInterfaceCategories } from '@/hooks/use-interface-category';
 
-const CUSTOM_VALUE = '__custom__';
 const HTTP_METHODS: HttpMethod[] = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'];
 
 interface FormState {
-  interfaceType: string;
-  customType: string;
+  categoryId: string;
   name: string;
   endpoint: string;
   httpMethod: string;
@@ -56,8 +54,7 @@ interface FormState {
 function toForm(edit: QuoteInterface | null): FormState {
   if (!edit) {
     return {
-      interfaceType: '',
-      customType: '',
+      categoryId: '',
       name: '',
       endpoint: '',
       httpMethod: '',
@@ -70,8 +67,7 @@ function toForm(edit: QuoteInterface | null): FormState {
     };
   }
   return {
-    interfaceType: edit.interface_type,
-    customType: '',
+    categoryId: edit.category_id ?? '',
     name: edit.name,
     endpoint: edit.endpoint ?? '',
     httpMethod: edit.http_method ?? '',
@@ -109,18 +105,9 @@ export function QuoteInterfaceDialog({
 
   const pending = createMut.isPending || updateMut.isPending;
 
-  const resolveInterfaceType = (): string | null => {
-    if (form.interfaceType === CUSTOM_VALUE) {
-      const v = form.customType.trim();
-      return v || null;
-    }
-    return form.interfaceType.trim() || null;
-  };
-
   const handleSubmit = (): void => {
-    const interfaceType = resolveInterfaceType();
-    if (!interfaceType) {
-      toast.error('请选择或填写接口分类');
+    if (!form.categoryId.trim()) {
+      toast.error('请选择接口分类');
       return;
     }
     if (!form.name.trim()) {
@@ -144,7 +131,7 @@ export function QuoteInterfaceDialog({
     }
 
     const payload = {
-      interface_type: interfaceType,
+      category_id: form.categoryId.trim(),
       name: form.name.trim(),
       endpoint: form.endpoint.trim() || null,
       http_method:
@@ -185,33 +172,20 @@ export function QuoteInterfaceDialog({
           <div className="space-y-2">
             <Label htmlFor="qi-type">接口分类</Label>
             <Select
-              value={form.interfaceType}
-              onValueChange={(v) =>
-                setForm({ ...form, interfaceType: v })
-              }
+              value={form.categoryId}
+              onValueChange={(v) => setForm({ ...form, categoryId: v })}
             >
               <SelectTrigger id="qi-type">
-                <SelectValue placeholder="选择分类（或自定义）" />
+                <SelectValue placeholder="选择分类" />
               </SelectTrigger>
               <SelectContent>
                 {(categories ?? []).map((c) => (
-                  <SelectItem key={c.id} value={c.key}>
-                    {c.label}（{c.key}）
+                  <SelectItem key={c.id} value={c.id}>
+                    {c.label}
                   </SelectItem>
                 ))}
-                <SelectItem value={CUSTOM_VALUE}>自定义…</SelectItem>
               </SelectContent>
             </Select>
-            {form.interfaceType === CUSTOM_VALUE && (
-              <Input
-                id="qi-custom-type"
-                placeholder="自定义分类 key，如 ashare_list"
-                value={form.customType}
-                onChange={(e) =>
-                  setForm({ ...form, customType: e.target.value })
-                }
-              />
-            )}
           </div>
 
           <div className="space-y-2">

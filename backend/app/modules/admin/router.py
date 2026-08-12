@@ -19,7 +19,7 @@
 
 接口分类（InterfaceCategory）CRUD：
 - GET    /api/admin/interface-categories：列出全部分类（按 sort_order 升序）。
-- POST   /api/admin/interface-categories：新增分类（key 唯一，冲突 → 409）。
+- POST   /api/admin/interface-categories：新增分类（label 必填）。
 - PATCH  /api/admin/interface-categories/{id}：更新分类。
 - DELETE /api/admin/interface-categories/{id}：删除（不影响接口）。
 
@@ -51,6 +51,13 @@ def _check_config(access_method: QuoteProviderAccessMethod, config: dict[str, An
     elif access_method == QuoteProviderAccessMethod.SDK:
         if not isinstance(config.get("sdk_name"), str) or not config.get("sdk_name"):
             raise ValueError("SDK 接入方式必须提供 sdk_name（字符串，如 akshare）")
+
+
+# 接口分类 id 必须是合法 UUID（外键引用 quote_provider_interface_categories.id）
+UUID_PATTERN: str = (
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
 
 
 # --------------------------------------------------------------------------- #
@@ -106,7 +113,9 @@ class QuoteProviderOut(BaseModel):
 # 提供方接口（QuoteInterface）内联 schema
 # --------------------------------------------------------------------------- #
 class QuoteInterfaceCreate(BaseModel):
-    interface_type: str = Field(..., min_length=1, max_length=64)
+    category_id: str = Field(
+        ..., pattern=UUID_PATTERN, description="接口分类 id（UUID，外键→interface_categories.id）"
+    )
     name: str = Field(..., min_length=1, max_length=255)
     endpoint: Optional[str] = Field(None, max_length=512)
     http_method: Optional[Literal["GET", "POST", "PUT", "DELETE", "PATCH"]] = None
@@ -120,7 +129,9 @@ class QuoteInterfaceCreate(BaseModel):
 
 
 class QuoteInterfaceUpdate(BaseModel):
-    interface_type: Optional[str] = Field(None, min_length=1, max_length=64)
+    category_id: Optional[str] = Field(
+        None, pattern=UUID_PATTERN, description="接口分类 id（UUID），可空表示未分类"
+    )
     name: Optional[str] = Field(None, min_length=1, max_length=255)
     endpoint: Optional[str] = Field(None, max_length=512)
     http_method: Optional[Literal["GET", "POST", "PUT", "DELETE", "PATCH"]] = None
@@ -136,7 +147,7 @@ class QuoteInterfaceUpdate(BaseModel):
 class QuoteInterfaceOut(BaseModel):
     id: str
     provider_id: str
-    interface_type: str
+    category_id: Optional[str] = None
     name: str
     endpoint: Optional[str]
     http_method: Optional[str]
@@ -157,14 +168,12 @@ class QuoteInterfaceOut(BaseModel):
 # 接口分类（InterfaceCategory）内联 schema
 # --------------------------------------------------------------------------- #
 class InterfaceCategoryCreate(BaseModel):
-    key: str = Field(..., min_length=1, max_length=64)
     label: str = Field(..., min_length=1, max_length=128)
     icon: Optional[str] = Field(None, max_length=64)
     sort_order: int = 0
 
 
 class InterfaceCategoryUpdate(BaseModel):
-    key: Optional[str] = Field(None, min_length=1, max_length=64)
     label: Optional[str] = Field(None, min_length=1, max_length=128)
     icon: Optional[str] = Field(None, max_length=64)
     sort_order: Optional[int] = None
@@ -172,7 +181,6 @@ class InterfaceCategoryUpdate(BaseModel):
 
 class InterfaceCategoryOut(BaseModel):
     id: str
-    key: str
     label: str
     icon: Optional[str]
     sort_order: int
@@ -275,7 +283,7 @@ async def create_provider_interface(
     svc = QuoteInterfaceService(db)
     obj = await svc.create(
         provider_id=provider_id,
-        interface_type=body.interface_type,
+        category_id=body.category_id,
         name=body.name,
         endpoint=body.endpoint,
         http_method=body.http_method,
@@ -397,7 +405,7 @@ async def update_interface(
         raise HTTPException(status_code=404, detail="接口不存在")
     obj = await svc.update(
         obj,
-        interface_type=body.interface_type,
+        category_id=body.category_id,
         name=body.name,
         endpoint=body.endpoint,
         http_method=body.http_method,
@@ -450,7 +458,7 @@ async def create_interface_category(
 ) -> InterfaceCategoryOut:
     svc = InterfaceCategoryService(db)
     cat = await svc.create(
-        key=body.key, label=body.label, icon=body.icon, sort_order=body.sort_order
+        label=body.label, icon=body.icon, sort_order=body.sort_order
     )
     await db.commit()
     await db.refresh(cat)
@@ -470,7 +478,6 @@ async def update_interface_category(
         raise HTTPException(status_code=404, detail="分类不存在")
     cat = await svc.update(
         cat,
-        key=body.key,
         label=body.label,
         icon=body.icon,
         sort_order=body.sort_order,

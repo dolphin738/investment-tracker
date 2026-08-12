@@ -3,8 +3,8 @@
  *
  * - 提供方按接入方式分组（HTTPS 提供方 / SDK 提供方）。
  * - 每个提供方行：编辑 / 设为默认 / 切换当前 / 删除（沿用现有 hooks）。
- * - 每个提供方展开区：接口子表（按 interface_type 分组，复用 useQuoteInterfaces）+ 新增/编辑/删除接口。
- * - 顶层「按分类汇总所有提供方接口」总览（ InterfacesByCategoryOverview，扁平接口按 interface_type 聚合）。
+ * - 每个提供方展开区：接口子表（按 category_id 分组，复用 useQuoteInterfaces）+ 新增/编辑/删除接口。
+ * - 顶层「按分类汇总所有提供方接口」总览（ InterfacesByCategoryOverview，扁平接口按 category_id 聚合）。
  * - 新增 / 编辑提供方走独立对话框组件 QuoteProviderDialog（与同模块其它对话框风格一致）。
  */
 
@@ -60,7 +60,7 @@ function useCategoryLabelMap(): Map<string, string> {
   const { data: categories } = useInterfaceCategories();
   return useMemo(() => {
     const m = new Map<string, string>();
-    (categories ?? []).forEach((c) => m.set(c.key, c.label));
+    (categories ?? []).forEach((c) => m.set(c.id, c.label));
     return m;
   }, [categories]);
 }
@@ -307,7 +307,7 @@ export function QuoteProviderSection(): JSX.Element {
   );
 }
 
-/** 单个提供方下的接口子表（按 interface_type 分组） */
+/** 单个提供方下的接口子表（按 category_id 分组） */
 function ProviderInterfaces({ providerId }: { providerId: string }): JSX.Element {
   const { data: interfaces, isLoading } = useQuoteInterfaces(providerId);
   const labelMap = useCategoryLabelMap();
@@ -319,9 +319,9 @@ function ProviderInterfaces({ providerId }: { providerId: string }): JSX.Element
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
   const groups = useMemo(() => {
-    const map = new Map<string, QuoteInterface[]>();
+    const map = new Map<string | null, QuoteInterface[]>();
     (interfaces ?? []).forEach((it) => {
-      const k = it.interface_type;
+      const k = it.category_id;
       if (!map.has(k)) map.set(k, []);
       map.get(k)!.push(it);
     });
@@ -365,7 +365,7 @@ function ProviderInterfaces({ providerId }: { providerId: string }): JSX.Element
           groups.map(([type, items]) => (
             <div key={type} className="mb-4">
               <div className="mb-1 text-xs font-medium text-muted-foreground">
-                {labelMap.get(type) ?? type}
+                {type ? (labelMap.get(type) ?? type) : '未分类'}
               </div>
               <Table>
                 <TableHeader>
@@ -464,9 +464,9 @@ function InterfacesByCategoryOverview(): JSX.Element {
   const labelMap = useCategoryLabelMap();
 
   const groups = useMemo(() => {
-    const map = new Map<string, QuoteInterface[]>();
+    const map = new Map<string | null, QuoteInterface[]>();
     (interfaces ?? []).forEach((it) => {
-      const k = it.interface_type;
+      const k = it.category_id;
       if (!map.has(k)) map.set(k, []);
       map.get(k)!.push(it);
     });
@@ -478,7 +478,7 @@ function InterfacesByCategoryOverview(): JSX.Element {
       <CardHeader>
         <CardTitle className="text-base">按分类汇总所有提供方接口</CardTitle>
         <CardDescription>
-          跨提供方按接口分类聚合；无匹配分类时显示原始 key
+          跨提供方按接口分类聚合；未分类时显示「未分类」
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -495,7 +495,7 @@ function InterfacesByCategoryOverview(): JSX.Element {
             <div key={type} className="mb-5">
               <div className="mb-2 flex items-center gap-2">
                 <span className="text-sm font-medium">
-                  {labelMap.get(type) ?? type}
+                  {type ? (labelMap.get(type) ?? type) : '未分类'}
                 </span>
                 <Badge variant="outline">{items.length}</Badge>
               </div>
