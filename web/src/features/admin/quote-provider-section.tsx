@@ -274,7 +274,7 @@ export function QuoteProviderSection(): JSX.Element {
         <CardHeader>
           <div className="flex items-start justify-between gap-4">
             <div>
-              <CardTitle className="text-base">证券行情数据提供方</CardTitle>
+              <CardTitle className="text-base">数据来源</CardTitle>
               <CardDescription>
                 配置多个行情数据来源；系统默认使用「当前」方，未指定时回退到「默认」方
               </CardDescription>
@@ -369,7 +369,7 @@ export function QuoteProviderSection(): JSX.Element {
             <DialogDescription>
               {editingId
                 ? '修改该行情数据提供方的配置'
-                : '新增一个证券行情数据提供方'}
+                : '新增数据来源'}
             </DialogDescription>
           </DialogHeader>
 
