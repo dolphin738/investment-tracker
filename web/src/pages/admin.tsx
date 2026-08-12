@@ -1,15 +1,24 @@
 /**
  * pages/admin.tsx — 系统管理页（仅管理员可见）
  *
- * 通用外壳：左侧 ADMIN_SECTIONS 注册表（证券行情设置 + 接口分类管理）。
- * 新增管理板块只需追加一条注册项，不改外壳（PRD P0-1/P0-2）。
+ * 通用外壳：左侧分组导航注册表（ADMIN_NAV）。
  *
+ * 导航结构（二级分组）：
+ *   金融数据接口（group）
+ *     ├─ 接口API来源   （quote-provider，原「证券行情设置」）
+ *     └─ 接口分类管理   （interface-category）
+ *
+ * - AdminNav 是 AdminGroup 与 AdminSection 的联合类型：group 拥有 children，
+ *   leaf 直接持有 component。新增管理板块只需在对应 group 下追加一条 children 注册项，
+ *   不改外壳（PRD P0-1/P0-2）。
  * - 非管理员：整页「无权限访问该页面」，且左栏/板块均不渲染。
- * - 管理员：顶部板块切换 + 右栏渲染选中板块组件。
+ * - 管理员：左侧分组导航（左侧栏，group 为标题、children 缩进按钮）+ 右栏渲染选中板块组件。
+ * - 默认选中第一个叶子板块（quote-provider）；findActive 按 key 在 group children 中检索，
+ *   未命中则回退到第一个叶子板块。
  */
 
 import { useState } from 'react';
-import { ServerCog, Tags } from 'lucide-react';
+import { Database, ServerCog, Tags } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import { useIsAdmin } from '@/stores/auth.store';
@@ -23,24 +32,59 @@ interface AdminSection {
   component: () => JSX.Element;
 }
 
-const ADMIN_SECTIONS: AdminSection[] = [
+interface AdminGroup {
+  key: string;
+  label: string;
+  icon: JSX.Element;
+  children: AdminSection[];
+}
+
+type AdminNav = AdminGroup | AdminSection;
+
+const ADMIN_NAV: AdminNav[] = [
   {
-    key: 'quote-provider',
-    label: '证券行情设置',
-    icon: <ServerCog className="mr-2 h-4 w-4" />,
-    component: QuoteProviderSection,
-  },
-  {
-    key: 'interface-category',
-    label: '接口分类管理',
-    icon: <Tags className="mr-2 h-4 w-4" />,
-    component: InterfaceCategorySection,
+    key: 'financial-data-interface',
+    label: '金融数据接口',
+    icon: <Database className="mr-2 h-4 w-4" />,
+    children: [
+      {
+        key: 'quote-provider',
+        label: '接口API来源',
+        icon: <ServerCog className="mr-2 h-4 w-4" />,
+        component: QuoteProviderSection,
+      },
+      {
+        key: 'interface-category',
+        label: '接口分类管理',
+        icon: <Tags className="mr-2 h-4 w-4" />,
+        component: InterfaceCategorySection,
+      },
+    ],
   },
 ];
 
+/** 取导航中第一个叶子板块（用于默认选中与回退）。 */
+function getFirstLeaf(): AdminSection {
+  const first = ADMIN_NAV[0];
+  return 'children' in first ? first.children[0] : first;
+}
+
+/** 按 key 在 group children 中检索对应 leaf；未命中则回退到第一个叶子板块。 */
+function findActive(key: string): AdminSection {
+  for (const nav of ADMIN_NAV) {
+    if ('children' in nav) {
+      const found = nav.children.find((child) => child.key === key);
+      if (found) return found;
+    } else if (nav.key === key) {
+      return nav;
+    }
+  }
+  return getFirstLeaf();
+}
+
 export default function AdminPage(): JSX.Element {
   const isAdmin = useIsAdmin();
-  const [active, setActive] = useState<string>(ADMIN_SECTIONS[0].key);
+  const [active, setActive] = useState<string>(getFirstLeaf().key);
 
   if (!isAdmin) {
     return (
@@ -55,32 +99,64 @@ export default function AdminPage(): JSX.Element {
     );
   }
 
-  const Active =
-    ADMIN_SECTIONS.find((s) => s.key === active)?.component ??
-    ADMIN_SECTIONS[0].component;
+  const Active = findActive(active).component;
 
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-bold tracking-tight">系统管理</h1>
-      <div className="flex gap-1 border-b">
-        {ADMIN_SECTIONS.map((s) => (
-          <button
-            key={s.key}
-            type="button"
-            onClick={() => setActive(s.key)}
-            className={cn(
-              'flex items-center border-b-2 px-3 py-2 text-sm font-medium transition-colors',
-              active === s.key
-                ? 'border-primary text-primary'
-                : 'border-transparent text-muted-foreground hover:text-foreground',
-            )}
-          >
-            {s.icon}
-            {s.label}
-          </button>
-        ))}
+      <div className="flex gap-6">
+        <nav className="w-56 shrink-0 border-r pr-3">
+          {ADMIN_NAV.map((nav) => {
+            if ('children' in nav) {
+              return (
+                <div key={nav.key} className="mb-4">
+                  <div className="flex items-center px-2 py-1.5 text-sm font-semibold text-foreground">
+                    {nav.icon}
+                    {nav.label}
+                  </div>
+                  <div className="ml-2 border-l pl-2">
+                    {nav.children.map((child) => (
+                      <button
+                        key={child.key}
+                        type="button"
+                        onClick={() => setActive(child.key)}
+                        className={cn(
+                          'mb-1 flex w-full items-center rounded-md px-2 py-1.5 text-sm transition-colors',
+                          active === child.key
+                            ? 'bg-primary/10 font-medium text-primary'
+                            : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+                        )}
+                      >
+                        {child.icon}
+                        {child.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              );
+            }
+            return (
+              <button
+                key={nav.key}
+                type="button"
+                onClick={() => setActive(nav.key)}
+                className={cn(
+                  'mb-1 flex w-full items-center rounded-md px-2 py-1.5 text-sm transition-colors',
+                  active === nav.key
+                    ? 'bg-primary/10 font-medium text-primary'
+                    : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+                )}
+              >
+                {nav.icon}
+                {nav.label}
+              </button>
+            );
+          })}
+        </nav>
+        <div className="min-w-0 flex-1">
+          <Active />
+        </div>
       </div>
-      <Active />
     </div>
   );
 }
