@@ -14,7 +14,8 @@
  *   不改外壳（PRD P0-1/P0-2）。
  * - 非管理员：整页「无权限访问该页面」，且左栏/板块均不渲染。
  * - 管理员：左侧栏「金融数据接口」为可展开/收起的二级菜单（点击标题切换展开状态，
- *   带 Chevron 指示）；其下两个子模块即「分页」单元，点击切换即在右栏渲染对应内容。
+ *   带 Chevron 指示）；其下两个子模块即「分页」单元。右栏顶部另设分页 tab 控件，
+ *   与左栏点击切换共享同一 active 状态，点击即在右栏渲染对应内容。
  * - 默认选中第一个叶子板块（quote-provider）；findActive 按 key 在 group children 中检索，
  *   未命中则回退到第一个叶子板块。
  */
@@ -103,6 +104,9 @@ export default function AdminPage(): JSX.Element {
   }
 
   const Active = findActive(active).component;
+  const leaves = ADMIN_NAV.flatMap((nav) =>
+    'children' in nav ? nav.children : [nav],
+  );
 
   return (
     <div className="space-y-6">
@@ -171,6 +175,24 @@ export default function AdminPage(): JSX.Element {
           })}
         </nav>
         <div className="min-w-0 flex-1">
+          <div className="mb-4 flex flex-wrap gap-2">
+            {leaves.map((leaf) => (
+              <button
+                key={leaf.key}
+                type="button"
+                onClick={() => setActive(leaf.key)}
+                className={cn(
+                  'flex items-center rounded-md border px-3 py-1.5 text-sm transition-colors',
+                  active === leaf.key
+                    ? 'border-primary bg-primary/10 font-medium text-primary'
+                    : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+                )}
+              >
+                {leaf.icon}
+                {leaf.label}
+              </button>
+            ))}
+          </div>
           <Active />
         </div>
       </div>
