@@ -147,7 +147,7 @@ PG 枚举类型名：`interface_direction`。
 - `QuoteInterfaceService` / `InterfaceCategoryService` 分别管理对应模型
 
 ### 3.5 迁移要点（Alembic）
-- 新版本 `c2d3e4f5a6b7`，`down_revision = 'b1c2d3e4f5a6'`（接在当前最新迁移之后）。
+- 新版本 `d3e4f5a6b7c8_add_quote_interfaces_and_categories.py`，`down_revision = 'c2d3e4f5a6b7'`（接在当前迁移链头 `c2d3e4f5a6b7_add_quote_providers_drop_system_configs.py` 之后；**当前链头是 `c2d3e4f5a6b7`，绝非 `b1c2d3e4f5a6`**）。**严禁删除/改动现有 `c2d3e4f5a6b7_*` 迁移文件**——它创建 `securities_data_providers` 表，删了会断链。
 - `upgrade()`：`sa.Enum('in','out', name='interface_direction')` 创建原生枚举 → 建两表（含外键 + 唯一约束）→ 可选 `INSERT` 7 个预置分类（见 §8 约定）。
 - `downgrade()`：按**反序** drop 两表 → drop 枚举类型 `interface_direction`。
 - 写法完全参照 `b1c2d3e4f5a6_add_role_and_system_configs.py`（PK 用 `gen_random_uuid()` server_default、`created_at/updated_at` 用 `now()` server_default）。
@@ -255,7 +255,7 @@ pages/admin.tsx  （通用外壳：左栏 ADMIN_SECTIONS 注册表 + 右栏选�
 
 | 任务 | 名称 | 来源文件（≥3）| 依赖 | 优先级 |
 |---|---|---|---|---|
-| **T01** | 后端数据层（枚举 + 模型 + 迁移 + 注册）| `models/enums.py`[改]、`models/quote_interface.py`[新]、`models/interface_category.py`[新]、`models/__init__.py`[改]、`alembic/versions/c2d3e4f5a6b7_*.py`[新] | 无 | P0 |
+| **T01** | 后端数据层（枚举 + 模型 + 迁移 + 注册）| `models/enums.py`[改]、`models/quote_interface.py`[新]、`models/interface_category.py`[新]、`models/__init__.py`[改]、`alembic/versions/d3e4f5a6b7c8_add_quote_interfaces_and_categories.py`[新] | 无 | P0 |
 | **T02** | 后端服务层（接口 + 分类服务）| `services/quote_interface.py`[新]、`services/interface_category.py`[新]、`services/__init__.py`[改] | T01 | P0 |
 | **T03** | 后端路由 + 后端测试（接口/分类 CRUD 端点 + 集成测试）| `modules/admin/router.py`[改]、`tests/test_quote_interface.py`[新]、`tests/test_interface_category.py`[新] | T02 | P0 |
 | **T04** | 前端数据层（API 类型/函数 + hooks）| `api/quote-interface.api.ts`[新]、`api/interface-category.api.ts`[新]、`hooks/use-quote-interface.ts`[新]、`hooks/use-interface-category.ts`[新] | T01（仅契约/字段名）| P0 |
