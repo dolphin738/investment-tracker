@@ -8,13 +8,16 @@ from app.models.dividend import DividendRecord
 from app.models.enums import (
     CashFlowType,
     DividendType,
+    InterfaceDirection,
     QuoteProviderAccessMethod,
     SecuritySide,
     SecurityType,
     SnapshotSource,
     SnapshotValuation,
 )
+from app.models.interface_category import InterfaceCategory
 from app.models.portfolio import Portfolio
+from app.models.quote_interface import QuoteInterface
 from app.models.quote_provider import SecuritiesDataProvider
 from app.models.security import Security, SecurityPrice, SecurityTrade
 from app.models.snapshot import AssetSnapshot
@@ -31,7 +34,10 @@ __all__ = [
     "SecurityPrice",
     "AssetSnapshot",
     "SecuritiesDataProvider",
+    "QuoteInterface",
+    "InterfaceCategory",
     "QuoteProviderAccessMethod",
+    "InterfaceDirection",
     "DailyNav",
     "DailyXirr",
     "DividendRecord",

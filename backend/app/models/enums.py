@@ -80,3 +80,14 @@ class QuoteProviderAccessMethod(str, enum.Enum):
 
     HTTPS = "https"
     SDK = "sdk"
+
+
+class InterfaceDirection(str, enum.Enum):
+    """提供方接口方向（入站 / 出站）。
+
+    PG 原生枚举类型名 `interface_direction`（由迁移创建）。
+    业务当前仅落库使用（默认 in），UI 不暴露该字段。
+    """
+
+    IN = "in"
+    OUT = "out"
