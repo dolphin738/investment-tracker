@@ -316,7 +316,8 @@ graph TD
 2. **分类删除语义**：本设计允许直接删除分类（接口保留 raw key）。是否需要在删除分类时**阻断**（若该 key 仍被接口引用则返回 409）？当前默认「允许删除」，如需阻断请确认。
 3. **`direction` 是否在前端暴露**：§6.1 #4 为「预留」字段。本设计默认 UI 不展示（恒为 `in`），仅后端落库。若希望现在就可在 UI 选择 in/out，请确认。
 4. **`rate_limit` 存储格式**：建议存自由文本（如 `"100/min"`、`"10/s"`），不做结构化解析。若需结构化（次数+单位两列），请确认。
-5. **接口列表分组 UI**：本设计在「提供方展开区」按 `interface_type` 分组展示接口。是否还需要在「证券行情设置」顶层按分类汇总所有提供方的接口？默认按提供方维度分组。
+5. **接口列表分组 UI**：本设计在「提供方展开区」按 `interface_type` 分组展示接口，并新增顶层「按分类汇总所有提供方接口」总览。
+   **【已决议：顶层按分类汇总所有提供方，是】**（2026-08-12）——新增后端端点 `GET /api/admin/quote-providers/interfaces`（扁平返回该管理员可见的全部接口，复用 `require_admin`+`EnvelopeRoute`+信封），`QuoteInterfaceService` 加 `list_all()` 方法 + 1 条集成测试；前端据此按 `interface_type`（映射分类 label，无匹配显示 raw key）聚合渲染。该路径与现有 `GET /api/admin/quote-providers/{provider_id}/interfaces` 不冲突（段数不同）。
 
 ---
 
