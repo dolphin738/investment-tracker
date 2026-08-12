@@ -606,8 +606,8 @@ totalAsset(D) = marketValue(D) + cashBalance(D)          // 自动派生口径
 系统管理页承载「金融数据接口」配置，含三个能力：
 
 1. **数据来源（证券行情数据提供方，多提供方）**：取代旧的单 URL 系统配置。每个提供方（`SecuritiesDataProvider`）含 `name` / `provider_type` / `access_method`(https|sdk) / `config`(JSON，HTTPS 存 `base_url`、SDK 存 `sdk_name`) / `is_default` / `is_active` / `enabled` / `description`；解析链「当前(is_active) → 默认(is_default) → None」决定运行时使用哪个提供方（`get_active_provider`）。提供方可设默认 / 设当前（全局至多一个）；删除提供方级联删其接口。
-2. **接口 API 来源（提供方接口）**：每个提供方下可配置多个接口（`QuoteInterface`）：`interface_type`(分类 key) / `name` / `endpoint`(地址或 SDK 函数名) / `http_method`(GET/POST/PUT/DELETE/PATCH，SDK 可空) / `params`(JSON 模板) / `enabled` / `direction`(in/out，默认 in) / `timeout` / `retry_count` / `rate_limit`。顶层 `GET /api/admin/quote-providers/interfaces` 扁平返回全部接口，供「按分类汇总所有提供方」总览。
-3. **接口分类管理（InterfaceCategory）**：后台可配分类（`key` 唯一 / `label` / `icon`(lucide 名) / `sort_order`）；迁移预置 7 类（A股列表/行情、港股列表/行情、基金列表、可转债列表/行情）。`interface_type` 仅存自由文本 key，不强制外键；删除分类不影响接口。
+2. **接口 API 来源（提供方接口）**：每个提供方下可配置多个接口（`QuoteInterface`）：`category_id`(分类 id，外键→interface_categories.id) / `name` / `endpoint`(地址或 SDK 函数名) / `http_method`(GET/POST/PUT/DELETE/PATCH，SDK 可空) / `params`(JSON 模板) / `enabled` / `direction`(in/out，默认 in) / `timeout` / `retry_count` / `rate_limit`。顶层 `GET /api/admin/quote-providers/interfaces` 扁平返回全部接口，供「按分类汇总所有提供方」总览。
+3. **接口分类管理（InterfaceCategory）**：后台可配分类（`id`(UUID) / `label` / `icon`(lucide 名) / `sort_order`）；迁移预置 7 类（A股列表/行情、港股列表/行情、基金列表、可转债列表/行情）。`category_id` 为外键引用 interface_categories.id（ON DELETE SET NULL）；删除分类不影响接口（接口 category_id 置 NULL 变未分类）。
 
 **权限**：所有端点 `require_admin` 查库校验（PRD `AUTH-P0-01` / `SYS-P0-08`）。前端全局主侧边栏「系统管理」为可折叠分组，子项「金融数据接口」进入本页；页面内以标签页呈现「接口 API 来源」「接口分类管理」两个模块。
 

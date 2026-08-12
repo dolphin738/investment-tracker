@@ -77,6 +77,20 @@ async def _create_category(
     return data["id"]
 
 
+async def _create_interface(
+    client, token: str, provider_id: str, category_id: str, **overrides
+) -> str:
+    body = {**INTERFACE_BASE, "category_id": category_id, **overrides}
+    r = await client.post(
+        f"/api/admin/quote-providers/{provider_id}/interfaces",
+        json=body,
+        headers=auth(token),
+    )
+    status, code, data, _ = env(r)
+    assert status == 200 and code == 0, data
+    return data["id"]
+
+
 async def test_non_admin_forbidden(client):
     token = await _user_token(client, "qi_user_1@example.com")
     r = await client.get("/api/admin/quote-providers/interfaces", headers=auth(token))
@@ -227,3 +241,35 @@ async def test_list_all_returns_all_interfaces(client):
     # 扁平：含两个不同提供方的接口
     provider_ids = {i["provider_id"] for i in data}
     assert provider_ids == {pid1, pid2}
+
+
+async def test_update_with_nonexistent_category_id_returns_4xx(client):
+    """回归（补充）：更新接口时显式传入不存在的 category_id 也应返回 400。"""
+    token = await _admin_token(client, "qi_admin_9@example.com")
+    pid = await _create_provider(client, token)
+    cid = await _create_category(client, token)
+    iid = await _create_interface(client, token, pid, cid)
+    bad_uuid = "22222222-2222-2222-2222-222222222222"
+    r = await client.patch(
+        f"/api/admin/quote-providers/interfaces/{iid}",
+        json={"category_id": bad_uuid},
+        headers=auth(token),
+    )
+    status, code, _, _ = env(r)
+    assert status == 400
+    assert code == BusinessErrorCode.VALIDATION_FAILED
+
+
+async def test_create_with_unknown_category_returns_4xx(client):
+    """category_id 传一个不存在的 uuid，应返回 4xx（而非被 IntegrityError 兜底成 500）。"""
+    token = await _admin_token(client, "qi_admin_9@example.com")
+    pid = await _create_provider(client, token)
+    fake_cid = "11111111-1111-1111-1111-111111111111"
+    r = await client.post(
+        f"/api/admin/quote-providers/{pid}/interfaces",
+        json={**INTERFACE_BASE, "category_id": fake_cid},
+        headers=auth(token),
+    )
+    status, code, _, _ = env(r)
+    assert status == 400
+    assert code == BusinessErrorCode.VALIDATION_FAILED

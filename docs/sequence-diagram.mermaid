@@ -14,7 +14,7 @@ sequenceDiagram
     API->>HTTP: http.get(/admin/quote-providers/{pid}/interfaces)
     HTTP->>R: GET ...
     R->>S: list_by_provider(provider_id)
-    S->>DB: SELECT ... WHERE provider_id=? ORDER BY interface_type,name
+    S->>DB: SELECT ... WHERE provider_id=? ORDER BY category_id,name
     DB-->>S: rows
     S-->>R: list[QuoteInterface]
     R-->>HTTP: QuoteInterfaceOut[]
@@ -25,7 +25,7 @@ sequenceDiagram
     Hook->>API: createQuoteInterface(providerId, body)
     API->>HTTP: http.post(/admin/quote-providers/{pid}/interfaces, body)
     HTTP->>R: POST ...
-    R->>S: create(provider_id=pid, interface_type=..., name=..., ...)
+    R->>S: create(provider_id=pid, category_id=..., name=..., ...)
     S->>DB: INSERT quote_provider_interfaces
     DB-->>S: row (id, ts)
     S-->>R: QuoteInterface
@@ -67,21 +67,15 @@ sequenceDiagram
     R-->>HTTP: InterfaceCategoryOut[]
     HTTP-->>UI: data
 
-    Note over UI,DB: 场景B·2 — 新增分类（key 唯一）
+    Note over UI,DB: 场景B·2 — 新增分类（无唯一业务键，label 可重复）
     UI->>Hook: useCreateInterfaceCategory().mutate(body)
     Hook->>API: createInterfaceCategory(body)
     API->>HTTP: http.post(/admin/interface-categories, body)
     HTTP->>R: POST ...
-    R->>S: create(key=..., label=..., icon=..., sort_order=...)
+    R->>S: create(label=..., icon=..., sort_order=...)
     S->>DB: INSERT quote_provider_interface_categories
     DB-->>S: row
-    alt key 重复
-        DB-->>S: IntegrityError
-        S-->>R: BusinessException(VALIDATION_FAILED, "接口分类 key 已存在", 409)
-        R-->>HTTP: {code:2000,message} (HTTP 409)
-    else 成功
-        S-->>R: InterfaceCategory
-        R-->>HTTP: InterfaceCategoryOut
-        HTTP-->>UI: {code:0,data}
-        Hook->>Hook: invalidateQueries(['admin','interface-categories'])
-    end
+    S-->>R: InterfaceCategory
+    R-->>HTTP: InterfaceCategoryOut
+    HTTP-->>UI: {code:0,data}
+    Hook->>Hook: invalidateQueries(['admin','interface-categories'])

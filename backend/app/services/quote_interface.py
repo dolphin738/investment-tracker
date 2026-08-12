@@ -13,10 +13,12 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.quote_interface import QuoteInterface
+from app.services.interface_category import InterfaceCategoryService
 
 
 class QuoteInterfaceService:
@@ -62,6 +64,11 @@ class QuoteInterfaceService:
         retry_count: Optional[int] = None,
         rate_limit: Optional[str] = None,
     ) -> QuoteInterface:
+        # 写入前显式校验 category_id 指向真实存在的分类：
+        # 不依赖 DB 外键报错翻译（那样会落到 500 兜底），这里主动映射成 4xx。
+        category = await InterfaceCategoryService(self.session).get_or_none(category_id)
+        if category is None:
+            raise HTTPException(status_code=400, detail="分类不存在")
         obj = QuoteInterface(
             provider_id=provider_id,
             category_id=category_id,
@@ -88,6 +95,13 @@ class QuoteInterfaceService:
 
         注意 provider_id 不在更新范围内（接口归属不可改）。
         """
+        # 若本次要写入新的 category_id（不为空），先校验其指向真实存在的分类。
+        # 设为未分类（category_id=None）是允许的，无需校验。
+        new_category_id = opts.get("category_id")
+        if new_category_id is not None:
+            category = await InterfaceCategoryService(self.session).get_or_none(new_category_id)
+            if category is None:
+                raise HTTPException(status_code=400, detail="分类不存在")
         for key, value in opts.items():
             if value is not None:
                 setattr(obj, key, value)

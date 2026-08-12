@@ -11,7 +11,7 @@
 
 提供方接口（QuoteInterface）CRUD：
 - GET    /api/admin/quote-providers/{provider_id}/interfaces：列出某提供方全部接口。
-- POST   /api/admin/quote-providers/{provider_id}/interfaces：新增接口（provider 不存在 → 404）。
+- POST   /api/admin/quote-providers/{provider_id}/interfaces：新增接口（provider 不存在 → 404；category_id 不存在 → 400）。
 - GET    /api/admin/quote-providers/interfaces：扁平返回全部接口（顶层按分类汇总总览）。
 - GET    /api/admin/quote-providers/interfaces/{interface_id}：读取单个。
 - PATCH  /api/admin/quote-providers/interfaces/{interface_id}：局部更新。
@@ -280,6 +280,12 @@ async def create_provider_interface(
     provider = await provider_svc.get(provider_id)
     if provider is None:
         raise HTTPException(status_code=404, detail="提供方不存在")
+    # 预校验分类存在：category_id 是外键，传入「格式合法但不存在」的 uuid 必须在
+    # 写入前拦截为 400，否则 flush() 触发外键 IntegrityError 会被兜底成 500（见 QA 回归）。
+    cat_svc = InterfaceCategoryService(db)
+    category = await cat_svc.get_or_none(body.category_id)
+    if category is None:
+        raise HTTPException(status_code=400, detail="接口分类不存在")
     svc = QuoteInterfaceService(db)
     obj = await svc.create(
         provider_id=provider_id,
@@ -403,6 +409,13 @@ async def update_interface(
     obj = await svc.get(interface_id)
     if obj is None:
         raise HTTPException(status_code=404, detail="接口不存在")
+    # 局部更新时若显式传了 category_id（非 None），预校验分类存在；
+    # category_id 为 None 表示「置为未分类」，属合法意图，无需校验。
+    if body.category_id is not None:
+        cat_svc = InterfaceCategoryService(db)
+        category = await cat_svc.get(body.category_id)
+        if category is None:
+            raise HTTPException(status_code=400, detail="接口分类不存在")
     obj = await svc.update(
         obj,
         category_id=body.category_id,

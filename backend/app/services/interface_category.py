@@ -32,6 +32,14 @@ class InterfaceCategoryService:
     async def get(self, category_id: str) -> Optional[InterfaceCategory]:
         return await self.session.get(InterfaceCategory, category_id)
 
+    async def get_or_none(self, category_id: str) -> Optional[InterfaceCategory]:
+        """按 id 查询分类；缺失时返回 None（不抛异常）。
+
+        用于「分类存在性预校验」场景：调用方据此主动映射成 4xx，
+        避免误用 .get() 将来若改为 get-or-404 风格时误传播 404。
+        """
+        return await self.session.get(InterfaceCategory, category_id)
+
     async def create(
         self,
         *,
