@@ -24,8 +24,8 @@
 - **右栏数据**：选中接口（`listAllInterfaces`）→ 动态渲染该接口 `params` 模板为可编辑键值对（支持增删多个参数）→ 可选填 codes → 「执行测试」调**新端点** `POST /api/admin/quote-interfaces/:id/test`（body `{params, codes?}`）→ 展示原始响应（pretty-print JSON）+ 解析出的 `{code→price}` + 状态 / 耗时。**该测试端点目前不存在，是后端前置依赖。**
 - **风格一致性**：复用 shadcn（Card/Table/Button/Badge/Input/Select/Textarea/Dialog）、TanStack Query（`useQuery`/`useMutation`）、`lucide-react` 图标、`sonner` toast，对齐 `quote-provider-section.tsx` 组织方式。
  - **后端前置依赖**（§8 决策后已收窄）：① 改造 `securities`（portfolio_id 可空 + exchange + 部分唯一索引）+ 定时同步任务 + `GET /api/admin/securities/masters`（+ 可选 `POST /api/admin/securities/sync`）；② 单接口测试端点 `POST /api/admin/quote-interfaces/{id}/test`（执行单接口、回传原始响应）。① 已扩展为「**配置驱动、多资产类别**」：`QuoteInterface` 加 `asset_class`/`purpose`/`resp_name_field`/`resp_exchange_field`，`SecurityType` 扩展 `HK_STOCK`/`CONVERTIBLE_BOND`/`ETF`/`INDEX`，sync 走 `purpose=MASTER_LIST` 接口、复用现有 `priority` 降级链，详见 §11。
-- **决策点状态**：§8 五项已全部拍板（改造 securities / 不持久化 / 任意 enabled 接口 / 支持左右联动 / `.../quote-interfaces/{id}/test`）。详见 §8。
-- **补充需求（§10）**：录入买卖界面移除「新建标的」、改为证券搜索（code/名称/拼音首字母），选中主数据后由后端 `resolve` 懒实例化为组合标的。影响：后端 `securities` 需新增 `pinyin_initials` 字段 + 搜索端点支持拼音 + `resolve` 端点（§7 ①③）；前端 `security-trade-form.tsx` 替换为 `SecuritySearchCombobox`（依赖 `cmdk`）。新待确认决策 6–9 见 §10.6。
+- **决策点状态**：§8（1–5）+ §10.6（6–9）+ §11.7（10–11）**共 11 项全部拍板**，含左栏分页；全文无待确认项。详见 §8 / §10.6 / §11.7。
+- **补充需求（§10）**：录入买卖界面移除「新建标的」、改为证券搜索（code/名称/拼音首字母），选中主数据后由后端 `resolve` 懒实例化为组合标的。影响：后端 `securities` 需新增 `pinyin_initials` 字段 + 搜索端点支持拼音 + `resolve` 端点（§7 ①③）；前端 `security-trade-form.tsx` 替换为 `SecuritySearchCombobox`（依赖 `cmdk`）。决策 6–9 已拍板（见 §10.6）。
 
 ---
 
@@ -63,9 +63,10 @@ classDiagram
         内含 StockListPanel + InterfaceTestPanel
     }
     class StockListPanel {
-        +useSecurityMasters() 读取主数据
-        +本地 state: query(搜索)
+        +useSecurityMasters() 读取主数据(分页: page/pageSize)
+        +本地 state: query(搜索), page(分页)
         只读 Table: code/name/exchange/type/updatedAt
+        +Pagination 分页器(翻页/总条数)
     }
     class InterfaceTestPanel {
         +useQuoteInterfacesAll() 接口下拉
@@ -87,7 +88,7 @@ classDiagram
 | 组件 | 职责 | 主要 state / hooks | 关键 UI |
 |------|------|--------------------|----------|
 | `StockListTestSection` | 顶层容器，左右两栏布局；串联左右两面板 | 无（或统管 loading 态） | `Card` 包裹两栏；`grid grid-cols-1 lg:grid-cols-2 gap-6` |
-| `StockListPanel`（左） | 只读展示系统级股票主数据；支持关键字搜索 | `useSecurityMasters()`（见§4）；`query: string` | `CardHeader`(标题+说明) + `Input`(搜索) + `Table`(code/name/交易所·类型/更新时间) |
+| `StockListPanel`（左） | 只读展示系统级股票主数据；支持关键字搜索 + 分页浏览 | `useSecurityMasters()`（见§4，分页参数 `page`/`pageSize`）；`query: string`、`page: number` | `CardHeader`(标题+说明) + `Input`(搜索) + `Table`(code/name/交易所·类型/更新时间) + `Pagination` 分页器(翻页 + 总条数) |
 | `InterfaceTestPanel`（右） | 选接口、动态渲染 `params`、可选 codes、执行测试、展示原始响应 | `useQuoteInterfacesAll()`、`useInterfaceTest()`；`selectedInterfaceId`、`paramRows: {key,value}[]`、`codesText`、`result` | `Select`(接口) + 可编辑键值对表格(增删) + `Textarea`(codes) + `Button`(执行) + `Card`(响应区：状态 Badge / 耗时 / 解析表 / 原始 JSON) |
 
 **左右联动（§8 决策 4，支持）**：左栏每行提供「填入测试」操作，将 `code` 注入右栏 `InterfaceTestPanel` 的 `codesText`（追加，不覆盖）；默认两面板仍解耦、互不依赖。
@@ -149,10 +150,13 @@ UniqueConstraint("portfolio_id", "code")
 - 触发：调度器（APScheduler/Celery beat）定时 + 可选管理面手动端点 `POST /api/admin/securities/sync`（对齐现有 `POST /api/admin/quote-providers/sync` 风格）。
 - 交易所/类型：由 `resp_exchange_field` 或代码前缀推断 + `asset_class`（枚举见 §11.3）落地，前端仅展示，不强制约束。
 
-列表端点：`GET /api/admin/securities/masters`
+列表端点：`GET /api/admin/securities/masters`（**分页**，左栏需求）
 
-- 返回 `portfolio_id IS NULL` 的 `securities` 行，即系统级股票主数据（`SecurityMaster[]`：`code`/`name`/`exchange`/`type`/`updated_at`）。
-- 支持可选 `?q=` 关键字搜索（匹配 `code`/`name`）；量级可控，建议一次性返回或较大 pageSize。
+- 复用后端 `paginate()`（`backend/app/common.py`）返回 `PaginatedResponse<SecurityMaster>`：`{ items: SecurityMaster[], total, page, pageSize }`，与现有 `listSecurities` 的 `PaginatedResponse<Security>` 同构。
+- 查询参数：`page`（默认 1）、`pageSize`（默认 20，与 `data/router.py` 等列表端点一致）、`q`（可选关键字搜索）。
+- 返回 `portfolio_id IS NULL` 的 `securities` 主数据行（`SecurityMaster`：`code`/`name`/`exchange`/`type`/`updated_at`）。
+- 搜索 `?q=` 匹配 `code`/`name`/`pinyin_initials`（后端 `ILIKE`，大小写不敏感）。
+- 左栏以「分页表格 + 底部 `Pagination` 分页器」浏览全市场 5000+ 行，**无需一次性拉全量**（原「较大 pageSize 一次性返回」方案改为标准分页）。
 
 > 原「方案 B（复用 securities 伪造 portfolio 上下文）」已被本决策取代，不再采用——本方案虽仍复用 `securities` 表，但**以 `portfolio_id IS NULL` 正名系统行**，而非伪造组合，语义清晰。
 
@@ -175,18 +179,19 @@ sequenceDiagram
     participant S as StockListTestSection
     participant P as StockListPanel
     participant H as useSecurityMasters()
-    participant API as GET /api/admin/securities/masters
+    participant API as GET /api/admin/securities/masters?page=&pageSize=
     participant DB as securities 表(主数据行 portfolio_id=NULL, 定时任务已填充)
 
     U->>S: 切换到「股票列表和测试」标签
     S->>P: 渲染左栏
     P->>H: useQuery 发起
     H->>API: listSecurityMasters()
-    API->>DB: SELECT ... WHERE portfolio_id IS NULL
-    DB-->>API: SecurityMaster[]
+    API->>DB: SELECT ... WHERE portfolio_id IS NULL (分页 LIMIT/OFFSET)
+    DB-->>API: PaginatedResponse<SecurityMaster>(分页)
     API-->>H: 信封解包数据
     H-->>P: data 就绪
-    P-->>U: Table 展示 code/name/交易所·类型/更新时间
+    P-->>U: Table 展示 code/name/交易所·类型/更新时间(分页)
+    Note over P,API: 分页器翻页: useSecurityMasters 带 page/pageSize 重新拉取
     Note over U,DB: 数据由后端定时任务自动维护，前端只读
 ```
 
@@ -287,9 +292,10 @@ sequenceDiagram
   - 唯一约束：保留 `uq_securities_portfolio_code(portfolio_id, code)`（用户行）；新增 **部分唯一索引** `uq_securities_master_asset_code ON securities(asset_class, code) WHERE portfolio_id IS NULL`（主数据行按 资产类别+code 唯一，避免港股 5 位码等跨类命名空间碰撞）。
   - **建议索引**：在 `pinyin_initials`、`code`、`name` 上分别建索引（或 `(pinyin_initials, code)` 复合），加速 `ILIKE` 搜索。
 - **定时同步任务（配置驱动，非硬编码 AKShare，§11）**：新增 `MarketDataSyncService.sync_security_masters(asset_class?)`，查询 `purpose=MASTER_LIST` 的 `QuoteInterface`（可跨 provider、按 `asset_class` 过滤），复用 `_call_interface` 的 https/sdk 分派拉原始行，按 `resp_code_field`/`resp_name_field`/`resp_exchange_field` 解析为 `(code,name,exchange)`，upsert 到 `portfolio_id IS NULL` 的 `securities` 行（存在更新、不存在 insert）；**同步时用 `pypinyin` 计算 `pinyin_initials`**（新增后端依赖，加入 `pyproject.toml`）。由调度器（APScheduler/Celery beat）定时触发；同一 `asset_class` 配多个接口即自动形成 `priority` 降级链（复用 `_mark_success`/`_mark_failure` + 告警）。
-- **列表端点**：`GET /api/admin/securities/masters`（返回主数据行 `SecurityMaster[]`）。
-  - 支持 `?q=` 关键字搜索：**匹配 `code` / `name` / `pinyin_initials`**（后端 `ILIKE`，大小写不敏感），用于录入界面证券搜索（见 §10）。
-  - 支持 `?limit=` 限制返回条数（默认如 20，避免全市场 5000+ 行一次性下推）；按需返回 `exchange`/`type`/`pinyin_initials` 供前端展示。
+- **列表端点（分页）**：`GET /api/admin/securities/masters`，复用后端 `paginate()`（`common.py`）返回 `PaginatedResponse<SecurityMaster>`（`{items, total, page, pageSize}`），与现有 `listSecurities` 契约一致。
+  - 查询参数：`page`（默认 1）、`pageSize`（默认 20）、`q`（可选关键字搜索）。
+  - `?q=` 搜索：**匹配 `code` / `name` / `pinyin_initials`**（后端 `ILIKE`，大小写不敏感），用于录入界面证券搜索（见 §10）。
+  - 分页浏览全市场 5000+ 行，无需一次性下推（原 `?limit=` 改为标准 `page`/`pageSize` 分页）。
 - **（可选）手动触发端点**：`POST /api/admin/securities/sync`（对齐 `POST /api/admin/quote-providers/sync` 风格，便于联调）。
 
 ### ② 单接口测试端点（右栏数据源）
@@ -327,7 +333,7 @@ sequenceDiagram
 | 4 | 左右联动 | **支持**：左栏行「一键填入右栏 codes」。 | `StockListPanel` 行操作注入 `codesText` |
 | 5 | 测试端点命名 | **`POST /api/admin/quote-interfaces/{id}/test`**（沿用 reorder 前缀）。 | 前端 `testInterface(id, body)` 路径 |
 
-> 全部决策已落地到本文档各节（§3 / §4 / §5 / §6 / §7 / §9）；§10 为本补充需求（录入界面证券搜索）的影响评估与新增待确认决策（6–9）。
+> 全部决策已落地到本文档各节（§3 / §4 / §5 / §6 / §7 / §9 / §10 / §11）；§10 决策 6–9 与 §11 决策 10–11 均已拍板，全文无待确认项。
 
 ---
 
@@ -341,7 +347,7 @@ sequenceDiagram
 | **T1a** | **（§11 补充）后端配置驱动 + 多资产类别**：`SecurityType` 扩展 `HK_STOCK`/`CONVERTIBLE_BOND`/`ETF`/`INDEX`（迁移 `ALTER TYPE ADD VALUE`）；`QuoteInterface` 加 `asset_class`/`purpose`/`resp_name_field`/`resp_exchange_field`；`sync_security_masters(asset_class?)` 改为查 `purpose=MASTER_LIST` 接口、按 `asset_class` 分组、复用现有 `priority` 降级链（与价格同步共用 `_mark_success`/`_mark_failure` + 告警） | `backend` 模型/迁移/服务 | T1 |
 | T2 | 新增股票主数据 API + 类型 + hook | `web/src/api/security-master.api.ts`、`web/src/hooks/use-security-master.ts` | T1（① 端点） |
 | T3 | 扩展接口测试 API + 类型 + hook | `web/src/api/quote-interface.api.ts`（增 `testInterface`）、`web/src/hooks/use-interface-test.ts` | T1（② 端点） |
-| T4 | 实现 `stock-list-test-section.tsx`（左 `StockListPanel` + 右 `InterfaceTestPanel`） | `web/src/features/admin/stock-list-test-section.tsx` | T2、T3 |
+| T4 | 实现 `stock-list-test-section.tsx`（左 `StockListPanel` + 右 `InterfaceTestPanel`；**左栏含分页表格 + `Pagination` 分页器，接入 `useSecurityMasters` 的 `page`/`pageSize` 参数**） | `web/src/features/admin/stock-list-test-section.tsx` | T2、T3 |
 | T5 | 接入 `admin.tsx` 的 `MODULES` 注册表 | `web/src/pages/admin.tsx` | T4 |
 | T6 | 联调 + 类型 / lint 校验 + 手动验证左右两栏 | 全部新增/修改文件 | T4、T5 |
 | **T7** | **（§10 补充）后端补齐录入搜索依赖**：`Security` 加 `pinyin_initials` 列 + 迁移；`sync_security_masters` 用 `pypinyin` 填拼音；`GET /api/admin/securities/masters?q=` 支持 `code`/`name`/`pinyin_initials` ILIKE + `?limit=`；新增 `POST /portfolios/{pid}/securities/resolve` 幂等 upsert（§7 ③）；后端加 `pypinyin` 依赖 | `backend` 模型/迁移/服务/router | T1（① 端点） |
@@ -399,16 +405,16 @@ sequenceDiagram
 | 后端 `POST /securities` 端点 | ⚠️ 语义收敛 | 不再被录入 UI 直接调用，改由 `resolve` 内部复用；可保留供 admin 手动建（若需要）。 |
 | `web/` 依赖 | ⚠️ 新增 `cmdk` | 支撑 `SecuritySearchCombobox`（shadcn Command+Popover）。`backend` 依赖新增 `pypinyin`。 |
 
-### 10.6 待确认决策点（本补充需求带来，请用户拍板）
+### 10.6 决策点（已全部拍板，2026-08-13）
 
-| # | 决策点 | 推荐 | 备选 / 影响 |
-|---|--------|------|------------|
-| 6 | 拼音匹配实现 | **后端 `pinyin_initials` 列 + `pypinyin` 同步时计算 + 端点 `ILIKE`**（推荐，全市场 5000+ 行场景最优） | 前端 `pinyin-pro` 实时算（需全量拉数据，性能差，不推荐） |
-| 7 | 选中主数据后 `security_id` 落点 | **resolve 端点懒实例化组合行（§7 ③）**，trade 永远指向组合行 | 直接引用主数据行（污染持仓列表、破坏唯一约束，不推荐） |
-| 8 | 搜索数据源范围 | **仅搜系统主数据**（`masters?q=`），resolve 自动去重到组合行（推荐，单一可信源） | 主数据 + 组合行合并搜（实现复杂，无必要） |
-| 9 | 改动范围 | **仅 `security-trade-form.tsx`（录入买卖）**；其他录入表单的标的下拉暂不替换（推荐，先收敛） | 一次性把分红/价格等也换 Combobox（范围扩大，建议二期） |
+| # | 决策点 | 用户拍板 | 影响 |
+|---|--------|----------|------|
+| 6 | 拼音匹配实现 | **后端 `pinyin_initials` 列 + `pypinyin` 同步计算 + 端点 `ILIKE`**（采用推荐，全市场 5000+ 行场景最优） | §7 ① / §4.2 加字段；端点支持拼音搜索 |
+| 7 | 选中主数据后 `security_id` 落点 | **resolve 端点懒实例化组合行（§7 ③）**，trade 永远指向组合行 | 新增 resolve 端点；不污染主数据、不破坏唯一约束 |
+| 8 | 搜索数据源范围 | **仅搜系统主数据**（`masters?q=`），resolve 自动去重到组合行（采用推荐，单一可信源） | 搜索端点只查主数据行 |
+| 9 | 改动范围 | **仅 `security-trade-form.tsx`（录入买卖）**；其他录入表单标的下拉二期复用（采用推荐，先收敛） | 影响面收敛 |
 
-> 决策 6–9 待拍板后，可将本补充需求并入 §9 任务分解进入实现（建议新增任务 T7 后端 resolve+pinyin、T8 前端 Combobox+表单改造）。
+> 决策 6–9 已全部拍板，可直接并入 §9 进入实现（T7 后端 resolve+pinyin、T8 前端 Combobox+表单改造、T9 文案）。
 
 ---
 
@@ -428,12 +434,13 @@ sequenceDiagram
 
 在 `QuoteInterface` 上新增以下字段以承载「证券列表获取」语义（价格行情接口保持不变，靠 `purpose` 区分）：
 
-| 新字段 | 类型 | 说明 |
-|--------|------|------|
-| `purpose` | `InterfacePurpose` 枚举（`QUOTE`/`MASTER_LIST`），默认 `QUOTE` | 区分「价格行情」与「证券列表」两类接口。主数据同步只选 `MASTER_LIST`。 |
-| `asset_class` | `SecurityType`（复用现有枚举，见 11.3），可空 | **类型标识字段**：该接口拉取的是哪类资产（A股/港股/可转债/基金…）。主数据同步按此分组。 |
-| `resp_name_field` | `str \| null`，默认 `name` | 响应中证券名称字段名（列表解析用；价格接口用 `resp_price_field`，互不影响）。 |
-| `resp_exchange_field` | `str \| null` | 响应中交易所字段名（如 `exchange`/`market`）；为空时由代码前缀启发式推断（见 11.4）。 |
+| 新字段                   | 类型                                                      | 说明                                                      |
+| --------------------- | ------------------------------------------------------- | ------------------------------------------------------- |
+| `purpose`             | `InterfacePurpose` 枚举（`QUOTE`/`MASTER_LIST`），默认 `QUOTE` | 区分「价格行情」与「证券列表」两类接口。主数据同步只选 `MASTER_LIST`。              |
+| `asset_class`         | `SecurityType`（复用现有枚举，见 11.3），可空                        | **类型标识字段**：该接口拉取的是哪类资产（A股/港股/可转债/基金…）。主数据同步按此分组。        |
+| `resp_name_field`     | `str \| null`，默认 `name`                                 | 响应中证券名称字段名（列表解析用；价格接口用 `resp_price_field`，互不影响）。        |
+| `resp_exchange_field` | `str \| null`                                           | 响应中交易所字段名（如 `exchange`/`market`）；为空时由代码前缀启发式推断（见 11.4）。 |
+|                       |                                                         |                                                         |
 
 > 复用而非新增：`asset_class` 直接复用 `SecurityType`，使「接口资产类别」与「证券 `type`」为同一套枚举，主数据行 `type` 直接 = 接口 `asset_class`，无需双份枚举维护。
 
@@ -479,12 +486,14 @@ sequenceDiagram
 
 > 若某类改用付费 HTTPS API：仅把 provider 换成 `access_method=https` + `base_url` + `endpoint`，接口 `resp_*` 字段对齐新响应即可，sync 代码零改动。
 
-### 11.7 待确认决策（本需求带来）
+### 11.7 决策点（已全部拍板，2026-08-13）
 
-| # | 决策点 | 推荐 |
-|---|--------|------|
-| 10 | 资产类别枚举：复用 `SecurityType`（扩展值）vs 新建独立 `AssetClass` 枚举 | **复用 `SecurityType`**（单一分类法，主数据 `type` 直接=接口 `asset_class`，零重复） |
-| 11 | 是否预置 AKShare 的 A股/港股/可转债/基金四条 `MASTER_LIST` 接口作为种子配置 | 推荐预置（首次部署即有数据），但机制不绑定 AKShare，可后续替换 |
+| # | 决策点 | 用户拍板 | 影响 |
+|---|--------|----------|------|
+| 10 | 资产类别枚举：复用 `SecurityType`（扩展值）vs 新建独立 `AssetClass` 枚举 | **复用 `SecurityType`**（单一分类法，主数据 `type` 直接=接口 `asset_class`，零重复） | 枚举扩展值见 §11.3 |
+| 11 | 是否预置 AKShare 的 A股/港股/可转债/基金四条 `MASTER_LIST` 接口作为种子配置 | **预置**（首次部署即有数据，机制不绑定 AKShare，可后续替换） | 种子迁移/脚本写入四条接口配置 |
+
+> 决策 10–11 已全部拍板；主数据获取完全配置驱动、多资产类别数据驱动扩展（§11）。
 
 ---
 
@@ -502,7 +511,9 @@ export interface SecurityMaster {
   type: string | null;       // SecurityType: STOCK / INDEX / ETF ...
   updatedAt: string;         // 最近同步时间 ISO8601（TimestampMixin）
 }
-// GET /api/admin/securities/masters  → SecurityMaster[]（portfolio_id IS NULL 的 securities 行）
+// GET /api/admin/securities/masters?page=1&pageSize=20&q=  → PaginatedResponse<SecurityMaster>
+//   { items: SecurityMaster[]; total: number; page: number; pageSize: number }
+//   （对齐后端 paginate() 与现有 listSecurities 的 PaginatedResponse<Security>）
 // （可选）POST /api/admin/securities/sync → { synced: number; failed: number; errors: string[] }
 
 // web/src/api/quote-interface.api.ts（扩展）
@@ -529,5 +540,5 @@ export interface InterfaceTestResponse {
 
 - **`QuoteInterface.access_method` 归属**：`market_data_sync.py` 中 `_call_interface` 按 `itf.access_method`（https/sdk）分派，但 `quote_interface.py` 模型的可见字段未直接含 `access_method`（实际由所属 `SecuritiesDataProvider` 提供，经关系/代理暴露）。本方案把测试端点的调用分派交给后端复用 `_call_interface` 内部逻辑，前端无需感知，故不影响设计；实现时后端自行处理即可。
 - **股票主数据交易所/类型枚举（已明确，§11.3）**：`SecurityType` 扩展 `HK_STOCK`/`CONVERTIBLE_BOND`/`ETF`/`INDEX`；`exchange` 取 `resp_exchange_field` 或代码前缀推断（SH/SZ/BJ/HK）。AKShare 依赖已消除——主数据获取走「已配置接口」（§11），AKShare 仅是一个可替换的 provider。
-- **左栏是否分页**：股票主数据量级（全 A 股约 5000+ 行）建议后端一次性返回或给较大 pageSize；若超大再补分页，属实现细节。
-- **决策点已全部拍板**（见 §8，2026-08-13）：采用改造 `securities` 承载主数据、测试结果不持久化、对任意 enabled 接口测试、支持左右联动、端点 `.../quote-interfaces/{id}/test`。
+- **左栏分页（已拍板）**：全市场主数据 5000+ 行，采用后端标准 `page`/`pageSize` 分页（`paginate()` 返回 `PaginatedResponse<SecurityMaster>`，默认 `pageSize=20`），左栏以分页表格 + 分页器浏览，与现有 `listSecurities` 契约一致；不再「一次性返回」或「较大 pageSize 全量下推」。
+- **决策点已全部拍板**（见 §8 / §10.6 / §11.7，2026-08-13）：改造 `securities` 承载主数据、测试结果不持久化、对任意 enabled 接口测试、支持左右联动、端点 `.../quote-interfaces/{id}/test`、录入搜索后端 `pinyin_initials`+resolve、仅搜主数据、仅改录入买卖表单、复用 `SecurityType`、预置 AKShare 四条种子接口、左栏分页。全文无「待确认/待拍板」项。
