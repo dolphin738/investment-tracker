@@ -83,6 +83,25 @@ async def test_reorder_cross_category_id_raises_400(session):
     assert exc.value.status_code == 400
 
 
+async def test_list_all_returns_priority_order(session):
+    """list_all 必须按 priority 升序返回，否则拖拽调序后重拉会按 name 弹回。
+
+    对应 ADR-002 §5.3 拖拽调序读路径 — 这是「拖完提示已保存但顺序无变化」的根因回归。
+    """
+    _, cat, iffs = await _seed(session, n=3)
+    # 重排为 [if2, if0, if1]（priority 写作 0/1/2）
+    await QuoteInterfaceService(session).reorder(
+        cat.id, [iffs[2].id, iffs[0].id, iffs[1].id]
+    )
+    await session.commit()
+
+    # 列表名按字母序会是 [if0, if1, if2]，与 priority 顺序不同 —— 用于区分两种排序
+    all_rows = await QuoteInterfaceService(session).list_all()
+    cat_rows = [r for r in all_rows if r.category_id == cat.id]
+    assert [r.id for r in cat_rows] == [iffs[2].id, iffs[0].id, iffs[1].id]
+    assert [r.priority for r in cat_rows] == [0, 1, 2]
+
+
 async def test_create_default_priority_append_to_end(session):
     """create 默认 priority = COALESCE(MAX(priority),-1)+1，落该分类末位。"""
     provider, cat, iffs = await _seed(session, n=2)

@@ -14,7 +14,7 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from fastapi import HTTPException
-from sqlalchemy import func, select, update
+from sqlalchemy import func, nullslast, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.quote_interface import QuoteInterface
@@ -35,11 +35,16 @@ class QuoteInterfaceService:
         return list(result.scalars().all())
 
     async def list_all(self) -> list[QuoteInterface]:
-        """列出全部接口（扁平，供顶层按分类汇总总览）。按提供方 + 分类 + 名称排序。"""
+        """列出全部接口（扁平，供顶层按分类汇总总览）。
+
+        排序：分类优先，分类内按 priority 升序（NULL 沉底），最后以 name 兜底。
+        必须按 priority 排序，否则拖拽调序写入后重拉仍按 name 弹回，视觉无变化
+        （ADR-002 §5.3 拖拽调序链路的读路径）。
+        """
         result = await self.session.execute(
             select(QuoteInterface).order_by(
-                QuoteInterface.provider_id,
                 QuoteInterface.category_id,
+                nullslast(QuoteInterface.priority),
                 QuoteInterface.name,
             )
         )
