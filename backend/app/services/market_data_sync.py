@@ -250,10 +250,13 @@ class MarketDataSyncService:
         """
         provider = await self.session.get(SecuritiesDataProvider, itf.provider_id)
         config = (provider.config or {}) if provider is not None else {}
-        sdk_func = config.get("sdk_func")
+        # SDK 顶层函数名：优先取接口 endpoint（UI 约定「SDK 时为函数名」，见接口对话框占位），
+        # 兼容旧配置 provider.config.sdk_func（管理面 SDK 表单只收集 sdk_name，函数名在接口上）。
+        sdk_func = (itf.endpoint or "").strip() or config.get("sdk_func")
         if not isinstance(sdk_func, str) or not sdk_func:
             raise ValueError(
-                "SDK 接入方式必须在 provider.config.sdk_func 指定 akshare 顶层函数名"
+                "SDK 接入方式必须在接口「调用路径」填写 akshare 顶层函数名"
+                "（或提供方 config.sdk_func 配置）"
             )
         # 懒导入：模块级不 import akshare（见文件头约束）
         import akshare  # noqa: PLC0415

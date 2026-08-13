@@ -15,7 +15,6 @@ from typing import Any
 
 import pytest
 
-import app.services.market_data_sync as mds
 from app.models.enums import QuoteProviderAccessMethod
 from app.models.interface_category import InterfaceCategory
 from app.models.quote_interface import QuoteInterface
@@ -84,12 +83,13 @@ async def _seed_sdk_interface(
 
 
 async def test_module_import_does_not_import_akshare():
-    """仅导入 app.services.market_data_sync 不应在 import 期触发 akshare 导入。"""
-    assert "akshare" not in sys.modules
-    # 即便显式 reload，akshare 仍不应被导入（懒导入在函数体内）
-    import importlib
+    """仅导入 app.services.market_data_sync 不应在 import 期触发 akshare 导入。
 
-    importlib.reload(mds)
+    注意：不做 importlib.reload —— reload 会用新类对象覆盖 sys.modules 里的
+    MarketDataSyncService，造成「类身份分裂」：本文件与路由层各自绑定的类不是同一对象，
+    monkeypatch 打在旧类上、路由实例化新类而失效（表现为接口测试真发网络请求）。
+    懒导入保证 akshare 仅在 _fetch_sdk 函数体内 import，模块加载期零副作用。
+    """
     assert "akshare" not in sys.modules
 
 
@@ -122,10 +122,27 @@ async def test_fetch_sdk_empty_returns_empty_dict(session, monkeypatch):
 
 
 async def test_fetch_sdk_missing_sdk_func_raises(session, monkeypatch):
-    """未配 sdk_func → 清晰报错（ValueError）。"""
+    """未配 sdk_func（接口 endpoint 与 provider.config 均缺失）→ 清晰报错（ValueError）。"""
     itf = await _seed_sdk_interface(session, sdk_func="")
     monkeypatch.setitem(sys.modules, "akshare", FakeAkShare())
 
     svc = MarketDataSyncService(session)
     with pytest.raises(ValueError):
         await svc._fetch_sdk(itf, ["600000"])
+
+
+async def test_fetch_sdk_uses_interface_endpoint_as_func_name(session, monkeypatch):
+    """UI 约定：SDK 顶层函数名取自接口 endpoint（provider.config.sdk_func 仅作旧配置回退）。"""
+    itf = await _seed_sdk_interface(session, sdk_func="")
+    itf.endpoint = "stock_zh_a_spot"  # 接口「调用路径」填 akshare 函数名
+    await session.commit()
+    fake = FakeAkShare()
+    monkeypatch.setitem(sys.modules, "akshare", fake)
+
+    svc = MarketDataSyncService(session)
+    result = await svc._fetch_sdk(itf, ["600000"])
+    assert result == {
+        "600000": Decimal("12.34"),
+        "000001": Decimal("56.78"),
+    }
+    assert fake.last_kwargs.get("codes") == ["600000"]
