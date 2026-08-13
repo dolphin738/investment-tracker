@@ -491,7 +491,7 @@ sequenceDiagram
 | # | 决策点 | 用户拍板 | 影响 |
 |---|--------|----------|------|
 | 10 | 资产类别枚举：复用 `SecurityType`（扩展值）vs 新建独立 `AssetClass` 枚举 | **复用 `SecurityType`**（单一分类法，主数据 `type` 直接=接口 `asset_class`，零重复） | 枚举扩展值见 §11.3 |
-| 11 | 是否预置 AKShare 的 A股/港股/可转债/基金四条 `MASTER_LIST` 接口作为种子配置 | **预置**（首次部署即有数据，机制不绑定 AKShare，可后续替换） | 种子迁移/脚本写入四条接口配置 |
+| 11 | 是否预置 AKShare 的 A股/港股/可转债/基金四条 `MASTER_LIST` 接口作为种子配置 | **不预置**（首次部署为零种子，接口配置完全由管理员在「金融数据接口」UI 按需手动维护，机制零硬编码、纯配置驱动） | 不写种子迁移/脚本；接口配置页提供「新建 + 设用途为 MASTER_LIST」的能力即可 |
 
 > 决策 10–11 已全部拍板；主数据获取完全配置驱动、多资产类别数据驱动扩展（§11）。
 
@@ -541,4 +541,4 @@ export interface InterfaceTestResponse {
 - **`QuoteInterface.access_method` 归属**：`market_data_sync.py` 中 `_call_interface` 按 `itf.access_method`（https/sdk）分派，但 `quote_interface.py` 模型的可见字段未直接含 `access_method`（实际由所属 `SecuritiesDataProvider` 提供，经关系/代理暴露）。本方案把测试端点的调用分派交给后端复用 `_call_interface` 内部逻辑，前端无需感知，故不影响设计；实现时后端自行处理即可。
 - **股票主数据交易所/类型枚举（已明确，§11.3）**：`SecurityType` 扩展 `HK_STOCK`/`CONVERTIBLE_BOND`/`ETF`/`INDEX`；`exchange` 取 `resp_exchange_field` 或代码前缀推断（SH/SZ/BJ/HK）。AKShare 依赖已消除——主数据获取走「已配置接口」（§11），AKShare 仅是一个可替换的 provider。
 - **左栏分页（已拍板）**：全市场主数据 5000+ 行，采用后端标准 `page`/`pageSize` 分页（`paginate()` 返回 `PaginatedResponse<SecurityMaster>`，默认 `pageSize=20`），左栏以分页表格 + 分页器浏览，与现有 `listSecurities` 契约一致；不再「一次性返回」或「较大 pageSize 全量下推」。
-- **决策点已全部拍板**（见 §8 / §10.6 / §11.7，2026-08-13）：改造 `securities` 承载主数据、测试结果不持久化、对任意 enabled 接口测试、支持左右联动、端点 `.../quote-interfaces/{id}/test`、录入搜索后端 `pinyin_initials`+resolve、仅搜主数据、仅改录入买卖表单、复用 `SecurityType`、预置 AKShare 四条种子接口、左栏分页。全文无「待确认/待拍板」项。
+- **决策点已全部拍板**（见 §8 / §10.6 / §11.7，2026-08-13）：改造 `securities` 承载主数据、测试结果不持久化、对任意 enabled 接口测试、支持左右联动、端点 `.../quote-interfaces/{id}/test`、录入搜索后端 `pinyin_initials`+resolve、仅搜主数据、仅改录入买卖表单、复用 `SecurityType`、**不预置**种子接口（配置纯由管理员手动维护）、左栏分页。全文无「待确认/待拍板」项。
