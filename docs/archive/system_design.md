@@ -2,7 +2,7 @@
 
 > 范围：在现有「多提供方证券行情数据提供方管理」之上，新增
 > **① 提供方下的接口 CRUD** 与 **② 接口分类后台管理** 两大特性。
-> 冻结决策来源：`docs/prd-system-management.md` §6.1（评审 2026-08-12）。
+> 冻结决策来源：`./prd-system-management.md` §6.1（评审 2026-08-12）。
 > 当前 git HEAD = `4a692cc`（已落地提供方管理，但**尚无**接口 CRUD 与分类管理）。
 
 ---
@@ -321,6 +321,6 @@ graph TD
 
 ---
 
-## 附录：时序图（见 `docs/sequence-diagram.mermaid`）
+## 附录：时序图（见 `./sequence-diagram.mermaid`）
 - 场景 A：列出某提供方接口 + 新增接口（前端 → hooks → api → 信封 → AdminRouter → Service → PG）
 - 场景 B：分类管理 list / create（同上链路）

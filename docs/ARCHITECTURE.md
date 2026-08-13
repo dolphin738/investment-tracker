@@ -373,7 +373,7 @@ User (1) ──< Portfolio (N)
 
 #### 4.1.1 角色模型（新增）
 
-> 2026-08-11 新增（方案 `docs/plan-admin-quote-api-config-2026-08-11.md`）。**源真相在 DB，JWT 仅缓存 `role` 供前端显示，后端授权以查库为准**。
+> 2026-08-11 新增（方案 `docs/archive/plan-admin-quote-api-config-2026-08-11.md`）。**源真相在 DB，JWT 仅缓存 `role` 供前端显示，后端授权以查库为准**。
 
 - **`User.role`**：`users` 表新增列 `String(20)`，默认 `'user'`，非空；取值由 Python 枚举 `UserRole(user="user", admin="admin")` 约束（选用 `String` + Python 枚举，**非** §3.1.5 的原生 PG 枚举类型，便于未来加角色只改枚举不动库表）。注册默认 `role='user'`。
 - **JWT payload 含 `role`**：`create_access_token(sub, email, role)` 在 `payload` 追加 `"role": role`（仅前端判断显示 / 入口隐藏用，**不用于后端授权**）；现有 `payload={sub, email, iat, exp}` 其余不变。
@@ -655,7 +655,7 @@ User (1) ──< Portfolio (N)
 
 > 模块定位：全局管理员配置（证券行情**数据来源 / 接口 API 来源 / 接口分类**），**仅 admin 可见可改**。后端以 `Depends(require_admin)` 查库校验为最终防线（普通用户 → `FORBIDDEN 4001/403`）；前端全局主侧边栏「系统管理」为可折叠分组、子项「金融数据接口」进入 `/admin` 页，且 hook 以 `enabled: isAdmin` 守护普通用户不发请求（纵深防御）。
 >
-> 取代旧的「单 URL system-config」配置：旧 `GET/PATCH /api/admin/system-config/{key}` 端点已整体移除（迁移 `c2d3e4f5a6b7` 删 `system_configs` 表），改为**多提供方管理**（见 §3.1.6）。详细规格见 `docs/prd-system-management.md`；对应 PRD `AUTH-P0-01` / `SYS-P0-08`。
+> 取代旧的「单 URL system-config」配置：旧 `GET/PATCH /api/admin/system-config/{key}` 端点已整体移除（迁移 `c2d3e4f5a6b7` 删 `system_configs` 表），改为**多提供方管理**（见 §3.1.6）。详细规格见 `docs/archive/prd-system-management.md`；对应 PRD `AUTH-P0-01` / `SYS-P0-08`。
 
 **证券行情数据来源（SecuritiesDataProvider）**：
 
