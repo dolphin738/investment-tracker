@@ -9,7 +9,7 @@
  */
 
 import { Fragment, useMemo, useState } from 'react';
-import { ChevronDown, ChevronRight, Loader2, Pencil, Plus, Star, Trash2, Zap } from 'lucide-react';
+import { ChevronDown, ChevronRight, Loader2, Pencil, Plus, Trash2 } from 'lucide-react';
 import {
   Card,
   CardContent,
@@ -19,6 +19,7 @@ import {
 } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Switch } from '@/components/ui/switch';
 import {
   Table,
   TableBody,
@@ -40,8 +41,7 @@ import {
 import {
   useDeleteQuoteProvider,
   useQuoteProviders,
-  useSetActiveQuoteProvider,
-  useSetDefaultQuoteProvider,
+  useUpdateQuoteProvider,
 } from '@/hooks/use-quote-provider';
 import type { QuoteProvider } from '@/api/quote-provider.api';
 import {
@@ -68,8 +68,7 @@ function useCategoryLabelMap(): Map<string, string> {
 export function QuoteProviderSection(): JSX.Element {
   const { data: providers, isLoading, isError } = useQuoteProviders();
   const deleteMut = useDeleteQuoteProvider();
-  const setDefaultMut = useSetDefaultQuoteProvider();
-  const setActiveMut = useSetActiveQuoteProvider();
+  const updateMut = useUpdateQuoteProvider();
 
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<QuoteProvider | null>(null);
@@ -100,22 +99,19 @@ export function QuoteProviderSection(): JSX.Element {
 
   const renderProviderRow = (p: QuoteProvider): JSX.Element => (
     <Fragment key={p.id}>
-      <TableRow>
-      <TableCell>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="p-1"
-          onClick={() => toggleExpand(p.id)}
-          aria-label={expanded[p.id] ? '收起接口' : '展开接口'}
-        >
-          {expanded[p.id] ? (
-            <ChevronDown className="h-4 w-4" />
-          ) : (
-            <ChevronRight className="h-4 w-4" />
-          )}
-        </Button>
-      </TableCell>
+      <TableRow
+        className="cursor-pointer"
+        onClick={() => toggleExpand(p.id)}
+      >
+        <TableCell>
+          <span className="inline-flex h-8 w-8 items-center justify-center text-muted-foreground">
+            {expanded[p.id] ? (
+              <ChevronDown className="h-4 w-4" />
+            ) : (
+              <ChevronRight className="h-4 w-4" />
+            )}
+          </span>
+        </TableCell>
       <TableCell className="font-medium">{p.name}</TableCell>
       <TableCell>{p.access_method === 'https' ? 'HTTPS' : 'SDK'}</TableCell>
       <TableCell className="max-w-[220px] truncate text-muted-foreground">
@@ -130,37 +126,30 @@ export function QuoteProviderSection(): JSX.Element {
           {!p.enabled && <Badge variant="secondary">已禁用</Badge>}
         </div>
       </TableCell>
-      <TableCell className="text-right">
-        <div className="flex justify-end gap-1">
+      <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-end gap-2">
+          <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            默认
+            <Switch
+              checked={p.is_default}
+              onCheckedChange={(v) =>
+                updateMut.mutate({ id: p.id, body: { is_default: v } })
+              }
+            />
+          </label>
+          <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            当前
+            <Switch
+              checked={p.is_active}
+              disabled={!p.enabled}
+              onCheckedChange={(v) =>
+                updateMut.mutate({ id: p.id, body: { is_active: v } })
+              }
+            />
+          </label>
           <Button variant="ghost" size="sm" onClick={() => openEdit(p)}>
             <Pencil className="mr-1 h-3.5 w-3.5" />
             编辑
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={p.is_default}
-            onClick={() => setDefaultMut.mutate(p.id)}
-            title={p.is_default ? '已是默认' : '设为默认方'}
-          >
-            <Star className="mr-1 h-3.5 w-3.5" />
-            默认
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={!p.enabled || p.is_active}
-            onClick={() => setActiveMut.mutate(p.id)}
-            title={
-              !p.enabled
-                ? '禁用的提供方不能设为当前使用'
-                : p.is_active
-                  ? '已是当前使用方'
-                  : '切换为当前使用方'
-            }
-          >
-            <Zap className="mr-1 h-3.5 w-3.5" />
-            当前
           </Button>
           <Button
             variant="ghost"
@@ -197,7 +186,7 @@ export function QuoteProviderSection(): JSX.Element {
             </div>
             <Button onClick={openCreate}>
               <Plus className="mr-2 h-4 w-4" />
-              新增提供方
+              新增数据来源
             </Button>
           </div>
         </CardHeader>
@@ -215,7 +204,7 @@ export function QuoteProviderSection(): JSX.Element {
           )}
           {!isLoading && !isError && providers && providers.length === 0 && (
             <p className="py-8 text-center text-sm text-muted-foreground">
-              暂无提供方，点击右上角「新增提供方」开始配置
+              暂无数据来源，点击右上角「新增数据来源」开始配置
             </p>
           )}
           {!isLoading && !isError && providers && providers.length > 0 && (
@@ -463,9 +452,9 @@ function InterfacesByCategoryOverview(): JSX.Element {
   const { data: interfaces, isLoading } = useQuoteInterfacesAll();
   const labelMap = useCategoryLabelMap();
   const { data: providers } = useQuoteProviders();
-  const providerMap = useMemo(() => {
-    const m = new Map<string, string>();
-    (providers ?? []).forEach((p) => m.set(p.id, p.name));
+  const providerById = useMemo(() => {
+    const m = new Map<string, QuoteProvider>();
+    (providers ?? []).forEach((p) => m.set(p.id, p));
     return m;
   }, [providers]);
 
@@ -520,14 +509,14 @@ function InterfacesByCategoryOverview(): JSX.Element {
                     <TableRow key={it.id}>
                       <TableCell className="font-medium">{it.name}</TableCell>
                       <TableCell className="max-w-[160px] truncate text-xs text-muted-foreground">
-                        {providerMap.get(it.provider_id) ?? it.provider_id}
+                        {providerById.get(it.provider_id)?.name ?? it.provider_id}
                       </TableCell>
                       <TableCell className="max-w-[200px] truncate text-muted-foreground">
                         {it.endpoint ?? '-'}
                       </TableCell>
                       <TableCell>{it.http_method ?? '-'}</TableCell>
                       <TableCell>
-                        {it.enabled ? (
+                        {providerById.get(it.provider_id)?.enabled && it.enabled ? (
                           <Badge variant="success">启用</Badge>
                         ) : (
                           <Badge variant="secondary">停用</Badge>

@@ -2,10 +2,10 @@
  * pages/__tests__/admin.test.tsx — 系统管理页（多提供方）RBAC 与表单行为验收
  *
  * 验收点：
- * 1. 非管理员：页面不渲染「新增提供方」按钮，改为展示「无权限访问」；
+ * 1. 非管理员：页面不渲染「新增数据来源」按钮，改为展示「无权限访问」；
  *    且侧边栏不展示「系统管理」入口（useIsAdmin === false → 过滤 admin 项）。
- * 2. 管理员：表格可见并列出提供方，且展示「新增提供方」按钮。
- * 3. 管理员：点击「新增提供方」打开对话框，填写并提交调用 createQuoteProvider
+ * 2. 管理员：表格可见并列出提供方，且展示「新增数据来源」按钮。
+ * 3. 管理员：点击「新增数据来源」打开对话框，填写并提交调用 createQuoteProvider
  *    且请求体含 name / access_method=https / config.base_url / enabled。
  *
  * Mock 策略（稳健模式）：
@@ -101,10 +101,10 @@ describe('AdminPage — 多提供方管理 RBAC 与表单', () => {
     vi.clearAllMocks();
   });
 
-  it('① 非管理员：不渲染「新增提供方」，展示「无权限访问」', () => {
+  it('① 非管理员：不渲染「新增数据来源」，展示「无权限访问」', () => {
     adminFlag = false;
     renderWithProviders(<AdminPage />);
-    expect(screen.queryByText('新增提供方')).toBeNull();
+    expect(screen.queryByText('新增数据来源')).toBeNull();
     expect(screen.getByText('无权限访问该页面')).toBeTruthy();
   });
 
@@ -118,22 +118,22 @@ describe('AdminPage — 多提供方管理 RBAC 与表单', () => {
     expect(screen.queryByText('系统管理')).toBeNull();
   });
 
-  it('③ 管理员：表格可见并列出提供方，且展示「新增提供方」按钮', async () => {
+  it('③ 管理员：表格可见并列出提供方，且展示「新增数据来源」按钮', async () => {
     adminFlag = true;
     renderWithProviders(<AdminPage />);
     expect(await screen.findByText('新浪财经')).toBeTruthy();
     expect(
-      screen.getByRole('button', { name: '新增提供方' }),
+      screen.getByRole('button', { name: '新增数据来源' }),
     ).toBeTruthy();
   });
 
-  it('④ 管理员：新增提供方填写并提交调用 createQuoteProvider', async () => {
+  it('④ 管理员：新增数据来源填写并提交调用 createQuoteProvider', async () => {
     adminFlag = true;
     renderWithProviders(<AdminPage />);
     // 等待列表加载完成
     await screen.findByText('新浪财经');
 
-    const addBtn = screen.getByRole('button', { name: '新增提供方' });
+    const addBtn = screen.getByRole('button', { name: '新增数据来源' });
     await act(async () => {
       fireEvent.click(addBtn);
     });
