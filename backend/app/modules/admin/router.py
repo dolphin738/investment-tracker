@@ -1,13 +1,11 @@
 """管理员路由 — 受角色保护的证券行情数据提供方 / 接口 / 接口分类管理。
 
 多提供方管理（取代旧的单 URL 系统配置 system-config 端点）：
-- GET    /api/admin/quote-providers：列出全部提供方（含默认 / 当前标记）。
+- GET    /api/admin/quote-providers：列出全部提供方。
 - POST   /api/admin/quote-providers：新增提供方（access_method=https|sdk，config 按接入方式校验必填字段）。
 - GET    /api/admin/quote-providers/{id}：读取单个。
 - PATCH  /api/admin/quote-providers/{id}：局部更新。
 - DELETE /api/admin/quote-providers/{id}：删除（级联删除其下接口）。
-- POST   /api/admin/quote-providers/{id}/set-default：设为默认（全局至多一个默认）。
-- POST   /api/admin/quote-providers/{id}/set-active：设为当前运行时使用（全局至多一个当前；禁用者不可设）。
 
 提供方接口（QuoteInterface）CRUD：
 - GET    /api/admin/quote-providers/{provider_id}/interfaces：列出某提供方全部接口。
@@ -24,7 +22,7 @@
 - DELETE /api/admin/interface-categories/{id}：删除（不影响接口）。
 
 安全约束：所有端点均依赖 require_admin（查库校验角色），非管理员返回 403。
-is_default / is_active 的「全局至多一个」由服务层写入时保证（见 services.quote_provider）。
+提供方仅保留 enabled 启停开关（全局单一活跃源 is_default/is_active 已移除，见 ADR-002）。
 """
 from __future__ import annotations
 
@@ -33,13 +31,16 @@ from typing import Any, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.envelope import EnvelopeRoute
 from app.core.security import CurrentUser, require_admin
 from app.db.database import get_db
+from app.models import Portfolio
 from app.models.enums import InterfaceDirection, QuoteProviderAccessMethod
 from app.services import InterfaceCategoryService, QuoteInterfaceService
+from app.services.market_data_sync import MarketDataSyncService
 from app.services.quote_provider import QuoteProviderService
 
 
@@ -69,8 +70,6 @@ class QuoteProviderCreate(BaseModel):
     config: dict[str, Any]
     enabled: bool = True
     description: Optional[str] = None
-    is_default: bool = False
-    is_active: bool = False
 
     @model_validator(mode="after")
     def _validate(self) -> "QuoteProviderCreate":
@@ -84,8 +83,6 @@ class QuoteProviderUpdate(BaseModel):
     config: Optional[dict[str, Any]] = None
     enabled: Optional[bool] = None
     description: Optional[str] = None
-    is_default: Optional[bool] = None
-    is_active: Optional[bool] = None
 
     @model_validator(mode="after")
     def _validate(self) -> "QuoteProviderUpdate":
@@ -99,8 +96,6 @@ class QuoteProviderOut(BaseModel):
     name: str
     access_method: str
     config: dict[str, Any]
-    is_default: bool
-    is_active: bool
     enabled: bool
     description: Optional[str]
     created_at: datetime
@@ -222,8 +217,6 @@ async def create_quote_provider(
             config=body.config,
             enabled=body.enabled,
             description=body.description,
-            is_default=body.is_default,
-            is_active=body.is_active,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -328,8 +321,6 @@ async def update_quote_provider(
             config=body.config,
             enabled=body.enabled,
             description=body.description,
-            is_default=body.is_default,
-            is_active=body.is_active,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -353,42 +344,36 @@ async def delete_quote_provider(
     return {"id": provider_id, "deleted": True}
 
 
-@router_admin.post("/quote-providers/{provider_id}/set-default")
-async def set_default_quote_provider(
-    provider_id: str,
+@router_admin.post("/quote-providers/sync")
+async def admin_sync_all_prices(
     current: CurrentUser = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
-) -> QuoteProviderOut:
-    svc = QuoteProviderService(db)
-    provider = await svc.get(provider_id)
-    if provider is None:
-        raise HTTPException(status_code=404, detail="提供方不存在")
-    try:
-        provider = await svc.set_default(provider)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    await db.commit()
-    await db.refresh(provider)
-    return QuoteProviderOut.model_validate(provider)
+) -> dict:
+    """管理面全量刷新（需 admin）：遍历全部组合同步实时行情并重建快照/净值。
 
-
-@router_admin.post("/quote-providers/{provider_id}/set-active")
-async def set_active_quote_provider(
-    provider_id: str,
-    current: CurrentUser = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
-) -> QuoteProviderOut:
-    svc = QuoteProviderService(db)
-    provider = await svc.get(provider_id)
-    if provider is None:
-        raise HTTPException(status_code=404, detail="提供方不存在")
-    try:
-        provider = await svc.set_active(provider)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    返回结构化汇总 ``{portfolios, synced, failed, errors}``。
+    """
+    portfolio_rows = (
+        await db.execute(select(Portfolio.id))
+    ).scalars().all()
+    total_synced = 0
+    total_failed = 0
+    errors: list[str] = []
+    for pid in portfolio_rows:
+        try:
+            result = await MarketDataSyncService(db).sync_portfolio_prices(pid)
+            total_synced += result["synced"]
+            total_failed += result["failed"]
+            errors.extend(result["errors"])
+        except Exception as exc:
+            errors.append(str(exc))
     await db.commit()
-    await db.refresh(provider)
-    return QuoteProviderOut.model_validate(provider)
+    return {
+        "portfolios": len(portfolio_rows),
+        "synced": total_synced,
+        "failed": total_failed,
+        "errors": errors,
+    }
 
 
 # --------------------------------------------------------------------------- #

@@ -4,17 +4,21 @@
 """
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, Depends
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.envelope import EnvelopeRoute
 from app.core.security import CurrentUser, get_current_user
-from app.db.database import get_db
-from app.models import Portfolio
+from app.db.database import AsyncSessionLocal, get_db
+from app.models import Portfolio, SecurityPrice
 from app.common import get_portfolio
 from app.serializers import serialize_portfolio, serialize_preference
 from app.schemas import PortfolioArchiveReq, PortfolioCreateReq, PortfolioPatchReq
 from app.schemas_resp import ClearDataOut, PortfolioOut, PreferenceOut
+from app.services.market_data_sync import MarketDataSyncService
 from app.services.portfolio import PortfolioService
 
 router = APIRouter(prefix="/api", tags=["portfolios"], route_class=EnvelopeRoute)
@@ -71,6 +75,65 @@ async def clear_data(
     """清空组合所有数据（保留组合本身）。级联删除子表。"""
     counts = await PortfolioService(db).clear_data(p)
     return {"deletedCount": counts}
+
+
+# --------------------------------------------------------------------------- #
+# 实时行情同步（ADR-002 §2.6 三路端点）
+# --------------------------------------------------------------------------- #
+@router.post("/portfolios/{portfolio_id}/prices/sync")
+async def sync_portfolio_prices_endpoint(
+    p: Portfolio = Depends(get_portfolio),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """同步完整 fallback 链（路径 C）：同步等待，Σtimeout 封顶。
+
+    返回结构化结果 ``{synced, failed, skipped, errors}``。
+    """
+    result = await MarketDataSyncService(db).sync_portfolio_prices(p.id)
+    await db.commit()
+    return result
+
+
+@router.post("/portfolios/{portfolio_id}/prices/refresh-async", status_code=202)
+async def refresh_async_portfolio_prices(
+    p: Portfolio = Depends(get_portfolio),
+) -> dict:
+    """后台异步刷新（路径 B，fire-and-forget）：立即 202，不阻塞 UI。
+
+    用独立会话跑完整链，避免请求会话关闭后后台任务访问已关闭会话。
+    """
+    portfolio_id = p.id
+
+    async def _bg() -> None:
+        async with AsyncSessionLocal() as s:
+            try:
+                await MarketDataSyncService(s).sync_portfolio_prices(portfolio_id)
+                await s.commit()
+            except Exception:
+                await s.rollback()
+
+    asyncio.create_task(_bg())
+    return {"accepted": True, "portfolio_id": portfolio_id}
+
+
+@router.get("/portfolios/{portfolio_id}/prices/sync-status")
+async def sync_status_portfolio_prices(
+    p: Portfolio = Depends(get_portfolio),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """刷新进度 / 最新 fetched_at 与来源（路径 B 收尾轮询）。"""
+    row = (
+        await db.execute(
+            select(SecurityPrice.fetched_at, SecurityPrice.source)
+            .where(SecurityPrice.portfolio_id == p.id)
+            .order_by(SecurityPrice.fetched_at.desc())
+            .limit(1)
+        )
+    ).first()
+    return {
+        "last_fetched_at": row[0].isoformat() if row and row[0] else None,
+        "source": row[1] if row else None,
+    }
 
 
 @router.patch("/portfolios/{portfolio_id}/archive", response_model=PortfolioOut)
