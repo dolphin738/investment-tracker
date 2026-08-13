@@ -16,6 +16,7 @@ from app.models.enums import (
     SnapshotValuation,
 )
 from app.models.interface_category import InterfaceCategory
+from app.models.notification import Notification
 from app.models.portfolio import Portfolio
 from app.models.quote_interface import QuoteInterface
 from app.models.quote_provider import SecuritiesDataProvider
@@ -36,6 +37,7 @@ __all__ = [
     "SecuritiesDataProvider",
     "QuoteInterface",
     "InterfaceCategory",
+    "Notification",
     "QuoteProviderAccessMethod",
     "InterfaceDirection",
     "DailyNav",
