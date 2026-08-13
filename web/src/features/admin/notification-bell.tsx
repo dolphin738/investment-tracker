@@ -108,7 +108,7 @@ export function NotificationBell(): JSX.Element {
                     size="sm"
                     className="mt-1 h-7 self-end px-2 text-xs"
                     onClick={(e) => {
-                      // 阻止冒泡到 DropdownMenuItem（避免关闭菜单），仅触发标记已读
+                      // 阻止冒泡到下拉容器，避免误触；仅触发标记已读
                       e.stopPropagation();
                       markRead.mutate(n.id);
                     }}
@@ -117,7 +117,6 @@ export function NotificationBell(): JSX.Element {
                   </Button>
                 )}
               </div>
-            </div>
           ))}
       </DropdownMenuContent>
     </DropdownMenu>
