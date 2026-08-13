@@ -518,11 +518,11 @@ function InterfacesByCategoryOverview(): JSX.Element {
                 <TableBody>
                   {items.map((it) => (
                     <TableRow key={it.id}>
-                      <TableCell className="font-medium">{it.name}</TableCell>
-                      <TableCell className="max-w-[160px] truncate text-xs text-muted-foreground">
+                      <TableCell className="font-medium align-middle">{it.name}</TableCell>
+                      <TableCell className="max-w-[160px] truncate align-middle text-muted-foreground">
                         {providerById.get(it.provider_id)?.name ?? it.provider_id}
                       </TableCell>
-                      <TableCell className="max-w-[200px] truncate text-muted-foreground">
+                      <TableCell className="max-w-[200px] truncate align-middle text-muted-foreground">
                         {it.endpoint ?? '-'}
                       </TableCell>
                       <TableCell className="whitespace-nowrap align-middle">{it.http_method ?? '-'}</TableCell>
