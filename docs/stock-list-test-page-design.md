@@ -20,10 +20,10 @@
 
 - **入口**：在 `admin.tsx` 的 `MODULES` 注册表追加第三个分页 `股票列表和测试`，挂载新组件 `StockListTestSection`。
 - **布局**：`StockListTestSection` 顶部做左右两栏（`lg:grid-cols-2`）；左栏 `StockListPanel`（只读展示系统级股票主数据），右栏 `InterfaceTestPanel`（选接口 → 填参数 → 执行测试 → 看原始响应）。
-- **左栏数据**：当前 `securities` 表是**组合（portfolio）维度**主数据、由用户交易产生，**不是**系统级全市场股票主数据。（详见 §4.2「改造 securities」方案：不新建表，`portfolio_id` 可空 + 新增 `exchange`，定时任务 upsert 主数据行，列表端点 `GET /api/admin/securities/masters`。）
+- **左栏数据**：当前 `securities` 表是**组合（portfolio）维度**主数据、由用户交易产生，**不是**系统级全市场股票主数据。（详见 §4.2「改造 securities」方案：不新建表，`portfolio_id` 可空 + 新增 `exchange`，列表端点 `GET /api/admin/securities/masters`。）**主数据获取走「已配置接口」（非硬编码 AKShare）、支持多资产类别（A股/港股/可转债/基金…）扩展，机制见 §11。**
 - **右栏数据**：选中接口（`listAllInterfaces`）→ 动态渲染该接口 `params` 模板为可编辑键值对（支持增删多个参数）→ 可选填 codes → 「执行测试」调**新端点** `POST /api/admin/quote-interfaces/:id/test`（body `{params, codes?}`）→ 展示原始响应（pretty-print JSON）+ 解析出的 `{code→price}` + 状态 / 耗时。**该测试端点目前不存在，是后端前置依赖。**
 - **风格一致性**：复用 shadcn（Card/Table/Button/Badge/Input/Select/Textarea/Dialog）、TanStack Query（`useQuery`/`useMutation`）、`lucide-react` 图标、`sonner` toast，对齐 `quote-provider-section.tsx` 组织方式。
- - **后端前置依赖**（§8 决策后已收窄）：① 改造 `securities`（portfolio_id 可空 + exchange + 部分唯一索引）+ 定时同步任务 + `GET /api/admin/securities/masters`（+ 可选 `POST /api/admin/securities/sync`）；② 单接口测试端点 `POST /api/admin/quote-interfaces/{id}/test`（执行单接口、回传原始响应）。
+ - **后端前置依赖**（§8 决策后已收窄）：① 改造 `securities`（portfolio_id 可空 + exchange + 部分唯一索引）+ 定时同步任务 + `GET /api/admin/securities/masters`（+ 可选 `POST /api/admin/securities/sync`）；② 单接口测试端点 `POST /api/admin/quote-interfaces/{id}/test`（执行单接口、回传原始响应）。① 已扩展为「**配置驱动、多资产类别**」：`QuoteInterface` 加 `asset_class`/`purpose`/`resp_name_field`/`resp_exchange_field`，`SecurityType` 扩展 `HK_STOCK`/`CONVERTIBLE_BOND`/`ETF`/`INDEX`，sync 走 `purpose=MASTER_LIST` 接口、复用现有 `priority` 降级链，详见 §11。
 - **决策点状态**：§8 五项已全部拍板（改造 securities / 不持久化 / 任意 enabled 接口 / 支持左右联动 / `.../quote-interfaces/{id}/test`）。详见 §8。
 - **补充需求（§10）**：录入买卖界面移除「新建标的」、改为证券搜索（code/名称/拼音首字母），选中主数据后由后端 `resolve` 懒实例化为组合标的。影响：后端 `securities` 需新增 `pinyin_initials` 字段 + 搜索端点支持拼音 + `resolve` 端点（§7 ①③）；前端 `security-trade-form.tsx` 替换为 `SecuritySearchCombobox`（依赖 `cmdk`）。新待确认决策 6–9 见 §10.6。
 
@@ -138,16 +138,16 @@ UniqueConstraint("portfolio_id", "code")
   - **用户持仓行**：仍填真实组合 id，保持原有 CASCADE 行为不变。
 - 新增 `exchange: Mapped[Optional[str]]`（如 `SH`/`SZ`/`BJ`，可空）—— 同步任务填充。
 - **新增 `pinyin_initials: Mapped[Optional[str]]`（如 `贵州茅台`→`gzm`，可空）** —— 同步任务用 `pypinyin` 计算首字母并填充（见 §7 ① 与 §10 数据匹配逻辑）。**这是为支持录入界面「按名称拼音首字母搜索」而追加的字段，原 §8 决策 1 的改造清单未含，属本补充需求带来的新增依赖。**
-- `type`：已存在（`SecurityType` 枚举 STOCK/INDEX/ETF…），同步主数据时填具体值（主数据多为 `STOCK`）。
+- `type`：已存在（`SecurityType` 枚举），需**扩展** `HK_STOCK` / `CONVERTIBLE_BOND` / `ETF` / `INDEX`（见 §11.3）；同步主数据时 `type` 直接取来源接口的 `asset_class`。
 - `updated_at`：`Security` 已继承 `TimestampMixin`，同步 upsert 时自动刷新，直接作为「最近同步时间」展示，无需新增列。
-- **唯一约束调整**：保留现有 `uq_securities_portfolio_code(portfolio_id, code)`（约束用户行）；系统主数据行（`portfolio_id IS NULL`）需按 `code` 唯一，新增 **PostgreSQL 部分唯一索引** `uq_securities_master_code ON securities(code) WHERE portfolio_id IS NULL`，保证全市场主数据 code 不重复且不干扰用户行。
+- **唯一约束调整**：保留现有 `uq_securities_portfolio_code(portfolio_id, code)`（约束用户行）；系统主数据行（`portfolio_id IS NULL`）需按 `资产类别+code` 唯一，新增 **PostgreSQL 部分唯一索引** `uq_securities_master_asset_code ON securities(asset_class, code) WHERE portfolio_id IS NULL`（避免港股 5 位码等跨类命名空间碰撞，不干扰用户行）。
   - （备选：新增 `is_master: bool` 标志 + 部分索引；当前采用 `portfolio_id IS NULL` 判定，零新增列、最简洁。）
 
 定时同步任务：
 
-- 沿用 `MarketDataSyncService`，新增 `sync_security_masters()`：调用 AKShare `stock_info_a_code_name` 取全 A 股代码+名称，按 `code` upsert 到 `securities` 主数据行（`portfolio_id = NULL` 的行；存在则更新 `name`/`exchange`/`type`，不存在则 insert 并置 `portfolio_id = NULL`）；同时刷新 `updated_at`。
+- 沿用 `MarketDataSyncService`，新增 `sync_security_masters(asset_class?)`：**不再硬编码 AKShare**，改为查询 `purpose=MASTER_LIST` 的 `QuoteInterface` 配置行（可跨 provider），复用 `_call_interface` 的 https/sdk 分派拉取原始行，按 `resp_code_field`/`resp_name_field`/`resp_exchange_field` 解析为 `(code, name, exchange)`，按 `asset_class` 分组 upsert 到 `securities` 主数据行（`portfolio_id = NULL`；存在更新 `name`/`exchange`/`type`/`pinyin_initials`，不存在 insert）；刷新 `updated_at`。AKShare 仅是「其中一个 provider」配置（`access_method=sdk`, `config.sdk_func=...`），换成付费 HTTPS 源只需改配置、零代码改动（详见 §11）。
 - 触发：调度器（APScheduler/Celery beat）定时 + 可选管理面手动端点 `POST /api/admin/securities/sync`（对齐现有 `POST /api/admin/quote-providers/sync` 风格）。
-- （可选）交易所/类型枚举：与 AKShare 返回对齐，前端仅展示，不强制约束。
+- 交易所/类型：由 `resp_exchange_field` 或代码前缀推断 + `asset_class`（枚举见 §11.3）落地，前端仅展示，不强制约束。
 
 列表端点：`GET /api/admin/securities/masters`
 
@@ -281,11 +281,12 @@ sequenceDiagram
   - `portfolio_id` 由 `nullable=False` 改为 `nullable=True`；系统主数据行置 `NULL`（不触发 portfolios CASCADE）。
   - 新增 `exchange: Optional[str]`（SH/SZ/BJ，可空）。
   - **新增 `pinyin_initials: Optional[str]`**（如 `贵州茅台`→`gzm`，可空）—— 录入搜索按拼音首字母匹配所需，**同步任务填充**（见 §10 数据匹配逻辑）。
+  - **`QuoteInterface` 模型扩展（承载证券列表获取语义，§11）**：新增 `purpose: InterfacePurpose`（`QUOTE`/`MASTER_LIST`，默认 `QUOTE`）区分价格与列表接口；`asset_class: Optional[SecurityType]`（类型标识字段，复用现有枚举，见 §11.3）；`resp_name_field: Optional[str]`（列表解析的证券名称字段，默认 `name`）；`resp_exchange_field: Optional[str]`（交易所字段，缺失则代码前缀推断）。主数据同步只选 `purpose=MASTER_LIST` 接口、按 `asset_class` 分组、复用现有 `priority` 降级链（与价格同步共用 `consecutive_failures` + 告警机制）。
   - `updated_at` 继承 `TimestampMixin` 已存在，同步时刷新即「最近同步时间」。
-  - `type` 沿用 `SecurityType` 枚举。
-  - 唯一约束：保留 `uq_securities_portfolio_code(portfolio_id, code)`（用户行）；新增 **部分唯一索引** `uq_securities_master_code ON securities(code) WHERE portfolio_id IS NULL`（主数据行按 code 唯一）。
+  - `type`：沿用并**扩展** `SecurityType` 枚举（新增 `HK_STOCK` / `CONVERTIBLE_BOND` / `ETF` / `INDEX`，纯新增值，PG `ALTER TYPE SecurityType ADD VALUE` 安全、不重写既有行）；主数据行 `type` 直接取来源接口的 `asset_class`（§11.3）。
+  - 唯一约束：保留 `uq_securities_portfolio_code(portfolio_id, code)`（用户行）；新增 **部分唯一索引** `uq_securities_master_asset_code ON securities(asset_class, code) WHERE portfolio_id IS NULL`（主数据行按 资产类别+code 唯一，避免港股 5 位码等跨类命名空间碰撞）。
   - **建议索引**：在 `pinyin_initials`、`code`、`name` 上分别建索引（或 `(pinyin_initials, code)` 复合），加速 `ILIKE` 搜索。
-- **定时同步任务**：新增 `MarketDataSyncService.sync_security_masters()`，调用 AKShare `stock_info_a_code_name` 拉全 A 代码+名称，按 `code` upsert 到 `portfolio_id IS NULL` 的 `securities` 行（存在更新 `name`/`exchange`/`type`/`pinyin_initials`，不存在 insert）；**同步时用 `pypinyin` 计算 `pinyin_initials`**（新增后端依赖，加入 `pyproject.toml`）。由调度器（APScheduler/Celery beat）定时触发。
+- **定时同步任务（配置驱动，非硬编码 AKShare，§11）**：新增 `MarketDataSyncService.sync_security_masters(asset_class?)`，查询 `purpose=MASTER_LIST` 的 `QuoteInterface`（可跨 provider、按 `asset_class` 过滤），复用 `_call_interface` 的 https/sdk 分派拉原始行，按 `resp_code_field`/`resp_name_field`/`resp_exchange_field` 解析为 `(code,name,exchange)`，upsert 到 `portfolio_id IS NULL` 的 `securities` 行（存在更新、不存在 insert）；**同步时用 `pypinyin` 计算 `pinyin_initials`**（新增后端依赖，加入 `pyproject.toml`）。由调度器（APScheduler/Celery beat）定时触发；同一 `asset_class` 配多个接口即自动形成 `priority` 降级链（复用 `_mark_success`/`_mark_failure` + 告警）。
 - **列表端点**：`GET /api/admin/securities/masters`（返回主数据行 `SecurityMaster[]`）。
   - 支持 `?q=` 关键字搜索：**匹配 `code` / `name` / `pinyin_initials`**（后端 `ILIKE`，大小写不敏感），用于录入界面证券搜索（见 §10）。
   - 支持 `?limit=` 限制返回条数（默认如 20，避免全市场 5000+ 行一次性下推）；按需返回 `exchange`/`type`/`pinyin_initials` 供前端展示。
@@ -337,6 +338,7 @@ sequenceDiagram
 | 顺序 | 任务 | 涉及文件 | 依赖 |
 |------|------|----------|------|
 | T1 | 后端补齐前置能力（§7 ① ②），提供 `GET /api/admin/securities/masters` 与 `POST .../quote-interfaces/{id}/test` 并自测 | `backend` 模型/迁移/服务/router | 无（可并行启动） |
+| **T1a** | **（§11 补充）后端配置驱动 + 多资产类别**：`SecurityType` 扩展 `HK_STOCK`/`CONVERTIBLE_BOND`/`ETF`/`INDEX`（迁移 `ALTER TYPE ADD VALUE`）；`QuoteInterface` 加 `asset_class`/`purpose`/`resp_name_field`/`resp_exchange_field`；`sync_security_masters(asset_class?)` 改为查 `purpose=MASTER_LIST` 接口、按 `asset_class` 分组、复用现有 `priority` 降级链（与价格同步共用 `_mark_success`/`_mark_failure` + 告警） | `backend` 模型/迁移/服务 | T1 |
 | T2 | 新增股票主数据 API + 类型 + hook | `web/src/api/security-master.api.ts`、`web/src/hooks/use-security-master.ts` | T1（① 端点） |
 | T3 | 扩展接口测试 API + 类型 + hook | `web/src/api/quote-interface.api.ts`（增 `testInterface`）、`web/src/hooks/use-interface-test.ts` | T1（② 端点） |
 | T4 | 实现 `stock-list-test-section.tsx`（左 `StockListPanel` + 右 `InterfaceTestPanel`） | `web/src/features/admin/stock-list-test-section.tsx` | T2、T3 |
@@ -410,6 +412,82 @@ sequenceDiagram
 
 ---
 
+## 11. 证券主数据获取：接口优先级统一接入与多资产类别扩展
+
+> 用户补充要求（2026-08-13）：股票列表获取**不应单一依赖 AKShare**，而应通过「已配置的接口列表」里设定的方式（HTTPS/SDK、endpoint、params、解析字段）统一获取；并需支持后续扩展港股、可转债、基金等资产类别。本节定义统一接入机制、接口配置结构、类型标识字段与扩展方式。
+
+### 11.1 核心原则：主数据获取 = 走「已配置的接口」，不硬编码数据源
+
+现有 `QuoteInterface`（及其所属 `SecuritiesDataProvider`）已是「行情数据接口」的唯一配置注册表，`MarketDataSyncService.fallback_fetch` 已能按 `priority` 顺序、经 `_call_interface` 的 https/sdk 分派拉取行情。主数据（证券列表）获取**复用同一套机制**，而非在 `sync_security_masters()` 里写死 `akshare.stock_info_a_code_name`：
+
+- AKShare 只是「一个 provider」：建一个 `SecuritiesDataProvider(access_method='sdk', config={'sdk_func':'stock_info_a_code_name'})`，其下挂一条 `purpose=MASTER_LIST` 的接口即可；要换成付费 HTTPS 源，只需在 admin 另配一个 https provider + 接口，**无需改代码**。
+- `sync_security_masters()` 只做：查配置 → `_call_interface()` 拉原始行 → 按 `resp_code_field`/`resp_name_field`/`resp_exchange_field` 解析 → upsert 主数据行。数据源差异全部封在接口配置里。
+- 注：`access_method`（https/sdk）实际在 `SecuritiesDataProvider` 上（`quote_provider.py:27`），`_call_interface` 经 provider 关系取用，主数据 sync 与价格 sync 共用同一分派逻辑（详见文末 UNCLEAR）。
+
+### 11.2 接口配置结构（`QuoteInterface` 扩展字段，见 §7 ①）
+
+在 `QuoteInterface` 上新增以下字段以承载「证券列表获取」语义（价格行情接口保持不变，靠 `purpose` 区分）：
+
+| 新字段 | 类型 | 说明 |
+|--------|------|------|
+| `purpose` | `InterfacePurpose` 枚举（`QUOTE`/`MASTER_LIST`），默认 `QUOTE` | 区分「价格行情」与「证券列表」两类接口。主数据同步只选 `MASTER_LIST`。 |
+| `asset_class` | `SecurityType`（复用现有枚举，见 11.3），可空 | **类型标识字段**：该接口拉取的是哪类资产（A股/港股/可转债/基金…）。主数据同步按此分组。 |
+| `resp_name_field` | `str \| null`，默认 `name` | 响应中证券名称字段名（列表解析用；价格接口用 `resp_price_field`，互不影响）。 |
+| `resp_exchange_field` | `str \| null` | 响应中交易所字段名（如 `exchange`/`market`）；为空时由代码前缀启发式推断（见 11.4）。 |
+
+> 复用而非新增：`asset_class` 直接复用 `SecurityType`，使「接口资产类别」与「证券 `type`」为同一套枚举，主数据行 `type` 直接 = 接口 `asset_class`，无需双份枚举维护。
+
+### 11.3 类型标识字段（资产类别如何落地）
+
+- **`Security.type`（现有 `SecurityType` 枚举，需扩展值）** = 主数据行的资产类别标签。现有值 `STOCK`/`FUND`/`BOND`/`OTHER`/`CASH`；扩展补 `HK_STOCK` / `CONVERTIBLE_BOND` / `ETF` / `INDEX`（**纯新增，PG `ALTER TYPE SecurityType ADD VALUE` 安全，不重写既有行**）。即资产类别全集 = `{STOCK, HK_STOCK, CONVERTIBLE_BOND, FUND, ETF, INDEX, BOND, OTHER, CASH}`；基金（FUND）已存在，无需新增。
+- **`Security.exchange`（§4.2 新增列）** = 交易所/市场：`SH`/`SZ`/`BJ`/`HK`…；主数据同步填充，来源优先 `resp_exchange_field`，缺失则代码前缀推断（`6*`/`9*`→SH，`0*`/`3*`→SZ，`8*`/`4*`→BJ，`5*`→SH 基金等）。
+- **唯一性**：主数据行仍 `portfolio_id IS NULL`；部分唯一索引升级为 `uq_securities_master_asset_code ON (asset_class, code) WHERE portfolio_id IS NULL`（不同资产类别 code 命名空间可能不同，如港股 5 位代码，避免跨类碰撞）。
+
+### 11.4 统一接入 + 接口优先级机制（如何区分并 fallback 不同资产类别）
+
+`sync_security_masters(asset_class: SecurityType | None = None)` 与现有 `fallback_fetch` 同构，仅「按键」与「解析字段」不同：
+
+1. **选接口**：`SELECT QuoteInterface WHERE purpose=MASTER_LIST AND enabled AND (asset_class = :asset_class 若给定) ORDER BY priority NULLS LAST`。
+2. **逐接口调用**（复用现有 `_mark_success`/`_mark_failure` + 告警抢占）：
+   - `rows = _call_interface_list(itf)` —— 复用 `_call_interface` 的 https/sdk 分派，返回原始行 `list[dict]`（新增一个列表解析变体，或复用 `_parse_rows` 取行）。
+   - 若 `rows` 非空（有响应）：逐行按 `resp_code_field`/`resp_name_field`/`resp_exchange_field`（缺失则代码前缀推断 exchange）解析为 `(code,name,exchange)`，upsert 主数据行（`type=itf.asset_class`，`pinyin` 用 `pypinyin` 计算），`_mark_success(itf)`，`break`。
+   - 否则 `_mark_failure(itf)`，继续下一接口（`priority` 降级）。
+3. **（可选）`sync_all_security_masters()`**：取所有 `MASTER_LIST` 接口的 distinct `asset_class`，逐个调用上函数，覆盖全资产类别。
+
+- **区分不同资产类别**：完全由 `asset_class` 字段**数据驱动**，sync 循环无 `if asset_class==...` 分支；A股/港股/可转债/基金只是不同的接口配置行。
+- **优先级 / fallback**：与价格同步共用同一套 `priority` + `consecutive_failures` + 告警机制——同一 `asset_class` 配多个接口（可跨 provider）即自动形成主备降级链。
+- **解析统一**：所有资产类别共用 `code`/`name`/`exchange` 三段解析（经 `resp_*` 字段映射），差异只在配置里写的字段名。
+
+### 11.5 新增资产类别的扩展方式（数据驱动，零代码改动）
+
+| 步骤 | 操作 | 是否改代码 |
+|------|------|-----------|
+| 1 | （若该枚举值尚不存在）`SecurityType` 加值（迁移 `ALTER TYPE ADD VALUE`）；如 ETF/INDEX/HK_STOCK/CONVERTIBLE_BOND 可一次加齐 | 仅一次迁移 |
+| 2 | admin 配置：新建/复用 `SecuritiesDataProvider`（https 或 sdk，填 `base_url`/`sdk_func`/`config`）+ 新建 `QuoteInterface{purpose=MASTER_LIST, asset_class=<新类>, endpoint, params, resp_code_field, resp_name_field, resp_exchange_field, priority}` | **不改代码** |
+| 3 | 调度器按 `asset_class` 触发；`sync_all_security_masters()` 自动纳入 | 不改代码 |
+
+> 结论：扩展资产类别 = 「配置接口 +（极少）加一个枚举值」，**sync 循环永远不用改**。这就是把数据源从硬编码 AKShare 改为配置驱动的核心收益。
+
+### 11.6 配置示例（AKShare 仅作其中一个 provider）
+
+| 资产类别 | provider | interface 配置要点 |
+|----------|----------|-------------------|
+| A股 | AKShare(sdk, `sdk_func=stock_info_a_code_name`) | `asset_class=STOCK`, `resp_code_field=code`, `resp_name_field=name`, `resp_exchange_field=null`(代码前缀推断) |
+| 港股 | AKShare(sdk, `sdk_func=stock_hk_spot_em`) 或 HTTPS 源 | `asset_class=HK_STOCK`, `resp_code_field=symbol`, `resp_name_field=name`, `resp_exchange_field=market`(→HK) |
+| 可转债 | AKShare(sdk, `sdk_func=convertible_bond_spot` 之类) | `asset_class=CONVERTIBLE_BOND` |
+| 基金 | AKShare(sdk, `sdk_func=fund_open_fund_info` 之类) | `asset_class=FUND`（枚举已存在） |
+
+> 若某类改用付费 HTTPS API：仅把 provider 换成 `access_method=https` + `base_url` + `endpoint`，接口 `resp_*` 字段对齐新响应即可，sync 代码零改动。
+
+### 11.7 待确认决策（本需求带来）
+
+| # | 决策点 | 推荐 |
+|---|--------|------|
+| 10 | 资产类别枚举：复用 `SecurityType`（扩展值）vs 新建独立 `AssetClass` 枚举 | **复用 `SecurityType`**（单一分类法，主数据 `type` 直接=接口 `asset_class`，零重复） |
+| 11 | 是否预置 AKShare 的 A股/港股/可转债/基金四条 `MASTER_LIST` 接口作为种子配置 | 推荐预置（首次部署即有数据），但机制不绑定 AKShare，可后续替换 |
+
+---
+
 ## 附录：关键类型草案（设计用，非实现）
 
 > 仅描述契约形状，供前后端对齐；不写实现逻辑。
@@ -450,6 +528,6 @@ export interface InterfaceTestResponse {
 ## Anything UNCLEAR（不确定项）
 
 - **`QuoteInterface.access_method` 归属**：`market_data_sync.py` 中 `_call_interface` 按 `itf.access_method`（https/sdk）分派，但 `quote_interface.py` 模型的可见字段未直接含 `access_method`（实际由所属 `SecuritiesDataProvider` 提供，经关系/代理暴露）。本方案把测试端点的调用分派交给后端复用 `_call_interface` 内部逻辑，前端无需感知，故不影响设计；实现时后端自行处理即可。
-- **股票主数据交易所/类型枚举**：`exchange`/`type` 的取值集合未在现有模型中定义，建议后端在迁移时定一小套枚举或与 AKShare 返回对齐；前端仅展示，不需强约束。
+- **股票主数据交易所/类型枚举（已明确，§11.3）**：`SecurityType` 扩展 `HK_STOCK`/`CONVERTIBLE_BOND`/`ETF`/`INDEX`；`exchange` 取 `resp_exchange_field` 或代码前缀推断（SH/SZ/BJ/HK）。AKShare 依赖已消除——主数据获取走「已配置接口」（§11），AKShare 仅是一个可替换的 provider。
 - **左栏是否分页**：股票主数据量级（全 A 股约 5000+ 行）建议后端一次性返回或给较大 pageSize；若超大再补分页，属实现细节。
 - **决策点已全部拍板**（见 §8，2026-08-13）：采用改造 `securities` 承载主数据、测试结果不持久化、对任意 enabled 接口测试、支持左右联动、端点 `.../quote-interfaces/{id}/test`。
