@@ -10,7 +10,7 @@
  * 组件组织对齐 quote-provider-section.tsx：本文件内含主组件 + 两个面板子组件。
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ArrowRight, Loader2, Play, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
@@ -42,6 +42,7 @@ import {
 import { useIsAdmin } from '@/stores/auth.store';
 import { useSecurityMasters, useSyncSecurityMasters } from '@/hooks/use-security-master';
 import { useQuoteInterfacesAll } from '@/hooks/use-quote-interface';
+import { useQuoteProviders } from '@/hooks/use-quote-provider';
 import { useInterfaceTest } from '@/hooks/use-interface-test';
 import type { SecurityMaster } from '@/api/security-master.api';
 import type { InterfaceTestResponse, QuoteInterface } from '@/api/quote-interface.api';
@@ -214,6 +215,8 @@ function StockListPanel({
 interface ParamRow {
   key: string;
   value: string;
+  /** 模板默认值：仅作输入框占位提示，不实际填入（§实现：默认值以 placeholder 展示） */
+  defaultValue: string;
 }
 
 /** 右栏：单接口测试（选接口 → 编辑参数 → 执行 → 看原始响应 + 解析） */
@@ -225,7 +228,15 @@ function InterfaceTestPanel({
   onCodesChange: (v: string) => void;
 }): JSX.Element {
   const { data: interfaces } = useQuoteInterfacesAll();
+  const { data: providers } = useQuoteProviders();
   const testMut = useInterfaceTest();
+
+  // 提供方 id → 名称：接口下拉展示接口归属（如「A股行情（小熊同学）」）
+  const providerNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    (providers ?? []).forEach((p) => m.set(p.id, p.name));
+    return m;
+  }, [providers]);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [paramRows, setParamRows] = useState<ParamRow[]>([]);
@@ -246,7 +257,8 @@ function InterfaceTestPanel({
     setParamRows(
       Object.entries(params).map(([k, v]) => ({
         key: k,
-        value: v == null ? '' : String(v),
+        value: '',
+        defaultValue: v == null ? '' : String(v),
       })),
     );
   }, [selectedId, interfaces]);
@@ -255,7 +267,8 @@ function InterfaceTestPanel({
     setParamRows((rows) =>
       rows.map((r, i) => (i === idx ? { ...r, ...patch } : r)),
     );
-  const addRow = () => setParamRows((rows) => [...rows, { key: '', value: '' }]);
+  const addRow = () =>
+    setParamRows((rows) => [...rows, { key: '', value: '', defaultValue: '' }]);
   const removeRow = (idx: number) =>
     setParamRows((rows) => rows.filter((_, i) => i !== idx));
 
@@ -264,7 +277,7 @@ function InterfaceTestPanel({
     const params: Record<string, unknown> = {};
     paramRows.forEach((r) => {
       const k = r.key.trim();
-      if (k) params[k] = r.value;
+      if (k) params[k] = r.value.trim() !== '' ? r.value : r.defaultValue;
     });
     const codes = codesText
       .split(/[\s,，]+/)
@@ -298,7 +311,7 @@ function InterfaceTestPanel({
             <SelectContent>
               {enabledInterfaces.map((it) => (
                 <SelectItem key={it.id} value={it.id}>
-                  {it.name}
+                  {it.name}（{providerNameById.get(it.provider_id) ?? '未知提供方'}）
                 </SelectItem>
               ))}
             </SelectContent>
@@ -327,7 +340,7 @@ function InterfaceTestPanel({
                 />
                 <Input
                   className="flex-1"
-                  placeholder="参数值"
+                  placeholder={row.defaultValue ? `默认：${row.defaultValue}` : '参数值'}
                   value={row.value}
                   onChange={(e) => updateRow(idx, { value: e.target.value })}
                 />
