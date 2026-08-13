@@ -17,6 +17,7 @@ from fastapi import HTTPException
 from sqlalchemy import func, nullslast, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.enums import InterfacePurpose, SecurityType
 from app.models.quote_interface import QuoteInterface
 from app.services.interface_category import InterfaceCategoryService
 
@@ -119,6 +120,10 @@ class QuoteInterfaceService:
         timeout: Optional[int] = None,
         retry_count: Optional[int] = None,
         rate_limit: Optional[str] = None,
+        purpose: InterfacePurpose = InterfacePurpose.QUOTE,
+        asset_class: Optional[SecurityType] = None,
+        resp_name_field: Optional[str] = None,
+        resp_exchange_field: Optional[str] = None,
     ) -> QuoteInterface:
         # 写入前显式校验 category_id 指向真实存在的分类：
         # 不依赖 DB 外键报错翻译（那样会落到 500 兜底），这里主动映射成 4xx。
@@ -141,6 +146,10 @@ class QuoteInterfaceService:
             retry_count=retry_count,
             rate_limit=rate_limit,
             priority=priority,
+            purpose=purpose,
+            asset_class=asset_class,
+            resp_name_field=resp_name_field,
+            resp_exchange_field=resp_exchange_field,
         )
         self.session.add(obj)
         await self.session.flush()

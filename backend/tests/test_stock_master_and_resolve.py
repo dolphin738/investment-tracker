@@ -19,7 +19,7 @@ from sqlalchemy import select
 
 import app.db.database as dbmod
 from app.core.security import create_access_token
-from app.models import Portfolio, QuoteInterface, Security, User
+from app.models import Portfolio, Security, User
 from app.models.enums import InterfacePurpose, SecurityType
 from app.services.market_data_sync import MarketDataSyncService
 
@@ -357,15 +357,16 @@ async def test_sync_security_masters_dispatch_uses_provider_access_method(
     token = await _admin_token(client, "sm_admin_8@example.com")
     pid = await _create_provider(client, token)  # access_method=https
     cid = await _create_category(client, token)
-    iid = await _create_interface(client, token, pid, cid, name="A股主数据")
-    # admin 接口 create schema 暂未透传 purpose/asset_class（§11 配置能力缺口），
-    # 这里直接经 ORM 补全 MASTER_LIST 语义字段，覆盖「真实接口行 → 分派」链路。
-    itf = (
-        await session.execute(select(QuoteInterface).where(QuoteInterface.id == iid))
-    ).scalar_one()
-    itf.purpose = InterfacePurpose.MASTER_LIST
-    itf.asset_class = SecurityType.STOCK
-    await session.commit()
+    # §11 配置能力：create schema 现已透传 purpose/asset_class，经 API 直接建 MASTER_LIST 接口
+    iid = await _create_interface(
+        client,
+        token,
+        pid,
+        cid,
+        name="A股主数据",
+        purpose=InterfacePurpose.MASTER_LIST.value,
+        asset_class=SecurityType.STOCK.value,
+    )
 
     async def _fake_https_raw(self, itf, params, codes):
         return [
@@ -407,3 +408,45 @@ async def test_quote_interface_test_dispatch_uses_provider_access_method(
     assert status == 200 and code == 0
     assert data["ok"] is True
     assert data["parsed"] == {"600000": "12.34"}
+
+
+async def test_quote_interface_create_update_master_list_fields(client):
+    """§11 配置能力：接口 create/update 透传 purpose/asset_class/resp_name_field/resp_exchange_field。"""
+    token = await _admin_token(client, "sm_admin_10@example.com")
+    pid = await _create_provider(client, token)
+    cid = await _create_category(client, token)
+
+    # create：设 MASTER_LIST + HK_STOCK + 自定义解析字段
+    iid = await _create_interface(
+        client,
+        token,
+        pid,
+        cid,
+        name="港股主数据",
+        purpose="MASTER_LIST",
+        asset_class="HK_STOCK",
+        resp_name_field="sec_name",
+        resp_exchange_field="market",
+    )
+    r = await client.get(
+        f"/api/admin/quote-providers/interfaces/{iid}", headers=auth(token)
+    )
+    status, code, data, _ = env(r)
+    assert status == 200 and code == 0
+    assert data["purpose"] == "MASTER_LIST"
+    assert data["asset_class"] == "HK_STOCK"
+    assert data["resp_name_field"] == "sec_name"
+    assert data["resp_exchange_field"] == "market"
+
+    # update：显式改值生效；未提供的字段保持原值（service 约定 None=未提供）
+    r = await client.patch(
+        f"/api/admin/quote-providers/interfaces/{iid}",
+        json={"purpose": "QUOTE", "resp_name_field": "name"},
+        headers=auth(token),
+    )
+    status, code, data, _ = env(r)
+    assert status == 200 and code == 0
+    assert data["purpose"] == "QUOTE"
+    assert data["resp_name_field"] == "name"
+    assert data["asset_class"] == "HK_STOCK"
+    assert data["resp_exchange_field"] == "market"

@@ -39,7 +39,7 @@ from app.core.envelope import EnvelopeRoute
 from app.core.security import CurrentUser, get_current_user, require_admin
 from app.db.database import get_db
 from app.models import Portfolio, Security
-from app.models.enums import InterfaceDirection, QuoteProviderAccessMethod
+from app.models.enums import InterfaceDirection, InterfacePurpose, QuoteProviderAccessMethod, SecurityType
 from app.models.notification import Notification
 from app.serializers import serialize_security_master
 from app.services import InterfaceCategoryService, QuoteInterfaceService
@@ -125,6 +125,11 @@ class QuoteInterfaceCreate(BaseModel):
     timeout: Optional[int] = None
     retry_count: Optional[int] = None
     rate_limit: Optional[str] = Field(None, max_length=64)
+    # —— 接口用途 / 资产类别 / 列表解析字段（§7 ① / §11，MASTER_LIST 配置能力）——
+    purpose: InterfacePurpose = InterfacePurpose.QUOTE
+    asset_class: Optional[SecurityType] = None
+    resp_name_field: Optional[str] = Field(None, max_length=64)
+    resp_exchange_field: Optional[str] = Field(None, max_length=64)
 
 
 class QuoteInterfaceUpdate(BaseModel):
@@ -141,6 +146,10 @@ class QuoteInterfaceUpdate(BaseModel):
     timeout: Optional[int] = None
     retry_count: Optional[int] = None
     rate_limit: Optional[str] = Field(None, max_length=64)
+    purpose: Optional[InterfacePurpose] = None
+    asset_class: Optional[SecurityType] = None
+    resp_name_field: Optional[str] = Field(None, max_length=64)
+    resp_exchange_field: Optional[str] = Field(None, max_length=64)
 
 
 class QuoteInterfaceOut(BaseModel):
@@ -158,6 +167,10 @@ class QuoteInterfaceOut(BaseModel):
     retry_count: Optional[int]
     rate_limit: Optional[str]
     priority: Optional[int] = None
+    purpose: str
+    asset_class: Optional[str] = None
+    resp_name_field: Optional[str] = None
+    resp_exchange_field: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -323,6 +336,10 @@ async def create_provider_interface(
         timeout=body.timeout,
         retry_count=body.retry_count,
         rate_limit=body.rate_limit,
+        purpose=body.purpose.value,
+        asset_class=body.asset_class,
+        resp_name_field=body.resp_name_field,
+        resp_exchange_field=body.resp_exchange_field,
     )
     await db.commit()
     await db.refresh(obj)
@@ -450,6 +467,10 @@ async def update_interface(
         timeout=body.timeout,
         retry_count=body.retry_count,
         rate_limit=body.rate_limit,
+        purpose=body.purpose.value if body.purpose is not None else None,
+        asset_class=body.asset_class,
+        resp_name_field=body.resp_name_field,
+        resp_exchange_field=body.resp_exchange_field,
     )
     await db.commit()
     await db.refresh(obj)
