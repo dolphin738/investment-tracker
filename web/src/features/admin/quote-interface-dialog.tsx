@@ -51,6 +51,24 @@ function normalizeJsonInput(raw: string): string {
 
 const HTTP_METHODS: HttpMethod[] = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'];
 
+/** 接口用途（§11：QUOTE 价格行情 / MASTER_LIST 证券列表） */
+const PURPOSE_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: 'QUOTE', label: '价格行情（QUOTE）' },
+  { value: 'MASTER_LIST', label: '证券列表（MASTER_LIST）' },
+];
+
+/** 资产类别（复用 SecurityType；排除 CASH——现金不作主数据字典） */
+const ASSET_CLASS_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: 'STOCK', label: '股票（A股）' },
+  { value: 'HK_STOCK', label: '港股' },
+  { value: 'CONVERTIBLE_BOND', label: '可转债' },
+  { value: 'FUND', label: '基金' },
+  { value: 'ETF', label: 'ETF' },
+  { value: 'INDEX', label: '指数' },
+  { value: 'BOND', label: '债券' },
+  { value: 'OTHER', label: '其他' },
+];
+
 interface FormState {
   categoryId: string;
   name: string;
@@ -62,6 +80,10 @@ interface FormState {
   timeout: string;
   retryCount: string;
   rateLimit: string;
+  purpose: string;
+  assetClass: string;
+  respNameField: string;
+  respExchangeField: string;
 }
 
 function toForm(edit: QuoteInterface | null): FormState {
@@ -77,6 +99,10 @@ function toForm(edit: QuoteInterface | null): FormState {
       timeout: '',
       retryCount: '',
       rateLimit: '',
+      purpose: 'QUOTE',
+      assetClass: '',
+      respNameField: '',
+      respExchangeField: '',
     };
   }
   return {
@@ -90,6 +116,10 @@ function toForm(edit: QuoteInterface | null): FormState {
     timeout: edit.timeout != null ? String(edit.timeout) : '',
     retryCount: edit.retry_count != null ? String(edit.retry_count) : '',
     rateLimit: edit.rate_limit ?? '',
+    purpose: edit.purpose ?? 'QUOTE',
+    assetClass: edit.asset_class ?? '',
+    respNameField: edit.resp_name_field ?? '',
+    respExchangeField: edit.resp_exchange_field ?? '',
   };
 }
 
@@ -157,6 +187,13 @@ export function QuoteInterfaceDialog({
       timeout: form.timeout.trim() ? Number(form.timeout) : null,
       retry_count: form.retryCount.trim() ? Number(form.retryCount) : null,
       rate_limit: form.rateLimit.trim() || null,
+      purpose: form.purpose as 'QUOTE' | 'MASTER_LIST',
+      asset_class:
+        !form.assetClass || form.assetClass === '__none__'
+          ? null
+          : form.assetClass,
+      resp_name_field: form.respNameField.trim() || null,
+      resp_exchange_field: form.respExchangeField.trim() || null,
     };
 
     if (editing) {
@@ -242,6 +279,76 @@ export function QuoteInterfaceDialog({
                 </SelectContent>
               </Select>
             </div>
+          </div>
+
+          <div className="space-y-3 rounded-md border bg-muted/40 p-3">
+            <div className="text-sm font-medium">接口用途与证券列表配置</div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="qi-purpose">用途</Label>
+                <Select
+                  value={form.purpose}
+                  onValueChange={(v) => setForm({ ...form, purpose: v })}
+                >
+                  <SelectTrigger id="qi-purpose">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PURPOSE_OPTIONS.map((o) => (
+                      <SelectItem key={o.value} value={o.value}>
+                        {o.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="qi-asset-class">资产类别</Label>
+                <Select
+                  value={form.assetClass}
+                  onValueChange={(v) => setForm({ ...form, assetClass: v })}
+                >
+                  <SelectTrigger id="qi-asset-class">
+                    <SelectValue placeholder="不设置" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">不设置</SelectItem>
+                    {ASSET_CLASS_OPTIONS.map((o) => (
+                      <SelectItem key={o.value} value={o.value}>
+                        {o.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="qi-resp-name">响应名称字段</Label>
+                <Input
+                  id="qi-resp-name"
+                  placeholder="默认 name"
+                  value={form.respNameField}
+                  onChange={(e) =>
+                    setForm({ ...form, respNameField: e.target.value })
+                  }
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="qi-resp-exchange">响应交易所字段</Label>
+                <Input
+                  id="qi-resp-exchange"
+                  placeholder="如 exchange / market，缺省按代码前缀推断"
+                  value={form.respExchangeField}
+                  onChange={(e) =>
+                    setForm({ ...form, respExchangeField: e.target.value })
+                  }
+                />
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              用途选「证券列表（MASTER_LIST）」时，主数据同步按资产类别拉取全市场代码/名称/交易所（配置驱动，换数据源只改配置）。
+            </p>
           </div>
 
           <div className="space-y-2">

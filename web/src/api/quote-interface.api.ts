@@ -35,6 +35,14 @@ export interface QuoteInterface {
   timeout: number | null;
   retry_count: number | null;
   rate_limit: string | null;
+  /** 接口用途：价格行情 QUOTE / 证券列表 MASTER_LIST（§11） */
+  purpose: 'QUOTE' | 'MASTER_LIST';
+  /** 该接口拉取资产类别（复用 SecurityType），主数据行 type 即=asset_class */
+  asset_class: string | null;
+  /** 响应中证券名称字段（列表解析用，默认 name） */
+  resp_name_field: string | null;
+  /** 响应中交易所字段（如 exchange/market）；缺失则代码前缀推断 */
+  resp_exchange_field: string | null;
   /** 分类级优先级（ADR-002 优先级链）：数字越小越优先；跨分类独立计数，null = 未纳入优先级链 */
   priority: number | null;
   created_at: string;
@@ -54,6 +62,10 @@ export interface QuoteInterfaceCreate {
   timeout?: number | null;
   retry_count?: number | null;
   rate_limit?: string | null;
+  purpose?: 'QUOTE' | 'MASTER_LIST';
+  asset_class?: string | null;
+  resp_name_field?: string | null;
+  resp_exchange_field?: string | null;
 }
 
 /** 更新接口请求体（全字段可选；provider_id 不可改） */
@@ -69,6 +81,10 @@ export interface QuoteInterfaceUpdate {
   timeout?: number | null;
   retry_count?: number | null;
   rate_limit?: string | null;
+  purpose?: 'QUOTE' | 'MASTER_LIST';
+  asset_class?: string | null;
+  resp_name_field?: string | null;
+  resp_exchange_field?: string | null;
 }
 
 /** 列出某提供方全部接口 */
