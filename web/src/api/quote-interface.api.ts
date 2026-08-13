@@ -141,3 +141,45 @@ export function reorderQuoteInterfaces(
 ): Promise<{ ok: boolean }> {
   return http.patch<{ ok: boolean }>('/admin/quote-interfaces/reorder', body);
 }
+
+/**
+ * 单接口测试请求体（§5.2）：params 为经前端编辑后的完整有效参数，覆盖 itf.params；
+ * codes 可选，对应 MarketDataSyncService 的 codes 入参。
+ */
+export interface InterfaceTestRequest {
+  params: Record<string, unknown>;
+  codes?: string[];
+}
+
+/** 单接口测试响应（后端 test_single_interface 原样回传） */
+export interface InterfaceTestResponse {
+  ok: boolean;
+  status: 'success' | 'error';
+  /** HTTPS 接口的上游状态码；SDK 接口为 null */
+  httpStatus?: number;
+  /** 调用耗时（毫秒） */
+  elapsedMs: number;
+  /** 原始响应（HTTPS: resp.json()；SDK: list[dict]） */
+  raw: unknown;
+  /** 按 resp_code_field / resp_price_field 解析出的 {code → price} */
+  parsed: Record<string, string> | null;
+  /** 异常信息 */
+  error?: string;
+  interfaceId: string;
+}
+
+/**
+ * 单接口测试：POST /api/admin/quote-interfaces/{id}/test
+ *
+ * 用调用方传入的 params 调用接口，原样回传 raw + parsed（不计入 consecutive_failures）。
+ * 对应后端 modules/admin/router.py 的 test_quote_interface。
+ */
+export function testInterface(
+  id: string,
+  body: InterfaceTestRequest,
+): Promise<InterfaceTestResponse> {
+  return http.post<InterfaceTestResponse>(
+    `/admin/quote-interfaces/${encodeURIComponent(id)}/test`,
+    body,
+  );
+}

@@ -11,12 +11,13 @@
  */
 
 import { useState } from 'react';
-import { ServerCog, Tags } from 'lucide-react';
+import { ServerCog, Tags, ListChecks } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import { useIsAdmin } from '@/stores/auth.store';
 import { QuoteProviderSection } from '@/features/admin/quote-provider-section';
 import { InterfaceCategorySection } from '@/features/admin/interface-category-section';
+import { StockListTestSection } from '@/features/admin/stock-list-test-section';
 
 interface AdminModule {
   key: string;
@@ -38,6 +39,12 @@ const MODULES: AdminModule[] = [
     label: '接口分类管理',
     icon: <Tags className="mr-2 h-4 w-4" />,
     component: InterfaceCategorySection,
+  },
+  {
+    key: 'stock-list-test',
+    label: '股票列表和测试',
+    icon: <ListChecks className="mr-2 h-4 w-4" />,
+    component: StockListTestSection,
   },
 ];
 
