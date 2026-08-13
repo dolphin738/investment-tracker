@@ -141,12 +141,18 @@ class MarketDataSyncService:
     async def _call_interface(
         self, itf: QuoteInterface, codes: Optional[list[str]]
     ) -> dict[str, Decimal]:
-        """价格行情分派：返回 {code: price}（供 fallback_fetch 使用）。"""
-        if itf.access_method == "https":
+        """价格行情分派：返回 {code: price}（供 fallback_fetch 使用）。
+
+        access_method 属于所属 SecuritiesDataProvider（QuoteInterface 无该列），
+        分派时经 provider 取用（对齐 _fetch_https_raw/_fetch_sdk_raw 的取法）。
+        """
+        provider = await self.session.get(SecuritiesDataProvider, itf.provider_id)
+        access_method = provider.access_method if provider is not None else None
+        if access_method == "https":
             return await self._fetch_https(itf, codes)
-        if itf.access_method == "sdk":
+        if access_method == "sdk":
             return await self._fetch_sdk(itf, codes)
-        raise ValueError(f"不支持的接入方式: {itf.access_method}")
+        raise ValueError(f"不支持的接入方式: {access_method}")
 
     async def _call_interface_raw(
         self, itf: QuoteInterface, params: Optional[dict[str, Any]], codes: Optional[list[str]]
@@ -154,12 +160,15 @@ class MarketDataSyncService:
         """原始行分派：返回 ``list[dict]``（供主数据同步 / 单接口测试，使用调用方 params）。
 
         https 回传 resp.json() 归一化后的行；sdk 回传 DataFrame.to_dict('records')。
+        access_method 由所属 SecuritiesDataProvider 提供（同 _call_interface）。
         """
-        if itf.access_method == "https":
+        provider = await self.session.get(SecuritiesDataProvider, itf.provider_id)
+        access_method = provider.access_method if provider is not None else None
+        if access_method == "https":
             return await self._fetch_https_raw(itf, params, codes)
-        if itf.access_method == "sdk":
+        if access_method == "sdk":
             return await self._fetch_sdk_raw(itf, params, codes)
-        raise ValueError(f"不支持的接入方式: {itf.access_method}")
+        raise ValueError(f"不支持的接入方式: {access_method}")
 
     # —— 原始行归一化（JSON list / {data:[...]} / 单对象）——
     def _normalize_rows(self, payload: Any) -> list[dict]:

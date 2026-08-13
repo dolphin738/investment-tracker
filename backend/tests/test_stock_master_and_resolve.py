@@ -19,8 +19,8 @@ from sqlalchemy import select
 
 import app.db.database as dbmod
 from app.core.security import create_access_token
-from app.models import Portfolio, Security, User
-from app.models.enums import SecurityType
+from app.models import Portfolio, QuoteInterface, Security, User
+from app.models.enums import InterfacePurpose, SecurityType
 from app.services.market_data_sync import MarketDataSyncService
 
 from tests.helpers import auth, env, register_login
@@ -341,3 +341,69 @@ async def test_resolve_not_found_for_other_user_portfolio(client, session):
     )
     status, code, _, _ = env(r)
     assert status == 404
+
+
+# --------------------------------------------------------------------------- #
+# 回归：真实分派路径（access_method 取自所属 provider，QuoteInterface 无该列）
+# --------------------------------------------------------------------------- #
+async def test_sync_security_masters_dispatch_uses_provider_access_method(
+    client, monkeypatch, session
+):
+    """sync_security_masters 真实分派回归：只 mock 网络层，分派须经 provider 判定 https。
+
+    修复前 _call_interface_raw 直接读 itf.access_method → AttributeError；
+    修复后经所属 SecuritiesDataProvider 取用，本用例应正常 upsert 主数据行。
+    """
+    token = await _admin_token(client, "sm_admin_8@example.com")
+    pid = await _create_provider(client, token)  # access_method=https
+    cid = await _create_category(client, token)
+    iid = await _create_interface(client, token, pid, cid, name="A股主数据")
+    # admin 接口 create schema 暂未透传 purpose/asset_class（§11 配置能力缺口），
+    # 这里直接经 ORM 补全 MASTER_LIST 语义字段，覆盖「真实接口行 → 分派」链路。
+    itf = (
+        await session.execute(select(QuoteInterface).where(QuoteInterface.id == iid))
+    ).scalar_one()
+    itf.purpose = InterfacePurpose.MASTER_LIST
+    itf.asset_class = SecurityType.STOCK
+    await session.commit()
+
+    async def _fake_https_raw(self, itf, params, codes):
+        return [
+            {"code": "600000", "name": "浦发银行"},
+            {"code": "000001", "name": "平安银行"},
+        ]
+
+    monkeypatch.setattr(MarketDataSyncService, "_fetch_https_raw", _fake_https_raw)
+    result = await MarketDataSyncService(session).sync_security_masters(
+        SecurityType.STOCK
+    )
+    assert result["synced"] == 2
+    assert result["failed"] == 0
+    rows = (
+        await session.execute(select(Security).where(Security.portfolio_id.is_(None)))
+    ).scalars().all()
+    assert {r.code for r in rows} == {"600000", "000001"}
+
+
+async def test_quote_interface_test_dispatch_uses_provider_access_method(
+    client, monkeypatch
+):
+    """POST /quote-interfaces/{id}/test 真实分派回归：不 mock 分派层，只 mock 网络。"""
+    token = await _admin_token(client, "sm_admin_9@example.com")
+    pid = await _create_provider(client, token)  # access_method=https
+    cid = await _create_category(client, token)
+    iid = await _create_interface(client, token, pid, cid, name="测试行情接口")
+
+    async def _fake_https_raw(self, itf, params, codes):
+        return [{"code": "600000", "price": "12.34"}]
+
+    monkeypatch.setattr(MarketDataSyncService, "_fetch_https_raw", _fake_https_raw)
+    r = await client.post(
+        f"/api/admin/quote-interfaces/{iid}/test",
+        json={"params": {"a": "b"}},
+        headers=auth(token),
+    )
+    status, code, data, _ = env(r)
+    assert status == 200 and code == 0
+    assert data["ok"] is True
+    assert data["parsed"] == {"600000": "12.34"}
