@@ -51,6 +51,7 @@ import { PageHeader } from '@/components/PageHeader';
 import { CashflowForm } from '@/features/cashflow/cashflow-form';
 import { SecurityTradeForm } from '@/features/security-trade/security-trade-form';
 import { FreshnessBanner } from '@/features/overview/freshness-banner';
+import { PriceFreshnessBadge } from '@/features/portfolio/price-freshness-badge';
 import { buildOverviewMetrics } from '@/features/overview/asset-metrics';
 import { TotalAssetTrendChart } from '@/features/overview/total-asset-trend-chart';
 import { createOverviewSchema } from '@/features/overview/overview-query-params';
@@ -494,7 +495,10 @@ export default function DashboardPage(): JSX.Element {
           actions={
             /* INC-05：两个录入入口统一为「主色 + sm + Plus」基准样式
               （原「录入出入金」为 outline，与右侧「录入买卖」视觉不齐）。 */
-            <div className="flex gap-2">
+            <div className="flex items-center gap-2">
+              {/* Q3：行情数据新鲜度徽标（始终可见的轻量指示，与下方
+                FreshnessBanner 后端判定提示互补、不冲突） */}
+              <PriceFreshnessBadge portfolioId={currentPortfolioId} />
               <Button
                 onClick={() => setCashflowOpen(true)}
                 variant={ENTRY_BUTTON_VARIANT}

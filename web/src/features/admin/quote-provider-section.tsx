@@ -8,8 +8,31 @@
  * - 新增 / 编辑提供方走独立对话框组件 QuoteProviderDialog（与同模块其它对话框风格一致）。
  */
 
-import { Fragment, useMemo, useState } from 'react';
-import { ChevronDown, ChevronRight, Loader2, Pencil, Plus, Trash2 } from 'lucide-react';
+import { Fragment, type CSSProperties, useMemo, useState } from 'react';
+import {
+  ChevronDown,
+  ChevronRight,
+  GripVertical,
+  Loader2,
+  Pencil,
+  Plus,
+  Trash2,
+} from 'lucide-react';
+import {
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import {
   Card,
   CardContent,
@@ -48,6 +71,7 @@ import {
   useDeleteInterface,
   useQuoteInterfaces,
   useQuoteInterfacesAll,
+  useReorderInterfaces,
 } from '@/hooks/use-quote-interface';
 import { useInterfaceCategories } from '@/hooks/use-interface-category';
 import type { QuoteInterface } from '@/api/quote-interface.api';
@@ -71,6 +95,29 @@ function EnabledBadge({ enabled }: { enabled: boolean }): JSX.Element {
   ) : (
     <Badge variant="secondary">停用</Badge>
   );
+}
+
+/**
+ * 计算拖拽后的新有序 id 列表（ADR-002 优先级链：priority = index）。
+ *
+ * 纯函数，便于单测；与 InterfacesByCategoryOverview 的 onDragEnd 共用同一算法。
+ * - activeId / overId 任一不在列表中 → 原样返回；
+ * - 拖到原位（oldIndex === newIndex）→ 原样返回；
+ * - 否则按数组移动语义重排。
+ */
+export function computeReorderedIds(
+  ids: readonly string[],
+  activeId: string,
+  overId: string,
+): string[] {
+  const oldIndex = ids.indexOf(activeId);
+  const newIndex = ids.indexOf(overId);
+  if (oldIndex < 0 || newIndex < 0 || oldIndex === newIndex) {
+    return [...ids];
+  }
+  const next = [...ids];
+  next.splice(newIndex, 0, next.splice(oldIndex, 1)[0]);
+  return next;
 }
 
 export function QuoteProviderSection(): JSX.Element {
@@ -435,7 +482,173 @@ function ProviderInterfaces({ providerId }: { providerId: string }): JSX.Element
   );
 }
 
-/** 顶层「按分类汇总所有提供方接口」总览 */
+/** 顶层「按分类汇总所有提供方接口」总览表头（拖拽手柄列 + 5 列） */
+function OverviewTableHeader(): JSX.Element {
+  return (
+    <TableHeader>
+      <TableRow>
+        <TableHead className="w-8" />
+        <TableHead className="w-[200px] whitespace-nowrap">名称</TableHead>
+        <TableHead className="w-[180px] whitespace-nowrap">提供方名称</TableHead>
+        <TableHead className="w-[280px] whitespace-nowrap">调用路径</TableHead>
+        <TableHead className="w-16 whitespace-nowrap">方法</TableHead>
+        <TableHead className="w-20 whitespace-nowrap">启用</TableHead>
+      </TableRow>
+    </TableHeader>
+  );
+}
+
+/** 总览行（不可拖拽，用于「未分类」分组） */
+function OverviewInterfaceRow({
+  item,
+  provider,
+}: {
+  item: QuoteInterface;
+  provider?: QuoteProvider;
+}): JSX.Element {
+  return (
+    <TableRow key={item.id}>
+      <TableCell className="w-8" />
+      <TableCell className="truncate font-medium align-middle">{item.name}</TableCell>
+      <TableCell className="truncate align-middle text-muted-foreground">
+        {provider?.name ?? item.provider_id}
+      </TableCell>
+      <TableCell className="truncate align-middle text-muted-foreground">
+        {item.endpoint ?? '-'}
+      </TableCell>
+      <TableCell className="whitespace-nowrap align-middle">{item.http_method ?? '-'}</TableCell>
+      <TableCell className="whitespace-nowrap align-middle">
+        <EnabledBadge
+          enabled={(provider?.enabled ?? false) && item.enabled}
+        />
+      </TableCell>
+    </TableRow>
+  );
+}
+
+/** 总览行（可拖拽，用于已分类分组；手柄在首列） */
+function SortableOverviewRow({
+  item,
+  provider,
+}: {
+  item: QuoteInterface;
+  provider?: QuoteProvider;
+}): JSX.Element {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id: item.id });
+  const style: CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+  return (
+    <TableRow ref={setNodeRef} style={style}>
+      <TableCell className="w-8 align-middle">
+        <button
+          type="button"
+          className="flex h-7 w-7 cursor-grab items-center justify-center rounded text-muted-foreground hover:bg-muted active:cursor-grabbing"
+          aria-label={`拖拽排序 ${item.name}`}
+          {...attributes}
+          {...listeners}
+        >
+          <GripVertical className="h-4 w-4" />
+        </button>
+      </TableCell>
+      <TableCell className="truncate font-medium align-middle">{item.name}</TableCell>
+      <TableCell className="truncate align-middle text-muted-foreground">
+        {provider?.name ?? item.provider_id}
+      </TableCell>
+      <TableCell className="truncate align-middle text-muted-foreground">
+        {item.endpoint ?? '-'}
+      </TableCell>
+      <TableCell className="whitespace-nowrap align-middle">{item.http_method ?? '-'}</TableCell>
+      <TableCell className="whitespace-nowrap align-middle">
+        <EnabledBadge
+          enabled={(provider?.enabled ?? false) && item.enabled}
+        />
+      </TableCell>
+    </TableRow>
+  );
+}
+
+/** 单分类分组：已分类 → DndContext+SortableContext 可拖拽调序；未分类 → 普通表格 */
+function OverviewCategoryGroup({
+  categoryId,
+  label,
+  items,
+  providerById,
+}: {
+  categoryId: string | null;
+  label: string;
+  items: QuoteInterface[];
+  providerById: Map<string, QuoteProvider>;
+}): JSX.Element {
+  const reorderMut = useReorderInterfaces();
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+
+  const handleDragEnd = (event: DragEndEvent): void => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const ids = items.map((i) => i.id);
+    const next = computeReorderedIds(ids, String(active.id), String(over.id));
+    if (next.join() === ids.join()) return;
+    if (categoryId) {
+      reorderMut.mutate({ category_id: categoryId, ordered_ids: next });
+    }
+  };
+
+  return (
+    <div className="mb-5">
+      <div className="mb-2 flex items-center gap-2">
+        <span className="text-sm font-medium">{label}</span>
+        <Badge variant="outline">{items.length}</Badge>
+      </div>
+      {categoryId ? (
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragEnd={handleDragEnd}
+        >
+          <SortableContext
+            items={items.map((i) => i.id)}
+            strategy={verticalListSortingStrategy}
+          >
+            <Table className="table-fixed">
+              <OverviewTableHeader />
+              <TableBody>
+                {items.map((it) => (
+                  <SortableOverviewRow
+                    key={it.id}
+                    item={it}
+                    provider={providerById.get(it.provider_id)}
+                  />
+                ))}
+              </TableBody>
+            </Table>
+          </SortableContext>
+        </DndContext>
+      ) : (
+        <Table className="table-fixed">
+          <OverviewTableHeader />
+          <TableBody>
+            {items.map((it) => (
+              <OverviewInterfaceRow
+                key={it.id}
+                item={it}
+                provider={providerById.get(it.provider_id)}
+              />
+            ))}
+          </TableBody>
+        </Table>
+      )}
+    </div>
+  );
+}
+
+/** 顶层「按分类汇总所有提供方接口」总览（每分类可拖拽调序，ADR-002 优先级链） */
 function InterfacesByCategoryOverview(): JSX.Element {
   const { data: interfaces, isLoading } = useQuoteInterfacesAll();
   const labelMap = useCategoryLabelMap();
@@ -461,7 +674,7 @@ function InterfacesByCategoryOverview(): JSX.Element {
       <CardHeader>
         <CardTitle className="text-base">按分类汇总所有提供方接口</CardTitle>
         <CardDescription>
-          跨提供方按接口分类聚合；未分类时显示「未分类」
+          跨提供方按接口分类聚合；未分类时显示「未分类」；已分类分组可拖拽手柄调整优先级顺序
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -475,47 +688,13 @@ function InterfacesByCategoryOverview(): JSX.Element {
         )}
         {!isLoading &&
           groups.map(([type, items]) => (
-            <div key={type} className="mb-5">
-              <div className="mb-2 flex items-center gap-2">
-                <span className="text-sm font-medium">
-                  {type ? (labelMap.get(type) ?? type) : '未分类'}
-                </span>
-                <Badge variant="outline">{items.length}</Badge>
-              </div>
-              <Table className="table-fixed">
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-[200px] whitespace-nowrap">名称</TableHead>
-                    <TableHead className="w-[180px] whitespace-nowrap">提供方名称</TableHead>
-                    <TableHead className="w-[280px] whitespace-nowrap">调用路径</TableHead>
-                    <TableHead className="w-16 whitespace-nowrap">方法</TableHead>
-                    <TableHead className="w-20 whitespace-nowrap">启用</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {items.map((it) => (
-                    <TableRow key={it.id}>
-                      <TableCell className="truncate font-medium align-middle">{it.name}</TableCell>
-                      <TableCell className="truncate align-middle text-muted-foreground">
-                        {providerById.get(it.provider_id)?.name ?? it.provider_id}
-                      </TableCell>
-                      <TableCell className="truncate align-middle text-muted-foreground">
-                        {it.endpoint ?? '-'}
-                      </TableCell>
-                      <TableCell className="whitespace-nowrap align-middle">{it.http_method ?? '-'}</TableCell>
-                      <TableCell className="whitespace-nowrap align-middle">
-                        <EnabledBadge
-                          enabled={
-                            (providerById.get(it.provider_id)?.enabled ?? false) &&
-                            it.enabled
-                          }
-                        />
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
+            <OverviewCategoryGroup
+              key={type ?? 'uncategorized'}
+              categoryId={type}
+              label={type ? (labelMap.get(type) ?? type) : '未分类'}
+              items={items}
+              providerById={providerById}
+            />
           ))}
       </CardContent>
     </Card>

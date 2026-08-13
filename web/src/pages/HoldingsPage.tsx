@@ -47,6 +47,7 @@ import { SecurityTradeList } from '@/features/security-trade/security-trade-list
 import { InlinePriceEditor } from '@/features/security-price/inline-price-editor';
 import { DividendFeeSection } from '@/features/security-income/dividend-fee-section';
 import { HoldingsToolbar } from '@/features/holdings/holdings-toolbar';
+import { PriceFreshnessBadge } from '@/features/portfolio/price-freshness-badge';
 import { createHoldingsSchema } from '@/features/holdings/holdings-query-params';
 import type { HoldingsFilterState } from '@/features/holdings/holdings-query-params';
 import { deriveTradeSecurityFilter } from '@/features/holdings/trade-security-filter';
@@ -302,14 +303,18 @@ export default function HoldingsPage(): JSX.Element {
         title="持仓"
         description="持仓由证券买卖流水实时推导，只读展示；现价可内联修改"
         actions={
-          <Button
-            size={ENTRY_BUTTON_SIZE}
-            variant={ENTRY_BUTTON_VARIANT}
-            onClick={() => setTradeDialogOpen(true)}
-          >
+          <>
+            {/* Q3：行情数据新鲜度徽标（始终可见的轻量指示，独立 sync-status 判定） */}
+            <PriceFreshnessBadge portfolioId={currentPortfolioId} />
+            <Button
+              size={ENTRY_BUTTON_SIZE}
+              variant={ENTRY_BUTTON_VARIANT}
+              onClick={() => setTradeDialogOpen(true)}
+            >
             <Plus className={ENTRY_BUTTON_ICON_CLASS} />
             {ENTRY_BUTTON_LABELS.securityTrade}
           </Button>
+          </>
         }
       />
 

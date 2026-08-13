@@ -21,7 +21,8 @@ import {
 import { Sidebar } from './sidebar';
 import { PortfolioSelector } from '@/features/portfolio/portfolio-selector';
 import { PortfolioDialog } from '@/features/portfolio/portfolio-dialog';
-import { useAuthStore } from '@/stores/auth.store';
+import { useAuthStore, useIsAdmin } from '@/stores/auth.store';
+import { NotificationBell } from '@/features/admin/notification-bell';
 import { ROUTE_PATH, nowInAppTzIso } from '@/lib/constants';
 
 /**
@@ -58,6 +59,7 @@ function BaselineClock(): JSX.Element {
 export function AppLayout(): JSX.Element {
   const navigate = useNavigate();
   const { user, logout } = useAuthStore();
+  const isAdmin = useIsAdmin();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [portfolioDialogOpen, setPortfolioDialogOpen] = useState(false);
 
@@ -88,6 +90,7 @@ export function AppLayout(): JSX.Element {
         <div className="flex items-center gap-2">
           <BaselineClock />
           <PortfolioSelector onCreateClick={() => setPortfolioDialogOpen(true)} />
+          {isAdmin && <NotificationBell />}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
