@@ -62,8 +62,10 @@
 | `quote_provider_interfaces` | +`consecutive_failures` | Integer, 默认 0 | 连续无响应计数，原子自增 |
 | `quote_provider_interfaces` | +`alerted` | Boolean, 默认 false | 告警去重抢占标志 |
 | `securities_data_providers` | **-`is_active` / -`is_default`**（DROP COLUMN） | — | 全局活跃源开关移除，仅保留 `enabled` |
+| `security_prices` | +`fetched_at` | DateTime, 默认 now | 数据拉取时间戳；支撑"数据截至 HH:MM"展示与 Q3 红点"过旧"判断（当前 `as_of` 仅 Date 粒度，无法区分日内拉取时刻） |
+| `security_prices` | +`source` | String, nullable | 价来源标记：接口名（如 `小熊同学/stock`）/ `手动上传`；前端"来源"展示 + 回溯 |
 
-约束：`(category_id, priority)` 建议唯一（或全局唯一+排序）；重排时若 DB 不支持批量 CASE 改值，用中间临时值法避免唯一冲突。
+约束：`(category_id, priority)` 建议唯一（或全局唯一+排序）；重排时若 DB 不支持批量 CASE 改值，用中间临时值法避免唯一冲突。`security_prices` 的 `fetched_at` / `source` 与方向 2 缺口 G2（响应字段映射）**同批 Alembic 迁移**，避免多次改表。
 
 ### 2.3 顺序 Fallback 查询语义
 
@@ -87,16 +89,31 @@
 - 双 admin 并发拖拽：低频场景用 last-write-wins + 前端实时刷新即可，无需乐观锁。
 - 展示序与 fallback 优先级是**同一字段 `priority`**，杜绝两套顺序不一致。
 
+### 2.6 行情同步接口契约（端点，已锁定）
+
+三路获取路径对应的后端端点（均走 `EnvelopeRoute`，返回结构化结果，禁返裸 int）：
+
+| 端点 | 语义 | 返回 | 用途 |
+|------|------|------|------|
+| `POST /api/portfolios/{id}/prices/refresh-async` | 后台异步刷新（fire-and-forget） | 立即 202 | 组合页 mounted/定时触发，不阻塞 UI（路径 B） |
+| `POST /api/portfolios/{id}/prices/sync` | 同步完整 fallback 链 | `{synced,failed,skipped,errors}` | 用户点"刷新行情"按钮，Σtimeout 封顶 ≤8s，按钮 loading（路径 C） |
+| `GET /api/portfolios/{id}/prices/sync-status` | 刷新进度 / 最新 `fetched_at` | 状态对象 | 前端轮询或 WS 推送，局部刷新（路径 B 收尾） |
+| `POST /api/admin/quote-providers/sync`（可选） | 管理面全量/指定组合刷新 | `{synced,failed,skipped}` | 需 admin，运维主动触发 |
+
+- `refresh-async` 与 `sync` 共用 `fallback_fetch(category_id)`；`sync` 显式 `await` 完整链并返回汇总，`refresh-async` 仅派发后台任务即 `202`。
+- 数据时效展示依赖 §2.2 的 `security_prices.fetched_at` / `source`；前端"数据截至 HH:MM · 来源"与"过旧"红点判断均读此二列。
+
 ---
 
 ## 3. 待确认项（实现前定稿，非锁定决策，附默认建议）
 
-| # | 项 | 默认建议（待用户最终确认） |
-|---|----|----------------------------|
-| Q1 | "无响应"精确边界 | 超时 / 连接错误 / HTTP 5xx / 鉴权失败 = 无响应（向下）；HTTP 200 但业务返回空 = 有响应（停止，数据空另行处理） |
-| Q2 | 告警落点 | MVP：管理面站内信 + 前端红点；后续可加邮件。落点需明确以免影响"抢占去重"实现 |
-| Q3 | 实时秒回策略 | 实时展示用 `last_good` 缓存秒回 + 后台异步 fallback 刷新；同步"刷新行情"按钮走完整链（避免点开组合卡 Σtimeout） |
-| Q4 | 失败阈值 N | 默认 3 次连续无响应触发告警（可在接口/全局配置） |
+| #   | 项         | 默认建议（待用户最终确认）                                                              |
+| --- | --------- | -------------------------------------------------------------------------- |
+| Q1  | "无响应"精确边界 | 超时 / 连接错误 / HTTP 5xx / 鉴权失败 = 无响应（向下）；HTTP 200 但业务返回空 = 有响应（停止，数据空另行处理）    |
+| Q2  | 告警落点      | MVP：管理面站内信 + 前端红点；后续可加邮件。落点需明确以免影响"抢占去重"实现                                 |
+| Q3  | 实时秒回策略    | 实时展示用 `last_good` 缓存秒回 + 后台异步 fallback 刷新；同步"刷新行情"按钮走完整链（避免点开组合卡 Σtimeout） |
+| Q4  | 失败阈值 N    | 默认 3 次连续无响应触发告警（可在接口/全局配置）                                                 |
+|     |           |                                                                            |
 
 > 以上 4 项为运维细节，不推翻 §2 的核心架构决策；实现前由用户确认后写入本 ADR 或独立配置。
 
@@ -117,8 +134,8 @@
 
 ## 5. 落地范围（分阶段，建议顺序）
 
-1. 数据模型：`QuoteInterface` 加 `priority` / `consecutive_failures` / `alerted`，`SecuritiesDataProvider` 删 `is_active` / `is_default` + Alembic 迁移；同步移除 service `set_default`/`set_active`/`get_active_provider`、router `set-default`/`set-active` 端点与 schema 字段、前端「默认/当前」徽标/开关/表单字段。
-2. `MarketDataSyncService.fallback_fetch(category_id)`：顺序链 + HTTPS 路径（先用 mock/respx 跑通）；复用方向 2 的 `upsert SecurityPrice` + `recalculateRange`。
+1. 数据模型：`QuoteInterface` 加 `priority` / `consecutive_failures` / `alerted`，`SecuritiesDataProvider` 删 `is_active` / `is_default`，`security_prices` 加 `fetched_at` / `source` 两列 + Alembic 迁移；同步移除 service `set_default`/`set_active`/`get_active_provider`、router `set-default`/`set-active` 端点与 schema 字段、前端「默认/当前」徽标/开关/表单字段。
+2. `MarketDataSyncService.fallback_fetch(category_id)`：顺序链 + HTTPS 路径（先用 mock/respx 跑通）；复用方向 2 的 `upsert SecurityPrice` + `recalculateRange`（端点契约见 §2.6）。
 3. `PATCH /quote-interfaces/reorder` 端点 + 前端同分类 dnd 调序。
 4. 告警落地（按 §3 Q2 落点）+ 抢占去重。
 5. SDK 路径（akshare 依赖）+ 可选定时任务（收盘后刷新）。
