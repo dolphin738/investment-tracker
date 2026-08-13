@@ -52,6 +52,12 @@ class Settings(BaseSettings):
     # 生产环境必须改为强随机值（对齐「受保护内部端点」）。
     INTERNAL_CLEANUP_TOKEN: str = "change-me-internal"
 
+    # 可选定时调度器（APScheduler，收盘后全量刷新行情，默认关闭）。
+    # 仅当 QUOTE_SYNC_SCHEDULER_ENABLED=True 时应用启动才会注册 job（且懒导入 apscheduler），
+    # 未安装 akshare / 未启用环境启动不报错。
+    QUOTE_SYNC_SCHEDULER_ENABLED: bool = False
+    QUOTE_SYNC_SCHEDULER_CRON: str = "0 16 * * 1-5"  # 工作日 16:00（收盘后）
+
 
 @lru_cache
 def get_settings() -> Settings:

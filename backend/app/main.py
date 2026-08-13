@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -24,6 +25,7 @@ from app.core.exceptions import (
     unhandled_exception_handler,
     validation_exception_handler,
 )
+from app.core.scheduler import shutdown_scheduler, start_scheduler
 from app.modules import (
     admin,
     aggregation,
@@ -41,6 +43,16 @@ from app.modules import (
 
 settings = get_settings()
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # 启动：仅当 QUOTE_SYNC_SCHEDULER_ENABLED=True 时注册收盘后全量同步 job
+    # （内部懒导入 apscheduler，未启用 / 未安装环境直接跳过）。
+    start_scheduler()
+    yield
+    shutdown_scheduler()
+
+
 app = FastAPI(
     title=settings.PROJECT_NAME,
     version="1.0",
@@ -50,6 +62,7 @@ app = FastAPI(
     redoc_url="/api/redoc",
     default_response_class=EnvelopeJSONResponse,
     route_class=EnvelopeRoute,
+    lifespan=lifespan,
 )
 
 # CORS（与 app 对齐：vite dev 源 + 凭据）
