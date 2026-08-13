@@ -23,6 +23,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { useMarkNotificationRead, useNotifications } from '@/hooks/use-notification';
+import { useIsAdmin } from '@/stores/auth.store';
 import type { Notification } from '@/api/notification.api';
 
 /** 北京时间（UTC+8）下格式化通知时间：MM-dd HH:mm */
@@ -39,6 +40,10 @@ export function NotificationBell(): JSX.Element {
   const { data: notifications, isLoading } = useNotifications();
   const markRead = useMarkNotificationRead();
   const [open, setOpen] = useState(false);
+  // 双重防御：组件自身也按管理员身份自 Gate（app-layout 已按 useIsAdmin 控制挂载，
+  // 这里再兜底一层，避免被其它入口直接渲染给非管理员）
+  const isAdmin = useIsAdmin();
+  if (!isAdmin) return null;
 
   const items = notifications ?? [];
   const unreadCount = items.filter((n: Notification) => !n.read).length;
