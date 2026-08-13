@@ -35,6 +35,8 @@ export interface QuoteInterface {
   timeout: number | null;
   retry_count: number | null;
   rate_limit: string | null;
+  /** 分类级优先级（ADR-002 优先级链）：数字越小越优先；跨分类独立计数，null = 未纳入优先级链 */
+  priority: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -117,4 +119,25 @@ export function deleteInterface(
 /** 扁平返回全部接口（顶层按分类汇总所有提供方接口总览） */
 export function listAllInterfaces(): Promise<QuoteInterface[]> {
   return http.get<QuoteInterface[]>('/admin/quote-providers/interfaces');
+}
+
+/**
+ * 同分类内拖拽调序请求体（前端 dnd 产生的完整有序 id 列表）。
+ * 对应后端 PATCH /admin/quote-interfaces/reorder。
+ */
+export interface ReorderQuoteInterfacesReq {
+  category_id: string;
+  ordered_ids: string[];
+}
+
+/**
+ * 同分类内拖拽调序：PATCH /admin/quote-interfaces/reorder
+ *
+ * 前端 dnd 产生的完整有序 id 列表 → 后端把 priority 设为 index。
+ * 返回 `{ ok: true }`。
+ */
+export function reorderQuoteInterfaces(
+  body: ReorderQuoteInterfacesReq,
+): Promise<{ ok: boolean }> {
+  return http.patch<{ ok: boolean }>('/admin/quote-interfaces/reorder', body);
 }

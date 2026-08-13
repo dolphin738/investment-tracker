@@ -15,10 +15,12 @@ import {
   deleteInterface,
   listAllInterfaces,
   listProviderInterfaces,
+  reorderQuoteInterfaces,
   updateInterface,
   type QuoteInterface,
   type QuoteInterfaceCreate,
   type QuoteInterfaceUpdate,
+  type ReorderQuoteInterfacesReq,
 } from '@/api/quote-interface.api';
 import { useIsAdmin } from '@/stores/auth.store';
 
@@ -90,5 +92,24 @@ export function useDeleteInterface() {
       toast.success('已删除');
     },
     onError: () => toast.error('删除失败'),
+  });
+}
+
+/**
+ * 同分类内拖拽调序（ADR-002 优先级链）。
+ *
+ * 入参为 dnd 产生的完整有序 id 列表；成功后失效全部接口相关缓存
+ * （兼容顶层「按分类汇总总览」与各提供方子表），并轻提示。
+ */
+export function useReorderInterfaces() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: ReorderQuoteInterfacesReq) => reorderQuoteInterfaces(body),
+    onSuccess: () => {
+      // 前缀命中：总览 / 各提供方子表 / 单提供方接口列表全部刷新
+      queryClient.invalidateQueries({ queryKey: ['admin', 'quote-providers'] });
+      toast.success('顺序已保存');
+    },
+    onError: () => toast.error('调序失败，请重试'),
   });
 }
