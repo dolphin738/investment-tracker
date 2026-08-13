@@ -29,6 +29,7 @@ from app.core.date_utils import today_app_tz
 from app.models.quote_interface import QuoteInterface
 from app.models.quote_provider import SecuritiesDataProvider
 from app.models.security import Security, SecurityPrice
+from app.services.notification import NotificationService
 from app.services.recalculation import RecalculationService
 
 # —— 可配置阈值（ADR-002 §3 Q4 默认 3）——
@@ -92,7 +93,7 @@ class MarketDataSyncService:
                 source = f"{provider.name}/{itf.name}" if provider else itf.name
                 return FetchResult(prices=rows, source=source)
             # 无响应：计数
-            await self._mark_failure(itf.id)
+            await self._mark_failure(itf)
         return FetchResult(prices={}, source=None)
 
     # ------------------------------------------------------------------ #
@@ -103,8 +104,9 @@ class MarketDataSyncService:
     ) -> dict[str, Decimal]:
         if itf.access_method == "https":
             return await self._fetch_https(itf, codes)
-        # SDK 接入方式 V1 暂未实现（ADR-002 §5 第 5 步）
-        raise NotImplementedError("SDK 接入方式将在 V1 后续步骤实现")
+        if itf.access_method == "sdk":
+            return await self._fetch_sdk(itf, codes)
+        raise ValueError(f"不支持的接入方式: {itf.access_method}")
 
     async def _fetch_https(
         self, itf: QuoteInterface, codes: Optional[list[str]]
@@ -131,6 +133,56 @@ class MarketDataSyncService:
             raise RuntimeError(f"鉴权失败: {resp.status_code}")
         resp.raise_for_status()
         return self._parse_rows(itf, resp.json())
+
+    async def _fetch_sdk(
+        self, itf: QuoteInterface, codes: Optional[list[str]]
+    ) -> dict[str, Decimal]:
+        """SDK 接入方式（如 akshare）：懒导入 SDK，按 resp 字段映射解析 DataFrame。
+
+        仅当 akshare 等 SDK 实际被调用时才 import，避免无 SDK 环境（测试 / 未安装）
+        在模块加载期即要求安装导致启动崩溃。
+
+        - sdk_func：akshare 顶层函数名，存于 provider.config.sdk_func（与
+          QuoteProviderAccessMethod.SDK 的 ``config.sdk_name`` 校验并存）。
+        - params：接口 params（itf.params）透传为调用参数；codes 非空时并入
+          ``codes`` 键（部分 akshare 函数按 code 入参）。
+        - DataFrame 解析：``code_field = resp_code_field or 'code'``、
+          ``price_field = resp_price_field or 'price'`` 逐行映射；
+          空 DataFrame / None → 返回 ``{}``（触发向下）。
+        """
+        provider = await self.session.get(SecuritiesDataProvider, itf.provider_id)
+        config = (provider.config or {}) if provider is not None else {}
+        sdk_func = config.get("sdk_func")
+        if not isinstance(sdk_func, str) or not sdk_func:
+            raise ValueError(
+                "SDK 接入方式必须在 provider.config.sdk_func 指定 akshare 顶层函数名"
+            )
+        # 懒导入：模块级不 import akshare（见文件头约束）
+        import akshare  # noqa: PLC0415
+
+        func = getattr(akshare, sdk_func, None)
+        if func is None:
+            raise ValueError(f"akshare 中不存在函数 {sdk_func}")
+        params: dict[str, Any] = {**(itf.params or {})}
+        if codes:
+            # codes 非空时透传（如 stock_zh_a_spot 按 code 入参）
+            params = {**params, "codes": codes}
+        df = func(**params)
+        if df is None or getattr(df, "empty", False):
+            return {}
+        code_field = itf.resp_code_field or "code"
+        price_field = itf.resp_price_field or "price"
+        out: dict[str, Decimal] = {}
+        for _, row in df.iterrows():
+            code = row.get(code_field) if hasattr(row, "get") else row[code_field]
+            price = row.get(price_field) if hasattr(row, "get") else row[price_field]
+            if code is None or price is None:
+                continue
+            try:
+                out[str(code)] = Decimal(str(price))
+            except (InvalidOperation, ValueError, TypeError):
+                continue
+        return out
 
     def _parse_rows(self, itf: QuoteInterface, payload: Any) -> dict[str, Decimal]:
         """把响应体解析为 ``{code: price}``。业务空 → 返回 ``{}``（触发向下）。"""
@@ -173,7 +225,8 @@ class MarketDataSyncService:
         )
         await self.session.flush()
 
-    async def _mark_failure(self, interface_id: str) -> None:
+    async def _mark_failure(self, itf: QuoteInterface) -> None:
+        interface_id = itf.id
         # 原子自增
         await self.session.execute(
             update(QuoteInterface)
@@ -201,7 +254,18 @@ class MarketDataSyncService:
                     .returning(QuoteInterface.id)
                 )
             ).scalar_one_or_none()
-            # claimed 非 None 表示本实例抢到告警（Q2 落点由上层消费）
+            # claimed 非 None 表示本实例抢到告警：写一条站内信（Q2 落点）
+            if claimed is not None:
+                await NotificationService(self.session).create(
+                    level="warning",
+                    title=f"接口「{itf.name}」连续 {FAILURE_THRESHOLD} 次无响应",
+                    message=(
+                        f"提供方接口 {itf.name} 已连续 {FAILURE_THRESHOLD} 次无响应，"
+                        f"已暂停重复告警，请检查。"
+                    ),
+                    related_type="quote_interface",
+                    related_id=itf.id,
+                )
         await self.session.flush()
 
     # ------------------------------------------------------------------ #

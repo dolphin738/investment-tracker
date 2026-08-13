@@ -17,6 +17,10 @@ dependencies = [
     "python-multipart==0.0.32",
     "pyxirr==0.10.8",
     "openpyxl==3.1.5",
+    # SDK 行情接入（ADR-002 §5 第 5 步）：akshare 懒导入，未安装不影响启动
+    "akshare>=1.14",
+    # 可选定时调度器（收盘后全量同步行情），默认关闭、懒导入
+    "apscheduler>=3.10",
 ]
 
 [project.optional-dependencies]
