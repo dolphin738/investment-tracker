@@ -10,8 +10,26 @@
  * 组件组织对齐 quote-provider-section.tsx：本文件内含主组件 + 两个面板子组件。
  */
 
-import { useEffect, useMemo, useState } from 'react';
-import { ArrowRight, Loader2, Play, Plus, RefreshCw, Trash2 } from 'lucide-react';
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
+import {
+  ArrowRight,
+  ChevronDown,
+  ChevronUp,
+  Copy,
+  Loader2,
+  Play,
+  Plus,
+  RefreshCw,
+  Search,
+  Trash2,
+} from 'lucide-react';
+import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import {
   Card,
@@ -242,6 +260,48 @@ function InterfaceTestPanel({
   const [paramRows, setParamRows] = useState<ParamRow[]>([]);
   const [result, setResult] = useState<InterfaceTestResponse | null>(null);
 
+  // —— 原始响应：全部复制 + 查找高亮/跳转 ——
+  const [findQuery, setFindQuery] = useState('');
+  const [currentMatch, setCurrentMatch] = useState(0);
+  const rawPreRef = useRef<HTMLPreElement>(null);
+
+  const rawText = result ? safeStringify(result.raw) : '';
+
+  /** 查询词在 rawText 中全部命中位置（大小写不敏感） */
+  const matchIndices = useMemo(() => {
+    if (!findQuery) return [];
+    const q = findQuery.toLowerCase();
+    const idxs: number[] = [];
+    let i = rawText.toLowerCase().indexOf(q);
+    while (i !== -1) {
+      idxs.push(i);
+      i = rawText.toLowerCase().indexOf(q, i + q.length);
+    }
+    return idxs;
+  }, [rawText, findQuery]);
+
+  /** 高亮当前命中并滚动到可视区（mark 元素顺序即命中顺序） */
+  useEffect(() => {
+    if (!findQuery || matchIndices.length === 0) return;
+    const marks = rawPreRef.current?.querySelectorAll('mark') ?? [];
+    const target = marks[Math.min(currentMatch, matchIndices.length - 1)];
+    target?.scrollIntoView({ block: 'center' });
+  }, [findQuery, currentMatch, matchIndices.length]);
+
+  const jumpMatch = (dir: 1 | -1): void => {
+    if (matchIndices.length === 0) return;
+    setCurrentMatch((m) => (m + dir + matchIndices.length) % matchIndices.length);
+  };
+
+  const handleCopyAll = async (): Promise<void> => {
+    try {
+      await navigator.clipboard.writeText(rawText);
+      toast.success('原始响应已复制');
+    } catch {
+      toast.error('复制失败，请手动选择复制');
+    }
+  };
+
   const enabledInterfaces: QuoteInterface[] = (interfaces ?? []).filter(
     (i) => i.enabled,
   );
@@ -274,6 +334,8 @@ function InterfaceTestPanel({
 
   const handleTest = () => {
     if (!selectedId) return;
+    setFindQuery('');
+    setCurrentMatch(0);
     const params: Record<string, unknown> = {};
     paramRows.forEach((r) => {
       const k = r.key.trim();
@@ -428,21 +490,101 @@ function InterfaceTestPanel({
             )}
 
             <div>
-              <div className="mb-1 text-xs font-medium text-muted-foreground">
-                原始响应
+              <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+                <span className="text-xs font-medium text-muted-foreground">
+                  原始响应（{rawText.length.toLocaleString()} 字符）
+                </span>
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1 rounded-md border px-2 py-1">
+                    <Search className="h-3.5 w-3.5 text-muted-foreground" />
+                    <input
+                      type="text"
+                      value={findQuery}
+                      onChange={(e) => {
+                        setFindQuery(e.target.value);
+                        setCurrentMatch(0);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          jumpMatch(e.shiftKey ? -1 : 1);
+                        }
+                      }}
+                      placeholder="查找"
+                      className="h-6 w-24 bg-transparent text-xs outline-none placeholder:text-muted-foreground"
+                    />
+                    {findQuery && matchIndices.length > 0 && (
+                      <span className="whitespace-nowrap text-xs text-muted-foreground">
+                        {currentMatch + 1}/{matchIndices.length}
+                      </span>
+                    )}
+                    {findQuery && matchIndices.length === 0 && (
+                      <span className="whitespace-nowrap text-xs text-red-500">0</span>
+                    )}
+                    <div className="flex items-center">
+                      <button
+                        type="button"
+                        onClick={() => jumpMatch(-1)}
+                        disabled={matchIndices.length === 0}
+                        title="上一个（Shift+Enter）"
+                        className="rounded p-0.5 text-muted-foreground hover:bg-muted disabled:opacity-40"
+                      >
+                        <ChevronUp className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => jumpMatch(1)}
+                        disabled={matchIndices.length === 0}
+                        title="下一个（Enter）"
+                        className="rounded p-0.5 text-muted-foreground hover:bg-muted disabled:opacity-40"
+                      >
+                        <ChevronDown className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                  <Button variant="outline" size="sm" onClick={handleCopyAll}>
+                    <Copy className="mr-1 h-3.5 w-3.5" />
+                    复制全部
+                  </Button>
+                </div>
               </div>
-              <Textarea
-                readOnly
-                value={safeStringify(result.raw)}
-                rows={8}
-                className="font-mono text-xs"
-              />
+              <pre
+                ref={rawPreRef}
+                className="max-h-72 overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-xs leading-relaxed"
+              >
+                {highlightSegments(rawText, findQuery)}
+              </pre>
             </div>
           </div>
         )}
       </CardContent>
     </Card>
   );
+}
+
+/** 按查询词切分文本并高亮（<mark>）；空查询原样返回。大小写不敏感。 */
+function highlightSegments(text: string, query: string): ReactNode[] {
+  if (!query) return [text];
+  const q = query.toLowerCase();
+  const lower = text.toLowerCase();
+  const parts: ReactNode[] = [];
+  let i = 0;
+  let key = 0;
+  for (;;) {
+    const idx = lower.indexOf(q, i);
+    if (idx === -1) {
+      parts.push(text.slice(i));
+      break;
+    }
+    if (idx > i) parts.push(text.slice(i, idx));
+    parts.push(
+      <mark key={key++} className="rounded-sm bg-yellow-300 px-0 text-black">
+        {text.slice(idx, idx + q.length)}
+      </mark>,
+    );
+    i = idx + q.length;
+  }
+  return parts;
 }
 
 /** 未知结构安全序列化（避免循环引用等导致 JSON.stringify 抛错） */
