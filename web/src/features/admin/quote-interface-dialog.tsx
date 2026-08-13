@@ -36,6 +36,19 @@ import {
 } from '@/hooks/use-quote-interface';
 import { useInterfaceCategories } from '@/hooks/use-interface-category';
 
+/**
+ * 归一化用户可能误输入的全角/不可见字符，避免 JSON.parse 误报"不是合法 JSON"。
+ * 常见场景：中文输入法下敲出的全角花括号 ｛｝ / 全角引号 ＂" "，以及复制带入的 BOM、零宽空格。
+ */
+function normalizeJsonInput(raw: string): string {
+  return raw
+    .replace(/[﻿\u200B\u200C\u200D\uFEFF\u00AD\u2060]/g, '') // 去除 BOM 与零宽字符
+    .replace(/\uFF5B/g, '{') // ｛ → {
+    .replace(/\uFF5D/g, '}') // ｝ → }
+    .replace(/[\uFF02\u201C\u201D]/g, '"') // 全角/弯双引号 → "
+    .replace(/[\uFF07\u2018\u2019]/g, "'"); // 全角/弯单引号 → '
+}
+
 const HTTP_METHODS: HttpMethod[] = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'];
 
 interface FormState {
@@ -119,7 +132,7 @@ export function QuoteInterfaceDialog({
     const rawParams = form.params.trim();
     if (rawParams) {
       try {
-        const parsed = JSON.parse(rawParams);
+        const parsed = JSON.parse(normalizeJsonInput(rawParams));
         if (parsed !== null && typeof parsed !== 'object') {
           throw new Error('params 必须是 JSON 对象');
         }
