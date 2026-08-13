@@ -143,13 +143,13 @@ async def test_failure_counting_and_alert_preemption(session):
     svc = MarketDataSyncService(session)
 
     for _ in range(3):
-        await svc._mark_failure(itfs[0].id)
+        await svc._mark_failure(itfs[0])
     await session.refresh(itfs[0])
     assert itfs[0].consecutive_failures == 3
     assert itfs[0].alerted is True  # 第 3 次抢占告警
 
     # 第 4 次：已 alerted，计数继续增长但不重复置位
-    await svc._mark_failure(itfs[0].id)
+    await svc._mark_failure(itfs[0])
     await session.refresh(itfs[0])
     assert itfs[0].consecutive_failures == 4
     assert itfs[0].alerted is True
@@ -159,8 +159,8 @@ async def test_mark_success_resets_failures(session):
     """成功响应复位 consecutive_failures=0 且 alerted=False。"""
     provider, category, itfs = await _seed_provider_category(session)
     svc = MarketDataSyncService(session)
-    await svc._mark_failure(itfs[0].id)
-    await svc._mark_failure(itfs[0].id)
+    await svc._mark_failure(itfs[0])
+    await svc._mark_failure(itfs[0])
     await session.refresh(itfs[0])
     assert itfs[0].consecutive_failures == 2
 

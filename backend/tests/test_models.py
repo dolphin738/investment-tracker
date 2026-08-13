@@ -49,6 +49,8 @@ def test_metadata_tables_and_enums():
         # 增量：系统管理扩展（提供方接口 CRUD + 接口分类后台管理）
         "quote_provider_interfaces",
         "quote_provider_interface_categories",
+        # 增量：站内信通知（ADR-002 §3 Q2 告警落点）
+        "notifications",
     } == tables
 
     enums = {
