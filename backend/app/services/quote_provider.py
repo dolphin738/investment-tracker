@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.quote_provider import SecuritiesDataProvider
@@ -44,6 +44,16 @@ class QuoteProviderService:
         is_default: bool = False,
         is_active: bool = False,
     ) -> SecuritiesDataProvider:
+        # 名称唯一性：禁止与现有提供方重名（大小写不敏感）
+        dup = (
+            await self.session.execute(
+                select(SecuritiesDataProvider).where(
+                    func.lower(SecuritiesDataProvider.name) == func.lower(name)
+                )
+            )
+        ).scalar_one_or_none()
+        if dup is not None:
+            raise ValueError("已存在同名数据来源，请更换名称")
         provider = SecuritiesDataProvider(
             name=name,
             access_method=access_method,
@@ -78,6 +88,17 @@ class QuoteProviderService:
         is_active: Optional[bool] = None,
     ) -> SecuritiesDataProvider:
         if name is not None:
+            # 重命名时禁止与「其它」提供方重名（大小写不敏感，排除自身）
+            dup = (
+                await self.session.execute(
+                    select(SecuritiesDataProvider).where(
+                        func.lower(SecuritiesDataProvider.name) == func.lower(name),
+                        SecuritiesDataProvider.id != provider.id,
+                    )
+                )
+            ).scalar_one_or_none()
+            if dup is not None:
+                raise ValueError("已存在同名数据来源，请更换名称")
             provider.name = name
         if access_method is not None:
             provider.access_method = access_method

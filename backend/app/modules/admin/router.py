@@ -215,15 +215,18 @@ async def create_quote_provider(
     db: AsyncSession = Depends(get_db),
 ) -> QuoteProviderOut:
     svc = QuoteProviderService(db)
-    provider = await svc.create(
-        name=body.name,
-        access_method=body.access_method.value,
-        config=body.config,
-        enabled=body.enabled,
-        description=body.description,
-        is_default=body.is_default,
-        is_active=body.is_active,
-    )
+    try:
+        provider = await svc.create(
+            name=body.name,
+            access_method=body.access_method.value,
+            config=body.config,
+            enabled=body.enabled,
+            description=body.description,
+            is_default=body.is_default,
+            is_active=body.is_active,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     await db.commit()
     await db.refresh(provider)
     return QuoteProviderOut.model_validate(provider)

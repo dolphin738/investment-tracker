@@ -36,7 +36,7 @@ import {
 } from '@/components/ui/dialog';
 import { toast } from 'sonner';
 import type { QuoteProvider, QuoteProviderAccessMethod } from '@/api/quote-provider.api';
-import { useCreateQuoteProvider, useUpdateQuoteProvider } from '@/hooks/use-quote-provider';
+import { useCreateQuoteProvider, useQuoteProviders, useUpdateQuoteProvider } from '@/hooks/use-quote-provider';
 
 interface FormState {
   name: string;
@@ -87,10 +87,15 @@ export function QuoteProviderDialog({
 }: QuoteProviderDialogProps): JSX.Element {
   const createMut = useCreateQuoteProvider();
   const updateMut = useUpdateQuoteProvider();
+  const { data: providers } = useQuoteProviders();
   const [form, setForm] = useState<FormState>(() => toForm(editing));
+  const [nameError, setNameError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (open) setForm(toForm(editing));
+    if (open) {
+      setForm(toForm(editing));
+      setNameError(null);
+    }
   }, [open, editing]);
 
   const pending = createMut.isPending || updateMut.isPending;
@@ -99,6 +104,15 @@ export function QuoteProviderDialog({
     const name = form.name.trim();
     if (!name) {
       toast.error('请填写名称');
+      return;
+    }
+    // 名称唯一性：创建时与任一现有提供方重名、编辑时与「其它」提供方重名均拦截
+    const dupName = (providers ?? []).find(
+      (p) =>
+        p.name.trim().toLowerCase() === name.toLowerCase() && p.id !== editing?.id,
+    );
+    if (dupName) {
+      setNameError('已存在同名数据来源，请更换名称');
       return;
     }
     if (form.accessMethod === 'https' && !form.baseUrl.trim()) {
@@ -151,8 +165,15 @@ export function QuoteProviderDialog({
               id="qp-name"
               placeholder="如 新浪财经"
               value={form.name}
-              onChange={(e) => setForm({ ...form, name: e.target.value })}
+              aria-invalid={nameError ? true : undefined}
+              onChange={(e) => {
+                setNameError(null);
+                setForm({ ...form, name: e.target.value });
+              }}
             />
+            {nameError && (
+              <p className="text-xs text-red-500">{nameError}</p>
+            )}
           </div>
 
           <div className="space-y-2">

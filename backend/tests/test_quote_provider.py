@@ -205,6 +205,47 @@ async def test_disabled_provider_cannot_be_default(client):
     assert env(rc)[2]["is_default"] is False
 
 
+async def test_create_duplicate_name_returns_400(client):
+    token = await _admin_token(client, "qp_admin_11@example.com")
+    body = dict(HTTPS_BODY, name="DupSrc_11")
+    r = await client.post("/api/admin/quote-providers", json=body, headers=auth(token))
+    assert env(r)[0] == 200  # 首次创建成功
+    # 完全相同名称 → 400
+    r2 = await client.post("/api/admin/quote-providers", json=body, headers=auth(token))
+    status, code, _, _ = env(r2)
+    assert status == 400 and code == BusinessErrorCode.VALIDATION_FAILED
+    # 大小写不敏感重名 → 400
+    r3 = await client.post(
+        "/api/admin/quote-providers",
+        json=dict(HTTPS_BODY, name="dupsrc_11"),
+        headers=auth(token),
+    )
+    status, code, _, _ = env(r3)
+    assert status == 400 and code == BusinessErrorCode.VALIDATION_FAILED
+
+
+async def test_update_to_existing_name_returns_400(client):
+    token = await _admin_token(client, "qp_admin_12@example.com")
+    ra = await client.post(
+        "/api/admin/quote-providers", json=dict(HTTPS_BODY, name="DupA_12"), headers=auth(token)
+    )
+    id_a = env(ra)[2]["id"]
+    rb = await client.post(
+        "/api/admin/quote-providers", json=dict(SDK_BODY, name="DupB_12"), headers=auth(token)
+    )
+    id_b = env(rb)[2]["id"]
+    # B 改名为 A（已存在）→ 400
+    rp = await client.patch(
+        f"/api/admin/quote-providers/{id_b}", json={"name": "DupA_12"}, headers=auth(token)
+    )
+    assert rp.status_code == 400
+    # 同名自改名（大小写不同）应允许（排除自身）→ 200
+    rp2 = await client.patch(
+        f"/api/admin/quote-providers/{id_a}", json={"name": "dupsrc_12"}, headers=auth(token)
+    )
+    assert env(rp2)[0] == 200 and env(rp2)[2]["name"] == "dupsrc_12"
+
+
 async def test_get_active_provider_fallback(client):
     token = await _admin_token(client, "qp_admin_9@example.com")
     # A 为默认（非当前），B 为当前；创建即清旧标记，状态确定

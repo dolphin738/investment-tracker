@@ -46,7 +46,10 @@ export function useCreateQuoteProvider() {
       queryClient.invalidateQueries({ queryKey: quoteProvidersKey() });
       toast.success('提供方已新增');
     },
-    onError: () => toast.error('新增失败，请检查配置'),
+    onError: (err: unknown) => {
+      const message = err instanceof Error ? err.message : '新增失败，请检查配置';
+      toast.error(message);
+    },
   });
 }
 
