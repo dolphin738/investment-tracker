@@ -14,7 +14,7 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.quote_interface import QuoteInterface
@@ -48,6 +48,57 @@ class QuoteInterfaceService:
     async def get(self, interface_id: str) -> Optional[QuoteInterface]:
         return await self.session.get(QuoteInterface, interface_id)
 
+    async def _next_priority(self, category_id: Optional[str]) -> Optional[int]:
+        """计算某分类下新接口的落位优先级：COALESCE(MAX(priority), -1) + 1。
+
+        未分类（category_id=None）返回 None（留 NULL）；分类内无接口时返回 0。
+        """
+        if category_id is None:
+            return None
+        row = (
+            await self.session.execute(
+                select(func.max(QuoteInterface.priority)).where(
+                    QuoteInterface.category_id == category_id
+                )
+            )
+        ).scalar()
+        base = -1 if row is None else row
+        return base + 1
+
+    async def reorder(self, category_id: str, ordered_ids: list[str]) -> None:
+        """同分类内按传入的完整有序 id 列表重排 priority = index。
+
+        校验：ordered_ids 中每个 id 都必须属于同一个 category_id，否则抛 400
+        （不允许把接口挪到别的分类链，也不允许混入不存在的 id）。
+        要求前端传入该分类完整接口 id 列表（含未启用），避免悬挂优先级歧义。
+        """
+        if not ordered_ids:
+            return
+        result = await self.session.execute(
+            select(QuoteInterface.id, QuoteInterface.category_id).where(
+                QuoteInterface.id.in_(ordered_ids)
+            )
+        )
+        rows = result.all()
+        found_ids = {r[0] for r in rows}
+        # 任一 id 不存在 → 视为非法请求
+        if set(ordered_ids) - found_ids:
+            raise HTTPException(status_code=400, detail="存在不存在的接口 id")
+        # 任一 id 不属于该分类 → 跨分类混入，拒绝
+        for r in rows:
+            if r[1] != category_id:
+                raise HTTPException(
+                    status_code=400, detail="存在不属于该分类的接口 id"
+                )
+        # 事务内批量重排：priority = 数组下标
+        for idx, qid in enumerate(ordered_ids):
+            await self.session.execute(
+                update(QuoteInterface)
+                .where(QuoteInterface.id == qid)
+                .values(priority=idx)
+            )
+        await self.session.flush()
+
     async def create(
         self,
         *,
@@ -69,6 +120,8 @@ class QuoteInterfaceService:
         category = await InterfaceCategoryService(self.session).get_or_none(category_id)
         if category is None:
             raise HTTPException(status_code=400, detail="分类不存在")
+        # 默认优先级：落该分类末位（COALESCE(MAX(priority),-1)+1）；未分类留 NULL。
+        priority = await self._next_priority(category_id)
         obj = QuoteInterface(
             provider_id=provider_id,
             category_id=category_id,
@@ -82,6 +135,7 @@ class QuoteInterfaceService:
             timeout=timeout,
             retry_count=retry_count,
             rate_limit=rate_limit,
+            priority=priority,
         )
         self.session.add(obj)
         await self.session.flush()

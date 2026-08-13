@@ -39,8 +39,10 @@ from app.core.security import CurrentUser, require_admin
 from app.db.database import get_db
 from app.models import Portfolio
 from app.models.enums import InterfaceDirection, QuoteProviderAccessMethod
+from app.models.notification import Notification
 from app.services import InterfaceCategoryService, QuoteInterfaceService
 from app.services.market_data_sync import MarketDataSyncService
+from app.services.notification import NotificationService
 from app.services.quote_provider import QuoteProviderService
 
 
@@ -153,8 +155,31 @@ class QuoteInterfaceOut(BaseModel):
     timeout: Optional[int]
     retry_count: Optional[int]
     rate_limit: Optional[str]
+    priority: Optional[int] = None
     created_at: datetime
     updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class QuoteInterfaceReorder(BaseModel):
+    """同分类内拖拽调序请求体（前端 dnd 产生的完整有序 id 列表）。"""
+
+    category_id: str = Field(..., description="接口分类 id（UUID）")
+    ordered_ids: list[str] = Field(
+        ..., description="该分类下完整接口 id 列表，顺序即新优先级"
+    )
+
+
+class NotificationOut(BaseModel):
+    id: str
+    level: str
+    title: str
+    message: str
+    related_type: Optional[str]
+    related_id: Optional[str]
+    read: bool
+    created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -442,6 +467,47 @@ async def delete_interface(
     await svc.delete(obj)
     await db.commit()
     return {"id": interface_id, "deleted": True}
+
+
+@router_admin.patch("/quote-interfaces/reorder")
+async def reorder_quote_interfaces(
+    body: QuoteInterfaceReorder,
+    current: CurrentUser = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """同分类内拖拽调序：前端 dnd 产生的完整有序 id 列表 → priority=index。
+
+    跨分类 id 混入 / 不存在 id → 400（由 QuoteInterfaceService.reorder 抛出）。
+    """
+    svc = QuoteInterfaceService(db)
+    await svc.reorder(body.category_id, body.ordered_ids)
+    await db.commit()
+    return {"ok": True}
+
+
+# --------------------------------------------------------------------------- #
+# 站内信通知（ADR-002 §3 Q2 默认「管理面站内信」）
+# --------------------------------------------------------------------------- #
+@router_admin.get("/notifications")
+async def list_notifications(
+    current: CurrentUser = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> list[NotificationOut]:
+    """站内信列表（按 created_at 倒序）；前端据 read 字段算未读数。"""
+    items = await NotificationService(db).list_all()
+    return [NotificationOut.model_validate(n) for n in items]
+
+
+@router_admin.post("/notifications/{notification_id}/read")
+async def mark_notification_read(
+    notification_id: str,
+    current: CurrentUser = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> NotificationOut:
+    """标记单条通知为已读（不存在 → 404）。"""
+    obj = await NotificationService(db).mark_read(notification_id)
+    await db.commit()
+    return NotificationOut.model_validate(obj)
 
 
 # --------------------------------------------------------------------------- #
