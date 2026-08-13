@@ -122,6 +122,8 @@ class QuoteInterfaceService:
         rate_limit: Optional[str] = None,
         purpose: InterfacePurpose = InterfacePurpose.QUOTE,
         asset_class: Optional[SecurityType] = None,
+        resp_code_field: Optional[str] = None,
+        resp_price_field: Optional[str] = None,
         resp_name_field: Optional[str] = None,
         resp_exchange_field: Optional[str] = None,
     ) -> QuoteInterface:
@@ -148,6 +150,8 @@ class QuoteInterfaceService:
             priority=priority,
             purpose=purpose,
             asset_class=asset_class,
+            resp_code_field=resp_code_field,
+            resp_price_field=resp_price_field,
             resp_name_field=resp_name_field,
             resp_exchange_field=resp_exchange_field,
         )

@@ -256,3 +256,48 @@ async def test_interfaces_for_category_orders_by_priority(session):
     ids = [o.id for o in ordered]
     assert disabled.id not in ids  # 禁用不被选中
     assert ids == [itfs[0].id, itfs[1].id]  # priority 1 在前
+
+
+# --------------------------------------------------------------------------- #
+# 数组行响应（如小熊同学 /stock/all → [[code, name], ...]）解析
+# --------------------------------------------------------------------------- #
+async def test_normalize_rows_keeps_array_rows():
+    """{data: [[code,name],...]} 应保留数组行（dict 行也保留），不被过滤成 []。"""
+    svc = MarketDataSyncService(None)  # type: ignore[arg-type]
+    payload = {
+        "code": 200,
+        "data": [
+            ["sz301141", "中科磁业"],
+            ["sh600000", "浦发银行"],
+        ],
+    }
+    rows = svc._normalize_rows(payload)
+    assert len(rows) == 2
+    assert rows[0] == ["sz301141", "中科磁业"]
+    assert rows[1] == ["sh600000", "浦发银行"]
+
+
+async def test_parse_price_rows_positional_indices():
+    """数组行按 resp_* 配置的位置下标解析（0=code, 2=price）。"""
+    svc = MarketDataSyncService(None)  # type: ignore[arg-type]
+    itf = QuoteInterface(
+        id="i1", provider_id="p1", category_id="c1", name="t",
+        resp_code_field="0", resp_price_field="2",
+    )
+    rows = [
+        ["600000", "浦发银行", "10.50"],
+        ["000001", "平安银行", "9.87"],
+    ]
+    parsed = svc._parse_price_rows(itf, rows)
+    assert parsed == {"600000": Decimal("10.50"), "000001": Decimal("9.87")}
+
+
+async def test_parse_price_rows_array_missing_price_skipped():
+    """数组行缺价格（如 [code, name] 且 price 字段非数字下标）→ 跳过不报错。"""
+    svc = MarketDataSyncService(None)  # type: ignore[arg-type]
+    itf = QuoteInterface(
+        id="i2", provider_id="p1", category_id="c1", name="t",
+        resp_code_field="0", resp_price_field="price",  # 数组行无 price 字段名
+    )
+    parsed = svc._parse_price_rows(itf, [["600000", "浦发银行"]])
+    assert parsed == {}

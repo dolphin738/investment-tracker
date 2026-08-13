@@ -60,6 +60,13 @@ def _infer_exchange(code: str) -> Optional[str]:
     """代码前缀启发式推断交易所（缺失 resp_exchange_field 时兜底，§11.4）。"""
     if not code:
         return None
+    c = str(code).lower()
+    if c.startswith("sh"):
+        return "SH"  # 上交所（含代码自带前缀，如 sh600000）
+    if c.startswith("sz"):
+        return "SZ"  # 深交所（如 sz301141）
+    if c.startswith("bj"):
+        return "BJ"  # 北交所（如 bj920021）
     head = code[0]
     if head in ("6", "9"):
         return "SH"  # 上交所
@@ -71,6 +78,25 @@ def _infer_exchange(code: str) -> Optional[str]:
         return "SH"  # 基金（上交所）
     if len(code) <= 5:
         return "HK"  # 港股 5 位码
+    return None
+
+
+def _row_get(row: Any, field: Optional[str]) -> Any:
+    """从行取值：dict 行按字段名；数组行按位置下标（resp_* 配置填 "0"/"1"）。
+
+    部分行情源（如小熊同学 /stock/all）返回 [[code, name], ...] 数组行——
+    无字段名可查，需在接口配置里把 resp_code_field/resp_name_field 填为整数下标；
+    field 非数字下标时数组行返回 None。
+    """
+    if row is None:
+        return None
+    if isinstance(row, dict):
+        return row.get(field)
+    if isinstance(row, (list, tuple)):
+        if field and str(field).isdigit():
+            idx = int(field)
+            return row[idx] if 0 <= idx < len(row) else None
+        return None
     return None
 
 
@@ -171,14 +197,19 @@ class MarketDataSyncService:
         raise ValueError(f"不支持的接入方式: {access_method}")
 
     # —— 原始行归一化（JSON list / {data:[...]} / 单对象）——
-    def _normalize_rows(self, payload: Any) -> list[dict]:
+    def _normalize_rows(self, payload: Any) -> list[Any]:
+        """归一化为行列表：dict 行（字段映射）或数组行（位置下标）。
+
+        保留数组行——部分行情源（如小熊同学 /stock/all）返回 [[code, name], ...]，
+        解析侧按 resp_* 配置的整数下标取值（见 _row_get）。
+        """
         if isinstance(payload, list):
-            return [r for r in payload if isinstance(r, dict)]
+            return [r for r in payload if isinstance(r, (dict, list))]
         if isinstance(payload, dict):
             for key in ("data", "list", "items", "result"):
                 v = payload.get(key)
                 if isinstance(v, list):
-                    return [r for r in v if isinstance(r, dict)]
+                    return [r for r in v if isinstance(r, (dict, list))]
             return [payload]
         return []
 
@@ -258,14 +289,14 @@ class MarketDataSyncService:
         rows = await self._fetch_sdk_raw(itf, itf.params, codes)
         return self._parse_price_rows(itf, rows)
 
-    def _parse_price_rows(self, itf: QuoteInterface, rows: list[dict]) -> dict[str, Decimal]:
+    def _parse_price_rows(self, itf: QuoteInterface, rows: list[Any]) -> dict[str, Decimal]:
         """把原始行解析为 ``{code: price}``。业务空 → 返回 ``{}``（触发向下）。"""
         code_field = itf.resp_code_field or "code"
         price_field = itf.resp_price_field or "price"
         out: dict[str, Decimal] = {}
         for r in rows:
-            code = r.get(code_field)
-            price = r.get(price_field)
+            code = _row_get(r, code_field)
+            price = _row_get(r, price_field)
             if code is None or price is None:
                 continue
             try:
@@ -274,14 +305,14 @@ class MarketDataSyncService:
                 continue
         return out
 
-    def _parse_test_rows(self, itf: QuoteInterface, rows: list[dict]) -> dict[str, str]:
+    def _parse_test_rows(self, itf: QuoteInterface, rows: list[Any]) -> dict[str, str]:
         """测试端点解析：{code→price 字符串}（按 resp_code_field/resp_price_field）。"""
         code_field = itf.resp_code_field or "code"
         price_field = itf.resp_price_field or "price"
         out: dict[str, str] = {}
         for r in rows:
-            code = r.get(code_field)
-            price = r.get(price_field)
+            code = _row_get(r, code_field)
+            price = _row_get(r, price_field)
             if code is None or price is None:
                 continue
             out[str(code)] = str(price)
@@ -493,7 +524,7 @@ class MarketDataSyncService:
             errors.extend(res["errors"])
         return {"synced": synced, "failed": failed, "errors": errors}
 
-    async def _upsert_masters(self, itf: QuoteInterface, rows: list[dict]) -> int:
+    async def _upsert_masters(self, itf: QuoteInterface, rows: list[Any]) -> int:
         """把原始行 upsert 进 securities 系统主数据（portfolio_id=NULL）。"""
         asset_class = itf.asset_class
         code_field = itf.resp_code_field or "code"
@@ -502,13 +533,13 @@ class MarketDataSyncService:
 
         count = 0
         for r in rows:
-            code = r.get(code_field)
+            code = _row_get(r, code_field)
             if code is None:
                 continue
             code = str(code)
-            name = r.get(name_field)
+            name = _row_get(r, name_field)
             name = str(name) if name is not None else code
-            exchange = r.get(exchange_field) if exchange_field else None
+            exchange = _row_get(r, exchange_field) if exchange_field else None
             if not exchange:
                 exchange = _infer_exchange(code)
             pinyin = _compute_pinyin_initials(name)

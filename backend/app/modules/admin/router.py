@@ -128,6 +128,8 @@ class QuoteInterfaceCreate(BaseModel):
     # —— 接口用途 / 资产类别 / 列表解析字段（§7 ① / §11，MASTER_LIST 配置能力）——
     purpose: InterfacePurpose = InterfacePurpose.QUOTE
     asset_class: Optional[SecurityType] = None
+    resp_code_field: Optional[str] = Field(None, max_length=64)
+    resp_price_field: Optional[str] = Field(None, max_length=64)
     resp_name_field: Optional[str] = Field(None, max_length=64)
     resp_exchange_field: Optional[str] = Field(None, max_length=64)
 
@@ -148,6 +150,8 @@ class QuoteInterfaceUpdate(BaseModel):
     rate_limit: Optional[str] = Field(None, max_length=64)
     purpose: Optional[InterfacePurpose] = None
     asset_class: Optional[SecurityType] = None
+    resp_code_field: Optional[str] = Field(None, max_length=64)
+    resp_price_field: Optional[str] = Field(None, max_length=64)
     resp_name_field: Optional[str] = Field(None, max_length=64)
     resp_exchange_field: Optional[str] = Field(None, max_length=64)
 
@@ -169,6 +173,8 @@ class QuoteInterfaceOut(BaseModel):
     priority: Optional[int] = None
     purpose: str
     asset_class: Optional[str] = None
+    resp_code_field: str
+    resp_price_field: str
     resp_name_field: Optional[str] = None
     resp_exchange_field: Optional[str] = None
     created_at: datetime
@@ -338,6 +344,8 @@ async def create_provider_interface(
         rate_limit=body.rate_limit,
         purpose=body.purpose.value,
         asset_class=body.asset_class,
+        resp_code_field=body.resp_code_field,
+        resp_price_field=body.resp_price_field,
         resp_name_field=body.resp_name_field,
         resp_exchange_field=body.resp_exchange_field,
     )
@@ -469,6 +477,8 @@ async def update_interface(
         rate_limit=body.rate_limit,
         purpose=body.purpose.value if body.purpose is not None else None,
         asset_class=body.asset_class,
+        resp_code_field=body.resp_code_field,
+        resp_price_field=body.resp_price_field,
         resp_name_field=body.resp_name_field,
         resp_exchange_field=body.resp_exchange_field,
     )

@@ -450,3 +450,46 @@ async def test_quote_interface_create_update_master_list_fields(client):
     assert data["resp_name_field"] == "name"
     assert data["asset_class"] == "HK_STOCK"
     assert data["resp_exchange_field"] == "market"
+
+
+async def test_sync_security_masters_array_rows_positional(client, monkeypatch, session):
+    """小熊同学类数组行响应 [[code,name],...]：resp_* 配下标 0/1，同步落主数据并推断交易所。"""
+    token = await _admin_token(client, "sm_admin_11@example.com")
+    pid = await _create_provider(client, token)  # https
+    cid = await _create_category(client, token)
+    iid = await _create_interface(
+        client,
+        token,
+        pid,
+        cid,
+        name="A股股票列表（数组行）",
+        purpose="MASTER_LIST",
+        asset_class="STOCK",
+        resp_code_field="0",
+        resp_name_field="1",
+    )
+
+    async def _fake_https_raw(self, itf, params, codes):
+        return [
+            ["sz301141", "中科磁业"],
+            ["sh600000", "浦发银行"],
+            ["bj920021", "流金科技"],
+        ]
+
+    monkeypatch.setattr(MarketDataSyncService, "_fetch_https_raw", _fake_https_raw)
+    result = await MarketDataSyncService(session).sync_security_masters(
+        SecurityType.STOCK
+    )
+    assert result["synced"] == 3
+    rows = {
+        r.code: r
+        for r in (
+            await session.execute(select(Security).where(Security.portfolio_id.is_(None)))
+        ).scalars().all()
+    }
+    assert rows["sz301141"].name == "中科磁业"
+    assert rows["sz301141"].exchange == "SZ"  # sz 前缀推断
+    assert rows["sh600000"].name == "浦发银行"
+    assert rows["sh600000"].exchange == "SH"
+    assert rows["bj920021"].exchange == "BJ"
+    assert rows["sh600000"].pinyin_initials == "pfyh"  # 浦发银行 → pfyh
