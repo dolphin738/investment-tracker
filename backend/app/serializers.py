@@ -17,7 +17,7 @@ from app.models import (
     SecurityPrice,
     SecurityTrade,
 )
-from app.models.enums import DividendType
+from app.models.enums import DividendType, SecurityType
 
 
 def serialize_portfolio(p: Portfolio) -> dict:
@@ -55,6 +55,18 @@ def serialize_security(s: Security) -> dict:
         "type": s.type.value,
         "currency": s.currency,
         "createdAt": s.created_at,
+        "updatedAt": s.updated_at,
+    }
+
+
+def serialize_security_master(s: Security) -> dict:
+    """系统级证券主数据行（portfolio_id IS NULL）序列化：左栏只读展示用。"""
+    return {
+        "id": s.id,
+        "code": s.code,
+        "name": s.name,
+        "exchange": s.exchange,
+        "type": s.type.value if isinstance(s.type, SecurityType) else s.type,
         "updatedAt": s.updated_at,
     }
 

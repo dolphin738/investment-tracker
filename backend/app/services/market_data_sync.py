@@ -7,6 +7,10 @@
   鉴权失败 / **HTTP 200 但业务返回空**，定义见 ADR-002 §3 Q1）计为无响应，向下一接口。
 - ``sync_portfolio_prices(portfolio_id)``：遍历组合涉及分类，按 code 匹配证券 upsert
   ``SecurityPrice``（含 ``fetched_at`` / ``source``），再 ``recalculateRange`` 重建快照/净值。
+- ``sync_security_masters(asset_class?)`` / ``sync_all_security_masters()``：配置驱动同步
+  系统级证券主数据（purpose=MASTER_LIST 接口，复用 priority 降级链，零硬编码数据源）。
+- ``test_single_interface(interface_id, params, codes)``：用调用方 params 单接口测试，
+  原样回传 raw+parsed，不计入 consecutive_failures。
 
 失败计数与告警去重均落 DB（多实例安全）：
 - 失败：``consecutive_failures`` 原子自增。
@@ -16,16 +20,20 @@
 """
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Optional
 
 import httpx
+import pypinyin
+from pypinyin import Style
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.date_utils import today_app_tz
+from app.models.enums import InterfacePurpose, SecurityType
 from app.models.quote_interface import QuoteInterface
 from app.models.quote_provider import SecuritiesDataProvider
 from app.models.security import Security, SecurityPrice
@@ -48,9 +56,40 @@ class FetchResult:
     source: Optional[str]
 
 
+def _infer_exchange(code: str) -> Optional[str]:
+    """代码前缀启发式推断交易所（缺失 resp_exchange_field 时兜底，§11.4）。"""
+    if not code:
+        return None
+    head = code[0]
+    if head in ("6", "9"):
+        return "SH"  # 上交所
+    if head in ("0", "3"):
+        return "SZ"  # 深交所
+    if head in ("8", "4"):
+        return "BJ"  # 北交所
+    if head == "5":
+        return "SH"  # 基金（上交所）
+    if len(code) <= 5:
+        return "HK"  # 港股 5 位码
+    return None
+
+
+def _compute_pinyin_initials(name: str) -> Optional[str]:
+    """名称 → 拼音首字母（如 贵州茅台→gzm）；异常时返回 None 不阻断同步。"""
+    if not name:
+        return None
+    try:
+        initials = pypinyin.pinyin(name, style=Style.FIRST_LETTER, heteronym=False)
+        return "".join(seg[0].lower() for seg in initials if seg)
+    except Exception:
+        return None
+
+
 class MarketDataSyncService:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+        # 最近一次 HTTPS 调用的上游状态码（测试端点回传用；SDK 接口为 None）
+        self._last_http_status: Optional[int] = None
 
     # ------------------------------------------------------------------ #
     # 顺序 fallback 链
@@ -102,53 +141,72 @@ class MarketDataSyncService:
     async def _call_interface(
         self, itf: QuoteInterface, codes: Optional[list[str]]
     ) -> dict[str, Decimal]:
+        """价格行情分派：返回 {code: price}（供 fallback_fetch 使用）。"""
         if itf.access_method == "https":
             return await self._fetch_https(itf, codes)
         if itf.access_method == "sdk":
             return await self._fetch_sdk(itf, codes)
         raise ValueError(f"不支持的接入方式: {itf.access_method}")
 
-    async def _fetch_https(
-        self, itf: QuoteInterface, codes: Optional[list[str]]
-    ) -> dict[str, Decimal]:
-        base_url = (itf.provider.config or {}).get("base_url")
+    async def _call_interface_raw(
+        self, itf: QuoteInterface, params: Optional[dict[str, Any]], codes: Optional[list[str]]
+    ) -> list[dict]:
+        """原始行分派：返回 ``list[dict]``（供主数据同步 / 单接口测试，使用调用方 params）。
+
+        https 回传 resp.json() 归一化后的行；sdk 回传 DataFrame.to_dict('records')。
+        """
+        if itf.access_method == "https":
+            return await self._fetch_https_raw(itf, params, codes)
+        if itf.access_method == "sdk":
+            return await self._fetch_sdk_raw(itf, params, codes)
+        raise ValueError(f"不支持的接入方式: {itf.access_method}")
+
+    # —— 原始行归一化（JSON list / {data:[...]} / 单对象）——
+    def _normalize_rows(self, payload: Any) -> list[dict]:
+        if isinstance(payload, list):
+            return [r for r in payload if isinstance(r, dict)]
+        if isinstance(payload, dict):
+            for key in ("data", "list", "items", "result"):
+                v = payload.get(key)
+                if isinstance(v, list):
+                    return [r for r in v if isinstance(r, dict)]
+            return [payload]
+        return []
+
+    async def _fetch_https_raw(
+        self, itf: QuoteInterface, params: Optional[dict[str, Any]], codes: Optional[list[str]]
+    ) -> list[dict]:
+        provider = await self.session.get(SecuritiesDataProvider, itf.provider_id)
+        config = (provider.config or {}) if provider is not None else {}
+        base_url = config.get("base_url")
         if not base_url or not itf.endpoint:
             raise ValueError("HTTPS 接口缺少 base_url 或 endpoint")
         url = base_url.rstrip("/") + "/" + itf.endpoint.lstrip("/")
-        params: dict[str, Any] = {
+        params = {
             k: (",".join(v) if isinstance(v, list) else v)
-            for k, v in (itf.params or {}).items()
+            for k, v in (params or {}).items()
         }
         if codes is not None:
             # 通用做法：以逗号拼接 code 列表覆盖 code 参数（如小熊同学 /stock）
             params["code"] = ",".join(codes)
         timeout = itf.timeout or DEFAULT_TIMEOUT
         async with httpx.AsyncClient(timeout=timeout) as client:
-            resp = await client.request(
-                itf.http_method or "GET", url, params=params
-            )
+            resp = await client.request(itf.http_method or "GET", url, params=params)
+        self._last_http_status = resp.status_code
         if resp.status_code >= 500:
             raise RuntimeError(f"上游 5xx: {resp.status_code}")
         if resp.status_code in (401, 403):
             raise RuntimeError(f"鉴权失败: {resp.status_code}")
         resp.raise_for_status()
-        return self._parse_rows(itf, resp.json())
+        return self._normalize_rows(resp.json())
 
-    async def _fetch_sdk(
-        self, itf: QuoteInterface, codes: Optional[list[str]]
-    ) -> dict[str, Decimal]:
-        """SDK 接入方式（如 akshare）：懒导入 SDK，按 resp 字段映射解析 DataFrame。
+    async def _fetch_sdk_raw(
+        self, itf: QuoteInterface, params: Optional[dict[str, Any]], codes: Optional[list[str]]
+    ) -> list[dict]:
+        """SDK 接入方式（如 akshare）：懒导入 SDK，按 resp 字段映射解析 DataFrame→list[dict]。
 
         仅当 akshare 等 SDK 实际被调用时才 import，避免无 SDK 环境（测试 / 未安装）
         在模块加载期即要求安装导致启动崩溃。
-
-        - sdk_func：akshare 顶层函数名，存于 provider.config.sdk_func（与
-          QuoteProviderAccessMethod.SDK 的 ``config.sdk_name`` 校验并存）。
-        - params：接口 params（itf.params）透传为调用参数；codes 非空时并入
-          ``codes`` 键（部分 akshare 函数按 code 入参）。
-        - DataFrame 解析：``code_field = resp_code_field or 'code'``、
-          ``price_field = resp_price_field or 'price'`` 逐行映射；
-          空 DataFrame / None → 返回 ``{}``（触发向下）。
         """
         provider = await self.session.get(SecuritiesDataProvider, itf.provider_id)
         config = (provider.config or {}) if provider is not None else {}
@@ -163,45 +221,38 @@ class MarketDataSyncService:
         func = getattr(akshare, sdk_func, None)
         if func is None:
             raise ValueError(f"akshare 中不存在函数 {sdk_func}")
-        params: dict[str, Any] = {**(itf.params or {})}
+        params = {**(params or {})}
         if codes:
             # codes 非空时透传（如 stock_zh_a_spot 按 code 入参）
             params = {**params, "codes": codes}
         df = func(**params)
         if df is None or getattr(df, "empty", False):
-            return {}
-        code_field = itf.resp_code_field or "code"
-        price_field = itf.resp_price_field or "price"
-        out: dict[str, Decimal] = {}
-        for _, row in df.iterrows():
-            code = row.get(code_field) if hasattr(row, "get") else row[code_field]
-            price = row.get(price_field) if hasattr(row, "get") else row[price_field]
-            if code is None or price is None:
-                continue
-            try:
-                out[str(code)] = Decimal(str(price))
-            except (InvalidOperation, ValueError, TypeError):
-                continue
-        return out
+            return []
+        if hasattr(df, "to_dict"):
+            return [dict(r) for r in df.to_dict("records")]
+        if hasattr(df, "iterrows"):  # 兼容非 pandas DataFrame 替身（测试）
+            return [
+                (r.to_dict() if hasattr(r, "to_dict") else dict(r))
+                for _, r in df.iterrows()
+            ]
+        return []
 
-    def _parse_rows(self, itf: QuoteInterface, payload: Any) -> dict[str, Decimal]:
-        """把响应体解析为 ``{code: price}``。业务空 → 返回 ``{}``（触发向下）。"""
+    async def _fetch_https(
+        self, itf: QuoteInterface, codes: Optional[list[str]]
+    ) -> dict[str, Decimal]:
+        rows = await self._fetch_https_raw(itf, itf.params, codes)
+        return self._parse_price_rows(itf, rows)
+
+    async def _fetch_sdk(
+        self, itf: QuoteInterface, codes: Optional[list[str]]
+    ) -> dict[str, Decimal]:
+        rows = await self._fetch_sdk_raw(itf, itf.params, codes)
+        return self._parse_price_rows(itf, rows)
+
+    def _parse_price_rows(self, itf: QuoteInterface, rows: list[dict]) -> dict[str, Decimal]:
+        """把原始行解析为 ``{code: price}``。业务空 → 返回 ``{}``（触发向下）。"""
         code_field = itf.resp_code_field or "code"
         price_field = itf.resp_price_field or "price"
-        rows: list[dict] = []
-        if isinstance(payload, list):
-            rows = [r for r in payload if isinstance(r, dict)]
-        elif isinstance(payload, dict):
-            for key in ("data", "list", "items", "result"):
-                v = payload.get(key)
-                if isinstance(v, list):
-                    rows = [r for r in v if isinstance(r, dict)]
-                    break
-            else:
-                if payload.get(code_field) is not None:
-                    rows = [payload]
-        if not rows:
-            return {}
         out: dict[str, Decimal] = {}
         for r in rows:
             code = r.get(code_field)
@@ -212,6 +263,19 @@ class MarketDataSyncService:
                 out[str(code)] = Decimal(str(price))
             except (InvalidOperation, ValueError, TypeError):
                 continue
+        return out
+
+    def _parse_test_rows(self, itf: QuoteInterface, rows: list[dict]) -> dict[str, str]:
+        """测试端点解析：{code→price 字符串}（按 resp_code_field/resp_price_field）。"""
+        code_field = itf.resp_code_field or "code"
+        price_field = itf.resp_price_field or "price"
+        out: dict[str, str] = {}
+        for r in rows:
+            code = r.get(code_field)
+            price = r.get(price_field)
+            if code is None or price is None:
+                continue
+            out[str(code)] = str(price)
         return out
 
     # ------------------------------------------------------------------ #
@@ -353,3 +417,166 @@ class MarketDataSyncService:
             portfolio_id, as_of, as_of
         )
         return {"synced": synced, "failed": failed, "skipped": 0, "errors": errors}
+
+    # ------------------------------------------------------------------ #
+    # 证券主数据同步（配置驱动，purpose=MASTER_LIST，§7 ① / §11）
+    # ------------------------------------------------------------------ #
+    async def sync_security_masters(
+        self, asset_class: Optional[SecurityType] = None
+    ) -> dict[str, Any]:
+        """配置驱动同步某资产类别的证券主数据（purpose=MASTER_LIST 接口，priority 降级链）。
+
+        仅选 ``portfolio_id IS NULL`` 的系统主数据行承载全市场列表；命中优先链即停。
+        返回结构化结果 ``{synced, failed, errors}``。
+        """
+        stmt = select(QuoteInterface).where(
+            QuoteInterface.purpose == InterfacePurpose.MASTER_LIST,
+            QuoteInterface.enabled == True,  # noqa: E712
+        )
+        if asset_class is not None:
+            stmt = stmt.where(QuoteInterface.asset_class == asset_class)
+        stmt = stmt.order_by(
+            QuoteInterface.priority.is_(None),
+            QuoteInterface.priority,
+        )
+        interfaces = list((await self.session.execute(stmt)).scalars().all())
+
+        synced = 0
+        failed = 0
+        errors: list[str] = []
+        for itf in interfaces:
+            try:
+                rows = await self._call_interface_raw(itf, itf.params, None)
+            except Exception as exc:
+                rows = None
+                errors.append(f"{itf.name}: {exc}")
+            if rows:  # 有响应 → 解析 upsert + 标记成功 + 优先链命中即停
+                synced += await self._upsert_masters(itf, rows)
+                await self._mark_success(itf.id)
+                break
+            # 无响应：计数，继续下一接口（priority 降级）
+            await self._mark_failure(itf)
+            failed += 1
+        await self.session.flush()
+        return {"synced": synced, "failed": failed, "errors": errors}
+
+    async def sync_all_security_masters(self) -> dict[str, Any]:
+        """遍历全部 MASTER_LIST 接口的 distinct asset_class，逐个同步（数据驱动，零硬编码）。"""
+        rows = (
+            await self.session.execute(
+                select(QuoteInterface.asset_class)
+                .where(
+                    QuoteInterface.purpose == InterfacePurpose.MASTER_LIST,
+                    QuoteInterface.enabled == True,  # noqa: E712
+                    QuoteInterface.asset_class.isnot(None),
+                )
+                .distinct()
+            )
+        ).all()
+        asset_classes = [r[0] for r in rows if r[0] is not None]
+        synced = 0
+        failed = 0
+        errors: list[str] = []
+        for ac in asset_classes:
+            res = await self.sync_security_masters(ac)
+            synced += res["synced"]
+            failed += res["failed"]
+            errors.extend(res["errors"])
+        return {"synced": synced, "failed": failed, "errors": errors}
+
+    async def _upsert_masters(self, itf: QuoteInterface, rows: list[dict]) -> int:
+        """把原始行 upsert 进 securities 系统主数据（portfolio_id=NULL）。"""
+        asset_class = itf.asset_class
+        code_field = itf.resp_code_field or "code"
+        name_field = itf.resp_name_field or "name"
+        exchange_field = itf.resp_exchange_field
+
+        count = 0
+        for r in rows:
+            code = r.get(code_field)
+            if code is None:
+                continue
+            code = str(code)
+            name = r.get(name_field)
+            name = str(name) if name is not None else code
+            exchange = r.get(exchange_field) if exchange_field else None
+            if not exchange:
+                exchange = _infer_exchange(code)
+            pinyin = _compute_pinyin_initials(name)
+
+            existing = (
+                await self.session.execute(
+                    select(Security).where(
+                        Security.portfolio_id.is_(None),
+                        Security.asset_class == asset_class,
+                        Security.code == code,
+                    )
+                )
+            ).scalar_one_or_none()
+
+            if existing is None:
+                sec = Security(
+                    portfolio_id=None,
+                    asset_class=asset_class,
+                    code=code,
+                    name=name,
+                    exchange=exchange,
+                    type=asset_class,
+                    pinyin_initials=pinyin,
+                )
+                self.session.add(sec)
+            else:
+                existing.asset_class = asset_class
+                existing.name = name
+                existing.exchange = exchange
+                existing.type = asset_class
+                existing.pinyin_initials = pinyin
+            count += 1
+        await self.session.flush()
+        return count
+
+    # ------------------------------------------------------------------ #
+    # 单接口测试（右栏数据源，§5.2；不计入 consecutive_failures 告警）
+    # ------------------------------------------------------------------ #
+    async def test_single_interface(
+        self, interface_id: str, params: Optional[dict[str, Any]], codes: Optional[list[str]]
+    ) -> dict[str, Any]:
+        """用调用方 params 调用单接口并原样回传 raw+parsed；不计入 consecutive_failures。"""
+        itf = await self.session.get(QuoteInterface, interface_id)
+        if itf is None:
+            return {
+                "ok": False,
+                "status": "error",
+                "elapsedMs": 0.0,
+                "raw": None,
+                "parsed": None,
+                "error": "接口不存在",
+                "interfaceId": interface_id,
+            }
+        self._last_http_status = None
+        start = time.perf_counter()
+        try:
+            rows = await self._call_interface_raw(itf, params, codes)
+        except Exception as exc:
+            elapsed = time.perf_counter() - start
+            return {
+                "ok": False,
+                "status": "error",
+                "httpStatus": self._last_http_status,
+                "elapsedMs": round(elapsed * 1000, 2),
+                "raw": None,
+                "parsed": None,
+                "error": str(exc),
+                "interfaceId": interface_id,
+            }
+        elapsed = time.perf_counter() - start
+        parsed = self._parse_test_rows(itf, rows)
+        return {
+            "ok": True,
+            "status": "success",
+            "httpStatus": self._last_http_status,
+            "elapsedMs": round(elapsed * 1000, 2),
+            "raw": rows,
+            "parsed": parsed,
+            "interfaceId": interface_id,
+        }

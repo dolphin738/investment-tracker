@@ -104,6 +104,15 @@ class SecurityPatchReq(BaseModel):
     type: Optional[str] = None
 
 
+class SecurityResolveReq(BaseModel):
+    """录入界面证券搜索选中后，懒实例化为组合标的的幂等 upsert 请求体（§7 ③）。"""
+
+    code: str = Field(..., min_length=1, max_length=64)
+    name: Optional[str] = Field(None, max_length=255)
+    type: Optional[str] = None
+    exchange: Optional[str] = Field(None, max_length=10)
+
+
 # ── 证券买卖 ──
 class TradeCreateReq(BaseModel):
     model_config = ConfigDict(populate_by_name=True)

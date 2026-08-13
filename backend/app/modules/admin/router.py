@@ -29,17 +29,19 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.common import paginate
 from app.core.envelope import EnvelopeRoute
-from app.core.security import CurrentUser, require_admin
+from app.core.security import CurrentUser, get_current_user, require_admin
 from app.db.database import get_db
-from app.models import Portfolio
+from app.models import Portfolio, Security
 from app.models.enums import InterfaceDirection, QuoteProviderAccessMethod
 from app.models.notification import Notification
+from app.serializers import serialize_security_master
 from app.services import InterfaceCategoryService, QuoteInterfaceService
 from app.services.market_data_sync import MarketDataSyncService
 from app.services.notification import NotificationService
@@ -573,3 +575,65 @@ async def delete_interface_category(
     await svc.delete(cat)
     await db.commit()
     return {"id": category_id, "deleted": True}
+
+
+# --------------------------------------------------------------------------- #
+# 证券主数据（系统级 securities，portfolio_id IS NULL）：列表 / 同步 / 单接口测试
+# --------------------------------------------------------------------------- #
+class InterfaceTestRequest(BaseModel):
+    """单接口测试请求体（§5.2）：params 为经前端编辑后的完整有效参数，覆盖 itf.params。"""
+
+    params: dict[str, Any]
+    codes: Optional[list[str]] = None
+
+
+@router_admin.get("/securities/masters")
+async def list_security_masters(
+    page: int = Query(1, ge=1),
+    pageSize: int = Query(20, ge=1, le=200),
+    q: Optional[str] = Query(None, description="匹配 code/name/拼音首字母（ILIKE）"),
+    current: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """系统级证券主数据（portfolio_id IS NULL）分页浏览；q 匹配 code/name/拼音首字母。
+
+    任意登录用户可读（§10：录入界面证券搜索复用本端点，主数据行是系统级公共字典）；
+    写入（sync）与接口测试仍仅限管理员。
+    """
+    stmt = select(Security).where(Security.portfolio_id.is_(None))
+    if q:
+        like = f"%{q.strip()}%"
+        stmt = stmt.where(
+            or_(
+                Security.code.ilike(like),
+                Security.name.ilike(like),
+                Security.pinyin_initials.ilike(like),
+            )
+        )
+    stmt = stmt.order_by(Security.code.asc())
+    return await paginate(db, stmt, page, pageSize, serialize_security_master)
+
+
+@router_admin.post("/securities/sync")
+async def admin_sync_security_masters(
+    current: CurrentUser = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """手动触发配置驱动的证券主数据全量同步（遍历全部 MASTER_LIST 接口的资产类别）。"""
+    result = await MarketDataSyncService(db).sync_all_security_masters()
+    await db.commit()
+    return result
+
+
+@router_admin.post("/quote-interfaces/{interface_id}/test")
+async def test_quote_interface(
+    interface_id: str,
+    body: InterfaceTestRequest,
+    current: CurrentUser = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """单接口测试：用调用方传入的 params 调用，原样回传 raw+parsed（不计入 consecutive_failures）。"""
+    result = await MarketDataSyncService(db).test_single_interface(
+        interface_id, body.params, body.codes
+    )
+    return result

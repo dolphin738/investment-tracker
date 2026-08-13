@@ -35,6 +35,7 @@ from app.schemas import (
     PricePatchReq,
     SecurityCreateReq,
     SecurityPatchReq,
+    SecurityResolveReq,
     SnapshotCreateReq,
     SnapshotPatchReq,
     TradeCreateReq,
@@ -173,6 +174,28 @@ async def create_security(
 ):
     sec = await SecurityService(db).create(p.id, req)
     return serialize_security(sec)
+
+
+@router_securities.post("/{portfolio_id}/securities/resolve")
+async def resolve_security(
+    req: SecurityResolveReq, p=Depends(get_portfolio), db: AsyncSession = Depends(get_db)
+):
+    """录入界面证券搜索选中后的懒实例化：幂等 upsert by (portfolio_id, code)。
+
+    1) 该组合已存在同 code 的 portfolio 行 → 直接返回其 id（isNew=false）；
+    2) 否则以系统主数据行（portfolio_id IS NULL、同 code）为模板实例化一条组合行；
+    3) 若主数据行也不存在（兜底）→ 按请求体 name/type 新建组合行。
+    trade 永远指向组合维度标的，不污染主数据、不破坏唯一约束（§7 ③）。
+    """
+    sec, is_new = await SecurityService(db).resolve(p.id, req)
+    return {
+        "id": sec.id,
+        "code": sec.code,
+        "name": sec.name,
+        "type": sec.type.value,
+        "exchange": sec.exchange,
+        "isNew": is_new,
+    }
 
 
 @router_securities.patch("/{portfolio_id}/securities/{sec_id}", response_model=SecurityOut)

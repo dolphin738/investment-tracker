@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Security, SecurityTrade
 from app.models.enums import SecurityType
-from app.schemas import SecurityCreateReq, SecurityPatchReq
+from app.schemas import SecurityCreateReq, SecurityPatchReq, SecurityResolveReq
 from app.services.base import PortfolioChildService, coerce_enum
 from app.services.recalculation import RecalculationResult, RecalculationService
 
@@ -54,6 +54,60 @@ class SecurityService(PortfolioChildService):
             sec.type = coerce_enum(SecurityType, req.type, "type")
         await self.session.commit()
         return sec
+
+    async def resolve(
+        self, portfolio_id: str, req: SecurityResolveReq
+    ) -> tuple[Security, bool]:
+        """幂等 upsert by (portfolio_id, code)：录入界面证券搜索选中后懒实例化为组合标的。
+
+        返回 (security, is_new)。命中已有组合行 → is_new=False；否则新建（以主数据行模板或
+        请求体兜底）→ is_new=True。
+        """
+        existing = (
+            await self.session.execute(
+                select(Security).where(
+                    Security.portfolio_id == portfolio_id,
+                    Security.code == req.code,
+                )
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            return existing, False
+
+        # 以系统主数据行（portfolio_id IS NULL、同 code）为模板
+        master = (
+            await self.session.execute(
+                select(Security).where(
+                    Security.portfolio_id.is_(None),
+                    Security.code == req.code,
+                )
+            )
+        ).scalar_one_or_none()
+        if master is not None:
+            name = master.name
+            stype = master.type
+            exchange = master.exchange
+        else:
+            name = req.name or req.code
+            stype = (
+                coerce_enum(SecurityType, req.type, "type")
+                if req.type
+                else SecurityType.STOCK
+            )
+            exchange = req.exchange
+
+        sec = Security(
+            portfolio_id=portfolio_id,
+            code=req.code,
+            name=name,
+            type=stype,
+            currency="CNY",
+            exchange=exchange,
+        )
+        self.session.add(sec)
+        await self.session.commit()
+        await self.session.refresh(sec)
+        return sec, True
 
     async def delete(
         self, portfolio_id: str, sec_id: str
