@@ -9,15 +9,30 @@
  *
  * Mock 策略：仅 mock 网络层（api + auth + category + provider），保留真实的
  * use-quote-interface（含 useReorderInterfaces）与组件渲染，保证 dnd 结构与调序链路真实。
+ *
+ * 隔离策略（关键）：vitest 以 pool:forks + singleFork:true 全量串行跑在「单一 fork」
+ * 内，模块注册表跨文件共享。若其他测试文件先以「真实」方式加载了
+ * @/api/quote-interface.api（如 admin 页面测试渲染管理面、传递式 import 了
+ * use-quote-interface → 真实 api），本文件的 vi.mock 会被已缓存的真实模块「短路」，
+ * 导致真实 hook 调用的是真实 reorderQuoteInterfaces、被 spy 的 mock 永远 0 调用。
+ * 因此这里在 beforeEach 内 vi.resetModules() 主动清空共享注册表，并对被测模块做
+ * 动态 import，确保本文件声明的 mock 一定优先生效（单一文件运行时本就如此，
+ * 全量场景下借此消除跨文件污染）。
+ *
+ * ④ 调序链路的确定性写法：直接 renderHook 拿到真实 useReorderInterfaces，
+ * 用 act + await mutateAsync 同步派发并等待 mutationFn 完成，再断言被 mock 的
+ * reorderQuoteInterfaces 入参正确。这样不依赖 useEffect 异步派发与 waitFor 轮询，
+ * 在 singleFork 全量重载下也不会因事件循环调度时延而偶发 0 调用。
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ReactElement } from 'react';
+import type { ComponentType, ReactElement } from 'react';
 import { useEffect } from 'react';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, renderHook, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import type { QuoteInterface } from '@/api/quote-interface.api';
+import type { UseMutationResult } from '@tanstack/react-query';
+import type { QuoteInterface, ReorderQuoteInterfacesReq } from '@/api/quote-interface.api';
 
 // dnd-kit 在 jsdom 下挂载可能引用 ResizeObserver，补一个 no-op 垫片
 globalThis.ResizeObserver ??= class {
@@ -71,9 +86,13 @@ vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
 }));
 
-import { QuoteProviderSection, computeReorderedIds } from '@/features/admin/quote-provider-section';
-import { useReorderInterfaces } from '@/hooks/use-quote-interface';
-import { listAllInterfaces, reorderQuoteInterfaces } from '@/api/quote-interface.api';
+// 被测模块与 mock 函数均经动态 import 取得，确保 vi.resetModules() 后重新求值、
+// 本文件声明的 mock 一定优先生效（规避 singleFork 共享注册表跨文件污染）。
+let QuoteProviderSection: ComponentType;
+let computeReorderedIds: (ids: string[], activeId: string, overId: string) => string[];
+let useReorderInterfaces: () => UseMutationResult<{ ok: boolean }, unknown, ReorderQuoteInterfacesReq>;
+let listAllInterfaces: ReturnType<typeof vi.fn>;
+let reorderQuoteInterfaces: ReturnType<typeof vi.fn>;
 
 const SAMPLE_INTERFACES: QuoteInterface[] = [
   mkIface('i1', 'p1', 'c1', '接口A', 0),
@@ -109,16 +128,37 @@ function mkIface(
   };
 }
 
-function renderWithProviders(ui: ReactElement) {
+function makeWrapper(ui: ReactElement) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
-  return render(
+  return (
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={['/admin']}>{ui}</MemoryRouter>
-    </QueryClientProvider>,
+    </QueryClientProvider>
   );
 }
+
+beforeEach(async () => {
+  // 清空跨文件共享的模块注册表，避免被其它测试文件缓存的「真实」api 短路本文件 mock
+  vi.resetModules();
+  adminFlag = true;
+  const sectionMod = await import('@/features/admin/quote-provider-section');
+  QuoteProviderSection = sectionMod.QuoteProviderSection;
+  computeReorderedIds = sectionMod.computeReorderedIds;
+  const hookMod = await import('@/hooks/use-quote-interface');
+  useReorderInterfaces = hookMod.useReorderInterfaces;
+  const apiMod = await import('@/api/quote-interface.api');
+  listAllInterfaces = apiMod.listAllInterfaces as ReturnType<typeof vi.fn>;
+  reorderQuoteInterfaces = apiMod.reorderQuoteInterfaces as ReturnType<typeof vi.fn>;
+  vi.mocked(listAllInterfaces).mockResolvedValue(SAMPLE_INTERFACES as never);
+  vi.mocked(reorderQuoteInterfaces).mockResolvedValue({ ok: true });
+});
+
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
+});
 
 describe('computeReorderedIds — 拖拽重排算法', () => {
   it('① 正常移动：把首项移到末尾', () => {
@@ -137,19 +177,8 @@ describe('computeReorderedIds — 拖拽重排算法', () => {
 });
 
 describe('QuoteProviderSection — 按分类汇总 dnd 调序 UI', () => {
-  beforeEach(() => {
-    adminFlag = true;
-    vi.mocked(listAllInterfaces).mockResolvedValue(SAMPLE_INTERFACES as never);
-    vi.mocked(reorderQuoteInterfaces).mockResolvedValue({ ok: true });
-  });
-
-  afterEach(() => {
-    cleanup();
-    vi.clearAllMocks();
-  });
-
   it('① 已分类分组渲染拖拽手柄，未分类分组不带手柄', async () => {
-    renderWithProviders(<QuoteProviderSection />);
+    render(makeWrapper(<QuoteProviderSection />));
     // 分类 c1 下三个接口均带拖拽手柄
     expect(await screen.findByLabelText('拖拽排序 接口A')).toBeTruthy();
     expect(screen.getByLabelText('拖拽排序 接口B')).toBeTruthy();
@@ -164,38 +193,28 @@ describe('QuoteProviderSection — 按分类汇总 dnd 调序 UI', () => {
   });
 
   it('② 初始渲染不触发 reorderQuoteInterfaces', async () => {
-    renderWithProviders(<QuoteProviderSection />);
+    render(makeWrapper(<QuoteProviderSection />));
     await screen.findByLabelText('拖拽排序 接口A');
     expect(vi.mocked(reorderQuoteInterfaces)).not.toHaveBeenCalled();
   });
 });
 
 describe('useReorderInterfaces — T08 调序 hook 链路', () => {
-  beforeEach(() => {
-    adminFlag = true;
-    vi.mocked(reorderQuoteInterfaces).mockResolvedValue({ ok: true });
-  });
-
-  afterEach(() => {
-    cleanup();
-    vi.clearAllMocks();
-  });
-
   it('① 调用 mutate 即触发 reorderQuoteInterfaces 且 body 正确', async () => {
-    function Harness(): ReactElement | null {
-      const mut = useReorderInterfaces();
-      // 仅在挂载时触发一次调序；依赖 [] 避免 mut 身份每次渲染变化导致无限重渲染
-      useEffect(() => {
-        mut.mutate({ category_id: 'c1', ordered_ids: ['i2', 'i1', 'i3'] });
-      }, []);
-      return null;
-    }
-    renderWithProviders(<Harness />);
-    await waitFor(() => {
-      expect(vi.mocked(reorderQuoteInterfaces)).toHaveBeenCalledWith({
+    const { result } = renderHook(() => useReorderInterfaces(), {
+      wrapper: ({ children }) => makeWrapper(children as ReactElement),
+    });
+    // 直接派发 mutation 并等待 mutationFn 完成（act + await 同步化异步链路，
+    // 避免 useEffect/waitFor 在全量重载下的事件循环调度时序不确定）
+    await act(async () => {
+      await result.current.mutateAsync({
         category_id: 'c1',
         ordered_ids: ['i2', 'i1', 'i3'],
       });
+    });
+    expect(vi.mocked(reorderQuoteInterfaces)).toHaveBeenCalledWith({
+      category_id: 'c1',
+      ordered_ids: ['i2', 'i1', 'i3'],
     });
   });
 });
