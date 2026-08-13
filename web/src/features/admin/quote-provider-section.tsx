@@ -121,9 +121,9 @@ export function QuoteProviderSection(): JSX.Element {
             )}
           </span>
         </TableCell>
-      <TableCell className="font-medium">{p.name}</TableCell>
+      <TableCell className="truncate font-medium">{p.name}</TableCell>
       <TableCell>{p.access_method === 'https' ? 'HTTPS' : 'SDK'}</TableCell>
-      <TableCell className="max-w-[220px] truncate text-muted-foreground">
+      <TableCell className="truncate text-muted-foreground">
         {p.access_method === 'https'
           ? ((p.config?.base_url as string) ?? '-')
           : ((p.config?.sdk_name as string) ?? '-')}
@@ -224,15 +224,15 @@ export function QuoteProviderSection(): JSX.Element {
                   <h4 className="mb-2 text-sm font-medium text-muted-foreground">
                     HTTPS 提供方
                   </h4>
-                  <Table>
+                  <Table className="table-fixed">
                     <TableHeader>
                       <TableRow>
                         <TableHead className="w-10" />
-                        <TableHead>名称</TableHead>
-                        <TableHead>接入方式</TableHead>
-                        <TableHead>连接信息</TableHead>
-                        <TableHead>状态</TableHead>
-                        <TableHead className="text-right">操作</TableHead>
+                        <TableHead className="w-[200px]">名称</TableHead>
+                        <TableHead className="w-24">接入方式</TableHead>
+                        <TableHead className="w-[240px]">连接信息</TableHead>
+                        <TableHead className="w-24">状态</TableHead>
+                        <TableHead className="w-[260px] text-right">操作</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>{httpsProviders.map(renderProviderRow)}</TableBody>
@@ -244,15 +244,15 @@ export function QuoteProviderSection(): JSX.Element {
                   <h4 className="mb-2 text-sm font-medium text-muted-foreground">
                     SDK 提供方
                   </h4>
-                  <Table>
+                  <Table className="table-fixed">
                     <TableHeader>
                       <TableRow>
                         <TableHead className="w-10" />
-                        <TableHead>名称</TableHead>
-                        <TableHead>接入方式</TableHead>
-                        <TableHead>连接信息</TableHead>
-                        <TableHead>状态</TableHead>
-                        <TableHead className="text-right">操作</TableHead>
+                        <TableHead className="w-[200px]">名称</TableHead>
+                        <TableHead className="w-24">接入方式</TableHead>
+                        <TableHead className="w-[240px]">连接信息</TableHead>
+                        <TableHead className="w-24">状态</TableHead>
+                        <TableHead className="w-[260px] text-right">操作</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>{sdkProviders.map(renderProviderRow)}</TableBody>
@@ -371,11 +371,11 @@ function ProviderInterfaces({ providerId }: { providerId: string }): JSX.Element
               <div className="mb-1 text-xs font-medium text-muted-foreground">
                 {type ? (labelMap.get(type) ?? type) : '未分类'}
               </div>
-              <Table>
+              <Table className="table-fixed">
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="whitespace-nowrap">名称</TableHead>
-                    <TableHead className="whitespace-nowrap">调用路径</TableHead>
+                    <TableHead className="w-[200px] whitespace-nowrap">名称</TableHead>
+                    <TableHead className="w-[280px] whitespace-nowrap">调用路径</TableHead>
                     <TableHead className="w-16 whitespace-nowrap">方法</TableHead>
                     <TableHead className="w-20 whitespace-nowrap">启用</TableHead>
                     <TableHead className="w-[140px] text-right whitespace-nowrap">操作</TableHead>
@@ -384,8 +384,8 @@ function ProviderInterfaces({ providerId }: { providerId: string }): JSX.Element
                 <TableBody>
                   {items.map((it) => (
                     <TableRow key={it.id}>
-                      <TableCell className="font-medium align-middle">{it.name}</TableCell>
-                      <TableCell className="max-w-[200px] truncate align-middle text-muted-foreground">
+                      <TableCell className="truncate font-medium align-middle">{it.name}</TableCell>
+                      <TableCell className="truncate align-middle text-muted-foreground">
                         {it.endpoint ?? '-'}
                       </TableCell>
                       <TableCell className="whitespace-nowrap align-middle">{it.http_method ?? '-'}</TableCell>
@@ -505,12 +505,12 @@ function InterfacesByCategoryOverview(): JSX.Element {
                 </span>
                 <Badge variant="outline">{items.length}</Badge>
               </div>
-              <Table>
+              <Table className="table-fixed">
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="whitespace-nowrap">名称</TableHead>
-                    <TableHead className="whitespace-nowrap">提供方名称</TableHead>
-                    <TableHead className="whitespace-nowrap">调用路径</TableHead>
+                    <TableHead className="w-[200px] whitespace-nowrap">名称</TableHead>
+                    <TableHead className="w-[180px] whitespace-nowrap">提供方名称</TableHead>
+                    <TableHead className="w-[280px] whitespace-nowrap">调用路径</TableHead>
                     <TableHead className="w-16 whitespace-nowrap">方法</TableHead>
                     <TableHead className="w-20 whitespace-nowrap">启用</TableHead>
                   </TableRow>
@@ -518,11 +518,11 @@ function InterfacesByCategoryOverview(): JSX.Element {
                 <TableBody>
                   {items.map((it) => (
                     <TableRow key={it.id}>
-                      <TableCell className="font-medium align-middle">{it.name}</TableCell>
-                      <TableCell className="max-w-[160px] truncate align-middle text-muted-foreground">
+                      <TableCell className="truncate font-medium align-middle">{it.name}</TableCell>
+                      <TableCell className="truncate align-middle text-muted-foreground">
                         {providerById.get(it.provider_id)?.name ?? it.provider_id}
                       </TableCell>
-                      <TableCell className="max-w-[200px] truncate align-middle text-muted-foreground">
+                      <TableCell className="truncate align-middle text-muted-foreground">
                         {it.endpoint ?? '-'}
                       </TableCell>
                       <TableCell className="whitespace-nowrap align-middle">{it.http_method ?? '-'}</TableCell>
