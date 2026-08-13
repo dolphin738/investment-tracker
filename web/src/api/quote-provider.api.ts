@@ -7,10 +7,9 @@
  * - GET    /api/admin/quote-providers/{id}：读取单个
  * - PATCH  /api/admin/quote-providers/{id}：局部更新
  * - DELETE /api/admin/quote-providers/{id}：删除
- * - POST   /api/admin/quote-providers/{id}/set-default：设为默认（全局至多一个）
- * - POST   /api/admin/quote-providers/{id}/set-active：设为当前运行时使用（全局至多一个）
  *
  * 取代旧的单 URL 系统配置（system-config）端点。
+ * 提供方仅保留 enabled 启停开关（全局单一活跃源 is_default/is_active 已移除，见 ADR-002）。
  */
 
 import { http } from '@/lib/api-client';
@@ -24,8 +23,6 @@ export interface QuoteProvider {
   name: string;
   access_method: QuoteProviderAccessMethod;
   config: Record<string, unknown>;
-  is_default: boolean;
-  is_active: boolean;
   enabled: boolean;
   description: string | null;
   created_at: string;
@@ -39,8 +36,6 @@ export interface QuoteProviderCreate {
   config: Record<string, unknown>;
   enabled?: boolean;
   description?: string | null;
-  is_default?: boolean;
-  is_active?: boolean;
 }
 
 /** 更新提供方请求体（全字段可选） */
@@ -50,8 +45,6 @@ export interface QuoteProviderUpdate {
   config?: Record<string, unknown>;
   enabled?: boolean;
   description?: string | null;
-  is_default?: boolean;
-  is_active?: boolean;
 }
 
 /** 列出全部提供方 */
@@ -88,19 +81,5 @@ export function deleteQuoteProvider(
 ): Promise<{ id: string; deleted: boolean }> {
   return http.delete<{ id: string; deleted: boolean }>(
     `/admin/quote-providers/${encodeURIComponent(id)}`,
-  );
-}
-
-/** 设为默认提供方（全局至多一个默认） */
-export function setDefaultQuoteProvider(id: string): Promise<QuoteProvider> {
-  return http.post<QuoteProvider>(
-    `/admin/quote-providers/${encodeURIComponent(id)}/set-default`,
-  );
-}
-
-/** 设为当前运行时使用方（全局至多一个当前；禁用者不可设） */
-export function setActiveQuoteProvider(id: string): Promise<QuoteProvider> {
-  return http.post<QuoteProvider>(
-    `/admin/quote-providers/${encodeURIComponent(id)}/set-active`,
   );
 }

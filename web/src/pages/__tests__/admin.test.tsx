@@ -29,8 +29,6 @@ const SAMPLE_LIST = [
     name: '新浪财经',
     access_method: 'https',
     config: { base_url: 'https://finance.sina.com.cn/api' },
-    is_default: true,
-    is_active: false,
     enabled: true,
     description: '默认源',
     created_at: '2026-01-01T00:00:00Z',
@@ -58,8 +56,6 @@ vi.mock('@/api/quote-provider.api', async (importOriginal) => {
     createQuoteProvider: vi.fn(),
     updateQuoteProvider: vi.fn(),
     deleteQuoteProvider: vi.fn(),
-    setDefaultQuoteProvider: vi.fn(),
-    setActiveQuoteProvider: vi.fn(),
   };
 });
 

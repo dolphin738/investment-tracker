@@ -737,10 +737,6 @@ PG 原生枚举类型名 `interface_direction`（由迁移创建）。
         enabled?: boolean;
         /** Description */
         description?: string | null;
-        /** Is Default */
-        is_default?: boolean;
-        /** Is Active */
-        is_active?: boolean;
       };
     /** QuoteProviderUpdate */
     QuoteProviderUpdate: {
@@ -753,10 +749,6 @@ PG 原生枚举类型名 `interface_direction`（由迁移创建）。
         enabled?: boolean | null;
         /** Description */
         description?: string | null;
-        /** Is Default */
-        is_default?: boolean | null;
-        /** Is Active */
-        is_active?: boolean | null;
       };
     /** RecalcOut */
     RecalcOut: {

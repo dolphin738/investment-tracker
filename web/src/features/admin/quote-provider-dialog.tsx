@@ -2,8 +2,8 @@
  * features/admin/quote-provider-dialog.tsx — 数据来源（提供方）新增/编辑对话框
  *
  * 字段：name、access_method（Select）、base_url | sdk_name（按接入方式二选一）、
- * description、enabled、is_default、is_active。
- * 「当前」与「默认」均为全局至多一个，由后端写入时保证互斥；禁用的提供方（enabled=false）不可设为当前/默认。
+ * description、enabled（唯一开关）。
+ * 全局单一活跃源（is_default/is_active）已移除（ADR-002 方案 X），提供方仅保留启用/停用开关。
  *
  * 风格对齐同模块其它对话框（QuoteInterfaceDialog / InterfaceCategoryDialog）：
  * - 独立 *-dialog.tsx 组件，props 为 { open, onOpenChange, editing }；
@@ -45,8 +45,6 @@ interface FormState {
   sdkName: string;
   description: string;
   enabled: boolean;
-  isDefault: boolean;
-  isActive: boolean;
 }
 
 function toForm(edit: QuoteProvider | null): FormState {
@@ -58,8 +56,6 @@ function toForm(edit: QuoteProvider | null): FormState {
       sdkName: '',
       description: '',
       enabled: true,
-      isDefault: false,
-      isActive: false,
     };
   }
   return {
@@ -69,8 +65,6 @@ function toForm(edit: QuoteProvider | null): FormState {
     sdkName: (edit.config?.sdk_name as string) ?? '',
     description: edit.description ?? '',
     enabled: edit.enabled,
-    isDefault: edit.is_default,
-    isActive: edit.is_active,
   };
 }
 
@@ -133,8 +127,6 @@ export function QuoteProviderDialog({
       config,
       enabled: form.enabled,
       description: form.description.trim() || null,
-      is_default: form.isDefault,
-      is_active: form.isActive,
     };
     if (editing) {
       updateMut.mutate(
@@ -237,53 +229,17 @@ export function QuoteProviderDialog({
               <Label htmlFor="qp-enabled" className="text-sm">
                 启用
               </Label>
-              <p className="text-xs text-muted-foreground">
-                禁用的提供方不能作为当前使用方
-              </p>
-            </div>
-            <Switch
-              id="qp-enabled"
-              checked={form.enabled}
-              onCheckedChange={(v) =>
-                setForm({
-                  ...form,
-                  enabled: v,
-                  isActive: v ? form.isActive : false,
-                  isDefault: v ? form.isDefault : false,
-                })
-              }
-            />
+            <p className="text-xs text-muted-foreground">
+              禁用的提供方不参与行情解析（仍可被重新启用）
+            </p>
           </div>
-
-          <div className="flex items-center justify-between rounded-md border p-3">
-            <Label htmlFor="qp-default" className="text-sm">
-              设为默认
-            </Label>
-            <Switch
-              id="qp-default"
-              checked={form.isDefault}
-              disabled={!form.enabled}
-              onCheckedChange={(v) => setForm({ ...form, isDefault: v })}
-            />
-          </div>
-
-          <div className="flex items-center justify-between rounded-md border p-3">
-            <div className="space-y-0.5">
-              <Label htmlFor="qp-active" className="text-sm">
-                当前
-              </Label>
-              <p className="text-xs text-muted-foreground">
-                设为系统当前使用的行情来源（全局至多一个；启用后方可选）
-              </p>
-            </div>
-            <Switch
-              id="qp-active"
-              checked={form.isActive}
-              disabled={!form.enabled}
-              onCheckedChange={(v) => setForm({ ...form, isActive: v })}
-            />
-          </div>
+          <Switch
+            id="qp-enabled"
+            checked={form.enabled}
+            onCheckedChange={(v) => setForm({ ...form, enabled: v })}
+          />
         </div>
+      </div>
 
         <DialogFooter>
           <Button variant="outline" onClick={close}>

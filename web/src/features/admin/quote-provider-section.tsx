@@ -19,7 +19,6 @@ import {
 } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Switch } from '@/components/ui/switch';
 import {
   Table,
   TableBody,
@@ -130,33 +129,11 @@ export function QuoteProviderSection(): JSX.Element {
       </TableCell>
       <TableCell>
         <div className="flex flex-wrap gap-1">
-          {p.is_default && <Badge variant="success">默认</Badge>}
-          {p.is_active && <Badge>当前</Badge>}
           {!p.enabled && <Badge variant="secondary">停用</Badge>}
         </div>
       </TableCell>
       <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-end gap-2">
-          <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            默认
-            <Switch
-              checked={p.is_default}
-              disabled={!p.enabled}
-              onCheckedChange={(v) =>
-                updateMut.mutate({ id: p.id, body: { is_default: v } })
-              }
-            />
-          </label>
-          <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            当前
-            <Switch
-              checked={p.is_active}
-              disabled={!p.enabled}
-              onCheckedChange={(v) =>
-                updateMut.mutate({ id: p.id, body: { is_active: v } })
-              }
-            />
-          </label>
           <Button variant="ghost" size="sm" onClick={() => openEdit(p)}>
             <Pencil className="mr-1 h-3.5 w-3.5" />
             编辑
@@ -191,7 +168,7 @@ export function QuoteProviderSection(): JSX.Element {
             <div>
               <CardTitle className="text-base">数据来源</CardTitle>
               <CardDescription>
-                配置多个行情数据来源；系统默认使用「当前」方，未指定时回退到「默认」方
+                配置多个行情数据来源；运行时按接口分类级优先级链自动选源（详见 ADR-002）
               </CardDescription>
             </div>
             <Button onClick={openCreate}>
@@ -282,7 +259,7 @@ export function QuoteProviderSection(): JSX.Element {
           <AlertDialogHeader>
             <AlertDialogTitle>确认删除该数据来源？</AlertDialogTitle>
             <AlertDialogDescription>
-              删除后不可恢复；其下接口将一并删除；若该数据来源为「当前 / 默认」方，系统将回退到其它可用方。
+              删除后不可恢复；其下接口将一并删除。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
