@@ -422,7 +422,7 @@ export default function HoldingsPage(): JSX.Element {
               title="暂无持仓数据"
               description={
                 securityList.length === 0
-                  ? '请先新建标的，再录入买卖流水；持仓将自动推导'
+                  ? '请先在「录入买卖」中搜索并选择标的，再录入买卖流水；持仓将自动推导'
                   : '持仓由证券买卖流水实时推导，点击下方按钮录入第一笔买卖'
               }
               action={

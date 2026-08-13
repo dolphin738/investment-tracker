@@ -200,7 +200,7 @@ export function DividendFeeForm({
         )}
         {!secLoading && securities.length === 0 && (
           <p className="text-xs text-muted-foreground">
-            当前组合还没有标的，请先在「录入买卖」中新建标的
+            当前组合还没有标的，请先在「录入买卖」中搜索并选择标的
           </p>
         )}
       </div>

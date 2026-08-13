@@ -14,6 +14,7 @@ import type {
   CreateSecurityDto,
   UpdateSecurityDto,
   PaginatedResponse,
+  SecurityType,
 } from './types';
 
 /**
@@ -67,5 +68,42 @@ export function deleteSecurity(
 ): Promise<null> {
   return http.delete<null>(
     `/portfolios/${portfolioId}/securities/${securityId}`,
+  );
+}
+
+/**
+ * 录入界面证券搜索选中后的懒实例化（§7 ③ / §10）。
+ *
+ * 用户从系统主数据（portfolio_id IS NULL）选中某标的，但 trade.securityId 必须指向
+ * 组合维度行：本端点幂等 upsert by (portfolio_id, code)——命中已有组合行直接返回；
+ * 否则以主数据行为模板实例化一条组合行。
+ */
+
+/** 解析（懒实例化）请求体 */
+export interface ResolveSecurityRequest {
+  code: string;
+  name?: string;
+  type?: SecurityType;
+  exchange?: string;
+}
+
+/** 解析（懒实例化）响应 */
+export interface ResolveSecurityResponse {
+  id: string;
+  code: string;
+  name: string;
+  type: SecurityType;
+  exchange: string | null;
+  isNew: boolean;
+}
+
+/** 选中主数据 → 解析为组合维度标的，返回其 id（幂等） */
+export function resolveSecurity(
+  portfolioId: string,
+  payload: ResolveSecurityRequest,
+): Promise<ResolveSecurityResponse> {
+  return http.post<ResolveSecurityResponse>(
+    `/portfolios/${portfolioId}/securities/resolve`,
+    payload,
   );
 }

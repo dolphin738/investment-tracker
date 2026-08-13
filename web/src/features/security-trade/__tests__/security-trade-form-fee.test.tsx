@@ -6,6 +6,9 @@
  *    costPrice 按含费单价公式推导（买入=(成交额+费用合计)/数量），
  *    费用三项直接写 security_trades 一行（不再有「删旧 FeeRecord 插新 FeeRecord」逻辑）。
  * 2. 编辑态三项费用正确回填（trade.commission/stampTax/other）。
+ *
+ * §10 改造后标的通过「搜索 → 选中主数据 → resolve 懒实例化」选择：
+ * 测试 mock 掉证券主数据搜索与 resolve 端点，验证选中回填 securityId 后提交链路不变。
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -19,6 +22,8 @@ const mocks = vi.hoisted(() => ({
   updateTrade: vi.fn(),
   securities: [] as Array<{ id: string; name: string; code: string }>,
   secLoading: false,
+  // 证券主数据搜索（SecuritySearchCombobox 数据源）
+  searchMasters: vi.fn(),
 }));
 
 vi.mock('sonner', () => ({
@@ -30,8 +35,18 @@ vi.mock('@/hooks/use-securities', () => ({
     data: mocks.securities,
     isLoading: mocks.secLoading,
   }),
-  useCreateSecurity: () => ({
-    mutate: vi.fn(),
+  useResolveSecurity: () => ({
+    mutate: (_payload: unknown, opts?: { onSuccess?: (r: unknown) => void }) => {
+      // 模拟 resolve 端点：选中主数据 → 实例化/命中组合行，回填 id='s-1'
+      opts?.onSuccess?.({
+        id: 's-1',
+        code: '600000',
+        name: '测试标的',
+        type: 'STOCK',
+        exchange: 'SH',
+        isNew: true,
+      });
+    },
     mutateAsync: vi.fn(),
     isPending: false,
   }),
@@ -54,6 +69,13 @@ vi.mock('@/hooks/use-security-trades', () => ({
   useDeleteSecurityTrade: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
+// 证券主数据搜索：返回一条候选（名称/代码/交易所/类型）
+vi.mock('@/api/security-master.api', () => ({
+  listSecurityMasters: mocks.searchMasters,
+  syncSecurityMasters: vi.fn(),
+}));
+
+// 方向字段仍用 Radix Select；测试不与其交互，保留原生替身 mock 规避 jsdom 渲染差异
 vi.mock('@/components/ui/select', async () => {
   const React = await import('react');
 
@@ -194,17 +216,40 @@ function renderForm(props: { trade?: SecurityTradeResponse | null } = {}): Retur
   );
 }
 
-function securitySelect(): HTMLSelectElement {
-  return document.getElementById('st-security') as HTMLSelectElement;
+function securityInput(): HTMLInputElement {
+  return document.getElementById('st-security') as HTMLInputElement;
+}
+
+/** 通过搜索框选择标的：键入 code → 等待候选 → 点击（触发 resolve 回填 securityId） */
+async function pickSecurityBySearch(code: string): Promise<void> {
+  fireEvent.change(securityInput(), { target: { value: code } });
+  const candidate = await screen.findByRole('button', { name: /测试标的/ });
+  fireEvent.click(candidate);
 }
 
 describe('证券买卖录入 · 三项费用物理并表（INC-03/INC-04）', () => {
   beforeEach(() => {
     mocks.createTrade.mockReset();
     mocks.updateTrade.mockReset();
+    mocks.searchMasters.mockReset();
     mocks.createTrade.mockResolvedValue({ id: 'new-id' });
     mocks.securities = [{ id: 's-1', name: '测试标的', code: '600000' }];
     mocks.secLoading = false;
+    mocks.searchMasters.mockResolvedValue({
+      items: [
+        {
+          id: 'm-1',
+          code: '600000',
+          name: '测试标的',
+          exchange: 'SH',
+          type: 'STOCK',
+          updatedAt: '2026-08-13T00:00:00.000Z',
+        },
+      ],
+      total: 1,
+      page: 1,
+      pageSize: 20,
+    });
   });
   afterEach(() => {
     cleanup();
@@ -214,8 +259,10 @@ describe('证券买卖录入 · 三项费用物理并表（INC-03/INC-04）', ()
   it('提交时 feeTotal = 三项之和，costPrice 由含费单价公式推导，直接写 security_trades（无 FeeRecord 痕迹）', async () => {
     renderForm();
 
-    // 标的
-    fireEvent.change(securitySelect(), { target: { value: 's-1' } });
+    // 标的：搜索 → 选中主数据 → resolve 回填 securityId='s-1'
+    await pickSecurityBySearch('600000');
+    expect(securityInput().value).toBe('测试标的（600000）');
+
     // 数量 / 成交额 / 三项费用
     fireEvent.change(document.getElementById('st-quantity') as HTMLInputElement, {
       target: { value: '100' },
@@ -239,6 +286,8 @@ describe('证券买卖录入 · 三项费用物理并表（INC-03/INC-04）', ()
     const payload = (mocks.createTrade.mock.calls[0][0] as { payload: Record<string, unknown> })
       .payload;
 
+    // resolve 回填的 securityId 被正确提交
+    expect(payload.securityId).toBe('s-1');
     // feeTotal = 3 + 1.5 + 0.5 = 5
     expect(payload.commission).toBe(3);
     expect(payload.stampTax).toBe(1.5);

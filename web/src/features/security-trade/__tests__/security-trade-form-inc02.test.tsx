@@ -2,18 +2,16 @@
  * features/security-trade/security-trade-form.tsx — INC-02 标的回填竞态（编辑态）
  *
  * 背景：编辑态首帧 `useSecurities` 往往还没返回，表单的 `securityId` 虽已由回填
- * effect 写入，但 Radix Select 找不到对应 SelectItem → 触发器回落 placeholder
- * 「选择标的」，看起来像「没回填」。INC-02 修复：受控值恒含 `trade.securityId` +
- * 选项保底 unshift 一条「当前标的」占位，保证任意时刻 value 都能命中已渲染选项。
+ * effect 写入，但证券搜索框（SecuritySearchCombobox）无键入时展示 `value` 文本。
+ * INC-02 修复（§10 改造后保留语义）：受控展示值恒由 `selectedSecurityLabel` 推导——
+ * 列表未到 → 「当前标的（加载中…）」；列表已到且含当前标的 → 「名称（代码）」；
+ * 已不在列表 → 「当前标的（已不在可选列表）」——保证任意时刻正确回显。
  *
  * 验证点：
- * 1. securities 未加载完（isLoading=true, data=[]）即打开编辑 → 下拉选中保底项
- *    （value=trade.securityId，非占位「选择标的」），且控件不被禁用。
- * 2. securities 已加载且含当前标的 → 显示「名称（代码）」。
- * 3. 无串号：当前标的已不在可选列表时，显示「当前标的（已不在可选列表）」，
- *    绝不串到列表中其它标的。
- *
- * ⚠️ Radix Select mock 为原生 <select>。
+ * 1. securities 未加载完（isLoading=true, data=[]）即打开编辑 → 输入框回显保底文案，
+ *    且控件不被禁用。
+ * 2. securities 已加载且含当前标的 → 输入框回显「名称（代码）」。
+ * 3. 无串号：当前标的已不在可选列表时 → 回显「当前标的（已不在可选列表）」，绝不串到其它标的。
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -25,7 +23,7 @@ import type { SecurityTradeResponse } from '@/api/types';
 const mocks = vi.hoisted(() => ({
   createTrade: vi.fn(),
   updateTrade: vi.fn(),
-  // 可控标的夹具
+  // 可控标的夹具（组合维度，供 selectedSecurityLabel 回显推导）
   securities: [] as Array<{ id: string; name: string; code: string }>,
   secLoading: false,
 }));
@@ -39,7 +37,7 @@ vi.mock('@/hooks/use-securities', () => ({
     data: mocks.securities,
     isLoading: mocks.secLoading,
   }),
-  useCreateSecurity: () => ({
+  useResolveSecurity: () => ({
     mutate: vi.fn(),
     mutateAsync: vi.fn(),
     isPending: false,
@@ -63,6 +61,7 @@ vi.mock('@/hooks/use-security-trades', () => ({
   useDeleteSecurityTrade: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
+// 方向字段仍用 Radix Select；测试不与其交互，保留原生替身 mock 规避 jsdom 渲染差异
 vi.mock('@/components/ui/select', async () => {
   const React = await import('react');
 
@@ -203,13 +202,9 @@ function renderForm(props: { trade?: SecurityTradeResponse | null } = {}) {
   );
 }
 
-/** 取标的下拉（原生替身）与其当前选中项文本 */
-function securitySelect(): HTMLSelectElement {
-  return document.getElementById('st-security') as HTMLSelectElement;
-}
-function selectedText(sel: HTMLSelectElement): string {
-  const opt = Array.from(sel.options).find((o) => o.value === sel.value);
-  return opt?.textContent?.trim() ?? '';
+/** 证券搜索框（无键入时回显选中标的文本） */
+function securityInput(): HTMLInputElement {
+  return document.getElementById('st-security') as HTMLInputElement;
 }
 
 describe('INC-02 标的回填竞态（编辑态）', () => {
@@ -225,43 +220,38 @@ describe('INC-02 标的回填竞态（编辑态）', () => {
     vi.clearAllMocks();
   });
 
-  it('securities 未加载完即打开编辑 → 选中保底项（value=当前标的），不显示「选择标的」占位', () => {
+  it('securities 未加载完即打开编辑 → 输入框回显「当前标的（加载中…）」，不被禁用', () => {
     mocks.securities = [];
     mocks.secLoading = true;
 
     renderForm({ trade: TRADE });
 
-    const sel = securitySelect();
-    // 关键：受控值恒含 trade.securityId，选中保底项而非空占位
-    expect(sel.value).toBe('s-a');
-    expect(selectedText(sel)).toBe('当前标的（加载中…）');
-    // 编辑态即便列表在加载也不禁用（保底项可正常回显）
-    expect(sel.disabled).toBe(false);
+    const input = securityInput();
+    // 受控展示值恒含 trade.securityId 的推导文案，而非空占位
+    expect(input.value).toBe('当前标的（加载中…）');
+    // 编辑态即便列表在加载也不禁用（回显不受影响）
+    expect(input.disabled).toBe(false);
   });
 
-  it('securities 已加载且含当前标的 → 显示「名称（代码）」', () => {
+  it('securities 已加载且含当前标的 → 回显「名称（代码）」', () => {
     mocks.securities = [{ id: 's-a', name: '贵州茅台', code: '600519' }];
     mocks.secLoading = false;
 
     renderForm({ trade: TRADE });
 
-    const sel = securitySelect();
-    expect(sel.value).toBe('s-a');
-    expect(selectedText(sel)).toBe('贵州茅台（600519）');
+    expect(securityInput().value).toBe('贵州茅台（600519）');
   });
 
-  it('无串号：当前标的已不在可选列表 → 显示「当前标的（已不在可选列表）」，不串到其它标的', () => {
+  it('无串号：当前标的已不在可选列表 → 回显「当前标的（已不在可选列表）」，不串到其它标的', () => {
     mocks.securities = [{ id: 's-b', name: '其它股票', code: '000001' }];
     mocks.secLoading = false;
 
     renderForm({ trade: TRADE });
 
-    const sel = securitySelect();
-    // 仍选中 trade 自己的标的（s-a），而非列表中的 s-b
-    expect(sel.value).toBe('s-a');
-    expect(selectedText(sel)).toBe('当前标的（已不在可选列表）');
-    // 选中的不是别的标的
-    expect(selectedText(sel)).not.toBe('其它股票（000001）');
+    const input = securityInput();
+    // 仍回显 trade 自己的标的（s-a），而非列表中的 s-b
+    expect(input.value).toBe('当前标的（已不在可选列表）');
+    expect(input.value).not.toBe('其它股票（000001）');
   });
 
   it('加载完成后回填项被真实标的覆盖（不再显示「加载中」）', () => {
@@ -269,7 +259,7 @@ describe('INC-02 标的回填竞态（编辑态）', () => {
     mocks.securities = [];
     mocks.secLoading = true;
     const { rerender } = renderForm({ trade: TRADE });
-    expect(selectedText(securitySelect())).toBe('当前标的（加载中…）');
+    expect(securityInput().value).toBe('当前标的（加载中…）');
 
     // 列表到达
     mocks.securities = [{ id: 's-a', name: '贵州茅台', code: '600519' }];
@@ -282,8 +272,6 @@ describe('INC-02 标的回填竞态（编辑态）', () => {
       </QueryClientProvider>,
     );
 
-    const sel = securitySelect();
-    expect(sel.value).toBe('s-a');
-    expect(selectedText(sel)).toBe('贵州茅台（600519）');
+    expect(securityInput().value).toBe('贵州茅台（600519）');
   });
 });

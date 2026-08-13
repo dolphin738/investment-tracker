@@ -18,7 +18,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { Loader2, Plus } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { sumMoney } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -32,7 +32,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useCreateSecurityTrade, useUpdateSecurityTrade } from '@/hooks/use-security-trades';
-import { useSecurities, useCreateSecurity } from '@/hooks/use-securities';
+import { useSecurities, useResolveSecurity } from '@/hooks/use-securities';
 import { toast } from 'sonner';
 import { toIsoDate } from '@/lib/constants';
 // SecurityType 与 SecuritySide 同源：唯一定义在 shared，前后端共用（Q-3）
@@ -42,6 +42,8 @@ import type {
   CreateSecurityTradeRequest,
   SecurityTradeResponse,
 } from '@/api/types';
+import { SecuritySearchCombobox } from '@/components/security/security-search-combobox';
+import type { SecurityMaster } from '@/api/security-master.api';
 
 /** 费用字段：可选、非负、最多 2 位小数 */
 const feeFieldSchema = z
@@ -111,15 +113,6 @@ export interface SecurityTradeFormProps {
   className?: string;
 }
 
-/** 标的类型中文映射 */
-const SECURITY_TYPE_LABEL: Record<string, string> = {
-  STOCK: '股票',
-  FUND: '基金',
-  BOND: '债券',
-  CASH: '现金',
-  OTHER: '其他',
-};
-
 /** 6 位小数字符串（编辑态成交额回填用；去除尾随零避免输入框显示 123.450000） */
 function toPrecision6(n: number): string {
   if (!Number.isFinite(n) || n <= 0) return '';
@@ -135,22 +128,9 @@ export function SecurityTradeForm({
   const isEdit = Boolean(trade);
   const createMutation = useCreateSecurityTrade();
   const updateMutation = useUpdateSecurityTrade();
-  const createSecurityMutation = useCreateSecurity(portfolioId);
   const { data: securities = [], isLoading: secLoading } = useSecurities(portfolioId);
   const today = toIsoDate(new Date());
   const [submitting, setSubmitting] = useState(false);
-  // 新建标的折叠表单状态
-  const [showNewSecurity, setShowNewSecurity] = useState(false);
-  // 显式标注 type 为 SecurityType（shared 的 as const 联合类型）
-  const [newSecurity, setNewSecurity] = useState<{
-    code: string;
-    name: string;
-    type: SecurityType;
-  }>({
-    code: '',
-    name: '',
-    type: SecurityType.STOCK,
-  });
 
   const {
     register,
@@ -231,28 +211,34 @@ export function SecurityTradeForm({
   const selectedSecurityId = securityIdValue || trade?.securityId || '';
 
   /**
-   * 标的下拉选项（INC-02 保底）。
-   *
-   * 列表尚未到达、或当前标的已被移出可选列表（如停用/删除）时，
-   * 在最前面补一条「当前标的」占位项 —— 否则受控 value 无处可落，
-   * 编辑弹窗会把用户已选的标的显示成未选中。
+   * 当前选中标的的展示文本（编辑态回显，INC-02 保底语义）：
+   * - 列表已到且含当前标的 → 「名称（代码）」；
+   * - 列表未到 → 「当前标的（加载中…）」；
+   * - 列表已到但当前标的不在 → 「当前标的（已不在可选列表）」。
+   * 传入 SecuritySearchCombobox 的 value，保证编辑态任何时刻都能正确回显。
    */
-  const securityOptions = useMemo<Array<{ id: string; label: string }>>(() => {
-    const options = securities.map((sec) => ({
-      id: sec.id,
-      label: `${sec.name}（${sec.code}）`,
-    }));
-    if (
-      selectedSecurityId &&
-      !options.some((opt) => opt.id === selectedSecurityId)
-    ) {
-      options.unshift({
-        id: selectedSecurityId,
-        label: secLoading ? '当前标的（加载中…）' : '当前标的（已不在可选列表）',
-      });
-    }
-    return options;
+  const selectedSecurityLabel = useMemo(() => {
+    if (!selectedSecurityId) return '';
+    const found = securities.find((s) => s.id === selectedSecurityId);
+    if (found) return `${found.name}（${found.code}）`;
+    return secLoading ? '当前标的（加载中…）' : '当前标的（已不在可选列表）';
   }, [securities, selectedSecurityId, secLoading]);
+
+  /** 选中系统主数据 → resolve 懒实例化为组合标的，回填 securityId（§7 ③ / §10） */
+  const resolveSecurityMutation = useResolveSecurity(portfolioId);
+  const handleSelectMaster = (master: SecurityMaster): void => {
+    resolveSecurityMutation.mutate(
+      {
+        code: master.code,
+        name: master.name,
+        type: master.type ? (master.type as SecurityType) : undefined,
+        exchange: master.exchange ?? undefined,
+      },
+      {
+        onSuccess: (res) => setValue('securityId', res.id, { shouldValidate: true }),
+      },
+    );
+  };
 
   const tradeAmountValue = watch('tradeAmount');
   const commissionValue = watch('commission');
@@ -283,26 +269,6 @@ export function SecurityTradeForm({
     // K-3/U-3：单价收敛到 6 位小数后按现有 number 契约提交
     return Number(raw.toFixed(6));
   }, [feeTotal, qtyValue, tradeAmountValue, sideValue]);
-
-  const handleCreateSecurity = () => {
-    if (!newSecurity.code.trim() || !newSecurity.name.trim()) {
-      return;
-    }
-    createSecurityMutation.mutate(
-      {
-        code: newSecurity.code.trim(),
-        name: newSecurity.name.trim(),
-        type: newSecurity.type,
-      },
-      {
-        onSuccess: (sec) => {
-          setValue('securityId', sec.id);
-          setShowNewSecurity(false);
-          setNewSecurity({ code: '', name: '', type: SecurityType.STOCK });
-        },
-      },
-    );
-  };
 
   /**
    * 统一保存流程（I-01 验收 6，两态对称）：
@@ -408,114 +374,18 @@ export function SecurityTradeForm({
           )}
         </div>
 
-        {/* 标的 */}
+        {/* 标的：证券搜索选择（§10，不再支持「新建标的」） */}
         <div className="space-y-2">
           <Label htmlFor="st-security">标的 *</Label>
-          <Select
-            value={selectedSecurityId}
-            onValueChange={(v) =>
-              v === '__new__' ? setShowNewSecurity(true) : setValue('securityId', v)
-            }
-            /* INC-02：编辑态即使列表在加载也不禁用 —— 已有保底选项可正常回显 */
+          <SecuritySearchCombobox
+            id="st-security"
+            value={selectedSecurityLabel}
+            placeholder={secLoading ? '加载中…' : '搜索代码 / 名称 / 拼音首字母'}
             disabled={secLoading && !selectedSecurityId}
-          >
-            <SelectTrigger id="st-security">
-              <SelectValue placeholder={secLoading ? '加载中…' : '选择标的'} />
-            </SelectTrigger>
-            <SelectContent>
-              {securityOptions.map((opt) => (
-                <SelectItem key={opt.id} value={opt.id}>
-                  {opt.label}
-                </SelectItem>
-              ))}
-              <SelectItem value="__new__">
-                <span className="flex items-center gap-2 text-primary">
-                  <Plus className="h-3 w-3" />
-                  新建标的
-                </span>
-              </SelectItem>
-            </SelectContent>
-          </Select>
+            onSelect={handleSelectMaster}
+          />
           {errors.securityId && (
             <p className="text-xs text-red-500">{errors.securityId.message}</p>
-          )}
-
-          {/* 新建标的折叠表单 */}
-          {showNewSecurity && (
-            <div className="space-y-3 rounded-md border bg-muted/40 p-3">
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <Label className="text-xs">代码 *</Label>
-                  <Input
-                    placeholder="如 600519"
-                    value={newSecurity.code}
-                    onChange={(e) =>
-                      setNewSecurity((s) => ({ ...s, code: e.target.value }))
-                    }
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs">名称 *</Label>
-                  <Input
-                    placeholder="如 贵州茅台"
-                    value={newSecurity.name}
-                    onChange={(e) =>
-                      setNewSecurity((s) => ({ ...s, name: e.target.value }))
-                    }
-                  />
-                </div>
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs">类型</Label>
-                <Select
-                  value={newSecurity.type}
-                  onValueChange={(v) =>
-                    setNewSecurity((s) => ({
-                      ...s,
-                      type: v as SecurityType,
-                    }))
-                  }
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {Object.entries(SECURITY_TYPE_LABEL)
-                      .filter(([k]) => k !== 'CASH')
-                      .map(([k, v]) => (
-                      <SelectItem key={k} value={k}>
-                        {v}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="flex justify-end gap-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => setShowNewSecurity(false)}
-                >
-                  取消
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  onClick={handleCreateSecurity}
-                  disabled={
-                    createSecurityMutation.isPending ||
-                    !newSecurity.code.trim() ||
-                    !newSecurity.name.trim()
-                  }
-                >
-                  {createSecurityMutation.isPending && (
-                    <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
-                  )}
-                  创建并选中
-                </Button>
-              </div>
-            </div>
           )}
         </div>
 

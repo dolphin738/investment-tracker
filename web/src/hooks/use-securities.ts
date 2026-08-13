@@ -9,6 +9,8 @@ import {
   createSecurity,
   updateSecurity,
   deleteSecurity,
+  resolveSecurity,
+  type ResolveSecurityRequest,
 } from '@/api/security.api';
 import type { CreateSecurityDto, PaginatedResponse, Security, UpdateSecurityDto } from '@/api/types';
 
@@ -65,5 +67,24 @@ export function useDeleteSecurity(portfolioId: string | null) {
       queryClient.invalidateQueries({ queryKey: ['securities', 'list', portfolioId] });
       queryClient.invalidateQueries({ queryKey: ['holdings', 'list', portfolioId] });
     },
+  });
+}
+
+/**
+ * 选中系统主数据 → 懒实例化为组合标的（§7 ③ / §10）。
+ *
+ * 录入买卖表单用：从搜索候选选中主数据行后调用，拿到组合维度 securityId 回填表单；
+ * 成功后失效标的列表缓存（新实例化的组合行立即可见于分红/快照等下拉）。
+ */
+export function useResolveSecurity(portfolioId: string | null) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: ResolveSecurityRequest) =>
+      resolveSecurity(portfolioId!, payload),
+    onSuccess: (data) => {
+      toast.success(data.isNew ? `已创建组合标的「${data.name}」` : '标的已选中');
+      queryClient.invalidateQueries({ queryKey: ['securities', 'list', portfolioId] });
+    },
+    onError: () => toast.error('标的解析失败，请重试'),
   });
 }
