@@ -36,7 +36,7 @@ function formatNotificationTime(iso: string): string {
   return `${s.slice(5, 10)} ${s.slice(11, 16)}`; // MM-dd HH:mm
 }
 
-export function NotificationBell(): JSX.Element {
+export function NotificationBell(): JSX.Element | null {
   const { data: notifications, isLoading } = useNotifications();
   const markRead = useMarkNotificationRead();
   const [open, setOpen] = useState(false);
