@@ -132,7 +132,7 @@ export function QuoteProviderSection(): JSX.Element {
         <div className="flex flex-wrap gap-1">
           {p.is_default && <Badge variant="success">默认</Badge>}
           {p.is_active && <Badge>当前</Badge>}
-          {!p.enabled && <Badge variant="secondary">已禁用</Badge>}
+          {!p.enabled && <Badge variant="secondary">停用</Badge>}
         </div>
       </TableCell>
       <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
@@ -389,7 +389,7 @@ function ProviderInterfaces({ providerId }: { providerId: string }): JSX.Element
                         {it.endpoint ?? '-'}
                       </TableCell>
                       <TableCell className="whitespace-nowrap align-middle">{it.http_method ?? '-'}</TableCell>
-                      <TableCell className="align-middle">
+                      <TableCell className="whitespace-nowrap align-middle">
                         <EnabledBadge enabled={providerEnabled && it.enabled} />
                       </TableCell>
                       <TableCell className="text-right align-middle">
@@ -526,7 +526,7 @@ function InterfacesByCategoryOverview(): JSX.Element {
                         {it.endpoint ?? '-'}
                       </TableCell>
                       <TableCell className="whitespace-nowrap align-middle">{it.http_method ?? '-'}</TableCell>
-                      <TableCell className="align-middle">
+                      <TableCell className="whitespace-nowrap align-middle">
                         <EnabledBadge
                           enabled={
                             (providerById.get(it.provider_id)?.enabled ?? false) &&
