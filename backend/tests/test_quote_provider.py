@@ -180,6 +180,31 @@ async def test_active_mutual_exclusion_and_disabled_blocked(client):
     assert env(rc)[2]["is_active"] is False
 
 
+async def test_disabled_provider_cannot_be_default(client):
+    token = await _admin_token(client, "qp_admin_10@example.com")
+    r = await client.post(
+        "/api/admin/quote-providers",
+        json={**HTTPS_BODY, "name": "D", "enabled": False},
+        headers=auth(token),
+    )
+    id_d = env(r)[2]["id"]
+    # set-default 端点：禁用源 → 400
+    rd = await client.post(
+        f"/api/admin/quote-providers/{id_d}/set-default", headers=auth(token)
+    )
+    assert rd.status_code == 400
+    # PATCH 显式 is_default=true：禁用源 → 400
+    rp = await client.patch(
+        f"/api/admin/quote-providers/{id_d}",
+        json={"is_default": True},
+        headers=auth(token),
+    )
+    assert rp.status_code == 400
+    # 确认仍非默认
+    rc = await client.get(f"/api/admin/quote-providers/{id_d}", headers=auth(token))
+    assert env(rc)[2]["is_default"] is False
+
+
 async def test_get_active_provider_fallback(client):
     token = await _admin_token(client, "qp_admin_9@example.com")
     # A 为默认（非当前），B 为当前；创建即清旧标记，状态确定

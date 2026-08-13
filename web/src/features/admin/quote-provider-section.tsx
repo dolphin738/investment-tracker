@@ -65,6 +65,15 @@ function useCategoryLabelMap(): Map<string, string> {
   }, [categories]);
 }
 
+/** 启用状态徽标：启用 → success「启用」；关闭 → secondary「停用」。两处状态显示共用，文案统一。 */
+function EnabledBadge({ enabled }: { enabled: boolean }): JSX.Element {
+  return enabled ? (
+    <Badge variant="success">启用</Badge>
+  ) : (
+    <Badge variant="secondary">停用</Badge>
+  );
+}
+
 export function QuoteProviderSection(): JSX.Element {
   const { data: providers, isLoading, isError } = useQuoteProviders();
   const deleteMut = useDeleteQuoteProvider();
@@ -132,6 +141,7 @@ export function QuoteProviderSection(): JSX.Element {
             默认
             <Switch
               checked={p.is_default}
+              disabled={!p.enabled}
               onCheckedChange={(v) =>
                 updateMut.mutate({ id: p.id, body: { is_default: v } })
               }
@@ -300,6 +310,11 @@ export function QuoteProviderSection(): JSX.Element {
 function ProviderInterfaces({ providerId }: { providerId: string }): JSX.Element {
   const { data: interfaces, isLoading } = useQuoteInterfaces(providerId);
   const labelMap = useCategoryLabelMap();
+  const { data: providers } = useQuoteProviders();
+  const providerEnabled = useMemo(
+    () => providers?.find((p) => p.id === providerId)?.enabled ?? true,
+    [providers, providerId],
+  );
   const createMut = useCreateInterface(providerId);
   const deleteMut = useDeleteInterface();
 
@@ -335,7 +350,7 @@ function ProviderInterfaces({ providerId }: { providerId: string }): JSX.Element
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between">
           <CardTitle className="text-sm">接口列表</CardTitle>
-          <Button size="sm" variant="outline" onClick={openCreate}>
+          <Button size="sm" onClick={openCreate}>
             <Plus className="mr-1 h-3.5 w-3.5" />
             新增接口
           </Button>
@@ -359,29 +374,25 @@ function ProviderInterfaces({ providerId }: { providerId: string }): JSX.Element
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>名称</TableHead>
-                    <TableHead>调用路径</TableHead>
-                    <TableHead>方法</TableHead>
-                    <TableHead>启用</TableHead>
-                    <TableHead className="text-right">操作</TableHead>
+                    <TableHead className="whitespace-nowrap">名称</TableHead>
+                    <TableHead className="whitespace-nowrap">调用路径</TableHead>
+                    <TableHead className="w-16 whitespace-nowrap">方法</TableHead>
+                    <TableHead className="w-20 whitespace-nowrap">启用</TableHead>
+                    <TableHead className="w-[140px] text-right whitespace-nowrap">操作</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {items.map((it) => (
                     <TableRow key={it.id}>
-                      <TableCell className="font-medium">{it.name}</TableCell>
-                      <TableCell className="max-w-[200px] truncate text-muted-foreground">
+                      <TableCell className="font-medium align-middle">{it.name}</TableCell>
+                      <TableCell className="max-w-[200px] truncate align-middle text-muted-foreground">
                         {it.endpoint ?? '-'}
                       </TableCell>
-                      <TableCell>{it.http_method ?? '-'}</TableCell>
-                      <TableCell>
-                        {it.enabled ? (
-                          <Badge variant="success">启用</Badge>
-                        ) : (
-                          <Badge variant="secondary">停用</Badge>
-                        )}
+                      <TableCell className="whitespace-nowrap align-middle">{it.http_method ?? '-'}</TableCell>
+                      <TableCell className="align-middle">
+                        <EnabledBadge enabled={providerEnabled && it.enabled} />
                       </TableCell>
-                      <TableCell className="text-right">
+                      <TableCell className="text-right align-middle">
                         <div className="flex justify-end gap-1">
                           <Button
                             variant="ghost"
@@ -497,11 +508,11 @@ function InterfacesByCategoryOverview(): JSX.Element {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>名称</TableHead>
-                    <TableHead>提供方名称</TableHead>
-                    <TableHead>调用路径</TableHead>
-                    <TableHead>方法</TableHead>
-                    <TableHead>启用</TableHead>
+                    <TableHead className="whitespace-nowrap">名称</TableHead>
+                    <TableHead className="whitespace-nowrap">提供方名称</TableHead>
+                    <TableHead className="whitespace-nowrap">调用路径</TableHead>
+                    <TableHead className="w-16 whitespace-nowrap">方法</TableHead>
+                    <TableHead className="w-20 whitespace-nowrap">启用</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -514,13 +525,14 @@ function InterfacesByCategoryOverview(): JSX.Element {
                       <TableCell className="max-w-[200px] truncate text-muted-foreground">
                         {it.endpoint ?? '-'}
                       </TableCell>
-                      <TableCell>{it.http_method ?? '-'}</TableCell>
-                      <TableCell>
-                        {providerById.get(it.provider_id)?.enabled && it.enabled ? (
-                          <Badge variant="success">启用</Badge>
-                        ) : (
-                          <Badge variant="secondary">停用</Badge>
-                        )}
+                      <TableCell className="whitespace-nowrap align-middle">{it.http_method ?? '-'}</TableCell>
+                      <TableCell className="align-middle">
+                        <EnabledBadge
+                          enabled={
+                            (providerById.get(it.provider_id)?.enabled ?? false) &&
+                            it.enabled
+                          }
+                        />
                       </TableCell>
                     </TableRow>
                   ))}

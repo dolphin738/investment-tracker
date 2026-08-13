@@ -3,7 +3,7 @@
  *
  * 字段：name、access_method（Select）、base_url | sdk_name（按接入方式二选一）、
  * description、enabled、is_default、is_active。
- * 「当前」与「默认」均为全局至多一个，由后端写入时保证互斥；禁用的提供方（enabled=false）不可设为当前。
+ * 「当前」与「默认」均为全局至多一个，由后端写入时保证互斥；禁用的提供方（enabled=false）不可设为当前/默认。
  *
  * 风格对齐同模块其它对话框（QuoteInterfaceDialog / InterfaceCategoryDialog）：
  * - 独立 *-dialog.tsx 组件，props 为 { open, onOpenChange, editing }；
@@ -224,7 +224,12 @@ export function QuoteProviderDialog({
               id="qp-enabled"
               checked={form.enabled}
               onCheckedChange={(v) =>
-                setForm({ ...form, enabled: v, isActive: v ? form.isActive : false })
+                setForm({
+                  ...form,
+                  enabled: v,
+                  isActive: v ? form.isActive : false,
+                  isDefault: v ? form.isDefault : false,
+                })
               }
             />
           </div>
@@ -236,6 +241,7 @@ export function QuoteProviderDialog({
             <Switch
               id="qp-default"
               checked={form.isDefault}
+              disabled={!form.enabled}
               onCheckedChange={(v) => setForm({ ...form, isDefault: v })}
             />
           </div>

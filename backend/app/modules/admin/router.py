@@ -317,16 +317,19 @@ async def update_quote_provider(
     provider = await svc.get(provider_id)
     if provider is None:
         raise HTTPException(status_code=404, detail="提供方不存在")
-    provider = await svc.update(
-        provider,
-        name=body.name,
-        access_method=body.access_method.value if body.access_method is not None else None,
-        config=body.config,
-        enabled=body.enabled,
-        description=body.description,
-        is_default=body.is_default,
-        is_active=body.is_active,
-    )
+    try:
+        provider = await svc.update(
+            provider,
+            name=body.name,
+            access_method=body.access_method.value if body.access_method is not None else None,
+            config=body.config,
+            enabled=body.enabled,
+            description=body.description,
+            is_default=body.is_default,
+            is_active=body.is_active,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     await db.commit()
     await db.refresh(provider)
     return QuoteProviderOut.model_validate(provider)
@@ -357,7 +360,10 @@ async def set_default_quote_provider(
     provider = await svc.get(provider_id)
     if provider is None:
         raise HTTPException(status_code=404, detail="提供方不存在")
-    provider = await svc.set_default(provider)
+    try:
+        provider = await svc.set_default(provider)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     await db.commit()
     await db.refresh(provider)
     return QuoteProviderOut.model_validate(provider)

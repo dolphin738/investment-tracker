@@ -53,6 +53,8 @@ class QuoteProviderService:
             is_default=is_default,
             is_active=is_active,
         )
+        if is_default and not enabled:
+            raise ValueError("禁用的提供方不能设为默认")
         self.session.add(provider)
         await self.session.flush()
         # 互斥标记：若要求默认/当前，先取消其它提供方的同名标记
@@ -90,6 +92,14 @@ class QuoteProviderService:
         if is_active is not None:
             provider.is_active = is_active
 
+        # 禁用源不可作为默认/当前方：禁用时清除其标记；若本次仍显式请求置位则拒绝
+        # （前端已禁用对应开关，此处为后端双保险，避免经 API 直调绕过 UI）。
+        if provider.enabled is False:
+            provider.is_default = False
+            provider.is_active = False
+            if is_default is True or is_active is True:
+                raise ValueError("禁用的提供方不能设为默认或当前使用")
+
         if is_default:
             await self._clear_flag("is_default", except_id=provider.id)
         if is_active:
@@ -103,6 +113,8 @@ class QuoteProviderService:
         await self.session.flush()
 
     async def set_default(self, provider: SecuritiesDataProvider) -> SecuritiesDataProvider:
+        if not provider.enabled:
+            raise ValueError("禁用的提供方不能设为默认")
         provider.is_default = True
         await self._clear_flag("is_default", except_id=provider.id)
         await self.session.flush()
