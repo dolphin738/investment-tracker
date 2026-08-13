@@ -60,11 +60,11 @@ vi.mock('@/api/quote-provider.api', async (importOriginal) => {
 
 vi.mock('@/api/quote-interface.api', async (importOriginal) => {
   const actual = await importOriginal();
-  return {
-    ...(actual as Record<string, unknown>),
-    listAllInterfaces: vi.fn(),
-    reorderQuoteInterfaces: vi.fn().mockResolvedValue({ ok: true }),
-  };
+    return {
+      ...(actual as Record<string, unknown>),
+      listAllInterfaces: vi.fn(),
+      reorderQuoteInterfaces: vi.fn().mockResolvedValue({ ok: true }),
+    };
 });
 
 vi.mock('sonner', () => ({
@@ -184,9 +184,10 @@ describe('useReorderInterfaces — T08 调序 hook 链路', () => {
   it('① 调用 mutate 即触发 reorderQuoteInterfaces 且 body 正确', async () => {
     function Harness(): ReactElement | null {
       const mut = useReorderInterfaces();
+      // 仅在挂载时触发一次调序；依赖 [] 避免 mut 身份每次渲染变化导致无限重渲染
       useEffect(() => {
         mut.mutate({ category_id: 'c1', ordered_ids: ['i2', 'i1', 'i3'] });
-      }, [mut]);
+      }, []);
       return null;
     }
     renderWithProviders(<Harness />);

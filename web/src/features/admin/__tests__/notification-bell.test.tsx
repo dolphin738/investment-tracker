@@ -68,8 +68,10 @@ vi.mock('@/api/notification.api', async (importOriginal) => {
   const actual = await importOriginal();
   return {
     ...(actual as Record<string, unknown>),
-    listNotifications: vi.fn().mockResolvedValue(SAMPLE_NOTIFS),
-    markNotificationRead: vi.fn().mockResolvedValue({ ...SAMPLE_NOTIFS[0], read: true }),
+    // 解析值在 beforeEach 中按 SAMPLE_NOTIFS 注入（vi.mock 工厂会被提升，
+    // 不可在此引用模块级 const，否则触发 TDZ：Cannot access before initialization）
+    listNotifications: vi.fn(),
+    markNotificationRead: vi.fn(),
   };
 });
 
