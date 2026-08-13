@@ -68,6 +68,8 @@ def test_metadata_tables_and_enums():
         "DividendType",
         # 增量：系统管理扩展——接口方向原生枚举
         "interface_direction",
+        # 增量：股票列表与测试——接口用途原生枚举（QUOTE / MASTER_LIST）
+        "InterfacePurpose",
     } == enums
 
     # 精度对齐 PRD 8.1

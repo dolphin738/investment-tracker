@@ -19,6 +19,18 @@ class SecurityType(str, enum.Enum):
     BOND = "BOND"
     OTHER = "OTHER"
     CASH = "CASH"
+    # —— 证券主数据多资产类别扩展（§11.3，配置驱动，零硬编码）——
+    HK_STOCK = "HK_STOCK"
+    CONVERTIBLE_BOND = "CONVERTIBLE_BOND"
+    ETF = "ETF"
+    INDEX = "INDEX"
+
+
+class InterfacePurpose(str, enum.Enum):
+    """提供方接口用途：价格行情 vs 证券列表（§7 ① / §11）。"""
+
+    QUOTE = "QUOTE"
+    MASTER_LIST = "MASTER_LIST"
 
 
 class SecuritySide(str, enum.Enum):

@@ -15,24 +15,37 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, CreatedAtMixin, TimestampMixin, pk_uuid
-from app.models.enums import SecuritySide, SecurityType
+from app.models.enums import InterfacePurpose, SecuritySide, SecurityType
 
 
 class Security(Base, TimestampMixin):
     __tablename__ = "securities"
     __table_args__ = (
         UniqueConstraint("portfolio_id", "code", name="uq_securities_portfolio_code"),
+        # 系统级主数据行（portfolio_id IS NULL）按 资产类别+code 唯一，避免跨类命名空间碰撞
+        Index(
+            "uq_securities_master_asset_code",
+            "asset_class",
+            "code",
+            unique=True,
+            postgresql_where=text("portfolio_id IS NULL"),
+        ),
+        # 录入界面证券搜索（code/name/拼音首字母 ILIKE）加速
+        Index("ix_securities_pinyin_initials", "pinyin_initials"),
     )
 
     id: Mapped[str] = pk_uuid()
-    portfolio_id: Mapped[str] = mapped_column(
+    # 系统级主数据行 portfolio_id=NULL（不触发 portfolios 的 ON DELETE CASCADE）；
+    # 用户持仓行仍填真实组合 id，保持原 CASCADE 行为。
+    portfolio_id: Mapped[Optional[str]] = mapped_column(
         String(36),
         ForeignKey("portfolios.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
     )
     code: Mapped[str] = mapped_column(String(64), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -42,6 +55,16 @@ class Security(Base, TimestampMixin):
         nullable=False,
     )
     currency: Mapped[str] = mapped_column(String(10), default="CNY", nullable=False)
+    # 交易所/市场（SH/SZ/BJ/HK…）；主数据同步填充，缺失时由代码前缀推断
+    exchange: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
+    # 名称拼音首字母（如 贵州茅台→gzm）；录入界面按拼音首字母搜索，同步任务用 pypinyin 计算
+    pinyin_initials: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    # 资产类别（复用 SecurityType）；主数据行 type 即 = asset_class。
+    # 与主数据部分唯一索引配套；组合行可留 NULL（唯一约束仅作用于 portfolio_id IS NULL 行）。
+    asset_class: Mapped[Optional[SecurityType]] = mapped_column(
+        Enum(SecurityType, name="SecurityType", native_enum=True, create_type=False),
+        nullable=True,
+    )
 
     portfolio: Mapped["Portfolio"] = relationship(back_populates="securities")
     trades: Mapped[list["SecurityTrade"]] = relationship(

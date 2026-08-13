@@ -19,7 +19,7 @@ from sqlalchemy import Boolean, Enum as SA_ENUM, ForeignKey, Integer, JSON, Stri
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, TimestampMixin, pk_uuid
-from app.models.enums import InterfaceDirection
+from app.models.enums import InterfaceDirection, InterfacePurpose, SecurityType
 
 
 class QuoteInterface(Base, TimestampMixin):
@@ -78,4 +78,29 @@ class QuoteInterface(Base, TimestampMixin):
     resp_price_field: Mapped[str] = mapped_column(
         String(64), nullable=False, default="price", server_default="price",
         comment="响应中标识价格的字段名（接口级）",
+    )
+    # —— 证券列表接口（purpose=MASTER_LIST）配置字段（§7 ① / §11）——
+    purpose: Mapped[InterfacePurpose] = mapped_column(
+        SA_ENUM(
+            InterfacePurpose,
+            name="InterfacePurpose",
+            values_callable=lambda e: [m.value for m in e],
+        ),
+        nullable=False,
+        default=InterfacePurpose.QUOTE,
+        server_default=InterfacePurpose.QUOTE.value,
+        comment="接口用途：价格行情 QUOTE / 证券列表 MASTER_LIST",
+    )
+    asset_class: Mapped[Optional[SecurityType]] = mapped_column(
+        SA_ENUM(SecurityType, name="SecurityType", native_enum=True, create_type=False),
+        nullable=True,
+        comment="该接口拉取资产类别（复用 SecurityType）；主数据行 type 即=asset_class",
+    )
+    resp_name_field: Mapped[Optional[str]] = mapped_column(
+        String(64), nullable=True, default="name", server_default="name",
+        comment="响应中证券名称字段（列表解析用，默认 name）",
+    )
+    resp_exchange_field: Mapped[Optional[str]] = mapped_column(
+        String(64), nullable=True,
+        comment="响应中交易所字段（如 exchange/market）；缺失则代码前缀推断",
     )

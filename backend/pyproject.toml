@@ -19,6 +19,8 @@ dependencies = [
     "openpyxl==3.1.5",
     # SDK 行情接入（ADR-002 §5 第 5 步）：akshare 懒导入，未安装不影响启动
     "akshare>=1.14",
+    # 证券主数据拼音首字母（录入界面按拼音搜索）：sync_security_masters 计算 pinyin_initials
+    "pypinyin>=0.53",
     # 可选定时调度器（收盘后全量同步行情），默认关闭、懒导入
     "apscheduler>=3.10",
 ]
