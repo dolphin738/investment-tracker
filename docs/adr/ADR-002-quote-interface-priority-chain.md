@@ -1,4 +1,4 @@
-> 本文档作为架构决策记录（ADR）。2026-08-13 经用户要求"先写成 ADR 锁定"创建；同日修订：方案 X 补充并锁定"**完全移除全局单一活跃源（含 `is_active`/`is_default` 开关），提供方仅保留 `enabled`（启动/停用）唯一开关**"。3 个运维细节仍列为待确认项（默认建议，实现前定稿，不视为已锁定决策）。
+> 本文档作为架构决策记录（ADR）。2026-08-13 经用户要求"先写成 ADR 锁定"创建；同日修订：方案 X 补充并锁定"**完全移除全局单一活跃源（含 `is_active`/`is_default` 开关），提供方仅保留 `enabled`（启动/停用）唯一开关**"。**Q1 已锁定**（业务返回空亦视为无响应、向下）；Q2/Q3/Q4 仍列为待确认项（默认建议，实现前定稿，不视为已锁定决策）。
 
 # 金融数据接口采用"分类级接口优先级链 + 顺序 Fallback + 连续失败告警"（ADR-002）
 
@@ -17,7 +17,7 @@
 | 分类模型 | `backend/app/models/interface_category.py`：`label` / `icon` / `sort_order` | ✅ `sort_order` 仅分类间展示序，非分类内接口优先级 |
 | 当前解析链 | `backend/app/services/quote_provider.py:get_active_provider`：`is_active → is_default → None` | ⚠️ provider 维度、全局只选一个提供方 |
 | 缺口 G1 | `backend/app/models/security.py`：无 `category_id` | ❌ 证券↔接口分类映射缺失 |
-| 缺口 G2 | `QuoteInterface`：无 `resp_code_field` / `resp_price_field` | ❌ 响应字段映射缺失 |
+| 缺口 G2 | `QuoteInterface`：无 `resp_code_field` / `resp_price_field` | ⚠️ V1 将加两列（见 §2.2） |
 
 **结论**：分类（`category_id`）是跨提供方的共享键，前端"汇总总览"本就按分类聚合所有提供方接口——新需求"按分类汇总"天然成立。但 `QuoteInterface` 无优先级字段、`Security` 无分类映射、无响应字段映射，且当前解析模型是"全局单一活跃源"，与新需求（接口级、跨 provider、按分类优先级链）直接冲突，需演进。
 
@@ -61,6 +61,8 @@
 | `quote_provider_interfaces` | +`priority` | Integer, nullable | 分类内排序，越小优先级越高；重排事务内批量重排 `UPDATE ... SET priority = CASE id WHEN ... END` |
 | `quote_provider_interfaces` | +`consecutive_failures` | Integer, 默认 0 | 连续无响应计数，原子自增 |
 | `quote_provider_interfaces` | +`alerted` | Boolean, 默认 false | 告警去重抢占标志 |
+| `quote_provider_interfaces` | +`resp_code_field` | String, 默认 `code` | 响应中标识证券代码的字段名（接口级，应对同提供方不同接口结构差异） |
+| `quote_provider_interfaces` | +`resp_price_field` | String, 默认 `price` | 响应中标识价格的字段名（接口级） |
 | `securities_data_providers` | **-`is_active` / -`is_default`**（DROP COLUMN） | — | 全局活跃源开关移除，仅保留 `enabled` |
 | `security_prices` | +`fetched_at` | DateTime, 默认 now | 数据拉取时间戳；支撑"数据截至 HH:MM"展示与 Q3 红点"过旧"判断（当前 `as_of` 仅 Date 粒度，无法区分日内拉取时刻） |
 | `security_prices` | +`source` | String, nullable | 价来源标记：接口名（如 `小熊同学/stock`）/ `手动上传`；前端"来源"展示 + 回溯 |
@@ -77,7 +79,7 @@
 
 ### 2.4 连续失败计数与告警
 
-- 失败（无响应，定义见 §3）：`UPDATE ... SET consecutive_failures = consecutive_failures + 1 WHERE id=?`（DB 原子自增，多实例安全）。
+- 失败（无响应，定义见 §3 Q1：超时 / 连接错误 / HTTP 5xx / 鉴权失败 / **HTTP 200 但业务返回空** 均计为无响应）：`UPDATE ... SET consecutive_failures = consecutive_failures + 1 WHERE id=?`（DB 原子自增，多实例安全）。
 - 成功（有响应）：`consecutive_failures = 0`。
 - 达阈值（`N`，默认建议 3）且 `alerted=false`：`UPDATE ... SET alerted=true ... RETURNING` **抢占**，保证多实例下仅一个实例发告警；人工恢复或成功一次后 `alerted` 复位。
 - 提醒落点见 §3（待确认）。
@@ -109,13 +111,13 @@
 
 | #   | 项         | 默认建议（待用户最终确认）                                                              |
 | --- | --------- | -------------------------------------------------------------------------- |
-| Q1  | "无响应"精确边界 | 超时 / 连接错误 / HTTP 5xx / 鉴权失败 = 无响应（向下）；HTTP 200 但业务返回空 = 有响应（停止，数据空另行处理）    |
+| Q1  | "无响应"精确边界 | **已锁定**：超时 / 连接错误 / HTTP 5xx / 鉴权失败 / **HTTP 200 但业务返回空（无可用行情行）** = 无响应（向下一接口）；仅当返回**非空业务数据**才视为"有响应"并停止。理由：空响应无法支撑估值，等同无数据。 |
 | Q2  | 告警落点      | MVP：管理面站内信 + 前端红点；后续可加邮件。落点需明确以免影响"抢占去重"实现                                 |
 | Q3  | 实时秒回策略    | 实时展示用 `last_good` 缓存秒回 + 后台异步 fallback 刷新；同步"刷新行情"按钮走完整链（避免点开组合卡 Σtimeout） |
 | Q4  | 失败阈值 N    | 默认 3 次连续无响应触发告警（可在接口/全局配置）                                                 |
 |     |           |                                                                            |
 
-> 以上 4 项为运维细节，不推翻 §2 的核心架构决策；实现前由用户确认后写入本 ADR 或独立配置。
+> 以上 Q2/Q3/Q4 为运维细节，不推翻 §2 的核心架构决策；实现前由用户确认后写入本 ADR 或独立配置。Q1 已于 2026-08-13 实现前锁定（业务返回空亦向下）。
 
 ---
 
