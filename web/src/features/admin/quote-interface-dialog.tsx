@@ -82,6 +82,8 @@ interface FormState {
   rateLimit: string;
   purpose: string;
   assetClass: string;
+  respCodeField: string;
+  respPriceField: string;
   respNameField: string;
   respExchangeField: string;
 }
@@ -101,6 +103,8 @@ function toForm(edit: QuoteInterface | null): FormState {
       rateLimit: '',
       purpose: 'QUOTE',
       assetClass: '',
+      respCodeField: '',
+      respPriceField: '',
       respNameField: '',
       respExchangeField: '',
     };
@@ -118,6 +122,8 @@ function toForm(edit: QuoteInterface | null): FormState {
     rateLimit: edit.rate_limit ?? '',
     purpose: edit.purpose ?? 'QUOTE',
     assetClass: edit.asset_class ?? '',
+    respCodeField: edit.resp_code_field ?? '',
+    respPriceField: edit.resp_price_field ?? '',
     respNameField: edit.resp_name_field ?? '',
     respExchangeField: edit.resp_exchange_field ?? '',
   };
@@ -192,6 +198,8 @@ export function QuoteInterfaceDialog({
         !form.assetClass || form.assetClass === '__none__'
           ? null
           : form.assetClass,
+      resp_code_field: form.respCodeField.trim() || null,
+      resp_price_field: form.respPriceField.trim() || null,
       resp_name_field: form.respNameField.trim() || null,
       resp_exchange_field: form.respExchangeField.trim() || null,
     };
@@ -324,10 +332,34 @@ export function QuoteInterfaceDialog({
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
+                <Label htmlFor="qi-resp-code">响应代码字段</Label>
+                <Input
+                  id="qi-resp-code"
+                  placeholder="默认 code；数组行填下标 0"
+                  value={form.respCodeField}
+                  onChange={(e) =>
+                    setForm({ ...form, respCodeField: e.target.value })
+                  }
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="qi-resp-price">响应价格字段</Label>
+                <Input
+                  id="qi-resp-price"
+                  placeholder="默认 price；数组行填下标"
+                  value={form.respPriceField}
+                  onChange={(e) =>
+                    setForm({ ...form, respPriceField: e.target.value })
+                  }
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
                 <Label htmlFor="qi-resp-name">响应名称字段</Label>
                 <Input
                   id="qi-resp-name"
-                  placeholder="默认 name"
+                  placeholder="默认 name；数组行填下标 1"
                   value={form.respNameField}
                   onChange={(e) =>
                     setForm({ ...form, respNameField: e.target.value })
@@ -347,7 +379,9 @@ export function QuoteInterfaceDialog({
               </div>
             </div>
             <p className="text-xs text-muted-foreground">
-              用途选「证券列表（MASTER_LIST）」时，主数据同步按资产类别拉取全市场代码/名称/交易所（配置驱动，换数据源只改配置）。
+              用途选「证券列表（MASTER_LIST）」时，主数据同步按资产类别拉取全市场代码/名称/交易所（配置驱动，换数据源只改配置）；若响应为数组行（如{' '}
+              <code className="font-mono">["code","name"]</code>），代码/名称字段填位置下标（如{' '}
+              <code className="font-mono">0</code>/<code className="font-mono">1</code>）。
             </p>
           </div>
 

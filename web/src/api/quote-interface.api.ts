@@ -39,6 +39,10 @@ export interface QuoteInterface {
   purpose: 'QUOTE' | 'MASTER_LIST';
   /** 该接口拉取资产类别（复用 SecurityType），主数据行 type 即=asset_class */
   asset_class: string | null;
+  /** 响应中证券代码字段（数组行填位置下标，如 "0"） */
+  resp_code_field: string;
+  /** 响应中价格字段（数组行填位置下标） */
+  resp_price_field: string;
   /** 响应中证券名称字段（列表解析用，默认 name） */
   resp_name_field: string | null;
   /** 响应中交易所字段（如 exchange/market）；缺失则代码前缀推断 */
@@ -64,6 +68,8 @@ export interface QuoteInterfaceCreate {
   rate_limit?: string | null;
   purpose?: 'QUOTE' | 'MASTER_LIST';
   asset_class?: string | null;
+  resp_code_field?: string | null;
+  resp_price_field?: string | null;
   resp_name_field?: string | null;
   resp_exchange_field?: string | null;
 }
@@ -83,6 +89,8 @@ export interface QuoteInterfaceUpdate {
   rate_limit?: string | null;
   purpose?: 'QUOTE' | 'MASTER_LIST';
   asset_class?: string | null;
+  resp_code_field?: string | null;
+  resp_price_field?: string | null;
   resp_name_field?: string | null;
   resp_exchange_field?: string | null;
 }

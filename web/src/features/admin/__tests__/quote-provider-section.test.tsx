@@ -124,6 +124,8 @@ function mkIface(
     rate_limit: null,
     purpose: 'QUOTE',
     asset_class: null,
+    resp_code_field: 'code',
+    resp_price_field: 'price',
     resp_name_field: null,
     resp_exchange_field: null,
     priority,
