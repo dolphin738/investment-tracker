@@ -127,3 +127,10 @@ async def client(_engine):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
+
+
+@pytest_asyncio.fixture
+async def session(_engine):
+    """测试用 DB 会话（指向测试库，function 作用域，随 _engine 共用循环）。"""
+    async with dbmod.AsyncSessionLocal() as s:
+        yield s

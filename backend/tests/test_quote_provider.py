@@ -1,15 +1,12 @@
-"""多提供方证券行情数据提供方 — admin CRUD + 切换 + 互斥 + 解析链。
+"""多提供方证券行情数据提供方 — admin CRUD（ADR-002 方案 X：无全局活跃源）。
 
 依赖 require_admin（非管理员 → 403）。覆盖：
 - CRUD：create（https / sdk 两种接入方式）、list、get、update、delete；
 - config 校验：https 缺 base_url / sdk 缺 sdk_name → 422；
-- 互斥：is_default / is_active 全局至多一个（后者置位会清前者）；
-- set_active 禁用的提供方 → 400；
-- get_active_provider 回退链：当前 → 默认 → None；
-- 非管理员访问 → 403。
+- 名称唯一性：重名（含大小写不敏感）→ 400，自改名（大小写不同）允许；
+- 仅保留 enabled 开关（is_default / is_active 已在 ADR-002 移除）。
 
-注意：测试库在会话内共享，故每个测试使用独立邮箱，且基于「创建即清旧标记」的互斥语义做断言，
-不依赖全局计数。
+注意：测试库在会话内共享，故每个测试使用独立邮箱。
 """
 from __future__ import annotations
 
@@ -20,7 +17,7 @@ import app.db.database as dbmod
 from app.core.enums import BusinessErrorCode, UserRole
 from app.core.security import create_access_token
 from app.models import User
-from app.services.quote_provider import QuoteProviderService, get_active_provider
+from app.services.quote_provider import QuoteProviderService
 
 from tests.helpers import auth, env, register_login
 
@@ -129,82 +126,6 @@ async def test_delete(client):
     assert env(r)[0] == 404
 
 
-async def test_default_mutual_exclusion(client):
-    token = await _admin_token(client, "qp_admin_7@example.com")
-    r1 = await client.post(
-        "/api/admin/quote-providers",
-        json={**HTTPS_BODY, "name": "A", "is_default": True},
-        headers=auth(token),
-    )
-    id_a = env(r1)[2]["id"]
-    r2 = await client.post(
-        "/api/admin/quote-providers",
-        json={**SDK_BODY, "name": "B", "is_default": True},
-        headers=auth(token),
-    )
-    id_b = env(r2)[2]["id"]
-    ra = await client.get(f"/api/admin/quote-providers/{id_a}", headers=auth(token))
-    rb = await client.get(f"/api/admin/quote-providers/{id_b}", headers=auth(token))
-    assert env(ra)[2]["is_default"] is False
-    assert env(rb)[2]["is_default"] is True
-
-
-async def test_active_mutual_exclusion_and_disabled_blocked(client):
-    token = await _admin_token(client, "qp_admin_8@example.com")
-    r1 = await client.post(
-        "/api/admin/quote-providers",
-        json={**HTTPS_BODY, "name": "A", "is_active": True},
-        headers=auth(token),
-    )
-    id_a = env(r1)[2]["id"]
-    r2 = await client.post(
-        "/api/admin/quote-providers",
-        json={**SDK_BODY, "name": "B", "is_active": True},
-        headers=auth(token),
-    )
-    id_b = env(r2)[2]["id"]
-    ra = await client.get(f"/api/admin/quote-providers/{id_a}", headers=auth(token))
-    rb = await client.get(f"/api/admin/quote-providers/{id_b}", headers=auth(token))
-    assert env(ra)[2]["is_active"] is False
-    assert env(rb)[2]["is_active"] is True
-    # 创建禁用提供方 C，尝试设为当前 → 400
-    r3 = await client.post(
-        "/api/admin/quote-providers",
-        json={**HTTPS_BODY, "name": "C", "enabled": False},
-        headers=auth(token),
-    )
-    id_c = env(r3)[2]["id"]
-    r = await client.post(f"/api/admin/quote-providers/{id_c}/set-active", headers=auth(token))
-    assert r.status_code == 400
-    rc = await client.get(f"/api/admin/quote-providers/{id_c}", headers=auth(token))
-    assert env(rc)[2]["is_active"] is False
-
-
-async def test_disabled_provider_cannot_be_default(client):
-    token = await _admin_token(client, "qp_admin_10@example.com")
-    r = await client.post(
-        "/api/admin/quote-providers",
-        json={**HTTPS_BODY, "name": "D", "enabled": False},
-        headers=auth(token),
-    )
-    id_d = env(r)[2]["id"]
-    # set-default 端点：禁用源 → 400
-    rd = await client.post(
-        f"/api/admin/quote-providers/{id_d}/set-default", headers=auth(token)
-    )
-    assert rd.status_code == 400
-    # PATCH 显式 is_default=true：禁用源 → 400
-    rp = await client.patch(
-        f"/api/admin/quote-providers/{id_d}",
-        json={"is_default": True},
-        headers=auth(token),
-    )
-    assert rp.status_code == 400
-    # 确认仍非默认
-    rc = await client.get(f"/api/admin/quote-providers/{id_d}", headers=auth(token))
-    assert env(rc)[2]["is_default"] is False
-
-
 async def test_create_duplicate_name_returns_400(client):
     token = await _admin_token(client, "qp_admin_11@example.com")
     body = dict(HTTPS_BODY, name="DupSrc_11")
@@ -246,29 +167,20 @@ async def test_update_to_existing_name_returns_400(client):
     assert env(rp2)[0] == 200 and env(rp2)[2]["name"] == "dupsrc_12"
 
 
-async def test_get_active_provider_fallback(client):
-    token = await _admin_token(client, "qp_admin_9@example.com")
-    # A 为默认（非当前），B 为当前；创建即清旧标记，状态确定
-    r1 = await client.post(
-        "/api/admin/quote-providers",
-        json={**HTTPS_BODY, "name": "A", "is_default": True},
-        headers=auth(token),
-    )
-    id_a = env(r1)[2]["id"]
-    r2 = await client.post(
-        "/api/admin/quote-providers",
-        json={**SDK_BODY, "name": "B", "is_active": True},
-        headers=auth(token),
-    )
-    id_b = env(r2)[2]["id"]
+async def test_get_active_provider_removed_no_global_switch(client):
+    """回归（ADR-002 方案 X）：提供方不再有全局 is_default / is_active 开关。
 
-    async with dbmod.AsyncSessionLocal() as s:
-        active = await get_active_provider(s)
-        assert active is not None and active.id == id_b  # 当前优先
-        # 取消 B 的当前标记 → 应回退到默认 A
-        svc = QuoteProviderService(s)
-        b = await svc.get(id_b)
-        await svc.update(b, is_active=False)
-        await s.commit()
-        active2 = await get_active_provider(s)
-        assert active2 is not None and active2.id == id_a  # 回退默认
+    create 时传入 is_default / is_active 应被忽略（pydantic 忽略额外字段），
+    返回的提供方既不带 is_default 也不带 is_active 字段。
+    """
+    token = await _admin_token(client, "qp_admin_9@example.com")
+    r = await client.post(
+        "/api/admin/quote-providers",
+        json={**HTTPS_BODY, "name": "A", "is_default": True, "is_active": True},
+        headers=auth(token),
+    )
+    status, code, data, _ = env(r)
+    assert status == 200 and code == 0
+    assert "is_default" not in data
+    assert "is_active" not in data
+    assert data["enabled"] is True
