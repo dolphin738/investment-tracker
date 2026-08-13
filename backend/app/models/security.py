@@ -1,11 +1,13 @@
 """标的主数据 / 证券买卖流水 / 标的最新价（对齐 app Prisma: Security / SecurityTrade / SecurityPrice）。"""
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
+from typing import Optional
 
 from sqlalchemy import (
     Date,
+    DateTime,
     Enum,
     ForeignKey,
     Index,
@@ -120,6 +122,13 @@ class SecurityPrice(Base, CreatedAtMixin):
     )
     price: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
     as_of: Mapped[date] = mapped_column("as_of", Date, nullable=False)
+    # —— 实时行情数据时效（ADR-002 §2.2）：支撑"数据截至 HH:MM · 来源"与过旧红点判断 ——
+    fetched_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True, comment="行情拉取时间（区分日内拉取时刻）"
+    )
+    source: Mapped[Optional[str]] = mapped_column(
+        String(64), nullable=True, comment="价来源：接口名（如 小熊同学/stock）/ 手动上传"
+    )
 
     portfolio: Mapped["Portfolio"] = relationship(back_populates="security_prices")
     security: Mapped["Security"] = relationship(back_populates="prices")

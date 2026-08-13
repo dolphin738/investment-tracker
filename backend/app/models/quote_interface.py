@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from sqlalchemy import Boolean, Enum as SA_ENUM, ForeignKey, Integer, JSON, String, Text
+from sqlalchemy import Boolean, Enum as SA_ENUM, ForeignKey, Integer, JSON, String, Text, false
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, TimestampMixin, pk_uuid
@@ -59,3 +59,23 @@ class QuoteInterface(Base, TimestampMixin):
     timeout: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     retry_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     rate_limit: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    # —— 分类级优先级链（ADR-002 方案 X）——
+    priority: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True, index=True, comment="分类内排序，越小优先级越高"
+    )
+    consecutive_failures: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0",
+        comment="连续无响应计数（DB 原子自增）",
+    )
+    alerted: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false(),
+        comment="连续失败达阈值后的告警去重抢占标志",
+    )
+    resp_code_field: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="code", server_default="code",
+        comment="响应中标识证券代码的字段名（接口级）",
+    )
+    resp_price_field: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="price", server_default="price",
+        comment="响应中标识价格的字段名（接口级）",
+    )
