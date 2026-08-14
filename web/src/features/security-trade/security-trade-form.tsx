@@ -32,7 +32,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useCreateSecurityTrade, useUpdateSecurityTrade } from '@/hooks/use-security-trades';
-import { useSecurities, useResolveSecurity } from '@/hooks/use-securities';
+import { useSecurities, useResolveSecurity, useUpdateSecurity } from '@/hooks/use-securities';
 import { toast } from 'sonner';
 import { toIsoDate } from '@/lib/constants';
 // SecurityType 与 SecuritySide 同源：唯一定义在 shared，前后端共用（Q-3）
@@ -44,6 +44,18 @@ import type {
 } from '@/api/types';
 import { SecuritySearchCombobox } from '@/components/security/security-search-combobox';
 import type { SecurityMaster } from '@/api/security-master.api';
+
+/** 资产类型选项（供手动修改使用） */
+const SECURITY_TYPE_OPTIONS: ReadonlyArray<{ value: SecurityType; label: string }> = [
+  { value: SecurityType.STOCK, label: '股票' },
+  { value: SecurityType.ETF, label: 'ETF' },
+  { value: SecurityType.FUND, label: '基金' },
+  { value: SecurityType.BOND, label: '债券' },
+  { value: SecurityType.CONVERTIBLE_BOND, label: '可转债' },
+  { value: SecurityType.INDEX, label: '指数' },
+  { value: SecurityType.HK_STOCK, label: '港股' },
+  { value: SecurityType.OTHER, label: '其他' },
+];
 
 /** 费用字段：可选、非负、最多 2 位小数 */
 const feeFieldSchema = z
@@ -128,9 +140,11 @@ export function SecurityTradeForm({
   const isEdit = Boolean(trade);
   const createMutation = useCreateSecurityTrade();
   const updateMutation = useUpdateSecurityTrade();
+  const updateSecurityMutation = useUpdateSecurity(portfolioId);
   const { data: securities = [], isLoading: secLoading } = useSecurities(portfolioId);
   const today = toIsoDate(new Date());
   const [submitting, setSubmitting] = useState(false);
+  const [currentSecurityType, setCurrentSecurityType] = useState<SecurityType | null>(null);
 
   const {
     register,
@@ -235,7 +249,30 @@ export function SecurityTradeForm({
         exchange: master.exchange ?? undefined,
       },
       {
-        onSuccess: (res) => setValue('securityId', res.id, { shouldValidate: true }),
+        onSuccess: (res) => {
+          setValue('securityId', res.id, { shouldValidate: true });
+          // 记录当前证券的类型，供手动修改使用
+          setCurrentSecurityType(res.type as SecurityType);
+        },
+      },
+    );
+  };
+
+  /** 手动修改资产类型 */
+  const handleSecurityTypeChange = (newType: SecurityType): void => {
+    if (!selectedSecurityId || !currentSecurityType || newType === currentSecurityType) {
+      return;
+    }
+    updateSecurityMutation.mutate(
+      {
+        securityId: selectedSecurityId,
+        payload: { type: newType },
+      },
+      {
+        onSuccess: () => {
+          setCurrentSecurityType(newType);
+          toast.success('资产类型已更新');
+        },
       },
     );
   };
@@ -388,6 +425,32 @@ export function SecurityTradeForm({
             <p className="text-xs text-red-500">{errors.securityId.message}</p>
           )}
         </div>
+
+        {/* 资产类型：选中证券后可手动修改 */}
+        {selectedSecurityId && currentSecurityType && (
+          <div className="space-y-2">
+            <Label htmlFor="st-security-type">资产类型（可修改）</Label>
+            <Select
+              value={currentSecurityType}
+              onValueChange={handleSecurityTypeChange}
+              disabled={updateSecurityMutation.isPending}
+            >
+              <SelectTrigger id="st-security-type">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {SECURITY_TYPE_OPTIONS.map((opt) => (
+                  <SelectItem key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {updateSecurityMutation.isPending && (
+              <p className="text-xs text-muted-foreground">更新中...</p>
+            )}
+          </div>
+        )}
 
         {/* 数量 */}
         <div className="space-y-2">
