@@ -487,6 +487,7 @@ class MarketDataSyncService:
         synced = 0
         failed = 0
         errors: list[str] = []
+        used: Optional[dict[str, Any]] = None
         for itf in interfaces:
             try:
                 rows = await self._call_interface_raw(itf, itf.params, None)
@@ -496,12 +497,27 @@ class MarketDataSyncService:
             if rows:  # 有响应 → 解析 upsert + 标记成功 + 优先链命中即停
                 synced += await self._upsert_masters(itf, rows)
                 await self._mark_success(itf.id)
+                # 记录本次实际使用的接口与提供方（供前端展示「本次同步来源」）
+                provider = await self.session.get(
+                    SecuritiesDataProvider, itf.provider_id
+                )
+                used = {
+                    "providerId": itf.provider_id,
+                    "providerName": provider.name if provider else itf.provider_id,
+                    "interfaceId": itf.id,
+                    "interfaceName": itf.name,
+                }
                 break
             # 无响应：计数，继续下一接口（priority 降级）
             await self._mark_failure(itf)
             failed += 1
         await self.session.flush()
-        return {"synced": synced, "failed": failed, "errors": errors}
+        return {
+            "synced": synced,
+            "failed": failed,
+            "errors": errors,
+            "used": used,
+        }
 
     async def sync_all_security_masters(self) -> dict[str, Any]:
         """遍历全部 MASTER_LIST 接口的 distinct asset_class，逐个同步（数据驱动，零硬编码）。"""
@@ -520,12 +536,28 @@ class MarketDataSyncService:
         synced = 0
         failed = 0
         errors: list[str] = []
+        used_list: list[dict[str, Any]] = []
         for ac in asset_classes:
             res = await self.sync_security_masters(ac)
             synced += res["synced"]
             failed += res["failed"]
             errors.extend(res["errors"])
-        return {"synced": synced, "failed": failed, "errors": errors}
+            if res.get("used"):
+                used_list.append(res["used"])
+        # 跨资产类别去重（按 interface_id）
+        seen: set[str] = set()
+        deduped: list[dict[str, Any]] = []
+        for u in used_list:
+            if u["interface_id"] in seen:
+                continue
+            seen.add(u["interface_id"])
+            deduped.append(u)
+        return {
+            "synced": synced,
+            "failed": failed,
+            "errors": errors,
+            "used": deduped,
+        }
 
     async def _upsert_masters(self, itf: QuoteInterface, rows: list[Any]) -> int:
         """把原始行 upsert 进 securities 系统主数据目录表（ADR-003 后仅主数据行）。
