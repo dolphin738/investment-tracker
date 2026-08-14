@@ -13,7 +13,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Loader2, Search } from 'lucide-react';
+import { Loader2, Search, X } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { listSecurityMasters, type SecurityMaster } from '@/api/security-master.api';
 
@@ -22,6 +22,8 @@ export interface SecuritySearchComboboxProps {
   value?: string;
   /** 选中系统主数据候选后回调（由调用方调 resolve 实例化为组合标的） */
   onSelect: (master: SecurityMaster) => void;
+  /** 点击清空小叉时回调（由调用方清掉已选标的 securityId） */
+  onClear?: () => void;
   disabled?: boolean;
   placeholder?: string;
   id?: string;
@@ -32,6 +34,7 @@ const SEARCH_DEBOUNCE_MS = 250;
 export function SecuritySearchCombobox({
   value,
   onSelect,
+  onClear,
   disabled = false,
   placeholder = '搜索代码 / 名称 / 拼音首字母',
   id,
@@ -81,7 +84,7 @@ export function SecuritySearchCombobox({
         <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
         <Input
           id={id}
-          className="pl-8"
+          className="pl-8 pr-8"
           placeholder={placeholder}
           disabled={disabled}
           value={searching ? query : (value ?? '')}
@@ -97,6 +100,21 @@ export function SecuritySearchCombobox({
             setTimeout(() => setOpen(false), 150);
           }}
         />
+        {(searching ? query : (value ?? '')) && !disabled && (
+          <button
+            type="button"
+            aria-label="清除"
+            onClick={() => {
+              setQuery('');
+              setDebouncedQ('');
+              setOpen(false);
+              onClear?.();
+            }}
+            className="absolute right-2 top-1/2 -translate-y-1/2 rounded-sm p-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        )}
       </div>
 
       {searching && (

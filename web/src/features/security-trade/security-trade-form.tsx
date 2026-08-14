@@ -429,6 +429,10 @@ export function SecurityTradeForm({
             placeholder={secLoading ? '加载中…' : '搜索代码 / 名称 / 拼音首字母'}
             disabled={secLoading && !selectedSecurityId}
             onSelect={handleSelectMaster}
+            onClear={() => {
+              setValue('securityId', '', { shouldValidate: true });
+              setCurrentSecurityType(null);
+            }}
           />
           {errors.securityId && (
             <p className="text-xs text-red-500">{errors.securityId.message}</p>

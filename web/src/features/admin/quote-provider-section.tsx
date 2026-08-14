@@ -16,6 +16,8 @@ import {
   Loader2,
   Pencil,
   Plus,
+  Power,
+  PowerOff,
   Trash2,
 } from 'lucide-react';
 import {
@@ -182,6 +184,23 @@ export function QuoteProviderSection(): JSX.Element {
       </TableCell>
       <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-end gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={updateMut.isPending}
+            onClick={(e) => {
+              e.stopPropagation();
+              updateMut.mutate({ id: p.id, body: { enabled: !p.enabled } });
+            }}
+            title={p.enabled ? '停用该数据来源' : '启用该数据来源'}
+          >
+            {p.enabled ? (
+              <PowerOff className="mr-1 h-3.5 w-3.5" />
+            ) : (
+              <Power className="mr-1 h-3.5 w-3.5" />
+            )}
+            {p.enabled ? '停用' : '启用'}
+          </Button>
           <Button variant="ghost" size="sm" onClick={() => openEdit(p)}>
             <Pencil className="mr-1 h-3.5 w-3.5" />
             编辑

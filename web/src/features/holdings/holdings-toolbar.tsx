@@ -19,6 +19,7 @@ import { useState } from 'react';
 import { Check, ChevronDown, Filter } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { SearchInput } from '@/components/ui/search-input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import {
@@ -146,7 +147,7 @@ export function HoldingsToolbar({
         {/* ③ 证券：文本框模糊匹配（code/name，覆盖全部标的类型；多选保持 sec=ID 契约） */}
         <div className="relative space-y-1.5">
           <Label className="text-xs text-muted-foreground">证券</Label>
-          <Input
+          <SearchInput
             type="text"
             value={secQuery}
             placeholder={
@@ -156,6 +157,7 @@ export function HoldingsToolbar({
               setSecQuery(e.target.value);
               setSecOpen(true);
             }}
+            onClear={() => setSecQuery('')}
             onFocus={() => setSecOpen(true)}
             onBlur={() => window.setTimeout(() => setSecOpen(false), 120)}
             className="w-[180px]"

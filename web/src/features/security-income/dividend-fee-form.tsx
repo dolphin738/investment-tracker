@@ -204,6 +204,7 @@ export function DividendFeeForm({
           placeholder={secLoading ? '加载中…' : '搜索代码 / 名称 / 拼音首字母'}
           disabled={secLoading && !securityId}
           onSelect={handleSelectMaster}
+          onClear={() => setValue('securityId', '', { shouldValidate: true })}
         />
         {errors.securityId && (
           <p className="text-xs text-destructive">{errors.securityId.message}</p>
