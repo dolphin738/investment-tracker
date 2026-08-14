@@ -187,13 +187,13 @@ export const SecurityType = {
   STOCK: 'STOCK',
   FUND: 'FUND',
   BOND: 'BOND',
-  CASH: 'CASH',
   OTHER: 'OTHER',
   // 证券主数据多资产类别扩展
   HK_STOCK: 'HK_STOCK',
   CONVERTIBLE_BOND: 'CONVERTIBLE_BOND',
   ETF: 'ETF',
   INDEX: 'INDEX',
+  LOF: 'LOF',
 } as const;
 export type SecurityType = (typeof SecurityType)[keyof typeof SecurityType];
 
