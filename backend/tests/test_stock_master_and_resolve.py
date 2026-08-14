@@ -496,3 +496,51 @@ async def test_sync_security_masters_array_rows_positional(client, monkeypatch, 
     assert rows["sh600000"].exchange == "SH"
     assert rows["bj920021"].exchange == "BJ"
     assert rows["sh600000"].pinyin_initials == "pfyh"  # 浦发银行 → pfyh
+
+
+async def test_sync_all_security_masters_returns_used_per_asset_class(
+    client, monkeypatch, session
+):
+    """sync_all_security_masters 遍历多资产类别时，used 列表按 camelCase interfaceId 读取，不 KeyError。
+
+    回归：去重循环曾误用 u['interface_id']（蛇形键），多资产类别同步会立刻 KeyError。
+    本用例建 2 个 MASTER_LIST 接口（STOCK / HK_STOCK 各一）触发 distinct 遍历，
+    断言 used 含两接口的 camelCase 信息且按 interfaceId 去重。
+    """
+    token = await _admin_token(client, "sm_admin_12@example.com")
+    pid = await _create_provider(client, token)  # access_method=https
+    iid_stock = await _create_interface(
+        client,
+        token,
+        pid,
+        await _create_category(client, token),
+        name="A股主数据",
+        purpose="MASTER_LIST",
+        asset_class="STOCK",
+    )
+    iid_hk = await _create_interface(
+        client,
+        token,
+        pid,
+        await _create_category(client, token),
+        name="港股主数据",
+        purpose="MASTER_LIST",
+        asset_class="HK_STOCK",
+    )
+
+    async def _fake_https_raw(self, itf, params, codes):
+        if itf.asset_class == SecurityType.HK_STOCK:
+            return [{"code": "00700", "name": "腾讯控股"}]
+        return [{"code": "600000", "name": "浦发银行"}]
+
+    monkeypatch.setattr(MarketDataSyncService, "_fetch_https_raw", _fake_https_raw)
+    result = await MarketDataSyncService(session).sync_all_security_masters()
+    assert result["synced"] == 2
+    assert result["failed"] == 0
+    used = result["used"]
+    assert used is not None and len(used) == 2
+    assert {u["interfaceId"] for u in used} == {iid_stock, iid_hk}
+    for u in used:
+        assert u["providerId"] == pid
+        assert u["interfaceName"] in ("A股主数据", "港股主数据")
+        assert "providerName" in u and "interfaceId" in u

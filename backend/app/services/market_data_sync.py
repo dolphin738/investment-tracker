@@ -544,13 +544,13 @@ class MarketDataSyncService:
             errors.extend(res["errors"])
             if res.get("used"):
                 used_list.append(res["used"])
-        # 跨资产类别去重（按 interface_id）
+        # 跨资产类别去重（按 interfaceId，camelCase 键，与 used dict 一致）
         seen: set[str] = set()
         deduped: list[dict[str, Any]] = []
         for u in used_list:
-            if u["interface_id"] in seen:
+            if u["interfaceId"] in seen:
                 continue
-            seen.add(u["interface_id"])
+            seen.add(u["interfaceId"])
             deduped.append(u)
         return {
             "synced": synced,
