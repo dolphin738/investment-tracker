@@ -177,6 +177,8 @@ export function SecurityTradeForm({
    *   （costPrice 为含费单价，`tradeAmount = qty*costPrice −/+ feeTotal` 倒推，金融算法不变）
    */
   useEffect(() => {
+    // 切换记录时清掉手动覆盖的类型，交由下方推导 effect 重新带出
+    setCurrentSecurityType(null);
     if (trade) {
       const feeTotal = Number(trade.feeTotal);
       const baseAmount = Number(trade.quantity) * Number(trade.costPrice);
@@ -224,6 +226,17 @@ export function SecurityTradeForm({
    * 任何时刻 value 都能命中一个已渲染的选项。
    */
   const selectedSecurityId = securityIdValue || trade?.securityId || '';
+
+  /**
+   * 资产类型首帧推导（点 1 配套）：编辑态 / 异步加载完成后，从标的列表推导当前资产类型，
+   * 保证「资产类型」框在页面加载即可正确带出，不再依赖手动选择标的后才出现。
+   * 仅在尚未被手动覆盖（currentSecurityType 为 null）时推导。
+   */
+  useEffect(() => {
+    if (currentSecurityType || !selectedSecurityId) return;
+    const found = securities.find((s) => s.id === selectedSecurityId);
+    if (found?.type) setCurrentSecurityType(found.type as SecurityType);
+  }, [securities, selectedSecurityId, currentSecurityType]);
 
   /**
    * 当前选中标的的展示文本（编辑态回显，INC-02 保底语义）：
@@ -427,31 +440,31 @@ export function SecurityTradeForm({
           )}
         </div>
 
-        {/* 资产类型：选中证券后可手动修改 */}
-        {selectedSecurityId && currentSecurityType && (
-          <div className="space-y-2">
-            <Label htmlFor="st-security-type">资产类型（可修改）</Label>
-            <Select
-              value={currentSecurityType}
-              onValueChange={handleSecurityTypeChange}
-              disabled={updateSecurityMutation.isPending}
-            >
-              <SelectTrigger id="st-security-type">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {SECURITY_TYPE_OPTIONS.map((opt) => (
-                  <SelectItem key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {updateSecurityMutation.isPending && (
-              <p className="text-xs text-muted-foreground">更新中...</p>
-            )}
-          </div>
-        )}
+        {/* 资产类型：选中证券后自动带出，可手动修改（点 1：页面加载即展示，不再依赖标的输入后才显示） */}
+        <div className="space-y-2">
+          <Label htmlFor="st-security-type">资产类型（可修改）</Label>
+          <Select
+            value={currentSecurityType ?? undefined}
+            onValueChange={handleSecurityTypeChange}
+            disabled={!selectedSecurityId || updateSecurityMutation.isPending}
+          >
+            <SelectTrigger id="st-security-type">
+              <SelectValue
+                placeholder={selectedSecurityId ? '加载中…' : '请先选择标的'}
+              />
+            </SelectTrigger>
+            <SelectContent>
+              {SECURITY_TYPE_OPTIONS.map((opt) => (
+                <SelectItem key={opt.value} value={opt.value}>
+                  {opt.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {updateSecurityMutation.isPending && (
+            <p className="text-xs text-muted-foreground">更新中...</p>
+          )}
+        </div>
 
         {/* 数量 */}
         <div className="space-y-2">
