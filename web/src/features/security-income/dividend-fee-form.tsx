@@ -19,7 +19,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { Info, Loader2 } from 'lucide-react';
-import { isMoneyString, computeNetAmount, SecurityType } from '@/lib/types';
+import { isMoneyString, computeNetAmount } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -133,16 +133,11 @@ export function DividendFeeForm({
   const amount = watch('amount');
   const tax = watch('tax');
 
-  /** 选中系统主数据 → resolve 懒实例化为组合标的，回填 securityId（对齐「录入买卖」§10） */
+  /** 选中系统主数据 → resolve 懒实例化为组合标的，回填 securityId（对齐「录入买卖」§10，ADR-003） */
   const resolveSecurityMutation = useResolveSecurity(portfolioId);
   const handleSelectMaster = (master: SecurityMaster): void => {
     resolveSecurityMutation.mutate(
-      {
-        code: master.code,
-        name: master.name,
-        type: master.type ? (master.type as SecurityType) : undefined,
-        exchange: master.exchange ?? undefined,
-      },
+      { masterId: master.id },
       {
         onSuccess: (res) => {
           setValue('securityId', res.id, { shouldValidate: true });

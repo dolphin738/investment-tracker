@@ -19,8 +19,12 @@ export interface SecurityMaster {
   name: string;
   /** 交易所/市场（SH/SZ/BJ/HK…）；主数据同步填充，可空 */
   exchange: string | null;
-  /** 资产类别（SecurityType：STOCK/HK_STOCK/ETF/INDEX…） */
-  type: string | null;
+  /**
+   * 资产类别（SecurityType：STOCK/HK_STOCK/ETF/INDEX…）。
+   * 仅用于唯一约束 + 接口配置路由，不参与组合维度类型推导
+   * （组合行 type 由代码前缀推断 / 手动 override，见 ADR-003）。
+   */
+  assetClass: string | null;
   /** 最近同步时间（TimestampMixin updated_at，ISO 8601） */
   updatedAt: string;
 }

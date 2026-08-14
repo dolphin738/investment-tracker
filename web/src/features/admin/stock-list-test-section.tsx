@@ -195,7 +195,7 @@ function StockListPanel({
                     {s.exchange ?? '-'}
                   </TableCell>
                   <TableCell className="text-muted-foreground">
-                    {s.type ? (SECURITY_TYPE_LABEL[s.type] ?? s.type) : '-'}
+                    {s.assetClass ? (SECURITY_TYPE_LABEL[s.assetClass] ?? s.assetClass) : '-'}
                   </TableCell>
                   <TableCell className="text-right">
                     <Button

@@ -125,7 +125,7 @@ export function SecuritySearchCombobox({
                   </span>
                 </span>
                 <span className="shrink-0 text-xs text-muted-foreground">
-                  {[s.exchange, s.type].filter(Boolean).join(' · ') || '—'}
+                  {[s.exchange, s.assetClass].filter(Boolean).join(' · ') || '—'}
                 </span>
               </button>
             ))}

@@ -259,7 +259,7 @@ describe('证券买卖表单证券搜索（shared SecurityType 驱动 resolve）
           code: '110011',
           name: '易方达',
           exchange: 'SH',
-          type: 'FUND',
+          assetClass: 'FUND',
           updatedAt: '2026-08-13T00:00:00.000Z',
         },
       ],
@@ -276,18 +276,15 @@ describe('证券买卖表单证券搜索（shared SecurityType 驱动 resolve）
 
     await waitFor(() => expect(mocks.resolveSecurity).toHaveBeenCalledTimes(1));
     const payload = mocks.resolveSecurity.mock.calls[0][0] as {
-      code: string;
-      name: string;
-      type: string;
+      masterId: string;
+      type?: string;
     };
-    expect(payload.code).toBe('110011');
-    expect(payload.name).toBe('易方达');
-    // type 直接取自 shared 白名单值（FUND），不因字面量类型卡住
-    expect(payload.type).toBe('FUND');
-    expect(Object.values(SharedSecurityType)).toContain(payload.type);
+    expect(payload.masterId).toBe('m-1');
+    // ADR-003 §2.2：resolve 不携带 type（type=NULL，读取时由代码前缀推断）
+    expect(payload.type).toBeUndefined();
   });
 
-  it('候选无类型（type=null）时 resolve 不携带 type（走后端默认）', async () => {
+  it('resolve 仅携带 masterId（不传 type，走后端默认推断）', async () => {
     mocks.searchMasters.mockResolvedValue({
       items: [
         {
@@ -295,7 +292,7 @@ describe('证券买卖表单证券搜索（shared SecurityType 驱动 resolve）
           code: '600519',
           name: '贵州茅台',
           exchange: 'SH',
-          type: null,
+          assetClass: null,
           updatedAt: '2026-08-13T00:00:00.000Z',
         },
       ],
@@ -311,7 +308,11 @@ describe('证券买卖表单证券搜索（shared SecurityType 驱动 resolve）
     fireEvent.click(candidate);
 
     await waitFor(() => expect(mocks.resolveSecurity).toHaveBeenCalledTimes(1));
-    const payload = mocks.resolveSecurity.mock.calls[0][0] as { type?: string };
+    const payload = mocks.resolveSecurity.mock.calls[0][0] as {
+      masterId: string;
+      type?: string;
+    };
+    expect(payload.masterId).toBe('m-2');
     expect(payload.type).toBeUndefined();
   });
 });

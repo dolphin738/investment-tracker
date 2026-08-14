@@ -252,20 +252,15 @@ export function SecurityTradeForm({
     return secLoading ? '当前标的（加载中…）' : '当前标的（已不在可选列表）';
   }, [securities, selectedSecurityId, secLoading]);
 
-  /** 选中系统主数据 → resolve 懒实例化为组合标的，回填 securityId（§7 ③ / §10） */
+  /** 选中系统主数据 → resolve 懒实例化为组合标的，回填 securityId（§7 ③ / §10，ADR-003） */
   const resolveSecurityMutation = useResolveSecurity(portfolioId);
   const handleSelectMaster = (master: SecurityMaster): void => {
     resolveSecurityMutation.mutate(
-      {
-        code: master.code,
-        name: master.name,
-        type: master.type ? (master.type as SecurityType) : undefined,
-        exchange: master.exchange ?? undefined,
-      },
+      { masterId: master.id },
       {
         onSuccess: (res) => {
           setValue('securityId', res.id, { shouldValidate: true });
-          // 记录当前证券的类型，供手动修改使用
+          // 记录当前证券的类型（后端由代码前缀推断），供手动修改使用
           setCurrentSecurityType(res.type as SecurityType);
         },
       },

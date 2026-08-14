@@ -246,7 +246,7 @@ describe('证券买卖录入 · 三项费用物理并表（INC-03/INC-04）', ()
           code: '600000',
           name: '测试标的',
           exchange: 'SH',
-          type: 'STOCK',
+          assetClass: 'STOCK',
           updatedAt: '2026-08-13T00:00:00.000Z',
         },
       ],

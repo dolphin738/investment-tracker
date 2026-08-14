@@ -72,19 +72,18 @@ export function deleteSecurity(
 }
 
 /**
- * 录入界面证券搜索选中后的懒实例化（§7 ③ / §10）。
+ * 录入界面证券搜索选中后的懒实例化（§7 ③ / §10，ADR-003）。
  *
  * 用户从系统主数据（portfolio_id IS NULL）选中某标的，但 trade.securityId 必须指向
- * 组合维度行：本端点幂等 upsert by (portfolio_id, code)——命中已有组合行直接返回；
- * 否则以主数据行为模板实例化一条组合行。
+ * 组合维度行：本端点幂等 upsert by (portfolio_id, master_id)——命中已有组合行直接返回；
+ * 否则以目录主数据为模板实例化一条组合行。type 不在此设置
+ * （NULL，读取时由代码前缀推断；手动改类型走 PATCH），对齐 ADR-003 §2.2 / D4。
  */
 
-/** 解析（懒实例化）请求体 */
+/** 解析（懒实例化）请求体：必须选中已存在的目录主数据（其 id） */
 export interface ResolveSecurityRequest {
-  code: string;
-  name?: string;
-  type?: SecurityType;
-  exchange?: string;
+  /** 目录主数据 id（securities.id），由 combobox onSelect(master) 提供 */
+  masterId: string;
 }
 
 /** 解析（懒实例化）响应 */
