@@ -236,3 +236,81 @@ async def test_delete_security_cascades_and_recalc(client):
     _, _, snap, _ = env(r)
     assert snap["source"] == "DERIVED"
     assert Decimal(snap["totalAsset"]) == Decimal(90000)
+
+
+async def test_delete_last_trade_prunes_orphan_holding(client):
+    """实现B：持仓仅有买卖（无行情/分红），删光买卖后持仓应被级联裁剪（GET 404）。"""
+    creds = await register_login(client, "orphan1@example.com", "pw123456")
+    h = auth(creds["token"])
+    pid = (
+        await client.post("/api/portfolios", headers=h, json={"name": "孤儿裁剪A"})
+    ).json()["data"]["id"]
+    sec_id = await seed_security(client, pid, "600001", "孤儿A", h, type="STOCK")
+    r = await client.post(
+        f"/api/portfolios/{pid}/security-trades",
+        headers=h,
+        json={
+            "date": str(D1),
+            "securityId": sec_id,
+            "side": "BUY_SEC",
+            "quantity": 100,
+            "costPrice": 10,
+        },
+    )
+    assert env(r)[0] == 200
+    trade_id = r.json()["data"]["id"]
+
+    r = await client.delete(
+        f"/api/portfolios/{pid}/security-trades/{trade_id}", headers=h
+    )
+    assert env(r)[0] == 200
+
+    # 持仓已无买卖/行情/分红 → 被裁剪
+    r = await client.get(f"/api/portfolios/{pid}/securities/{sec_id}", headers=h)
+    assert r.status_code == 404
+
+
+async def test_delete_last_trade_keeps_holding_with_price(client):
+    """实现B：持仓仍有行情时，删光买卖后持仓应保留（GET 200，不被误裁）。"""
+    creds = await register_login(client, "orphan2@example.com", "pw123456")
+    h = auth(creds["token"])
+    pid = (
+        await client.post("/api/portfolios", headers=h, json={"name": "孤儿裁剪B"})
+    ).json()["data"]["id"]
+    sec_id = await seed_security(client, pid, "600002", "孤儿B", h, type="STOCK")
+    await client.post(
+        f"/api/portfolios/{pid}/cashflows",
+        headers=h,
+        json={"date": str(D1), "type": "BUY", "amount": 100000},
+    )
+    await client.post(
+        f"/api/portfolios/{pid}/cash-balances",
+        headers=h,
+        json={"asOf": str(D1), "amount": 90000},
+    )
+    await client.post(
+        f"/api/portfolios/{pid}/security-prices",
+        headers=h,
+        json={"securityId": sec_id, "price": 10, "asOf": str(D1)},
+    )
+    r = await client.post(
+        f"/api/portfolios/{pid}/security-trades",
+        headers=h,
+        json={
+            "date": str(D1),
+            "securityId": sec_id,
+            "side": "BUY_SEC",
+            "quantity": 100,
+            "costPrice": 10,
+        },
+    )
+    trade_id = r.json()["data"]["id"]
+
+    r = await client.delete(
+        f"/api/portfolios/{pid}/security-trades/{trade_id}", headers=h
+    )
+    assert env(r)[0] == 200
+
+    # 持仓仍有行情 → 保留
+    r = await client.get(f"/api/portfolios/{pid}/securities/{sec_id}", headers=h)
+    assert r.status_code == 200
