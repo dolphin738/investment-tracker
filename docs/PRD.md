@@ -9,8 +9,8 @@
 
 本 PRD 描述的所有功能模块均已实现，代码库为 `investment_return_tracker`：
 
-- **后端（Python / FastAPI）**：已实现完整 API 面，模块含 `auth`（注册 / 登录 / 恢复 / me / 资料 / 密码 / 邮箱 / 注销）、`portfolios`（CRUD + 归档 + 清空数据）、`aggregation`（对比 / 摘要 / 概览 / 指标 / 回撤 / 账户统计）、`data`（cashflows、securities、security-trades、security-prices、cash-balances、snapshots + 重置）、`dividend`、`calc`（holdings / xirr / nav / 重算）、`data-transfer`（导出 / 导入 / 模板）、`preference`（用户偏好）、`upload`（头像）。
-- **前端（React / Vite）**：已构建全部页面 —— `login`、`register`、`dashboard(/)`、`holdings(/holdings)`、`transactions`(路由 `/cashflows`)、`snapshots(/snapshots)`、`xirr-analysis(/analysis/xirr)`、`nav-analysis(/analysis/nav)`、`account(/account)`、`settings(/settings)`、`not-found`。功能模块：`cashflow`、`holdings`、`security-trade`、`security-price`、`snapshot`、`security-income`(分红)、`overview`、`portfolio`、`account`、`auth`、`data-transfer`、`query`。图表用 ECharts（`nav-trend`、`xirr-trend`、`yearly-bar`、`monthly-heatmap`、`stat-card`）。
+- **后端（Python / FastAPI）**：已实现完整 API 面，模块含 `auth`（注册 / 登录 / 恢复 / me / 资料 / 密码 / 邮箱 / 注销）、`portfolios`（CRUD + 归档 + 清空数据）、`aggregation`（对比 / 摘要 / 概览 / 指标 / 回撤 / 账户统计）、`data`（cashflows、securities、security-trades、security-prices、cash-balances、snapshots + 重置、`securities/resolve` 选标实例化）、`dividend`、`calc`（holdings / xirr / nav / 重算）、`data-transfer`（导出 / 导入 / 模板）、`preference`（用户偏好）、`upload`（头像）、`admin`（金融数据接口：提供方 / 接口 / 分类 CRUD + 证券主数据同步 `securities/masters` + 单接口测试 `quote-interfaces/{id}/test`）、`market-data`（`MarketDataSyncService`：配置驱动行情拉取、数组行归一化、QUOTE/MASTER_LIST 分派、优先级降级链、同步失败告警）。
+- **前端（React / Vite）**：已构建全部页面 —— `login`、`register`、`dashboard(/)`、`holdings(/holdings)`、`transactions`(路由 `/cashflows`)、`snapshots(/snapshots)`、`xirr-analysis(/analysis/xirr)`、`nav-analysis(/analysis/nav)`、`account(/account)`、`settings(/settings)`、`not-found`。功能模块：`cashflow`、`holdings`、`security-trade`、`security-price`、`snapshot`、`security-income`(分红)、`overview`、`portfolio`、`account`、`auth`、`data-transfer`、`query`、`admin`（金融数据接口：提供方 / 接口对话框含 MASTER_LIST 配置 / 分类）、`stock-list-test`（系统管理内「股票列表和测试」：左栏主数据分页+搜索+同步、右栏接口测试含原始响应全部复制与查找高亮）、`master-data-select`（录入买入/卖出时按代码/名称/拼音首字母搜索选中主数据并实例化为组合标的）。图表用 ECharts（`nav-trend`、`xirr-trend`、`yearly-bar`、`monthly-heatmap`、`stat-card`）。
 
 > 各模块级别（§5）标注了对应的已实现后端模块与前端页面；文档其余部分不再逐行加「✅ 已实现」标记。
 
@@ -31,6 +31,7 @@
 | §8 | 计算引擎契约（XIRR / NAV 取数与触发） |
 | §9 | 非功能性需求 |
 | §10 | 验收与强制回归测试（REG-01 ~ REG-06） |
+| §11 | 证券主数据与市场数据接口配置（配置驱动 · 多资产类别） |
 | 附录 | A XIRR 伪代码 / B 净值伪代码 / C 持仓推导伪代码 / D 数据模型摘要 / E API 列表 |
 
 ---
@@ -606,12 +607,25 @@ totalAsset(D) = marketValue(D) + cashBalance(D)          // 自动派生口径
 系统管理页承载「金融数据接口」配置，含三个能力：
 
 1. **数据来源（证券行情数据提供方，多提供方）**：取代旧的单 URL 系统配置。每个提供方（`SecuritiesDataProvider`）含 `name` / `provider_type` / `access_method`(https|sdk) / `config`(JSON，HTTPS 存 `base_url`、SDK 存 `sdk_name`) / `is_default` / `is_active` / `enabled` / `description`；解析链「当前(is_active) → 默认(is_default) → None」决定运行时使用哪个提供方（`get_active_provider`）。提供方可设默认 / 设当前（全局至多一个）；删除提供方级联删其接口。
-2. **接口 API 来源（提供方接口）**：每个提供方下可配置多个接口（`QuoteInterface`）：`category_id`(分类 id，外键→interface_categories.id) / `name` / `endpoint`(地址或 SDK 函数名) / `http_method`(GET/POST/PUT/DELETE/PATCH，SDK 可空) / `params`(JSON 模板) / `enabled` / `direction`(in/out，默认 in) / `timeout` / `retry_count` / `rate_limit`。顶层 `GET /api/admin/quote-providers/interfaces` 扁平返回全部接口，供「按分类汇总所有提供方」总览。
+2. **接口 API 来源（提供方接口）**：每个提供方下可配置多个接口（`QuoteInterface`）：`category_id`(分类 id，外键→interface_categories.id) / `name` / `endpoint`(地址或 SDK 函数名) / `http_method`(GET/POST/PUT/DELETE/PATCH，SDK 可空) / `params`(JSON 模板) / `enabled` / `direction`(in/out，默认 in) / `timeout` / `retry_count` / `rate_limit` / **`purpose`(接口用途：`QUOTE`=价格行情 / `MASTER_LIST`=证券列表，默认 `QUOTE`)** / **`asset_class`(该接口拉取资产类别，复用 `SecurityType`；MASTER_LIST 接口必填)** / **`resp_code_field`(响应中证券代码字段名，默认 `code`；数组行可填位置下标如 `0`)** / **`resp_price_field`(响应中价格字段名，默认 `price`；数组行可填下标)** / **`resp_name_field`(响应中证券名称字段，默认 `name`；MASTER_LIST 用)** / **`resp_exchange_field`(响应中交易所字段，如 `exchange`/`market`，缺失则按代码前缀推断)** / `priority`(分类内优先级链，越小越优先；跨分类独立计数) / `consecutive_failures`(连续失败计数，DB 原子自增) / `alerted`(失败达阈值告警去重标志)。顶层 `GET /api/admin/quote-providers/interfaces` 扁平返回全部接口，供「按分类汇总所有提供方」总览。
 3. **接口分类管理（InterfaceCategory）**：后台可配分类（`id`(UUID) / `label` / `icon`(lucide 名) / `sort_order`）；迁移预置 7 类（A股列表/行情、港股列表/行情、基金列表、可转债列表/行情）。`category_id` 为外键引用 interface_categories.id（ON DELETE SET NULL）；删除分类不影响接口（接口 category_id 置 NULL 变未分类）。
 
 **权限**：所有端点 `require_admin` 查库校验（PRD `AUTH-P0-01` / `SYS-P0-08`）。前端全局主侧边栏「系统管理」为可折叠分组，子项「金融数据接口」进入本页；页面内以标签页呈现「接口 API 来源」「接口分类管理」两个模块。
 
 **运行时配置字段（P0）**：提供方接口表含 `timeout`(秒) / `retry_count` / `rate_limit`(自由文本)，支持 SDK 统一 `endpoint` / `http_method` 字段；分类后台可配（预置 7 类 + 允许自定义）。
+
+### 5.9.1 证券主数据同步（系统级字典 · §11）
+
+- 系统维护一张**系统级证券主数据**（`securities` 表中 `portfolio_id IS NULL` 的行，与用户组合标的共享同一张表但互不级联）；承载全市场「代码 / 名称 / 交易所 / 资产类别 / 拼音首字母」字典，供「股票列表和测试」左栏浏览与录入证券搜索复用。
+- 同步为**配置驱动、零硬编码**：`MarketDataSyncService.sync_all_security_masters()` 遍历所有 `purpose=MASTER_LIST` 且 `enabled` 的接口，按 `asset_class` 分组，复用 QUOTE 的 https/sdk 分派与 `priority` 降级链拉取 → 归一化响应（支持 dict 行与 `[code, name]` 数组行）→ 按 `resp_code_field/resp_name_field/resp_exchange_field` 解析 → upsert 进系统主数据（部分唯一索引 `(asset_class, code)` 跨资产类别命名空间隔离），并用 `pypinyin` 计算拼音首字母。
+- 多资产类别完全数据驱动：A股 / 港股 / 可转债 / 基金 / ETF / 指数 / LOF 各自是一条 `asset_class` 不同的 MASTER_LIST 接口，同步循环无任何 `if 资产类别` 分支；新增类别 = 配置接口 + 极少枚举值。
+- 首次部署按决策 11 **不预置**任何种子接口（配置纯由管理员手动维护），因此需先建提供方 + MASTER_LIST 接口并「同步」后，主数据才有内容。
+
+### 5.9.2 接口测试（单接口调试）
+
+- 管理员在「金融数据接口」任一接口点「测试」，前端传 `params`/`codes` 调 `POST /api/admin/quote-interfaces/{interfaceId}/test`；后端 `MarketDataSyncService.test_single_interface` 按该接口配置实际拉取一次，原样回传 `raw`（归一化响应体）+ `parsed`（按 `resp_*` 解析后的 `{code: price}` 或 `{code: name}`）+ 错误/耗时。
+- 测试**不计入** `consecutive_failures`（不影响告警与降级链），纯只读诊断。
+- 原始响应框支持「全部复制」（剪贴板导出完整 JSON）+「查找高亮」（大小写不敏感实时 `<mark>` 高亮、命中计数与上下跳转），便于核对数组行 / 字段映射。
 
 # §6 需求池（FIN / FLOW / HOLD-B / CASH / SNAP / DASH / ANL / ACC / SET / SYS）
 
@@ -895,7 +909,18 @@ totalAsset(D) = marketValue(D) + cashBalance(D)          // 自动派生口径
 | 编号 | 优先级 | 功能点 | 描述 |
 |------|--------|--------|------|
 | AUTH-P0-01 | P0 | 用户角色模型（新增） | `User` 新增 `role`（`user` / `admin`，默认 `user`）；JWT 仅缓存 `role` 供前端显示，**后端授权以查库为准**（`require_admin` 校验 `current_user.role == "admin"`，否则 `FORBIDDEN 4001/403`）；注册默认 `user` |
-| SYS-P0-08 | P0 | 管理员配置（证券行情 API 地址）（新增） | 仅 admin 可看可改；入口在 `/admin` 页与侧边栏「系统管理」；存储于 `system_configs` 全局表（**非** `UserPreference`）；提供 `get_quote_api_base_url()` 读取入口供未来行情客户端；非 admin 读写为 403 |
+| SYS-P0-08 | P0 | 管理员配置（证券行情数据接口）（新增） | 仅 admin 可看可改；入口在 `/admin` 页与侧边栏「系统管理」；经「金融数据接口」多提供方配置（提供方 `SecuritiesDataProvider` / 接口 `QuoteInterface` / 分类 `InterfaceCategory`，取代旧 `system_configs` 单 URL 表，见 §5.9 / §11）；非 admin 读写为 403 |
+
+## 6.12 市场数据接口（新增 · 配置驱动主数据）
+
+| 编号 | 优先级 | 功能点 | 描述 |
+|------|--------|--------|------|
+| MARKET-P0-01 | P0 | 证券主数据配置驱动同步 | 管理员配置 `purpose=MASTER_LIST` 接口后手动「同步」，系统级主数据（`securities` 表 `portfolio_id IS NULL` 行）覆盖全市场代码/名称/交易所/资产类别/拼音首字母（§11.1） |
+| MARKET-P0-02 | P0 | 接口测试（单接口调试） | 管理员对任意接口发起测试，回传 `raw`（归一化响应）+ `parsed`（按 `resp_*` 解析）+ 错误/耗时；**不计入** `consecutive_failures`（§5.9.2 / §11.5） |
+| MARKET-P0-03 | P0 | 录入证券搜索选标的 | 录入买入/卖出时按代码/名称/拼音首字母搜索主数据，选中后经 `POST /api/portfolios/:id/securities/resolve` 实例化为组合标的（§10 决策：移除「新建标的」，仅复用主数据） |
+| MARKET-P0-04 | P0 | 多资产类别支持 | 主数据/接口配置支持 A股 / 港股 / 可转债 / 基金 / ETF / 指数 / LOF，`SecurityType` 扩展对齐；新增类别零代码改动（§11.4） |
+| MARKET-P1-01 | P1 | 同步失败告警与降级 | 接口连续失败达阈值（`consecutive_failures`）触发告警（`alerted` 去重）；QUOTE 拉取按 `priority` 降级链自动切换备用接口（§11.3 / ARCH §11） |
+| MARKET-P1-02 | P1 | 数组行响应解析 | 上游返回 `[code, name]` 位置数组时按 `resp_*` 下标解析（如 `0`/`1`），与 dict 行字段名解析统一（§11.3） |
 
 # §7 UI 草图（文字版 Wireframe）
 
@@ -1282,6 +1307,56 @@ HAVING COUNT(*) > 1;
 
 ---
 
+# §11 证券主数据与市场数据接口配置（配置驱动 · 多资产类别）
+
+> 背景：初期方案依赖 AKShare 硬编码拉取全市场证券列表；经决策 11 改为**配置驱动**——证券列表 / 行情均从管理员已配置的 `QuoteInterface` 表获取，AKShare 只是其中一个可替换的 SDK 提供方。本节为权威规格，与 ARCH §3.1.6 / §4.2.21 / §11（市场数据同步）一致。
+
+## 11.1 配置驱动数据流
+
+1. **配置**：管理员新建提供方（`https`/`sdk`）+ 在其下建接口，设 `purpose=MASTER_LIST`、`asset_class`、响应解析字段（`resp_code_field`/`resp_name_field`/`resp_exchange_field`，数组行填位置下标 `0`/`1`）。
+2. **同步**：`sync_all_security_masters()` 挑 `purpose=MASTER_LIST AND enabled`，按 `asset_class` 分组，按 `priority` 降级链依次调用（复用 QUOTE 的 https/sdk 分派 + 失败告警），解析成 `(code, name, exchange)` 后 upsert 进 `securities`（`portfolio_id IS NULL` 系统行），并用 `pypinyin` 计算拼音首字母。
+3. **消费**：①「股票列表和测试」左栏分页/搜索/同步；② 录入买卖时输入代码/名称/拼音首字母 → 命中主数据 → `POST /api/portfolios/:id/securities/resolve` 懒实例化组合标的。
+
+## 11.2 接口用途分类：QUOTE vs MASTER_LIST
+
+| | `purpose=QUOTE`（价格行情） | `purpose=MASTER_LIST`（证券列表） |
+|---|---|---|
+| 拉取内容 | 实时**价格** → `{code: price}` | 全市场**证券字典** → `(code, name, exchange)` |
+| 消费方 | 持仓现价、概览估值（`fallback_fetch`） | 左栏主数据列表、录入买卖证券搜索 |
+| 关键字段 | `resp_code_field` / `resp_price_field` | `asset_class` / `resp_name_field` / `resp_exchange_field` |
+
+> 它承载「证券列表从哪来」，而非某个具体数据源。AKShare 只是其中一种配置——换付费 HTTPS 源只改配置、零代码改动。
+
+## 11.3 响应解析与字段映射
+
+- **归一化 `_normalize_rows`**：保留 dict 行与数组行（如 `["sz301141","中科磁业"]`）；数组行按 `resp_*` 配置的**位置下标**取值（`0`=code、`1`=name、`2`=price），dict 行按字段名。
+- **字段映射**：`resp_code_field`（默认 `code`）/ `resp_price_field`（默认 `price`）用于 QUOTE；`resp_name_field`（默认 `name`）/ `resp_exchange_field` 用于 MASTER_LIST。数组行一律填下标。
+- **交易所推断 `_infer_exchange`**：`resp_exchange_field` 缺失时按代码前缀推断（`6`/`9`→SH、`0`/`3`→SZ、`8`/`4`→BJ、`sh`/`sz`/`bj` 前缀、港股 5 位码→HK）。
+
+## 11.4 多资产类别扩展（数据驱动）
+
+- **`SecurityType` 扩展**：`STOCK` / `FUND` / `BOND` / `OTHER` / `HK_STOCK` / `CONVERTIBLE_BOND` / `ETF` / `INDEX` / `LOF`（`CASH` 已移除，新建标的隐藏该选项；自动/手动推断按代码前缀区分 A股/ETF/LOF/指数/可转债）。
+- **`securities` 表新增字段**：`asset_class`（= `SecurityType`，主数据行 `type` 即 = `asset_class`）、`exchange`、`pinyin_initials`；部分唯一索引 `uq_securities_master_asset_code` = `(asset_class, code) WHERE portfolio_id IS NULL`（跨资产类别命名空间隔离）。
+- 新增资产类别 = 配置一条 `asset_class` 不同的 MASTER_LIST 接口，同步循环零代码改动。
+
+## 11.5 同步与接口测试端点
+
+| 端点 | 说明 | 权限 |
+|------|------|------|
+| `GET /api/admin/securities/masters?page&pageSize&q` | 系统主数据分页/搜索（q 匹配 code/name/拼音首字母） | 任意登录用户可读（录入搜索复用）；写入与测试仅 admin |
+| `POST /api/admin/securities/sync` | 手动触发全量同步（遍历 MASTER_LIST 接口） | admin |
+| `POST /api/admin/quote-interfaces/{interfaceId}/test` | 单接口测试，回传 `raw`+`parsed`+错误/耗时（不计入失败计数） | admin |
+| `POST /api/portfolios/:id/securities/resolve` | 录入时选中主数据后实例化为组合标的（lazy） | 组合归属用户 |
+
+## 11.6 决策点锁定（权威）
+
+- **D1** 主数据获取改为配置驱动，不硬编码 AKShare（决策 11）。
+- **D2** 不预置任何种子接口，配置纯由管理员手动维护（决策 11）。
+- **D3** 接口用途分 `QUOTE` / `MASTER_LIST` 两类（§7 ① / §11）。
+- **D4** 多资产类别完全数据驱动，新增类别零代码改动（§11.4）。
+- **D5** 数组行（位置下标）与 dict 行（字段名）统一归一化解析（§11.3）。
+- **D6** SDK 函数名优先取接口 `endpoint`（对话框占位「SDK 时为函数名」），回退 `provider.config.sdk_func`（兼容旧配置 / 测试）。
+
 # 附录 A：XIRR 计算说明（冻结口径）
 
 > XIRR 数值求解**委托 `pyxirr` 库**（Python），金融口径（符号约定、ACT/365、精度）保持不变，属冻结内容。
@@ -1386,6 +1461,10 @@ price(s, date)   = SecurityPrice 中 asOf ≤ date 的最后一条（向前沿�
 | `GET /api/auth/profile`                                     | P0    | 当前用户读取（**Web 客户端绑定此路径**）                                                                                      |
 | `GET /api/auth/me`                                          | P0    | 当前用户（Python 重建等价端点，须与 `/profile` 并存，见 ARCH §4.3）                                                              |
 | `POST /api/auth/login`（冷静期信号扩展）                             | P1    | 软删账户 + 密码正确时返回冷静期业务码                                                                                          |
+| `GET /api/admin/securities/masters`                              | P0    | 系统级证券主数据分页/搜索（`q` 匹配 code/name/拼音首字母；录入搜索复用，§11.5）                                                   |
+| `POST /api/admin/securities/sync`                                | P0    | 手动触发证券主数据全量同步（遍历 MASTER_LIST 接口，配置驱动，§11）                                                               |
+| `POST /api/admin/quote-interfaces/{interfaceId}/test`            | P1    | 单接口测试：按接口配置实际拉取，回传 `raw`+`parsed`+错误/耗时（不计入 `consecutive_failures`）                                    |
+| `POST /api/portfolios/:id/securities/resolve`                    | P0    | 录入时按主数据 `code` 选中后实例化为组合标的（lazy，§10 决策移除「新建标的」）                                                    |
 
 > ⚠️ 端点绑定一致性：Web 客户端实际绑定的 `GET /api/auth/profile` 与 `GET /api/portfolios/summary` 在当前 Python 重建中尚未提供（分别等价于 `/api/auth/me` 与 `/api/portfolios/comparison`），迁移须补齐，详见 ARCH §4.3。
 

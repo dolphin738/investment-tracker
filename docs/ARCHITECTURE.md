@@ -173,12 +173,16 @@ backend/app/
 | | currency | String(10) | default 'CNY' | 币种 |
 | | archived_at | DateTime tz | NULL | 归档时间 |
 | `securities` | id | String(36) UUID | PK | |
-| | portfolio_id | String(36) | FK→portfolios.id CASCADE | |
+| | portfolio_id | String(36) | FK→portfolios.id CASCADE，**可空**（NULL = 系统级主数据行，不触发 portfolios 级联） | 归属组合；NULL 行是系统主数据字典（§11） |
 | | code | String(64) | NOT NULL | 代码 |
-| | name | String(50) | NOT NULL | 名称（≤ 50 字） |
-| | type | Enum(SecurityType) | NOT NULL default STOCK | 证券类型 |
+| | name | String(255) | NOT NULL | 名称 |
+| | type | Enum(SecurityType) | NOT NULL default STOCK | 证券类型（主数据行 `type` = `asset_class`） |
 | | currency | String(10) | default 'CNY' | |
+| | exchange | String(10) | NULL | 交易所/市场（SH/SZ/BJ/HK…）；主数据同步填充，缺失时按代码前缀推断 |
+| | pinyin_initials | String(64) | NULL | 名称拼音首字母（如 贵州茅台→gzm）；录入界面按拼音首字母搜索，同步由 `pypinyin` 计算 |
+| | asset_class | Enum(SecurityType) | NULL | 资产类别（复用 SecurityType）；主数据行 `type` 即 = `asset_class`；与部分唯一索引配套 |
 | | (UNIQUE(portfolio_id, code)) | | | 同组合代码唯一 |
+| | (uq_securities_master_asset_code) | 部分唯一索引 | `UNIQUE(asset_class, code) WHERE portfolio_id IS NULL` | 系统主数据跨资产类别命名空间隔离（§11.4） |
 
 #### 3.1.3 交易 / 价格 / 出入金 / 现金
 
@@ -245,7 +249,7 @@ backend/app/
 | 枚举 | 值 |
 |------|----|
 | `CashFlowType` | BUY, SELL |
-| `SecurityType` | STOCK, FUND, BOND, OTHER, CASH |
+| `SecurityType` | STOCK, FUND, BOND, OTHER, HK_STOCK, CONVERTIBLE_BOND, ETF, INDEX, LOF（`CASH` 已移除并标注 `@deprecated`，新建标的隐藏该选项；按代码前缀自动/手动推断 A股/ETF/LOF/指数/可转债，见 §11.4） |
 | `SecuritySide` | BUY_SEC, SELL_SEC |
 | `SnapshotSource` | DERIVED, MANUAL |
 | `SnapshotValuation` | EXACT, CARRIED_FORWARD, COST_BASED, MANUAL_INPUT |
@@ -283,6 +287,15 @@ backend/app/
 | | timeout | Integer | NULL | 超时（秒） |
 | | retry_count | Integer | NULL | 重试次数 |
 | | rate_limit | String(64) | NULL | 频率限制（自由文本，如 `100/min`） |
+| | priority | Integer | NULL, indexed | 分类内优先级链（ADR-002）：越小越优先；跨分类独立计数；NULL = 未纳入链 |
+| | consecutive_failures | Integer | NOT NULL default 0 | 连续无响应计数（DB 原子自增，达阈值触发告警） |
+| | alerted | Boolean | NOT NULL default false | 失败达阈值后的告警去重标志 |
+| | purpose | Enum(InterfacePurpose) | NOT NULL default QUOTE | 接口用途：`QUOTE`=价格行情 / `MASTER_LIST`=证券列表（§11.2 / §11.3） |
+| | asset_class | Enum(SecurityType) | NULL | 该接口拉取资产类别（MASTER_LIST 接口必填；主数据行 type = asset_class） |
+| | resp_code_field | String(64) | NOT NULL default 'code' | 响应中证券代码字段名（dict 行用）；数组行可填位置下标如 `0` |
+| | resp_price_field | String(64) | NOT NULL default 'price' | 响应中价格字段名（dict 行用）；数组行可填位置下标 |
+| | resp_name_field | String(64) | NULL default 'name' | 响应中证券名称字段（MASTER_LIST 解析用） |
+| | resp_exchange_field | String(64) | NULL | 响应中交易所字段（如 `exchange`/`market`）；缺失则按代码前缀推断（§11.3） |
 | `quote_provider_interface_categories` | id | String(36) UUID | PK | 接口分类（后台可配） |
 | | label | String(128) | NOT NULL | 展示名（如 A股列表） |
 | | icon | String(64) | NULL | lucide-react 图标名（如 List / LineChart），UI 动态映射 |
@@ -465,6 +478,7 @@ User (1) ──< Portfolio (N)
 | POST | `/api/portfolios/:id/securities` | 新建标的（`type` 隐藏 `CASH` 选项） | `{ code, name, type?, currency? }` | `Security` |
 | PATCH | `/api/portfolios/:id/securities/:secId` | 编辑标的 | `{ name?, type? }` | `Security` |
 | DELETE | `/api/portfolios/:id/securities/:secId` | 删除标的（级联删其 trades/prices） | — | `null`，若存在成交日则返回 **`recalculation`**（否则纯 `null`，保持原契约） |
+| POST | `/api/portfolios/:id/securities/resolve` | 录入买卖时按主数据 `code` 选中后**实例化为组合标的**（lazy：命中系统主数据 `portfolio_id IS NULL` 行则复用其 `asset_class`/`exchange`/`name`，否则按 `code` 创建组合行；§10 决策移除「新建标的」，仅复用主数据） | `{ code }` | `Security` |
 
 #### 4.2.6 证券买卖流水（`/security-trades` · 方案 B 持仓推导来源）
 
@@ -680,6 +694,16 @@ User (1) ──< Portfolio (N)
 | PATCH | `/api/admin/quote-providers/interfaces/:interfaceId` | 局部更新 | `QuoteInterfaceUpdate` | `QuoteInterfaceOut` |
 | DELETE | `/api/admin/quote-providers/interfaces/:interfaceId` | 删除 | `interfaceId` | `{ id, deleted }` |
 
+> **`QuoteInterfaceCreate` / `QuoteInterfaceUpdate` / `QuoteInterfaceOut` 字段**：`category_id` / `name` / `endpoint` / `http_method`（GET/POST/PUT/DELETE/PATCH，SDK 可空）/ `params`（JSON 模板）/ `enabled` / `direction`(IN/OUT) / `timeout` / `retry_count` / `rate_limit` / `priority`（分类内优先级链，越小越优先）/ **`purpose`**（`QUOTE`=价格行情 / `MASTER_LIST`=证券列表，默认 `QUOTE`）/ **`asset_class`**（MASTER_LIST 必填，复用 `SecurityType`）/ **`resp_code_field`**（默认 `code`，数组行填下标 `0`）/ **`resp_price_field`**（默认 `price`，数组行填下标）/ **`resp_name_field`**（默认 `name`，MASTER_LIST 用）/ **`resp_exchange_field`**（交易所字段名，缺失按代码前缀推断，§11.3）。`QuoteInterfaceUpdate` 全字段可选（未传 = 不改动）；`asset_class` 空字符串按 NULL 处理。
+
+**证券主数据同步与接口测试（§11）**：
+
+| Method | Path | 说明 | 请求体 / 参数 | 响应 data |
+|--------|------|------|--------------|-----------|
+| GET | `/api/admin/securities/masters` | 系统级证券主数据分页/搜索（`q` 匹配 code/name/拼音首字母）；任意登录用户可读（录入搜索复用），写入与测试仅 admin | `?page&pageSize&q` | `Paginated<SecurityMaster>` |
+| POST | `/api/admin/securities/sync` | 手动触发全量同步（遍历全部 `purpose=MASTER_LIST` 且 `enabled` 接口，按 `asset_class` 分组，复用 QUOTE 分派与 `priority` 降级链，§11.1） | — | `{ synced, by_asset_class }` |
+| POST | `/api/admin/quote-interfaces/:interfaceId/test` | 单接口测试：按配置实际拉取一次，回传 `raw`+`parsed`+错误/耗时；**不计入** `consecutive_failures` | `InterfaceTestRequest{ params?, codes? }` | `{ ok, raw, parsed, error?, httpStatus?, durationMs? }` |
+
 > ⚠️ `GET /api/admin/quote-providers/interfaces` 必须注册在 `GET /api/admin/quote-providers/:providerId` **之前**，否则会被后者按 `providerId='interfaces'` 抢匹配（二者段数不同、互不冲突）。
 
 **接口分类（InterfaceCategory）**：
@@ -758,6 +782,9 @@ classDiagram
         +String name
         +SecurityType type
         +String currency
+        +String exchange
+        +String pinyin_initials
+        +SecurityType asset_class
     }
     class SecurityTrade {
         +String id
@@ -832,6 +859,36 @@ classDiagram
         +DividendType type
         +String note
     }
+    class SecuritiesDataProvider {
+        +String id
+        +String name
+        +String access_method
+        +JSON config
+        +Boolean is_default
+        +Boolean is_active
+        +Boolean enabled
+    }
+    class QuoteInterface {
+        +String id
+        +String provider_id
+        +String category_id
+        +String name
+        +String endpoint
+        +InterfacePurpose purpose
+        +SecurityType asset_class
+        +String resp_code_field
+        +String resp_price_field
+        +String resp_name_field
+        +String resp_exchange_field
+        +Integer priority
+        +Boolean enabled
+    }
+    class InterfaceCategory {
+        +String id
+        +String label
+        +String icon
+        +Integer sort_order
+    }
 
     User "1" --> "1" UserPreference : has
     User "1" --> "*" Portfolio : owns
@@ -847,7 +904,11 @@ classDiagram
     Security "1" --> "*" SecurityTrade : trades
     Security "1" --> "*" SecurityPrice : prices
     Security "1" --> "*" DividendRecord : dividends
+    SecuritiesDataProvider "1" --> "*" QuoteInterface : provides
+    QuoteInterface "*" --> "0..1" InterfaceCategory : categorized
 ```
+
+> 类图说明：① `Security` 表同时承载**用户组合标的**（`portfolio_id` 非空，随组合 CASCADE）与**系统级主数据**（`portfolio_id IS NULL`，由证券列表同步写入，§11）；主数据行 `type` = `asset_class`、`exchange`/`pinyin_initials` 由同步填充。② 系统管理三表 `securities_data_providers` / `quote_provider_interfaces` / `quote_provider_interface_categories` 取代旧 `system_configs` 单 URL 表（§4.2.21 / §3.1.6）。`QuoteInterface.purpose` = `QUOTE`(价格行情) / `MASTER_LIST`(证券列表)；`asset_class` 复用 `SecurityType`。
 
 ### 5.2 共享 TypeScript 类型（已退役 · 2026-08-09）
 
@@ -1182,6 +1243,39 @@ sequenceDiagram
 - **涨跌配色强制**：全局正值红、负值绿（A 股惯例），由 `--color-up` / `--color-down` 统一提供，详见 §16.9。
 
 ---
+
+## 11. 市场数据同步与接口配置（配置驱动）
+
+> 与 PRD §11 对应。核心服务 `MarketDataSyncService`（`app/services/market_data_sync.py`）负责行情拉取 / 数组行归一化 / QUOTE&MASTER_LIST 分派 / 优先级降级链 / 主数据同步 / 单接口测试。
+
+### 11.1 服务职责与入口
+
+- `sync_portfolio_prices(portfolio_id, codes?)`：组合持仓现价批量拉取（QUOTE 接口，按 `priority` 降级链；失败计入 `consecutive_failures` + 告警）。
+- `sync_all_security_masters()` / `sync_security_masters(asset_class)`：系统主数据全量 / 单类同步（MASTER_LIST 接口，§11.1 PRD）。
+- `test_single_interface(interface_id, params, codes)`：单接口测试（回传 `raw`+`parsed`，**不计入**失败计数）。
+- `fallback_fetch(...)`：概览估值等兜底取价。
+
+### 11.2 接口调用分派（https / sdk 统一）
+
+- `_call_interface(itf, params, codes)` → `_call_interface_raw` → 按提供方 `access_method` 分派 `_fetch_https_raw`（httpx）或 `_fetch_sdk_raw`（SDK：优先 `itf.endpoint` 作函数名，回退 `provider.config.sdk_func`）。
+- https 请求：GET 走 query params、POST 走 JSON body；支持 `timeout`/`retry_count`。
+- SDK：懒导入（模块 import 阶段零副作用），函数签名按 `codes`/`symbol` 适配；akshare 提供方 `endpoint` 填 akshare 顶层函数名（如 `stock_info_a_code_name` / `stock_individual_info_em`）。
+
+### 11.3 响应归一化与解析（数组行 / dict 行）
+
+- `_normalize_rows(payload)`：保留 dict 行与数组行（如 `["sz301141","中科磁业"]`）。
+- `_row_get(row, field)`：dict 行按字段名取值；数组行按 `resp_*` 配置的**位置下标**（如 `0`/`1`）取值。
+- `_parse_price_rows` / `_parse_test_rows` / `_upsert_masters` 均经 `_row_get` 取值。
+- `_infer_exchange(code)`：缺失交易所字段时按代码前缀推断（`6`/`9`→SH、`0`/`3`→SZ、`8`/`4`→BJ、`sh`/`sz`/`bj` 前缀、港股 5 位码→HK）。
+
+### 11.4 优先级降级链与失败告警（ADR-002）
+
+- 同分类内按 `priority` 升序；QUOTE 拉取命中失败时自动切下一优先级接口。
+- 连续失败计数 `consecutive_failures`（DB 原子自增），达阈值触发告警（`alerted` 去重）；接口测试不计入。
+
+### 11.5 已知上游限制（实现备注）
+
+- 部分上游（如东方财富 `push2.eastmoney.com`、akshare `stock_individual_info_em`）对缺少浏览器 UA/Referer 的请求直接重置连接（`RemoteDisconnected`），属上游反爬 / 可达性限制，非本应用 bug；SDK 接口经 akshare 内部 `requests` 发出、本应用 httpx 客户端未参与。换可正常返回的数据源或经可配置请求头垫片可缓解（当前未内置）。
 
 ## 13. REG-01~06 架构支撑与验收点（P0 强制门禁）
 
