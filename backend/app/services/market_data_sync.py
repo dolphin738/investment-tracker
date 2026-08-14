@@ -20,6 +20,7 @@
 """
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
@@ -29,8 +30,11 @@ from typing import Any, Optional
 import httpx
 import pypinyin
 from pypinyin import Style
+from sqlalchemy import delete as sa_delete
+from sqlalchemy import exists as sa_exists
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.core.date_utils import today_app_tz
 from app.models.enums import InterfacePurpose, SecurityType
@@ -79,6 +83,31 @@ def _infer_exchange(code: str) -> Optional[str]:
     if len(code) <= 5:
         return "HK"  # 港股 5 位码
     return None
+
+
+def _normalize_master_code(raw: str) -> str:
+    """主数据代码统一为纯数字串（去交易所字母，保留前导零）。
+
+    不同数据源代码格式不一（``"000001"`` / ``"000001.SZ"`` / ``"sh600000"`` / ``"00700.HK"``），
+    统一规范为数字串，供 ``(asset_class, code)`` 唯一约束去重 + 前端纯数字展示：
+
+    - 去交易所后缀（``.SH``/``.SZ``/``.HK``/``.BJ`` 等分割符后部分）
+    - 去前导交易所字母（``sh``/``sz``/``bj``/``hk``）
+    - 仅保留数字（兜底清残留非数字字符）
+
+    例：``sh600000``→``600000``，``600000.SH``→``600000``，``000001.SZ``→``000001``，
+    ``00700.HK``→``00700``。无数字可提取时回退原始串（如纯字母代码），不丢数据。
+    """
+    if not raw:
+        return raw
+    s = str(raw).strip()
+    # 去交易所后缀：首个 . - _ 分隔符之后的部分（如 .SZ/.SH/.HK）
+    s = re.split(r"[.\-_]", s, maxsplit=1)[0]
+    # 去前导交易所字母（如 sh/sz/bj/hk）
+    s = re.sub(r"^[a-zA-Z]+", "", s)
+    # 仅保留数字（兜底清残留非数字字符）
+    digits = re.sub(r"\D", "", s)
+    return digits if digits else s
 
 
 def _row_get(row: Any, field: Optional[str]) -> Any:
@@ -317,7 +346,8 @@ class MarketDataSyncService:
             if code is None or price is None:
                 continue
             try:
-                out[str(code)] = Decimal(str(price))
+                # 价格 code 同样规范为数字串，与主数据 digits-only 对齐（否则带后缀源匹配不到）
+                out[_normalize_master_code(str(code))] = Decimal(str(price))
             except (InvalidOperation, ValueError, TypeError):
                 continue
         return out
@@ -564,18 +594,77 @@ class MarketDataSyncService:
                 used_list.append(res["used"])
         # 跨资产类别去重（按 interfaceId，camelCase 键，与 used dict 一致）
         seen: set[str] = set()
-        deduped: list[dict[str, Any]] = []
+        used_deduped: list[dict[str, Any]] = []
         for u in used_list:
             if u["interfaceId"] in seen:
                 continue
             seen.add(u["interfaceId"])
-            deduped.append(u)
+            used_deduped.append(u)
+        # 自愈：统一 code 为数字串并合并存量重复行（不同源带/不带交易所字母导致的历史重复）
+        removed = await self._normalize_and_dedupe_masters()
         return {
             "synced": synced,
             "failed": failed,
             "errors": errors,
-            "used": deduped,
+            "used": used_deduped,
+            "deduped": removed,
         }
+
+    async def _normalize_and_dedupe_masters(self) -> int:
+        """扫描系统主数据：统一 code 为数字串，并合并 ``(asset_class, code)`` 碰撞的重复行。
+
+        修复旧数据：不同源带/不带交易所字母（如 ``"000001"`` vs ``"000001.SZ"``）曾绕过
+        ``(asset_class, code)`` 唯一约束被当成两条追加写入。下次 ``sync_all`` 自动自愈，
+        清空「如 2 个平安银行」类存量重复。
+
+        合并规则：按 ``(asset_class, 规范code)`` 分组，保留 ``updated_at`` 最新行，其余删除；
+        删除前把其 ``portfolio_securities`` 引用安全转移到保留行（保留行已在该组合持有同一标的
+        → 属重复持仓，直接丢弃该残留引用），避免误删用户持仓。
+        （securities 现为纯目录表，无 portfolio_id 列，故直接全表扫描。）
+        """
+        rows = (
+            await self.session.execute(select(Security))
+        ).scalars().all()
+        groups: dict[tuple, list[Security]] = {}
+        for s in rows:
+            norm = _normalize_master_code(s.code)
+            groups.setdefault((s.asset_class, norm), []).append(s)
+
+        removed = 0
+        ps_alias = aliased(PortfolioSecurity)
+        for (asset_class, norm), items in groups.items():
+            if len(items) == 1:
+                if items[0].code != norm:
+                    items[0].code = norm  # 规范化孤立行
+                continue
+            items.sort(key=lambda x: (x.updated_at or datetime.min), reverse=True)
+            keep = items[0]
+            # 先安全转移并删除重复行；此时 keep.code 暂不动，避免与尚存的 dup 撞唯一约束
+            for dup in items[1:]:
+                # 转移组合持仓引用到 keep：仅当 keep 尚未在该组合持有该标的时
+                await self.session.execute(
+                    update(PortfolioSecurity)
+                    .where(
+                        PortfolioSecurity.master_id == dup.id,
+                        ~sa_exists().where(
+                            ps_alias.portfolio_id == PortfolioSecurity.portfolio_id,
+                            ps_alias.master_id == keep.id,
+                        ),
+                    )
+                    .values(master_id=keep.id)
+                )
+                # 清除无法转移（keep 已持有 → 属重复持仓）的残留引用
+                await self.session.execute(
+                    sa_delete(PortfolioSecurity).where(
+                        PortfolioSecurity.master_id == dup.id
+                    )
+                )
+                await self.session.delete(dup)
+                removed += 1
+            await self.session.flush()  # 先落库删掉 dup，腾出唯一键
+            keep.code = norm  # 再规范化保留行（此时无撞键风险）
+        await self.session.flush()
+        return removed
 
     async def _upsert_masters(self, itf: QuoteInterface, rows: list[Any]) -> int:
         """把原始行 upsert 进 securities 系统主数据目录表（ADR-003 后仅主数据行）。
@@ -594,12 +683,16 @@ class MarketDataSyncService:
             code = _row_get(r, code_field)
             if code is None:
                 continue
-            code = str(code)
+            raw_code = str(code)
             name = _row_get(r, name_field)
-            name = str(name) if name is not None else code
+            name = str(name) if name is not None else raw_code
+            # 交易所推断须用原始 code（如 bj920021→BJ、sh600000→SH），先于归一化
             exchange = _row_get(r, exchange_field) if exchange_field else None
             if not exchange:
-                exchange = _infer_exchange(code)
+                exchange = _infer_exchange(raw_code)
+            # 存储用「纯数字 code」：剥离交易所字母，保证不同源（000001 / 000001.SZ / sh000001）
+            # 落到同一 (asset_class, code) → 命中已存在行 UPDATE 而非追加 → 去重（如 2 个平安银行）
+            code = _normalize_master_code(raw_code)
             pinyin = _compute_pinyin_initials(name)
 
             existing = (

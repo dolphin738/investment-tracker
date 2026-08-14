@@ -490,12 +490,13 @@ async def test_sync_security_masters_array_rows_positional(client, monkeypatch, 
             await session.execute(select(Security))
         ).scalars().all()
     }
-    assert rows["sz301141"].name == "中科磁业"
-    assert rows["sz301141"].exchange == "SZ"  # sz 前缀推断
-    assert rows["sh600000"].name == "浦发银行"
-    assert rows["sh600000"].exchange == "SH"
-    assert rows["bj920021"].exchange == "BJ"
-    assert rows["sh600000"].pinyin_initials == "pfyh"  # 浦发银行 → pfyh
+    # code 统一为纯数字（剥离交易所字母），exchange 仍由原始 code 前缀推断
+    assert rows["301141"].name == "中科磁业"
+    assert rows["301141"].exchange == "SZ"  # sz 前缀推断
+    assert rows["600000"].name == "浦发银行"
+    assert rows["600000"].exchange == "SH"
+    assert rows["920021"].exchange == "BJ"
+    assert rows["600000"].pinyin_initials == "pfyh"  # 浦发银行 → pfyh
 
 
 async def test_sync_all_security_masters_returns_used_per_asset_class(
@@ -617,3 +618,104 @@ async def test_fallback_fetch_skips_disabled_provider(client, monkeypatch, sessi
     res = await MarketDataSyncService(session).fallback_fetch(cid, ["600000"])
     assert res.prices == {}  # 停用方接口被跳过 → 无数据
     assert res.source is None
+
+
+# --------------------------------------------------------------------------- #
+# 回归：主数据 code 规范为数字串 + 跨源去重（不同源带/不带交易所字母）
+# --------------------------------------------------------------------------- #
+async def test_sync_dedupes_master_code_across_formats(client, monkeypatch, session):
+    """两源代码格式不一（"000001" vs "000001.SZ"）同步后主数据只保留一条且 code 为纯数字。
+
+    回归：修复前按 (asset_class, code) 字符串匹配，两源 code 不同 → 各自追加 → 重复
+    （如 2 个平安银行）。修复后 _upsert_masters 规范 code 为数字串，第二次同步命中
+    已存在行并 UPDATE 而非插入新行。
+    """
+    token = await _admin_token(client, "sm_dedup_1@example.com")
+    pid = await _create_provider(client, token)
+    cid = await _create_category(client, token)
+    await _create_interface(
+        client, token, pid, cid,
+        name="主数据接口", purpose="MASTER_LIST", asset_class="STOCK",
+    )
+
+    # 第一次同步：源返回无后缀代码
+    async def _fake_v1(self, itf, params, codes):
+        return [{"code": "000001", "name": "平安银行"}]
+
+    monkeypatch.setattr(MarketDataSyncService, "_fetch_https_raw", _fake_v1)
+    res1 = await MarketDataSyncService(session).sync_all_security_masters()
+    assert res1["synced"] == 1
+
+    # 第二次同步：另一源返回带交易所后缀的代码（模拟「2 个不同源」）
+    async def _fake_v2(self, itf, params, codes):
+        return [{"code": "000001.SZ", "name": "平安银行"}]
+
+    monkeypatch.setattr(MarketDataSyncService, "_fetch_https_raw", _fake_v2)
+    res2 = await MarketDataSyncService(session).sync_all_security_masters()
+    assert res2["synced"] == 1  # 命中已存在 → UPDATE，仍计 1 条
+    assert res2["deduped"] == 0  # 本次无存量重复可合并（写入已去重）
+
+    # 主数据只应有一条，且 code 为纯数字
+    rows = (await session.execute(select(Security))).scalars().all()
+    assert len(rows) == 1
+    assert rows[0].code == "000001"
+    assert rows[0].name == "平安银行"
+    assert rows[0].exchange == "SZ"  # 由原始 000001.SZ 后缀推断
+
+
+async def test_dedupe_masters_merges_existing_duplicate_rows(client, session):
+    """sync_all 末尾自愈：存量重复主数据（"000001" 与 "000001.SZ" 同 asset_class）合并为一条。
+
+    模拟「现在有 2 个平安银行」的历史脏数据，验证下次同步自动合并、保留最新更新行、
+    且不误删被引用持仓（引用安全转移到保留行）。
+    """
+    token = await _admin_token(client, "sm_dedup_2@example.com")
+
+    # 直接种入两条重复主数据（不同 code 字符串但同资产类别）
+    async with dbmod.AsyncSessionLocal() as s:
+        old = Security(
+            asset_class=SecurityType.STOCK, code="000001", name="平安银行",
+            exchange="SZ", pinyin_initials="payh",
+        )
+        new = Security(
+            asset_class=SecurityType.STOCK, code="000001.SZ", name="平安银行",
+            exchange="SZ", pinyin_initials="payh",
+        )
+        s.add(old)
+        s.add(new)
+        await s.flush()
+        # 给旧行挂一个组合持仓，验证合并时引用安全转移（不丢持仓）
+        user = User(id=str(uuid.uuid4()), email="sm_dedup_hold@example.com",
+                    password_hash="x", role="user")
+        s.add(user)
+        await s.flush()
+        pf = Portfolio(id=str(uuid.uuid4()), user_id=user.id, name="P")
+        s.add(pf)
+        await s.flush()
+        s.add(PortfolioSecurity(
+            id=str(uuid.uuid4()), portfolio_id=pf.id, master_id=old.id,
+            type=SecurityType.STOCK,
+        ))
+        # 给新行挂一个同组合持仓（keep 已持有 → 属重复，合并时应被丢弃）
+        s.add(PortfolioSecurity(
+            id=str(uuid.uuid4()), portfolio_id=pf.id, master_id=new.id,
+            type=SecurityType.STOCK,
+        ))
+        await s.commit()
+
+    # 触发自愈（无需 MASTER_LIST 接口，sync_all 仍会跑 _normalize_and_dedupe_masters）
+    result = await MarketDataSyncService(session).sync_all_security_masters()
+    assert result["synced"] == 0
+    assert result["deduped"] == 1  # 合并掉 1 条重复
+
+    # 只剩一条，code 为纯数字
+    rows = (await session.execute(select(Security))).scalars().all()
+    assert len(rows) == 1
+    assert rows[0].code == "000001"
+
+    # 组合持仓引用被安全转移/合并：该组合只剩 1 条持仓，且指向保留行
+    holdings = (
+        await session.execute(select(PortfolioSecurity))
+    ).scalars().all()
+    assert len(holdings) == 1
+    assert holdings[0].master_id == rows[0].id
