@@ -37,11 +37,21 @@ export interface SecurityMasterQuery {
   q?: string;
 }
 
+/** 单次同步实际命中的接口与提供方（用于前端展示「本次同步来源」） */
+export interface UsedInterfaceInfo {
+  providerId: string;
+  providerName: string;
+  interfaceId: string;
+  interfaceName: string;
+}
+
 /** 主数据同步结果（POST /securities/sync） */
 export interface SecurityMasterSyncResult {
   synced: number;
   failed: number;
   errors: string[];
+  /** 本次同步实际使用的接口（按资产类别可能命中多个，已去重） */
+  used?: UsedInterfaceInfo[];
 }
 
 /** 分页浏览系统级证券主数据 */

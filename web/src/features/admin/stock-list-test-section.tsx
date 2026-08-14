@@ -28,6 +28,7 @@ import {
   RefreshCw,
   Search,
   Trash2,
+  X,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
@@ -49,6 +50,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Input } from '@/components/ui/input';
+import { SearchInput } from '@/components/ui/search-input';
 import { Textarea } from '@/components/ui/textarea';
 import {
   Select,
@@ -126,24 +128,35 @@ function StockListPanel({
               系统级全市场证券字典（由已配置接口定时同步；此处仅只读浏览）
             </CardDescription>
           </div>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => syncMut.mutate()}
-            disabled={!isAdmin || syncMut.isPending}
-          >
-            <RefreshCw
-              className={cn('mr-1 h-3.5 w-3.5', syncMut.isPending && 'animate-spin')}
-            />
-            同步
-          </Button>
+          <div className="flex flex-col items-end gap-1">
+            {syncMut.data?.used && syncMut.data.used.length > 0 && (
+              <span className="text-xs text-muted-foreground">
+                本次同步来源：
+                {syncMut.data.used
+                  .map((u) => `${u.providerName} · ${u.interfaceName}`)
+                  .join('、')}
+              </span>
+            )}
+            <Button
+              size="sm"
+              variant="default"
+              onClick={() => syncMut.mutate()}
+              disabled={!isAdmin || syncMut.isPending}
+            >
+              <RefreshCw
+                className={cn('mr-1 h-3.5 w-3.5', syncMut.isPending && 'animate-spin')}
+              />
+              同步
+            </Button>
+          </div>
         </div>
       </CardHeader>
       <CardContent className="space-y-3">
-        <Input
+        <SearchInput
           placeholder="搜索代码 / 名称 / 拼音首字母"
           value={rawQ}
           onChange={(e) => setRawQ(e.target.value)}
+          onClear={() => setRawQ('')}
         />
 
         {isLoading && (
@@ -509,6 +522,19 @@ function InterfaceTestPanel({
                       placeholder="查找"
                       className="h-6 w-24 bg-transparent text-xs outline-none placeholder:text-muted-foreground"
                     />
+                    {findQuery && (
+                      <button
+                        type="button"
+                        aria-label="清除查找"
+                        onClick={() => {
+                          setFindQuery('');
+                          setCurrentMatch(0);
+                        }}
+                        className="rounded p-0.5 text-muted-foreground hover:bg-muted"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    )}
                     {findQuery && matchIndices.length > 0 && (
                       <span className="whitespace-nowrap text-xs text-muted-foreground">
                         {currentMatch + 1}/{matchIndices.length}
