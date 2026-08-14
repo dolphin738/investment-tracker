@@ -129,5 +129,10 @@ class DividendService(PortfolioChildService):
 
     async def delete(self, portfolio_id: str, div_id: str) -> None:
         d = await self.get_scoped(DividendRecord, div_id, portfolio_id)
+        sec_id = d.security_id
         await self.session.delete(d)
         await self.session.commit()
+        # 实现B：分红删光后，若持仓已无买卖/行情/分红则连持仓一起删
+        from app.services.security import SecurityService
+
+        await SecurityService(self.session).prune_if_orphan(portfolio_id, sec_id)

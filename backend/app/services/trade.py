@@ -253,6 +253,7 @@ class TradeService(PortfolioChildService):
         """净删除买卖 + 重算 + 孤儿清理（与原路由一致：无 recalc 反馈）。"""
         trade = await self.get_scoped(SecurityTrade, trade_id, portfolio_id)
         d = trade.date
+        sec_id = trade.security_id
         await self.session.delete(trade)
         await self.session.commit()
         force = await RecalculationService(self.session).snapshot_dates_since(
@@ -267,3 +268,7 @@ class TradeService(PortfolioChildService):
         await AssetValuationService(self.session).prune_zero_orphans(portfolio_id, d)
         # prune 已不再内部重算：清理 0 值孤儿后需再重算一次 nav 链
         await RecalculationService(self.session).recalculateNavRange(portfolio_id, d)
+        # 实现B：买卖删光后，若持仓已无买卖/行情/分红则连持仓一起删
+        from app.services.security import SecurityService
+
+        await SecurityService(self.session).prune_if_orphan(portfolio_id, sec_id)

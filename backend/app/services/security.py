@@ -14,13 +14,19 @@ from __future__ import annotations
 
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.enums import BusinessErrorCode
 from app.core.exceptions import BusinessException
-from app.models import PortfolioSecurity, Security, SecurityTrade
+from app.models import (
+    DividendRecord,
+    PortfolioSecurity,
+    Security,
+    SecurityPrice,
+    SecurityTrade,
+)
 from app.models.enums import SecurityType
 from app.schemas import SecurityPatchReq, SecurityResolveReq
 from app.services.base import PortfolioChildService, coerce_enum
@@ -178,3 +184,38 @@ class SecurityService(PortfolioChildService):
                 portfolio_id, min(trade_dates), force_dates=sorted(set(trade_dates))
             )
         return None
+
+    async def prune_if_orphan(self, portfolio_id: str, security_id: str) -> bool:
+        """删除某证券的子记录（买卖/行情/分红）后，若该组合持仓已无任何子数据则连持仓一起删（实现B）。
+
+        持仓是组合下"触碰过此证券"的指针；仅当 ``trades=0 AND prices=0 AND dividends=0``
+        时才算纯孤儿。删除持仓不影响估值（估值只读取 trades/prices/dividends，持仓本身
+        不参与计算），故调用方无需额外重算。返回是否真删除了持仓。
+        """
+        n_trades = (
+            await self.session.execute(
+                select(func.count())
+                .select_from(SecurityTrade)
+                .where(SecurityTrade.security_id == security_id)
+            )
+        ).scalar_one()
+        n_prices = (
+            await self.session.execute(
+                select(func.count())
+                .select_from(SecurityPrice)
+                .where(SecurityPrice.security_id == security_id)
+            )
+        ).scalar_one()
+        n_div = (
+            await self.session.execute(
+                select(func.count())
+                .select_from(DividendRecord)
+                .where(DividendRecord.security_id == security_id)
+            )
+        ).scalar_one()
+        if n_trades == 0 and n_prices == 0 and n_div == 0:
+            holding = await self.get_scoped(PortfolioSecurity, security_id, portfolio_id)
+            await self.session.delete(holding)
+            await self.session.commit()
+            return True
+        return False
