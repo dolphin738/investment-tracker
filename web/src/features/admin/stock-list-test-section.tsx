@@ -64,10 +64,22 @@ import { useSecurityMasters, useSyncSecurityMasters } from '@/hooks/use-security
 import { useQuoteInterfacesAll } from '@/hooks/use-quote-interface';
 import { useQuoteProviders } from '@/hooks/use-quote-provider';
 import { useInterfaceTest } from '@/hooks/use-interface-test';
-import type { SecurityMaster } from '@/api/security-master.api';
+import type { SecurityMaster, UsedInterfaceInfo } from '@/api/security-master.api';
 import type { InterfaceTestResponse, QuoteInterface } from '@/api/quote-interface.api';
 
 const PAGE_SIZE = 20;
+
+/** 「本次同步来源」持久化键：组件重挂载后从 localStorage 读取，下次同步成功再覆盖 */
+const SYNC_SOURCE_KEY = 'invest:master-sync-source';
+
+function readStoredUsed(): UsedInterfaceInfo[] | null {
+  try {
+    const raw = localStorage.getItem(SYNC_SOURCE_KEY);
+    return raw ? (JSON.parse(raw) as UsedInterfaceInfo[]) : null;
+  } catch {
+    return null;
+  }
+}
 
 export function StockListTestSection(): JSX.Element {
   // 左右联动：左栏「填入测试」追加 code 到右栏 codesText
@@ -114,6 +126,15 @@ function StockListPanel({
   });
   const syncMut = useSyncSecurityMasters();
 
+  // 持久化「本次同步来源」：优先用本次同步结果，否则回退到上次持久化值
+  const [lastUsed, setLastUsed] = useState<UsedInterfaceInfo[] | null>(
+    () => readStoredUsed(),
+  );
+  const usedSources =
+    syncMut.data?.used && syncMut.data.used.length > 0
+      ? syncMut.data.used
+      : lastUsed;
+
   const items: SecurityMaster[] = data?.items ?? [];
   const total = data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -129,10 +150,10 @@ function StockListPanel({
             </CardDescription>
           </div>
           <div className="flex flex-col items-end gap-1">
-            {syncMut.data?.used && syncMut.data.used.length > 0 && (
+            {usedSources && usedSources.length > 0 && (
               <span className="text-xs text-muted-foreground">
                 本次同步来源：
-                {syncMut.data.used
+                {usedSources
                   .map((u) => `${u.providerName} · ${u.interfaceName}`)
                   .join('、')}
               </span>
@@ -140,7 +161,23 @@ function StockListPanel({
             <Button
               size="sm"
               variant="default"
-              onClick={() => syncMut.mutate()}
+              onClick={() =>
+                syncMut.mutate(undefined, {
+                  onSuccess: (data) => {
+                    if (data.used && data.used.length > 0) {
+                      setLastUsed(data.used);
+                      try {
+                        localStorage.setItem(
+                          SYNC_SOURCE_KEY,
+                          JSON.stringify(data.used),
+                        );
+                      } catch {
+                        /* 忽略持久化失败（隐私模式 / 配额） */
+                      }
+                    }
+                  },
+                })
+              }
               disabled={!isAdmin || syncMut.isPending}
             >
               <RefreshCw
