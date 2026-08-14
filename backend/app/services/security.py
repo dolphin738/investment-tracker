@@ -18,31 +18,43 @@ from app.services.base import PortfolioChildService, coerce_enum
 from app.services.recalculation import RecalculationResult, RecalculationService
 
 
-def infer_security_type(code: str) -> SecurityType:
+def infer_security_type(code: str, exchange: Optional[str] = None) -> SecurityType:
     """按代码前缀推断资产类型（供主数据同步 / resolve 使用）。
 
+    代码可能自带交易所前缀（如 sh510050 / sz159915 / bj920021，小熊同学等接口返回），
+    需先剥离前缀再按数字前缀判断；指数与深市 000 开头股票代码相同，须结合交易所区分。
+
     规则：
-    - 000xxx / 399xxx / 0003xx → 指数（INDEX）
-    - 5xxxxx / 15xxxx / 51xxxx → ETF
-    - 16xxxx → LOF（归入 FUND）
-    - 12xxxx → 可转债（CONVERTIBLE_BOND）
+    - ETF：5xxxxx（沪）/ 15xxxx（深）
+    - LOF：16xxxx（深）/ 501/502（沪）
+    - 可转债：11xxxx（沪）/ 12xxxx（深）
+    - 指数：399xxx（深）；000xxx 且为上交所（sh 前缀或 exchange=SH）→ 指数
     - 其他 → A 股股票（STOCK）
     """
     if not code:
         return SecurityType.STOCK
-    c = str(code)
-    # 指数：000xxx（沪深指数）、399xxx（深证指数）、0003xx（中证指数）
-    if c.startswith("000") or c.startswith("399"):
-        return SecurityType.INDEX
-    # ETF：上交所 5xxxxx、深交所 15xxxx
+    c = str(code).strip().lower()
+    # 剥离交易所前缀（sh/sz/bj），并据此确认交易所
+    exch = (exchange or "").upper()
+    if c.startswith(("sh", "sz", "bj")):
+        exch = c[:2].upper()
+        c = c[2:]
+    if not c:
+        return SecurityType.STOCK
+    # ETF：沪 5xxxxx、深 15xxxx
     if c.startswith("5") or c.startswith("15"):
         return SecurityType.ETF
-    # LOF：深交所 16xxxx（归入 FUND）
-    if c.startswith("16"):
-        return SecurityType.FUND
-    # 可转债：深交所 12xxxx
-    if c.startswith("12"):
+    # LOF：深 16xxxx、沪 501/502
+    if c.startswith("16") or c.startswith("501") or c.startswith("502"):
+        return SecurityType.LOF
+    # 可转债：沪 11xxxx、深 12xxxx
+    if c.startswith("11") or c.startswith("12"):
         return SecurityType.CONVERTIBLE_BOND
+    # 指数：深 399xxx；000xxx 且为上交所 → 指数（避免误判深市股票）
+    if c.startswith("399"):
+        return SecurityType.INDEX
+    if c.startswith("000") and exch == "SH":
+        return SecurityType.INDEX
     # 默认：A 股股票
     return SecurityType.STOCK
 
@@ -118,7 +130,7 @@ class SecurityService(PortfolioChildService):
             name = master.name
             exchange = master.exchange
             # 有主数据时，使用代码前缀推断资产类型（不从主数据复制）
-            stype = infer_security_type(req.code)
+            stype = infer_security_type(req.code, exchange)
         else:
             name = req.name or req.code
             exchange = req.exchange
@@ -126,7 +138,7 @@ class SecurityService(PortfolioChildService):
             stype = (
                 coerce_enum(SecurityType, req.type, "type")
                 if req.type
-                else infer_security_type(req.code)
+                else infer_security_type(req.code, exchange)
             )
 
         sec = Security(

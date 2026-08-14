@@ -553,7 +553,7 @@ class MarketDataSyncService:
                 exchange = _infer_exchange(code)
             pinyin = _compute_pinyin_initials(name)
             # 按代码前缀推断真实资产类型（供 resolve 时复制）
-            inferred_type = infer_security_type(code)
+            inferred_type = infer_security_type(code, exchange)
 
             existing = (
                 await self.session.execute(
