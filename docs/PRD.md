@@ -620,7 +620,7 @@ totalAsset(D) = marketValue(D) + cashBalance(D)          // 自动派生口径
 ### 5.9.1 证券主数据同步（系统级字典 · §11）
 
 - 系统维护一张独立的**证券目录表 `securities`**（ADR-003 拆表：目录与组合持仓分离，组合持仓在 `portfolio_securities`）；承载全市场「代码 / 名称 / 交易所 / 资产类别 / 拼音首字母」字典，供「金融数据接口-股票列表与测试」左栏浏览与录入证券搜索复用。
-- 同步为**配置驱动、零硬编码**：`MarketDataSyncService.sync_all_security_masters()` 遍历所有 `purpose=MASTER_LIST` 且 `enabled` 的接口，按 `asset_class` 分组，复用 QUOTE 的 https/sdk 分派与 `priority` 降级链拉取 → 归一化响应（支持 dict 行与 `[code, name]` 数组行）→ 按 `resp_code_field/resp_name_field/resp_exchange_field` 解析 → upsert 进证券目录表（唯一索引 `(asset_class, code)` 跨资产类别命名空间隔离），并用 `pypinyin` 计算拼音首字母。
+- 同步为**配置驱动、零硬编码**：`MarketDataSyncService.sync_all_security_masters()` 遍历所有 `purpose=MASTER_LIST` 且 `enabled` 的接口，按 `asset_class` 分组，复用 QUOTE 的 https/sdk 分派与 `priority` 降级链拉取 → 归一化响应（支持 dict 行与 `[code, name]` 数组行）→ 按 `resp_code_field/resp_name_field/resp_exchange_field` 解析 → upsert 进证券目录表（唯一索引 `(asset_class, code)` 跨资产类别命名空间隔离），并用 `pypinyin` 计算拼音首字母。主数据 `code` 统一存储为**纯数字**（剥离交易所字母、保留前导零），前端展示即纯数字，且不同源代码格式差异（如 `000001` 与 `000001.SZ`）不再产生重复行（写入去重 + 同步末尾自愈合并存量重复）。
 - 多资产类别完全数据驱动：A股 / 港股 / 可转债 / 基金 / ETF / 指数 / LOF 各自是一条 `asset_class` 不同的 MASTER_LIST 接口，同步循环无任何 `if 资产类别` 分支；新增类别 = 配置接口 + 极少枚举值。
 - 首次部署按决策 11 **不预置**任何种子接口（配置纯由管理员手动维护），因此需先建提供方 + MASTER_LIST 接口并「同步」后，主数据才有内容。
 

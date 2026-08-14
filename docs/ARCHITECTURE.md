@@ -1256,7 +1256,7 @@ sequenceDiagram
 ### 11.1 服务职责与入口
 
 - `sync_portfolio_prices(portfolio_id, codes?)`：组合持仓现价批量拉取（QUOTE 接口，按 `priority` 降级链；失败计入 `consecutive_failures` + 告警）。
-- `sync_all_security_masters()` / `sync_security_masters(asset_class)`：系统主数据全量 / 单类同步（MASTER_LIST 接口，§11.1 PRD）。
+- `sync_all_security_masters()` / `sync_security_masters(asset_class)`：系统主数据全量 / 单类同步（MASTER_LIST 接口，§11.1 PRD）。写入前将 `code` 规范为**纯数字串**（剥离 `sh/sz/bj` 前缀与 `.SZ/.SH/.HK` 后缀、保留前导零），保证不同源（`000001` / `000001.SZ` / `sh000001`）落到同一 `(asset_class, code)` 去重而非追加；`sync_all` 末尾再跑一次「自愈合并」扫描存量重复行（合并时把 `portfolio_securities` 引用安全转移到保留行，避免误删持仓）。
 - `test_single_interface(interface_id, params, codes)`：单接口测试（回传 `raw`+`parsed`，**不计入**失败计数）。
 - `fallback_fetch(...)`：概览估值等兜底取价。
 
