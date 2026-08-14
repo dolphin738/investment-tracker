@@ -19,7 +19,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { Info, Loader2 } from 'lucide-react';
-import { isMoneyString, computeNetAmount } from '@/lib/types';
+import { isMoneyString, computeNetAmount, SecurityType } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -31,7 +31,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { useSecurities } from '@/hooks/use-securities';
+import { useSecurities, useResolveSecurity } from '@/hooks/use-securities';
 import {
   useCreateDividend,
   useUpdateDividend,
@@ -40,6 +40,8 @@ import { toIsoDate } from '@/lib/constants';
 import { formatCurrency } from '@/lib/utils';
 import { DividendType } from '@/api/types';
 import type { DividendRecord } from '@/api/types';
+import type { SecurityMaster } from '@/api/security-master.api';
+import { SecuritySearchCombobox } from '@/components/security/security-search-combobox';
 
 /** 分红类型中文映射（导出供列表复用） */
 export const DIVIDEND_TYPE_LABEL: Record<string, string> = {
@@ -131,6 +133,32 @@ export function DividendFeeForm({
   const amount = watch('amount');
   const tax = watch('tax');
 
+  /** 选中系统主数据 → resolve 懒实例化为组合标的，回填 securityId（对齐「录入买卖」§10） */
+  const resolveSecurityMutation = useResolveSecurity(portfolioId);
+  const handleSelectMaster = (master: SecurityMaster): void => {
+    resolveSecurityMutation.mutate(
+      {
+        code: master.code,
+        name: master.name,
+        type: master.type ? (master.type as SecurityType) : undefined,
+        exchange: master.exchange ?? undefined,
+      },
+      {
+        onSuccess: (res) => {
+          setValue('securityId', res.id, { shouldValidate: true });
+        },
+      },
+    );
+  };
+
+  /** 当前选中标的的展示文本（编辑态回显）：列表已到且含当前标的 → 「名称（代码）」 */
+  const selectedSecurityLabel = useMemo(() => {
+    if (!securityId) return '';
+    const found = securities.find((s) => s.id === securityId);
+    if (found) return `${found.name}（${found.code}）`;
+    return secLoading ? '当前标的（加载中…）' : '当前标的（已不在可选列表）';
+  }, [securities, securityId, secLoading]);
+
   /** 净额实时展示（整数分运算；输入未成型时显示占位） */
   const netAmount = useMemo(() => {
     if (!isMoneyString(amount) || !amount) return null;
@@ -172,36 +200,18 @@ export function DividendFeeForm({
         </span>
       </p>
 
-      {/* 标的 */}
+      {/* 标的：证券搜索选择（对齐「录入买卖」样式/逻辑，§10，不再用原生下拉） */}
       <div className="space-y-1.5">
         <Label htmlFor="income-security">标的 *</Label>
-        <Select
-          value={securityId}
-          onValueChange={(v) =>
-            setValue('securityId', v, { shouldValidate: true })
-          }
-          disabled={secLoading}
-        >
-          <SelectTrigger id="income-security">
-            <SelectValue
-              placeholder={secLoading ? '加载中…' : '请选择标的'}
-            />
-          </SelectTrigger>
-          <SelectContent>
-            {securities.map((sec) => (
-              <SelectItem key={sec.id} value={sec.id}>
-                {sec.name}（{sec.code}）
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <SecuritySearchCombobox
+          id="income-security"
+          value={selectedSecurityLabel}
+          placeholder={secLoading ? '加载中…' : '搜索代码 / 名称 / 拼音首字母'}
+          disabled={secLoading && !securityId}
+          onSelect={handleSelectMaster}
+        />
         {errors.securityId && (
           <p className="text-xs text-destructive">{errors.securityId.message}</p>
-        )}
-        {!secLoading && securities.length === 0 && (
-          <p className="text-xs text-muted-foreground">
-            当前组合还没有标的，请先在「录入买卖」中搜索并选择标的
-          </p>
         )}
       </div>
 
