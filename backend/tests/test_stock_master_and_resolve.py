@@ -103,9 +103,9 @@ async def _seed_master(session, code, name, typ, pinyin, exchange=None):
 # --------------------------------------------------------------------------- #
 async def test_list_security_masters_pagination_and_search(client, session):
     token = await _admin_token(client, "sm_admin_1@example.com")
-    await _seed_master(session, "600000", "浦发银行", SecurityType.STOCK, "pfyh", "SH")
-    await _seed_master(session, "000001", "平安银行", SecurityType.STOCK, "payh", "SZ")
-    await _seed_master(session, "00700", "腾讯控股", SecurityType.HK_STOCK, "txkg", "HK")
+    await _seed_master(session, "sh600000", "浦发银行", SecurityType.STOCK, "pfyh", "SH")
+    await _seed_master(session, "sz000001", "平安银行", SecurityType.STOCK, "payh", "SZ")
+    await _seed_master(session, "hk00700", "腾讯控股", SecurityType.HK_STOCK, "txkg", "HK")
 
     # 分页：第 1 页 2 条
     r = await client.get(
@@ -122,20 +122,20 @@ async def test_list_security_masters_pagination_and_search(client, session):
         "id", "code", "name", "exchange", "assetClass", "updatedAt",
     }
 
-    # q 匹配 code
+    # q 匹配 code（带交易所前缀，子串仍可命中）
     r = await client.get("/api/admin/securities/masters?q=600000", headers=auth(token))
     _, _, data, _ = env(r)
-    assert data["total"] == 1 and data["items"][0]["code"] == "600000"
+    assert data["total"] == 1 and data["items"][0]["code"] == "sh600000"
 
     # q 匹配 name（中文）
     r = await client.get("/api/admin/securities/masters?q=平安", headers=auth(token))
     _, _, data, _ = env(r)
-    assert data["total"] == 1 and data["items"][0]["code"] == "000001"
+    assert data["total"] == 1 and data["items"][0]["code"] == "sz000001"
 
     # q 匹配拼音首字母
     r = await client.get("/api/admin/securities/masters?q=pfyh", headers=auth(token))
     _, _, data, _ = env(r)
-    assert data["total"] == 1 and data["items"][0]["code"] == "600000"
+    assert data["total"] == 1 and data["items"][0]["code"] == "sh600000"
 
 
 async def test_list_security_masters_excludes_portfolio_rows(client, session):
@@ -146,7 +146,7 @@ async def test_list_security_masters_excludes_portfolio_rows(client, session):
     """
     token = await _admin_token(client, "sm_admin_2@example.com")
     # 主数据行
-    master = await _seed_master(session, "600000", "浦发银行", SecurityType.STOCK, "pfyh", "SH")
+    master = await _seed_master(session, "sh600000", "浦发银行", SecurityType.STOCK, "pfyh", "SH")
 
     # resolve 出一条组合持仓（不影响 securities 主数据表）
     user, pf = await _user_and_portfolio(session, "sm_pf_user@example.com")
@@ -160,7 +160,7 @@ async def test_list_security_masters_excludes_portfolio_rows(client, session):
     r = await client.get("/api/admin/securities/masters", headers=auth(token))
     _, _, data, _ = env(r)
     assert data["total"] == 1
-    assert data["items"][0]["code"] == "600000"
+    assert data["items"][0]["code"] == "sh600000"
     assert data["items"][0]["name"] == "浦发银行"  # 主数据行，非组合行
 
 
@@ -223,7 +223,7 @@ async def test_quote_interface_test_returns_raw_and_parsed(client, monkeypatch, 
         {"code": "600000", "price": "12.34"},
         {"code": "000001", "price": "9.87"},
     ]
-    assert data["parsed"] == {"600000": "12.34", "000001": "9.87"}
+    assert data["parsed"] == {"sh600000": "12.34", "sz000001": "9.87"}
     assert data["elapsedMs"] >= 0
     assert "error" not in data or data.get("error") is None
 
@@ -386,7 +386,7 @@ async def test_sync_security_masters_dispatch_uses_provider_access_method(
     rows = (
         await session.execute(select(Security))
     ).scalars().all()
-    assert {r.code for r in rows} == {"600000", "000001"}
+    assert {r.code for r in rows} == {"sh600000", "sz000001"}
 
 
 async def test_quote_interface_test_dispatch_uses_provider_access_method(
@@ -410,7 +410,7 @@ async def test_quote_interface_test_dispatch_uses_provider_access_method(
     status, code, data, _ = env(r)
     assert status == 200 and code == 0
     assert data["ok"] is True
-    assert data["parsed"] == {"600000": "12.34"}
+    assert data["parsed"] == {"sh600000": "12.34"}
 
 
 async def test_quote_interface_create_update_master_list_fields(client):
@@ -490,13 +490,13 @@ async def test_sync_security_masters_array_rows_positional(client, monkeypatch, 
             await session.execute(select(Security))
         ).scalars().all()
     }
-    # code 统一为纯数字（剥离交易所字母），exchange 仍由原始 code 前缀推断
-    assert rows["301141"].name == "中科磁业"
-    assert rows["301141"].exchange == "SZ"  # sz 前缀推断
-    assert rows["600000"].name == "浦发银行"
-    assert rows["600000"].exchange == "SH"
-    assert rows["920021"].exchange == "BJ"
-    assert rows["600000"].pinyin_initials == "pfyh"  # 浦发银行 → pfyh
+    # code 统一为「交易所前缀 + 数字」，exchange 由原始 code 前缀推断
+    assert rows["sz301141"].name == "中科磁业"
+    assert rows["sz301141"].exchange == "SZ"  # sz 前缀推断
+    assert rows["sh600000"].name == "浦发银行"
+    assert rows["sh600000"].exchange == "SH"
+    assert rows["bj920021"].exchange == "BJ"
+    assert rows["sh600000"].pinyin_initials == "pfyh"  # 浦发银行 → pfyh
 
 
 async def test_sync_all_security_masters_returns_used_per_asset_class(
@@ -588,9 +588,9 @@ async def test_sync_skips_disabled_provider_master_interfaces(client, monkeypatc
     assert used["interfaceId"] == iid_on
     assert used["providerId"] == pid_on
     assert used["interfaceId"] != iid_off
-    # 主数据里只应有启用方同步来的代码
+    # 主数据里只应有启用方同步来的代码（带交易所前缀）
     rows = (await session.execute(select(Security))).scalars().all()
-    assert {r.code for r in rows} == {"600000"}
+    assert {r.code for r in rows} == {"sh600000"}
 
 
 async def test_fallback_fetch_skips_disabled_provider(client, monkeypatch, session):
@@ -624,11 +624,11 @@ async def test_fallback_fetch_skips_disabled_provider(client, monkeypatch, sessi
 # 回归：主数据 code 规范为数字串 + 跨源去重（不同源带/不带交易所字母）
 # --------------------------------------------------------------------------- #
 async def test_sync_dedupes_master_code_across_formats(client, monkeypatch, session):
-    """两源代码格式不一（"000001" vs "000001.SZ"）同步后主数据只保留一条且 code 为纯数字。
+    """两源代码格式不一（"000001" vs "000001.SZ"）同步后主数据只保留一条且 code 带交易所前缀。
 
     回归：修复前按 (asset_class, code) 字符串匹配，两源 code 不同 → 各自追加 → 重复
-    （如 2 个平安银行）。修复后 _upsert_masters 规范 code 为数字串，第二次同步命中
-    已存在行并 UPDATE 而非插入新行。
+    （如 2 个平安银行）。修复后 _upsert_masters 规范 code 为「交易所前缀 + 数字」，
+    第二次同步命中已存在行并 UPDATE 而非插入新行。
     """
     token = await _admin_token(client, "sm_dedup_1@example.com")
     pid = await _create_provider(client, token)
@@ -638,7 +638,7 @@ async def test_sync_dedupes_master_code_across_formats(client, monkeypatch, sess
         name="主数据接口", purpose="MASTER_LIST", asset_class="STOCK",
     )
 
-    # 第一次同步：源返回无后缀代码
+    # 第一次同步：源返回无后缀代码（数字启发式推断 SZ → sz000001）
     async def _fake_v1(self, itf, params, codes):
         return [{"code": "000001", "name": "平安银行"}]
 
@@ -655,10 +655,10 @@ async def test_sync_dedupes_master_code_across_formats(client, monkeypatch, sess
     assert res2["synced"] == 1  # 命中已存在 → UPDATE，仍计 1 条
     assert res2["deduped"] == 0  # 本次无存量重复可合并（写入已去重）
 
-    # 主数据只应有一条，且 code 为纯数字
+    # 主数据只应有一条，且 code 为「交易所前缀 + 数字」
     rows = (await session.execute(select(Security))).scalars().all()
     assert len(rows) == 1
-    assert rows[0].code == "000001"
+    assert rows[0].code == "sz000001"
     assert rows[0].name == "平安银行"
     assert rows[0].exchange == "SZ"  # 由原始 000001.SZ 后缀推断
 
@@ -671,7 +671,7 @@ async def test_dedupe_masters_merges_existing_duplicate_rows(client, session):
     """
     token = await _admin_token(client, "sm_dedup_2@example.com")
 
-    # 直接种入两条重复主数据（不同 code 字符串但同资产类别）
+    # 直接种入两条重复主数据（不同 code 字符串但同资产类别，规范后应都变成 sz000001）
     async with dbmod.AsyncSessionLocal() as s:
         old = Security(
             asset_class=SecurityType.STOCK, code="000001", name="平安银行",
@@ -708,10 +708,10 @@ async def test_dedupe_masters_merges_existing_duplicate_rows(client, session):
     assert result["synced"] == 0
     assert result["deduped"] == 1  # 合并掉 1 条重复
 
-    # 只剩一条，code 为纯数字
+    # 只剩一条，code 为「交易所前缀 + 数字」
     rows = (await session.execute(select(Security))).scalars().all()
     assert len(rows) == 1
-    assert rows[0].code == "000001"
+    assert rows[0].code == "sz000001"
 
     # 组合持仓引用被安全转移/合并：该组合只剩 1 条持仓，且指向保留行
     holdings = (

@@ -85,29 +85,61 @@ def _infer_exchange(code: str) -> Optional[str]:
     return None
 
 
-def _normalize_master_code(raw: str) -> str:
-    """主数据代码统一为纯数字串（去交易所字母，保留前导零）。
+def _norm_exchange(ex: Optional[str]) -> Optional[str]:
+    """把源返回的交易所字符串规范到枚举值 SH/SZ/BJ/HK（兼容中文/大小写/代码）。
 
-    不同数据源代码格式不一（``"000001"`` / ``"000001.SZ"`` / ``"sh600000"`` / ``"00700.HK"``），
-    统一规范为数字串，供 ``(asset_class, code)`` 唯一约束去重 + 前端纯数字展示：
+    源响应里的交易所可能形如 ``"SH"`` / ``"sz"`` / ``"上海"`` / ``".SZ"`` / ``"XHKG"`` 等，
+    统一归一为 SH/SZ/BJ/HK 便于 ``_EXCHANGE_PREFIX`` 拼前缀 + 存储一致。
+    """
+    if not ex:
+        return None
+    e = str(ex).strip().upper()
+    mapping = {
+        "SH": "SH", "SSE": "SH", "SHANGHAI": "SH", "上交所": "SH", "上海": "SH",
+        "SZ": "SZ", "SZSE": "SZ", "SHENZHEN": "SZ", "深交所": "SZ", "深圳": "SZ",
+        "BJ": "BJ", "BSE": "BJ", "北交所": "BJ", "北京": "BJ",
+        "HK": "HK", "HKE": "HK", "XHKG": "HK", "港股": "HK",
+    }
+    return mapping.get(e)
 
-    - 去交易所后缀（``.SH``/``.SZ``/``.HK``/``.BJ`` 等分割符后部分）
-    - 去前导交易所字母（``sh``/``sz``/``bj``/``hk``）
-    - 仅保留数字（兜底清残留非数字字符）
 
-    例：``sh600000``→``600000``，``600000.SH``→``600000``，``000001.SZ``→``000001``，
-    ``00700.HK``→``00700``。无数字可提取时回退原始串（如纯字母代码），不丢数据。
+_EXCHANGE_PREFIX = {"SH": "sh", "SZ": "sz", "BJ": "bj", "HK": "hk"}
+
+
+def _normalize_master_code(raw: str, exchange: Optional[str] = None) -> str:
+    """主数据代码统一为「交易所前缀 + 纯数字」（保留前导零），如 sh600000 / sz000001 / bj920021 / hk00700。
+
+    不同数据源代码格式不一（``"600000"`` / ``"600000.SH"`` / ``"sh600000"`` / ``"00700.HK"``）
+    统一规范为带交易所前缀的数字串，供 ``(asset_class, code)`` 唯一约束去重 + 前端带前缀展示：
+
+    - 显式前缀（``sh/sz/bj/hk``）或后缀（``.SH/.SZ/.HK/.BJ``）→ 直接取下划线前的交易所 + 数字
+    - 纯数字无交易所信息 → 用 ``exchange`` 参数或数字启发式推断前缀（``_infer_exchange``）
+
+    例：``sh600000``→``sh600000``，``600000.SH``→``sh600000``，``000001.SZ``→``sz000001``，
+    ``00700.HK``→``hk00700``，``600000``（无交易所）→``sh600000``（数字推断上交所）。
+
+    关键点：带前缀后 ``sz000012``（南玻A）与 ``sh000012``（国债指数）天然区分，
+    不会像纯数字 ``000012`` 那样跨市场误合并；同时代码自带交易所，前端无需单列「市场」。
+    无数字可提取时回退原始串（如纯字母代码），不丢数据。
     """
     if not raw:
         return raw
     s = str(raw).strip()
-    # 去交易所后缀：首个 . - _ 分隔符之后的部分（如 .SZ/.SH/.HK）
-    s = re.split(r"[.\-_]", s, maxsplit=1)[0]
-    # 去前导交易所字母（如 sh/sz/bj/hk）
-    s = re.sub(r"^[a-zA-Z]+", "", s)
-    # 仅保留数字（兜底清残留非数字字符）
+    # 1. 显式前缀 sh/sz/bj/hk
+    m = re.match(r"^(sh|sz|bj|hk)(\d+)", s, re.IGNORECASE)
+    if m:
+        return f"{m.group(1).lower()}{m.group(2)}"
+    # 2. 交易所后缀 .SH/.SZ/.HK/.BJ（及其小写）
+    m = re.match(r"^(\d+)\.(sh|sz|bj|hk)$", s, re.IGNORECASE)
+    if m:
+        return f"{m.group(2).lower()}{m.group(1)}"
+    # 3. 纯数字：用 exchange 或数字启发式推断前缀
     digits = re.sub(r"\D", "", s)
-    return digits if digits else s
+    if not digits:
+        return s
+    ex = _norm_exchange(exchange) or _infer_exchange(digits)
+    prefix = _EXCHANGE_PREFIX.get(ex or "", "")
+    return f"{prefix}{digits}"
 
 
 def _row_get(row: Any, field: Optional[str]) -> Any:
@@ -346,7 +378,7 @@ class MarketDataSyncService:
             if code is None or price is None:
                 continue
             try:
-                # 价格 code 同样规范为数字串，与主数据 digits-only 对齐（否则带后缀源匹配不到）
+                # 价格 code 同样规范为「交易所前缀 + 数字」，与主数据对齐（否则带后缀源匹配不到）
                 out[_normalize_master_code(str(code))] = Decimal(str(price))
             except (InvalidOperation, ValueError, TypeError):
                 continue
@@ -362,7 +394,8 @@ class MarketDataSyncService:
             price = _row_get(r, price_field)
             if code is None or price is None:
                 continue
-            out[str(code)] = str(price)
+            # 测试端点解析同样规范为「交易所前缀 + 数字」，与同步/价格口径一致
+            out[_normalize_master_code(str(code))] = str(price)
         return out
 
     # ------------------------------------------------------------------ #
@@ -600,7 +633,7 @@ class MarketDataSyncService:
                 continue
             seen.add(u["interfaceId"])
             used_deduped.append(u)
-        # 自愈：统一 code 为数字串并合并存量重复行（不同源带/不带交易所字母导致的历史重复）
+        # 自愈：统一 code 为「交易所前缀 + 数字」并合并存量重复行（不同源带/不带交易所字母导致的历史重复）
         removed = await self._normalize_and_dedupe_masters()
         return {
             "synced": synced,
@@ -611,7 +644,7 @@ class MarketDataSyncService:
         }
 
     async def _normalize_and_dedupe_masters(self) -> int:
-        """扫描系统主数据：统一 code 为数字串，并合并 ``(asset_class, code)`` 碰撞的重复行。
+        """扫描系统主数据：统一 code 为「交易所前缀 + 数字」，并合并 ``(asset_class, code)`` 碰撞的重复行。
 
         修复旧数据：不同源带/不带交易所字母（如 ``"000001"`` vs ``"000001.SZ"``）曾绕过
         ``(asset_class, code)`` 唯一约束被当成两条追加写入。下次 ``sync_all`` 自动自愈，
@@ -690,9 +723,10 @@ class MarketDataSyncService:
             exchange = _row_get(r, exchange_field) if exchange_field else None
             if not exchange:
                 exchange = _infer_exchange(raw_code)
-            # 存储用「纯数字 code」：剥离交易所字母，保证不同源（000001 / 000001.SZ / sh000001）
-            # 落到同一 (asset_class, code) → 命中已存在行 UPDATE 而非追加 → 去重（如 2 个平安银行）
-            code = _normalize_master_code(raw_code)
+            # 存储用「交易所前缀 + 数字」：不同源（000001 / 000001.SZ / sh600000）统一规范，
+            # 落到同一 (asset_class, code) → 命中已存在行 UPDATE 而非追加 → 去重（如 2 个平安银行）；
+            # 跨市场代码天然区分（sz000012 南玻A vs sh000012 国债指数）不会误合并
+            code = _normalize_master_code(raw_code, exchange)
             pinyin = _compute_pinyin_initials(name)
 
             existing = (

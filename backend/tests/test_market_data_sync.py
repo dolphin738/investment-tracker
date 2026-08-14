@@ -293,7 +293,8 @@ async def test_parse_price_rows_positional_indices():
         ["000001", "平安银行", "9.87"],
     ]
     parsed = svc._parse_price_rows(itf, rows)
-    assert parsed == {"600000": Decimal("10.50"), "000001": Decimal("9.87")}
+    # 价格 code 同样规范为「交易所前缀 + 数字」（600000→SH，000001→SZ）
+    assert parsed == {"sh600000": Decimal("10.50"), "sz000001": Decimal("9.87")}
 
 
 async def test_parse_price_rows_array_missing_price_skipped():

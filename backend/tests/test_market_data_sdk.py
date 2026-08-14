@@ -102,9 +102,10 @@ async def test_fetch_sdk_parses_dataframe(session, monkeypatch):
     svc = MarketDataSyncService(session)
     result = await svc._fetch_sdk(itf, ["600000", "000001"])
 
+    # 价格 code 同样规范为「交易所前缀 + 数字」（600000→SH，000001→SZ）
     assert result == {
-        "600000": Decimal("12.34"),
-        "000001": Decimal("56.78"),
+        "sh600000": Decimal("12.34"),
+        "sz000001": Decimal("56.78"),
     }
     # codes 透传进了 akshare 调用参数
     assert fake.last_kwargs.get("codes") == ["600000", "000001"]
@@ -142,7 +143,7 @@ async def test_fetch_sdk_uses_interface_endpoint_as_func_name(session, monkeypat
     svc = MarketDataSyncService(session)
     result = await svc._fetch_sdk(itf, ["600000"])
     assert result == {
-        "600000": Decimal("12.34"),
-        "000001": Decimal("56.78"),
+        "sh600000": Decimal("12.34"),
+        "sz000001": Decimal("56.78"),
     }
     assert fake.last_kwargs.get("codes") == ["600000"]
