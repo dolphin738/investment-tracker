@@ -352,7 +352,8 @@ flowchart LR
 |------|------|
 | `SecurityTrade`（证券买卖流水） | `date / securityId / side(BUY_SEC \| SELL_SEC) / quantity / costPrice / commission / stampTax / other / feeTotal / note`。`costPrice`=含费单价、`feeTotal` = 佣金+印花税+其他之和。独立枚举，严禁复用 `TransactionType` |
 | `SecurityPrice`（标的最新价） | `securityId / price / asOf`。与现金余额同构的「最新值 + 向前沿用」语义。行情自动获取落地前由用户手工更新 |
-| `Security`（标的主数据） | `id / portfolioId / code / name / type / currency`；`type` 枚举 `STOCK`/`FUND`/`BOND`/`CASH`/`OTHER`，其中 `CASH` 弃用。同一组合内 `code` 唯一；`name` 必填 ≤ 50 字 |
+| `securities`（证券目录表） | 全局主数据字典：`id / code / name / currency / exchange / pinyin_initials / asset_class`（`asset_class` 即原 `type` 语义）；系统主数据唯一约束 `UNIQUE(asset_class, code)` |
+| `portfolio_securities`（组合持仓表） | `id / portfolioId / masterId(FK→securities.id) / code / name / type(可空 override，NULL 时读取由 `compute_type` COALESCE 重推为 `asset_class`) / currency / exchange`；`SecurityTrade`/`SecurityPrice`/`DividendRecord` 外键指向本表而非目录表；同组合 `(portfolioId, masterId)` 唯一 |
 | `DividendRecord`（分红记录） | 日期 / 标的 / 金额 / **所得税 `tax`（可选，空视为 0，≥ 0）** / 类型（现金分红·红利再投）/ 备注。**不参与收益计算**。红利再投不录入（无现金进出）。净额 `netAmount` = 金额 − 所得税，由后端统一计算并随响应返回、不落库 |
 | `SecurityTrade` 费用字段 | 费用由 `commission` / `stampTax` / `other` / `feeTotal` 字段承载（`fee_records` 表已并入并删除），费用场景由 `side` 推导（买入时 / 卖出时），费用数据仍不参与收益计算 |
 | `Holding` | ❌ **不存在**。持仓不落库、不手工录入，一律由 `SecurityTrade` 回放推导 |
@@ -393,6 +394,8 @@ flowchart LR
 各标的**当前持仓**一行：`标的名称 / 代码 / 类型 / 数量 / 成本价(avgCost) / 现价(+asOf) / 成本额 / 市值 / 浮动盈亏 / 盈亏率 / 占比`。行级派生值一律**不落库**，由 service 计算返回。
 
 > **边界澄清**：「派生值不落库」仅适用于持仓列表的行级派生值。组合级总资产是唯一例外 —— 它必须每日落库（`AssetSnapshot`，每日唯一一条）。
+
+**删除与孤儿持仓裁剪（实现B）**：删除某证券的买卖 / 行情 / 分红记录后，`SecurityService.prune_if_orphan` 判定该组合持仓 `portfolio_securities` 行是否成为纯孤儿（`trades=0 AND prices=0 AND dividends=0`）；是则连该持仓行一并删除。删空持仓**不影响估值**（估值只读 trades/prices/dividends，持仓本身不参与计算，调用方无需额外重算）。
 
 ## 5.3 现金余额（`CashBalance`）
 
@@ -616,10 +619,15 @@ totalAsset(D) = marketValue(D) + cashBalance(D)          // 自动派生口径
 
 ### 5.9.1 证券主数据同步（系统级字典 · §11）
 
-- 系统维护一张**系统级证券主数据**（`securities` 表中 `portfolio_id IS NULL` 的行，与用户组合标的共享同一张表但互不级联）；承载全市场「代码 / 名称 / 交易所 / 资产类别 / 拼音首字母」字典，供「股票列表和测试」左栏浏览与录入证券搜索复用。
-- 同步为**配置驱动、零硬编码**：`MarketDataSyncService.sync_all_security_masters()` 遍历所有 `purpose=MASTER_LIST` 且 `enabled` 的接口，按 `asset_class` 分组，复用 QUOTE 的 https/sdk 分派与 `priority` 降级链拉取 → 归一化响应（支持 dict 行与 `[code, name]` 数组行）→ 按 `resp_code_field/resp_name_field/resp_exchange_field` 解析 → upsert 进系统主数据（部分唯一索引 `(asset_class, code)` 跨资产类别命名空间隔离），并用 `pypinyin` 计算拼音首字母。
+- 系统维护一张独立的**证券目录表 `securities`**（ADR-003 拆表：目录与组合持仓分离，组合持仓在 `portfolio_securities`）；承载全市场「代码 / 名称 / 交易所 / 资产类别 / 拼音首字母」字典，供「金融数据接口-股票列表与测试」左栏浏览与录入证券搜索复用。
+- 同步为**配置驱动、零硬编码**：`MarketDataSyncService.sync_all_security_masters()` 遍历所有 `purpose=MASTER_LIST` 且 `enabled` 的接口，按 `asset_class` 分组，复用 QUOTE 的 https/sdk 分派与 `priority` 降级链拉取 → 归一化响应（支持 dict 行与 `[code, name]` 数组行）→ 按 `resp_code_field/resp_name_field/resp_exchange_field` 解析 → upsert 进证券目录表（唯一索引 `(asset_class, code)` 跨资产类别命名空间隔离），并用 `pypinyin` 计算拼音首字母。
 - 多资产类别完全数据驱动：A股 / 港股 / 可转债 / 基金 / ETF / 指数 / LOF 各自是一条 `asset_class` 不同的 MASTER_LIST 接口，同步循环无任何 `if 资产类别` 分支；新增类别 = 配置接口 + 极少枚举值。
 - 首次部署按决策 11 **不预置**任何种子接口（配置纯由管理员手动维护），因此需先建提供方 + MASTER_LIST 接口并「同步」后，主数据才有内容。
+
+**管理面交互（已落地）**：
+- **数据来源启用开关**：「金融数据接口-数据来源」操作列提供「启用 / 停用」按钮，切换提供方的 `enabled`（仅 per-provider 开关，无全局 active 源，ADR-002）。
+- **同步来源展示**：点击「同步」后，按钮旁展示「本次同步来源：提供方名 · 接口名」（来自同步结果 `used` 字段，camelCase：providerId/providerName/interfaceId/interfaceName）。
+- **主数据列表去类型列**：证券主数据列表不再展示「类型」列（`type` 改为组合持仓行可空 override，读取时 COALESCE 重推，列表无需展示）。
 
 ### 5.9.2 接口测试（单接口调试）
 
@@ -1344,7 +1352,7 @@ HAVING COUNT(*) > 1;
 | 端点 | 说明 | 权限 |
 |------|------|------|
 | `GET /api/admin/securities/masters?page&pageSize&q` | 系统主数据分页/搜索（q 匹配 code/name/拼音首字母） | 任意登录用户可读（录入搜索复用）；写入与测试仅 admin |
-| `POST /api/admin/securities/sync` | 手动触发全量同步（遍历 MASTER_LIST 接口） | admin |
+| `POST /api/admin/securities/sync` | 手动触发全量同步（遍历 MASTER_LIST 接口）；响应含 `used[]`（本次各资产类别命中的提供方/接口，camelCase），前端在同步按钮旁展示「本次同步来源」 | admin |
 | `POST /api/admin/quote-interfaces/{interfaceId}/test` | 单接口测试，回传 `raw`+`parsed`+错误/耗时（不计入失败计数） | admin |
 | `POST /api/portfolios/:id/securities/resolve` | 录入时选中主数据后实例化为组合标的（lazy） | 组合归属用户 |
 

@@ -131,7 +131,7 @@ backend/app/
 
 ### 3.1 数据模型完整定义（真实态 · SQLAlchemy 2.0）
 
-> 共 **14 张表 + 7 个 PostgreSQL 原生枚举**（含系统管理扩展的 `securities_data_providers` / `quote_provider_interfaces` / `quote_provider_interface_categories` 与 `interface_direction` 枚举，见 §3.1.6）。所有表名 snake_case 复数；UUID 主键由库端 `gen_random_uuid()` 生成；`created_at` / `updated_at` 由 `TimestampMixin` 维护；软删除仅 `users.deleted_at`。
+> 共 **15 张表 + 7 个 PostgreSQL 原生枚举**（含 ADR-003 拆出的 `portfolio_securities`，以及系统管理扩展的 `securities_data_providers` / `quote_provider_interfaces` / `quote_provider_interface_categories` 与 `interface_direction` 枚举，见 §3.1.6）。所有表名 snake_case 复数；UUID 主键由库端 `gen_random_uuid()` 生成；`created_at` / `updated_at` 由 `TimestampMixin` 维护；软删除仅 `users.deleted_at`。
 
 #### 3.1.1 用户与偏好
 
@@ -172,17 +172,23 @@ backend/app/
 | | base_date | Date | NULL | 基准日（首笔存入日，设后不可改） |
 | | currency | String(10) | default 'CNY' | 币种 |
 | | archived_at | DateTime tz | NULL | 归档时间 |
-| `securities` | id | String(36) UUID | PK | |
-| | portfolio_id | String(36) | FK→portfolios.id CASCADE，**可空**（NULL = 系统级主数据行，不触发 portfolios 级联） | 归属组合；NULL 行是系统主数据字典（§11） |
+| `securities`（证券目录表） | id | String(36) UUID | PK | 全局证券主数据字典（ADR-003 拆表：目录与组合持仓分离；详见 `docs/adr/ADR-003-security-model-split.md`） |
 | | code | String(64) | NOT NULL | 代码 |
 | | name | String(255) | NOT NULL | 名称 |
-| | type | Enum(SecurityType) | NOT NULL default STOCK | 证券类型（主数据行 `type` = `asset_class`） |
 | | currency | String(10) | default 'CNY' | |
 | | exchange | String(10) | NULL | 交易所/市场（SH/SZ/BJ/HK…）；主数据同步填充，缺失时按代码前缀推断 |
 | | pinyin_initials | String(64) | NULL | 名称拼音首字母（如 贵州茅台→gzm）；录入界面按拼音首字母搜索，同步由 `pypinyin` 计算 |
-| | asset_class | Enum(SecurityType) | NULL | 资产类别（复用 SecurityType）；主数据行 `type` 即 = `asset_class`；与部分唯一索引配套 |
-| | (UNIQUE(portfolio_id, code)) | | | 同组合代码唯一 |
-| | (uq_securities_master_asset_code) | 部分唯一索引 | `UNIQUE(asset_class, code) WHERE portfolio_id IS NULL` | 系统主数据跨资产类别命名空间隔离（§11.4） |
+| | asset_class | Enum(SecurityType) | NOT NULL | 资产类别（复用 SecurityType），即原主数据行 `type` 语义 |
+| | (uq_securities_master_asset_code) | 部分唯一索引 | `UNIQUE(asset_class, code)` | 系统主数据跨资产类别命名空间隔离（§11.4） |
+| `portfolio_securities`（组合持仓表） | id | String(36) UUID | PK | 组合级证券实例（ADR-003：每个组合的持仓行独立） |
+| | portfolio_id | String(36) | FK→portfolios.id CASCADE | 归属组合 |
+| | master_id | String(36) | FK→portfolio_securities.id CASCADE | 关联目录主数据（code/name/asset_class 取自此处） |
+| | code | String(64) | NOT NULL | 冗余代码（来自主数据，便于查询） |
+| | name | String(255) | NOT NULL | 冗余名称（来自主数据） |
+| | type | Enum(SecurityType) | NULL（可空 override） | 证券类型覆盖；NULL 时读取由 `compute_type` COALESCE 重推为 `asset_class`（与含费单价/费用口径无关） |
+| | currency | String(10) | default 'CNY' | |
+| | exchange | String(10) | NULL | 交易所（冗余自主数据） |
+| | (uq_portfolio_securities) | 部分唯一索引 | `UNIQUE(portfolio_id, master_id)` | 同组合内同一主数据唯一 |
 
 #### 3.1.3 交易 / 价格 / 出入金 / 现金
 
@@ -190,7 +196,7 @@ backend/app/
 |----|------|------|------|------|
 | `security_trades` | id | String(36) UUID | PK | |
 | | portfolio_id | String(36) | FK→portfolios.id CASCADE | |
-| | security_id | String(36) | FK→securities.id CASCADE | |
+| | security_id | String(36) | FK→portfolio_securities.id CASCADE | |
 | | date | Date | NOT NULL | 成交日 |
 | | side | Enum(SecuritySide) | NOT NULL | 买卖方向（BUY_SEC / SELL_SEC） |
 | | quantity | Numeric(18,6) | NOT NULL | 数量（始终 > 0） |
@@ -238,7 +244,7 @@ backend/app/
 | `daily_xirr` | id / portfolio_id / date | — | UNIQUE(portfolio_id, date) | |
 | | xirr_value | Numeric(20,8) | NULL | 年化收益率（可空=不可计算） |
 | `dividend_records` | id / portfolio_id | — | | |
-| | security_id | String(36) | FK→securities.id CASCADE | |
+| | security_id | String(36) | FK→portfolio_securities.id CASCADE | |
 | | date | Date | NOT NULL | |
 | | amount / tax | Numeric(18,2) | NULL default 0(tax) | 分红额 / 税（tax 可选，空视为 0） |
 | | type | Enum(DividendType) | default CASH | |
@@ -474,11 +480,10 @@ User (1) ──< Portfolio (N)
 
 | Method | Path | 说明 | 请求体 / 参数 | 响应 data |
 |--------|------|------|--------------|-----------|
-| GET | `/api/portfolios/:id/securities` | 标的列表 | `?page&pageSize` | `Paginated<Security>` |
-| POST | `/api/portfolios/:id/securities` | 新建标的（`type` 隐藏 `CASH` 选项） | `{ code, name, type?, currency? }` | `Security` |
-| PATCH | `/api/portfolios/:id/securities/:secId` | 编辑标的 | `{ name?, type? }` | `Security` |
-| DELETE | `/api/portfolios/:id/securities/:secId` | 删除标的（级联删其 trades/prices） | — | `null`，若存在成交日则返回 **`recalculation`**（否则纯 `null`，保持原契约） |
-| POST | `/api/portfolios/:id/securities/resolve` | 录入买卖时按主数据 `code` 选中后**实例化为组合标的**（lazy：命中系统主数据 `portfolio_id IS NULL` 行则复用其 `asset_class`/`exchange`/`name`，否则按 `code` 创建组合行；§10 决策移除「新建标的」，仅复用主数据） | `{ code }` | `Security` |
+| GET | `/api/portfolios/:id/securities` | 组合持仓列表（来自 `portfolio_securities`） | `?page&pageSize` | `Paginated<Security>` |
+| PATCH | `/api/portfolios/:id/securities/:secId` | 编辑组合持仓（名称等；`type` 为可空 override，NULL 时重推为 `asset_class`） | `{ name?, type? }` | `Security` |
+| DELETE | `/api/portfolios/:id/securities/:secId` | 删除组合持仓（级联删其 trades/prices/dividends；删光后为纯孤儿则连 `portfolio_securities` 行一并裁剪，见孤儿持仓裁剪） | — | `null`，若存在成交日则返回 **`recalculation`**（否则纯 `null`，保持原契约） |
+| POST | `/api/portfolios/:id/securities/resolve` | 录入买卖时按主数据 `masterId` 选中后**实例化为组合持仓**（`portfolio_securities`）；命中目录 `securities` 行则复用其 `asset_class`/`exchange`/`name`，否则报错（禁止手输 code，D2） | `{ masterId }` | `Security`（组合持仓行） |
 
 #### 4.2.6 证券买卖流水（`/security-trades` · 方案 B 持仓推导来源）
 
@@ -737,7 +742,7 @@ User (1) ──< Portfolio (N)
 
 ## 5. 核心数据结构
 
-### 5.1 类图（12 模型 + 关系）
+### 5.1 类图（13 模型 + 关系 · ADR-003 已将 `securities` 拆为 `securities` 目录表 + `portfolio_securities` 组合持仓表，Trade/Price/Dividend 外键指向 `portfolio_securities`）
 
 ```mermaid
 classDiagram
@@ -1272,6 +1277,7 @@ sequenceDiagram
 
 - 同分类内按 `priority` 升序；QUOTE 拉取命中失败时自动切下一优先级接口。
 - 连续失败计数 `consecutive_failures`（DB 原子自增），达阈值触发告警（`alerted` 去重）；接口测试不计入。
+- 同步结果附带 `used` 字段（camelCase：providerId/providerName/interfaceId/interfaceName），记录本次命中的提供方与接口；`sync_all` 按 `interfaceId` 去重聚合为 `used[]`，前端据此在「同步」按钮旁展示「本次同步来源：提供方 · 接口」（回归测试见 `test_sync_all_security_masters_returns_used_per_asset_class`）。
 
 ### 11.5 已知上游限制（实现备注）
 
