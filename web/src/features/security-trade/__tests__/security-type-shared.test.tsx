@@ -40,6 +40,10 @@ vi.mock('@/hooks/use-securities', () => ({
     mutateAsync: vi.fn(),
     isPending: false,
   }),
+  useUpdateSecurity: () => ({
+    mutate: vi.fn(),
+    isPending: false,
+  }),
 }));
 
 vi.mock('@/hooks/use-security-trades', () => ({
@@ -200,15 +204,19 @@ describe('SecurityType 单一定义（shared）', () => {
     expect(ReExportedSecurityType).toBe(SharedSecurityType);
   });
 
-  it('恰好 5 个类型，键值一一对应（与被删除的本地 enum 完全一致）', () => {
+  it('类型键值一一对应（含主数据扩展；无 CASH）', () => {
     expect(SharedSecurityType).toEqual({
       STOCK: 'STOCK',
       FUND: 'FUND',
       BOND: 'BOND',
-      CASH: 'CASH',
       OTHER: 'OTHER',
+      HK_STOCK: 'HK_STOCK',
+      CONVERTIBLE_BOND: 'CONVERTIBLE_BOND',
+      ETF: 'ETF',
+      INDEX: 'INDEX',
+      LOF: 'LOF',
     });
-    expect(Object.keys(SharedSecurityType)).toHaveLength(5);
+    expect(Object.keys(SharedSecurityType)).toHaveLength(9);
   });
 
   it('无 enum 反向映射污染（键集合 === 值集合，遍历下拉不会多出条目）', () => {
@@ -221,8 +229,8 @@ describe('SecurityType 单一定义（shared）', () => {
     expect(SharedSecurityType.STOCK).toBe('STOCK');
     expect(SharedSecurityType.FUND).toBe('FUND');
     expect(SharedSecurityType.BOND).toBe('BOND');
-    expect(SharedSecurityType.CASH).toBe('CASH');
     expect(SharedSecurityType.OTHER).toBe('OTHER');
+    expect(SharedSecurityType.LOF).toBe('LOF');
   });
 });
 

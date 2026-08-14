@@ -49,6 +49,7 @@ import type { SecurityMaster } from '@/api/security-master.api';
 const SECURITY_TYPE_OPTIONS: ReadonlyArray<{ value: SecurityType; label: string }> = [
   { value: SecurityType.STOCK, label: '股票' },
   { value: SecurityType.ETF, label: 'ETF' },
+  { value: SecurityType.LOF, label: 'LOF' },
   { value: SecurityType.FUND, label: '基金' },
   { value: SecurityType.BOND, label: '债券' },
   { value: SecurityType.CONVERTIBLE_BOND, label: '可转债' },
