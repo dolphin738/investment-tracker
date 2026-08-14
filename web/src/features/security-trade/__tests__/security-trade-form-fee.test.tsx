@@ -50,6 +50,10 @@ vi.mock('@/hooks/use-securities', () => ({
     mutateAsync: vi.fn(),
     isPending: false,
   }),
+  useUpdateSecurity: () => ({
+    mutate: vi.fn(),
+    isPending: false,
+  }),
 }));
 
 vi.mock('@/hooks/use-security-trades', () => ({
