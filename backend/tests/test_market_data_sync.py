@@ -27,7 +27,7 @@ from app.models.interface_category import InterfaceCategory
 from app.models.portfolio import Portfolio
 from app.models.quote_interface import QuoteInterface
 from app.models.quote_provider import SecuritiesDataProvider
-from app.models.security import Security, SecurityPrice
+from app.models.security import PortfolioSecurity, Security, SecurityPrice
 from app.models.user import User
 from app.services.market_data_sync import MarketDataSyncService
 from app.services.recalculation import RecalculationService
@@ -185,8 +185,12 @@ async def test_sync_portfolio_prices_upserts_and_recalculates(session, monkeypat
     session.add(portfolio)
     await session.flush()
 
-    sec1 = Security(id=_uid(), portfolio_id=portfolio.id, code="600000", name="浦发", type=SecurityType.STOCK)
-    sec2 = Security(id=_uid(), portfolio_id=portfolio.id, code="000001", name="平安", type=SecurityType.STOCK)
+    m1 = Security(id=_uid(), asset_class=SecurityType.STOCK, code="600000", name="浦发")
+    m2 = Security(id=_uid(), asset_class=SecurityType.STOCK, code="000001", name="平安")
+    session.add_all([m1, m2])
+    await session.flush()
+    sec1 = PortfolioSecurity(id=_uid(), portfolio_id=portfolio.id, master_id=m1.id, type=SecurityType.STOCK)
+    sec2 = PortfolioSecurity(id=_uid(), portfolio_id=portfolio.id, master_id=m2.id, type=SecurityType.STOCK)
     session.add_all([sec1, sec2])
 
     provider, category, itfs = await _seed_provider_category(session)
@@ -223,7 +227,7 @@ async def test_sync_portfolio_prices_upserts_and_recalculates(session, monkeypat
             select(SecurityPrice).where(SecurityPrice.portfolio_id == portfolio.id)
         )
     ).scalars().all()
-    by_code = {r.security.code: r for r in rows}
+    by_code = {r.security.master.code: r for r in rows}
     assert set(by_code.keys()) == {"600000", "000001"}
     assert by_code["600000"].price == Decimal("12.34")
     assert by_code["600000"].source == f"{provider.name}/{itfs[0].name}"

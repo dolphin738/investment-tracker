@@ -22,7 +22,7 @@ from decimal import Decimal
 
 import pytest
 
-from tests.helpers import auth, env, register_login
+from tests.helpers import auth, env, register_login, seed_security
 
 pytestmark = pytest.mark.asyncio
 
@@ -46,11 +46,7 @@ async def _seed_position(client, h, pid, sec_code="600000"):
         f"/api/portfolios/{pid}/cash-balances",
         headers=h, json={"asOf": str(D1), "amount": 90000},
     )
-    sec = (await client.post(
-        f"/api/portfolios/{pid}/securities",
-        headers=h, json={"code": sec_code, "name": sec_code, "type": "STOCK"},
-    )).json()["data"]
-    sec_id = sec["id"]
+    sec_id = await seed_security(client, pid, sec_code, sec_code, h, type="STOCK")
     await client.post(
         f"/api/portfolios/{pid}/security-prices",
         headers=h, json={"securityId": sec_id, "price": 10, "asOf": str(D1)},
@@ -167,10 +163,7 @@ async def test_m4_import_6decimals_accepted(client):
     creds = await register_login(client, "m4@example.com", "pw123456")
     h = auth(creds["token"])
     pid = await _create_portfolio(client, h, "M4组合")
-    await client.post(
-        f"/api/portfolios/{pid}/securities",
-        headers=h, json={"code": "600000", "name": "平安", "type": "STOCK"},
-    )
+    await seed_security(client, pid, "600000", "平安", h, type="STOCK")
     csv_text = (
         "date,securityCode,side,quantity,costPrice,feeTotal\n"
         "2024-01-02,600000,BUY_SEC,10.123456,12.345678,0\n"
@@ -250,10 +243,7 @@ async def test_l3_negative_amount_rejected(client):
     )
     assert env(r)[0] == 400
     # 交易数量 ≤ 0
-    sec = (await client.post(
-        f"/api/portfolios/{pid}/securities",
-        headers=h, json={"code": "600000", "name": "x", "type": "STOCK"},
-    )).json()["data"]["id"]
+    sec = await seed_security(client, pid, "600000", "x", h, type="STOCK")
     r = await client.post(
         f"/api/portfolios/{pid}/security-trades",
         headers=h, json={
@@ -586,13 +576,10 @@ async def test_p2c_delete_trade_no_orphan(client):
     creds = await register_login(client, "p2c@example.com", "pw123456")
     h = auth(creds["token"])
     pid = await _create_portfolio(client, h)
-    sec = (await client.post(
-        f"/api/portfolios/{pid}/securities", headers=h,
-        json={"code": "600000", "name": "x", "type": "STOCK"},
-    )).json()["data"]
+    sec = await seed_security(client, pid, "600000", "x", h, type="STOCK")
     tr = (await client.post(
         f"/api/portfolios/{pid}/security-trades", headers=h,
-        json={"date": str(D1), "securityId": sec["id"], "side": "BUY_SEC",
+        json={"date": str(D1), "securityId": sec, "side": "BUY_SEC",
               "quantity": 100, "costPrice": 20.16},
     )).json()["data"]
     # 删除买卖
@@ -624,13 +611,10 @@ async def test_p3_overview_no_price_not_500(client):
         f"/api/portfolios/{pid}/cash-balances", headers=h,
         json={"asOf": str(D1), "amount": 7984},
     )
-    sec = (await client.post(
-        f"/api/portfolios/{pid}/securities", headers=h,
-        json={"code": "600000", "name": "x", "type": "STOCK"},
-    )).json()["data"]
+    sec = await seed_security(client, pid, "600000", "x", h, type="STOCK")
     await client.post(
         f"/api/portfolios/{pid}/security-trades", headers=h,
-        json={"date": str(D1), "securityId": sec["id"], "side": "BUY_SEC",
+        json={"date": str(D1), "securityId": sec, "side": "BUY_SEC",
               "quantity": 100, "costPrice": 20.16},
     )
     r = await client.get(f"/api/portfolios/{pid}/overview", headers=h)
@@ -655,30 +639,24 @@ async def test_p4_holdings_type_filter(client):
         f"/api/portfolios/{pid}/cash-balances", headers=h,
         json={"asOf": str(D1), "amount": 90000},
     )
-    stock = (await client.post(
-        f"/api/portfolios/{pid}/securities", headers=h,
-        json={"code": "600000", "name": "股", "type": "STOCK"},
-    )).json()["data"]
-    fund = (await client.post(
-        f"/api/portfolios/{pid}/securities", headers=h,
-        json={"code": "500001", "name": "基", "type": "FUND"},
-    )).json()["data"]
+    stock = await seed_security(client, pid, "600000", "股", h, type="STOCK")
+    fund = await seed_security(client, pid, "500001", "基", h, type="FUND")
     await client.post(
         f"/api/portfolios/{pid}/security-prices", headers=h,
-        json={"securityId": stock["id"], "price": 10, "asOf": str(D1)},
+        json={"securityId": stock, "price": 10, "asOf": str(D1)},
     )
     await client.post(
         f"/api/portfolios/{pid}/security-prices", headers=h,
-        json={"securityId": fund["id"], "price": 10, "asOf": str(D1)},
+        json={"securityId": fund, "price": 10, "asOf": str(D1)},
     )
     await client.post(
         f"/api/portfolios/{pid}/security-trades", headers=h,
-        json={"date": str(D1), "securityId": stock["id"], "side": "BUY_SEC",
+        json={"date": str(D1), "securityId": stock, "side": "BUY_SEC",
               "quantity": 100, "costPrice": 10},
     )
     await client.post(
         f"/api/portfolios/{pid}/security-trades", headers=h,
-        json={"date": str(D1), "securityId": fund["id"], "side": "BUY_SEC",
+        json={"date": str(D1), "securityId": fund, "side": "BUY_SEC",
               "quantity": 100, "costPrice": 10},
     )
     # 无筛选 → 2 个
@@ -772,13 +750,10 @@ async def test_userbug2_freshness_reasons_structured(client):
         f"/api/portfolios/{pid}/cash-balances", headers=h,
         json={"asOf": str(D1), "amount": 90000},
     )
-    sec = (await client.post(
-        f"/api/portfolios/{pid}/securities", headers=h,
-        json={"code": "600000", "name": "x", "type": "STOCK"},
-    )).json()["data"]
+    sec = await seed_security(client, pid, "600000", "x", h, type="STOCK")
     await client.post(
         f"/api/portfolios/{pid}/security-trades", headers=h,
-        json={"date": str(D1), "securityId": sec["id"], "side": "BUY_SEC",
+        json={"date": str(D1), "securityId": sec, "side": "BUY_SEC",
               "quantity": 100, "costPrice": 10},
     )
     r = await client.get(f"/api/portfolios/{pid}/overview", headers=h)

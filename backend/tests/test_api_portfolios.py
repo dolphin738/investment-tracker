@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from tests.helpers import auth, env, register_login
+from tests.helpers import auth, env, register_login, seed_security
 
 pytestmark = pytest.mark.asyncio
 
@@ -93,13 +93,7 @@ async def test_clear_data_keeps_portfolio(client):
         json={"date": "2024-01-02", "type": "BUY", "amount": 1000},
     )
     # D2：造一条分红记录（需先有标的），验证清空数据含 dividend_records
-    sec = (
-        await client.post(
-            f"/api/portfolios/{pid}/securities",
-            headers=h,
-            json={"code": "600519", "name": "贵州茅台"},
-        )
-    ).json()["data"]["id"]
+    sec = await seed_security(client, pid, "600519", "贵州茅台", h)
     await client.post(
         f"/api/portfolios/{pid}/dividends",
         headers=h,

@@ -7,22 +7,14 @@ from __future__ import annotations
 import pytest
 
 from app.services.recalculation import RecalculationService
-from tests.helpers import auth, env, register_login
+from tests.helpers import auth, env, register_login, seed_security
 
 pytestmark = pytest.mark.asyncio
 
 
 # ───────────────────────── dividend §4.2.18 ─────────────────────────
 async def _seed_security(client, h, pid, code="600000", name="浦发银行"):
-    st, code_, data, msg = env(
-        await client.post(
-            f"/api/portfolios/{pid}/securities",
-            headers=h,
-            json={"code": code, "name": name, "type": "STOCK", "currency": "CNY"},
-        )
-    )
-    assert st == 200 and code_ == 0, (st, code_, msg)
-    return data["id"]
+    return await seed_security(client, pid, code, name, h, type="STOCK")
 
 
 async def test_dividend_crud_and_netamount(client):

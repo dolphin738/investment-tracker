@@ -20,6 +20,7 @@ from app.models import (
     DailyNav,
     DailyXirr,
     Portfolio,
+    PortfolioSecurity,
     Security,
     SecuritySide,
     SecurityTrade,
@@ -44,6 +45,8 @@ def test_metadata_tables_and_enums():
         "daily_xirr",
         "dividend_records",
         "user_preferences",
+        # 增量：ADR-003 拆表——组合持仓表（组合行独立成表）
+        "portfolio_securities",
         # 增量：多提供方证券行情数据提供方（admin 管理页）
         "securities_data_providers",
         # 增量：系统管理扩展（提供方接口 CRUD + 接口分类后台管理）
@@ -96,7 +99,12 @@ async def test_orm_roundtrip_and_cascade():
         p = Portfolio(user_id=u.id, name="P1")
         s.add(p)
         await s.flush()
-        sec = Security(portfolio_id=p.id, code="T1", name="T", type=SecurityType.STOCK)
+        master = Security(code="T1", name="T", asset_class=SecurityType.STOCK)
+        s.add(master)
+        await s.flush()
+        sec = PortfolioSecurity(
+            portfolio_id=p.id, master_id=master.id, type=SecurityType.STOCK
+        )
         s.add(sec)
         await s.flush()
         tr = SecurityTrade(

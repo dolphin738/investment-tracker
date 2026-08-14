@@ -19,7 +19,7 @@ from sqlalchemy import select
 
 import app.db.database as dbmod
 from app.core.security import create_access_token
-from app.models import Portfolio, Security, User
+from app.models import Portfolio, PortfolioSecurity, Security, User
 from app.models.enums import InterfacePurpose, SecurityType
 from app.services.market_data_sync import MarketDataSyncService
 
@@ -87,11 +87,9 @@ async def _create_interface(
 
 async def _seed_master(session, code, name, typ, pinyin, exchange=None):
     sec = Security(
-        portfolio_id=None,
         asset_class=typ,
         code=code,
         name=name,
-        type=typ,
         pinyin_initials=pinyin,
         exchange=exchange,
     )
@@ -121,7 +119,7 @@ async def test_list_security_masters_pagination_and_search(client, session):
     assert len(data["items"]) == 2
     # 仅返回主数据行（portfolio_id IS NULL）；shape 含 code/name/exchange/type/updatedAt
     assert {k for k in data["items"][0]} >= {
-        "id", "code", "name", "exchange", "type", "updatedAt",
+        "id", "code", "name", "exchange", "assetClass", "updatedAt",
     }
 
     # q 匹配 code
@@ -141,24 +139,23 @@ async def test_list_security_masters_pagination_and_search(client, session):
 
 
 async def test_list_security_masters_excludes_portfolio_rows(client, session):
-    """主数据端点只返回 portfolio_id IS NULL 行，组合维度持仓行不出现。"""
+    """主数据端点只返回主数据行（securities 现为纯目录表，无组合行概念）。
+
+    ADR-003：resolve 实例化的是 portfolio_securities 组合持仓，不向 securities 写任何行；
+    故 masters 端点始终只返回系统主数据。
+    """
     token = await _admin_token(client, "sm_admin_2@example.com")
     # 主数据行
-    await _seed_master(session, "600000", "浦发银行", SecurityType.STOCK, "pfyh", "SH")
-    # 组合行（portfolio_id 非空）：直接造一个 user+portfolio
-    user = User(id=str(uuid.uuid4()), email="sm_pf@example.com", password_hash="x", role="user")
-    session.add(user)
-    await session.flush()
-    pf = Portfolio(id=str(uuid.uuid4()), user_id=user.id, name="P")
-    session.add(pf)
-    await session.flush()
-    session.add(
-        Security(
-            portfolio_id=pf.id, code="600000", name="浦发银行（组合）",
-            type=SecurityType.STOCK,
-        )
+    master = await _seed_master(session, "600000", "浦发银行", SecurityType.STOCK, "pfyh", "SH")
+
+    # resolve 出一条组合持仓（不影响 securities 主数据表）
+    user, pf = await _user_and_portfolio(session, "sm_pf_user@example.com")
+    r = await client.post(
+        f"/api/portfolios/{pf.id}/securities/resolve",
+        json={"masterId": master.id},
+        headers=auth(create_access_token(user.id, user.email, "user")),
     )
-    await session.commit()
+    assert env(r)[0] == 200
 
     r = await client.get("/api/admin/securities/masters", headers=auth(token))
     _, _, data, _ = env(r)
@@ -260,22 +257,29 @@ async def _user_and_portfolio(session, email: str):
 
 async def test_resolve_returns_existing_portfolio_row(client, session):
     user, pf = await _user_and_portfolio(session, "res1@example.com")
-    sec = Security(
-        id=str(uuid.uuid4()), portfolio_id=pf.id, code="600000",
-        name="浦发银行", type=SecurityType.STOCK, exchange="SH",
+    master = Security(
+        id=str(uuid.uuid4()), asset_class=SecurityType.STOCK,
+        code="600000", name="浦发银行", exchange="SH",
+        pinyin_initials="pfyh",
     )
-    session.add(sec)
+    session.add(master)
+    await session.flush()
+    holding = PortfolioSecurity(
+        id=str(uuid.uuid4()), portfolio_id=pf.id, master_id=master.id,
+        type=SecurityType.STOCK,
+    )
+    session.add(holding)
     await session.commit()
     token = create_access_token(user.id, user.email, "user")
 
     r = await client.post(
         f"/api/portfolios/{pf.id}/securities/resolve",
-        json={"code": "600000", "name": "浦发银行"},
+        json={"masterId": master.id},
         headers=auth(token),
     )
     status, code, data, _ = env(r)
     assert status == 200 and code == 0
-    assert data["id"] == sec.id  # 命中已有组合行，返回同一 id
+    assert data["id"] == holding.id  # 命中已有组合行，返回同一 id
     assert data["isNew"] is False
     assert data["code"] == "600000"
     assert data["type"] == "STOCK"
@@ -285,8 +289,8 @@ async def test_resolve_returns_existing_portfolio_row(client, session):
 async def test_resolve_creates_from_master_row(client, session):
     user, pf = await _user_and_portfolio(session, "res2@example.com")
     master = Security(
-        id=str(uuid.uuid4()), portfolio_id=None, asset_class=SecurityType.STOCK,
-        code="600519", name="贵州茅台", type=SecurityType.STOCK, exchange="SH",
+        id=str(uuid.uuid4()), asset_class=SecurityType.STOCK,
+        code="600519", name="贵州茅台", exchange="SH",
         pinyin_initials="gzm",
     )
     session.add(master)
@@ -295,7 +299,7 @@ async def test_resolve_creates_from_master_row(client, session):
 
     r = await client.post(
         f"/api/portfolios/{pf.id}/securities/resolve",
-        json={"code": "600519"},
+        json={"masterId": master.id},
         headers=auth(token),
     )
     status, code, data, _ = env(r)
@@ -309,34 +313,33 @@ async def test_resolve_creates_from_master_row(client, session):
 
 
 async def test_resolve_fallback_from_request_body(client, session):
-    """主数据无该 code 时，按请求体兜底新建组合行。"""
+    """D2（SEC-INC-04）：resolve 必须指定已存在的主数据 masterId，禁止手输 code 兜底新建。
+
+    主数据无该 masterId 时 → 404（NOT_FOUND），不再按请求体兜底创建组合行。
+    """
     user, pf = await _user_and_portfolio(session, "res3@example.com")
     token = create_access_token(user.id, user.email, "user")
 
     r = await client.post(
         f"/api/portfolios/{pf.id}/securities/resolve",
-        json={"code": "600999", "name": "新标的", "type": "ETF", "exchange": "SH"},
+        json={"masterId": str(uuid.uuid4())},  # 不存在的主数据
         headers=auth(token),
     )
-    status, code, data, _ = env(r)
-    assert status == 200 and code == 0
-    assert data["isNew"] is True
-    assert data["code"] == "600999"
-    assert data["name"] == "新标的"
-    assert data["type"] == "ETF"
-    assert data["exchange"] == "SH"
+    status, code, _, _ = env(r)
+    assert status == 404
 
 
 async def test_resolve_not_found_for_other_user_portfolio(client, session):
     """组合归属隔离：resolve 他人组合 → 404（不泄露存在性）。"""
     user, pf = await _user_and_portfolio(session, "res4@example.com")
+    master = await _seed_master(session, "600000", "浦发银行", SecurityType.STOCK, "pfyh", "SH")
     other = User(id=str(uuid.uuid4()), email="res4b@example.com", password_hash="x", role="user")
     session.add(other)
     await session.commit()
     token = create_access_token(other.id, other.email, "user")
     r = await client.post(
         f"/api/portfolios/{pf.id}/securities/resolve",
-        json={"code": "600000"},
+        json={"masterId": master.id},
         headers=auth(token),
     )
     status, code, _, _ = env(r)
@@ -381,7 +384,7 @@ async def test_sync_security_masters_dispatch_uses_provider_access_method(
     assert result["synced"] == 2
     assert result["failed"] == 0
     rows = (
-        await session.execute(select(Security).where(Security.portfolio_id.is_(None)))
+        await session.execute(select(Security))
     ).scalars().all()
     assert {r.code for r in rows} == {"600000", "000001"}
 
@@ -484,7 +487,7 @@ async def test_sync_security_masters_array_rows_positional(client, monkeypatch, 
     rows = {
         r.code: r
         for r in (
-            await session.execute(select(Security).where(Security.portfolio_id.is_(None)))
+            await session.execute(select(Security))
         ).scalars().all()
     }
     assert rows["sz301141"].name == "中科磁业"

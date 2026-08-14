@@ -13,7 +13,7 @@ import pytest
 
 from app.core.date_utils import today_app_tz
 
-from tests.helpers import auth, env, register_login
+from tests.helpers import auth, env, register_login, seed_security
 
 pytestmark = pytest.mark.asyncio
 
@@ -75,13 +75,7 @@ async def test_snapshot_rejects_future_date(client):
 
 async def test_security_trade_rejects_future_date(client):
     h, pid = await _new_portfolio(client)
-    sec = (
-        await client.post(
-            f"/api/portfolios/{pid}/securities",
-            headers=h,
-            json={"code": "600000", "name": "浦发银行"},
-        )
-    ).json()["data"]["id"]
+    sec = await seed_security(client, pid, "600000", "浦发银行", h)
     r = await client.post(
         f"/api/portfolios/{pid}/security-trades",
         headers=h,
@@ -98,13 +92,7 @@ async def test_security_trade_rejects_future_date(client):
 
 async def test_security_price_rejects_future_date(client):
     h, pid = await _new_portfolio(client)
-    sec = (
-        await client.post(
-            f"/api/portfolios/{pid}/securities",
-            headers=h,
-            json={"code": "600001", "name": "招商银行"},
-        )
-    ).json()["data"]["id"]
+    sec = await seed_security(client, pid, "600001", "招商银行", h)
     r = await client.post(
         f"/api/portfolios/{pid}/security-prices",
         headers=h,

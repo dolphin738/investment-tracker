@@ -10,7 +10,7 @@ from datetime import timedelta
 from decimal import Decimal
 
 from app.core.date_utils import today_app_tz
-from tests.helpers import auth, env, register_login
+from tests.helpers import auth, env, register_login, seed_security
 
 pytestmark = pytest.mark.asyncio
 
@@ -29,12 +29,7 @@ async def _seed(client, h, d1=D1):
         headers=h,
         json={"date": str(d1), "type": "BUY", "amount": 100000},
     )
-    sec = await client.post(
-        "/api/portfolios/{}/securities".format(pid),
-        headers=h,
-        json={"code": "A", "name": "StockA"},
-    )
-    sid = sec.json()["data"]["id"]
+    sid = await seed_security(client, pid, "A", "StockA", h)
     await client.post(
         "/api/portfolios/{}/security-trades".format(pid),
         headers=h,

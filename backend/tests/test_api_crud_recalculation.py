@@ -12,7 +12,7 @@ from decimal import Decimal
 
 import pytest
 
-from tests.helpers import auth, env, register_login
+from tests.helpers import auth, env, register_login, seed_security
 
 pytestmark = pytest.mark.asyncio
 
@@ -32,14 +32,7 @@ async def _seed_portfolio_with_position(client, h, pid):
         headers=h,
         json={"asOf": str(D1), "amount": 90000},
     )
-    sec = (
-        await client.post(
-            f"/api/portfolios/{pid}/securities",
-            headers=h,
-            json={"code": "600000", "name": "平安银行", "type": "STOCK"},
-        )
-    ).json()["data"]
-    sec_id = sec["id"]
+    sec_id = await seed_security(client, pid, "600000", "平安银行", h, type="STOCK")
     await client.post(
         f"/api/portfolios/{pid}/security-prices",
         headers=h,

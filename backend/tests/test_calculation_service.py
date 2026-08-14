@@ -22,6 +22,7 @@ from app.models import (
     DailyNav,
     DailyXirr,
     Portfolio,
+    PortfolioSecurity,
     Security,
     SecurityPrice,
     SecuritySide,
@@ -126,7 +127,12 @@ async def test_holding_derive_and_filters():
         p = Portfolio(user_id=u.id, name="P2")
         s.add(p)
         await s.flush()
-        sec = Security(portfolio_id=p.id, code="S1", name="S1", type=SecurityType.STOCK)
+        master = Security(code="S1", name="S1", asset_class=SecurityType.STOCK)
+        s.add(master)
+        await s.flush()
+        sec = PortfolioSecurity(
+            portfolio_id=p.id, master_id=master.id, type=SecurityType.STOCK
+        )
         s.add(sec)
         await s.flush()
 
