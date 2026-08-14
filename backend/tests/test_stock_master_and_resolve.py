@@ -544,3 +544,76 @@ async def test_sync_all_security_masters_returns_used_per_asset_class(
         assert u["providerId"] == pid
         assert u["interfaceName"] in ("A股主数据", "港股主数据")
         assert "providerName" in u and "interfaceId" in u
+
+
+async def test_sync_skips_disabled_provider_master_interfaces(client, monkeypatch, session):
+    """主数据同步须尊重提供方 enabled：停用提供方（如「小熊同学」）的接口不被采用。
+
+    两提供方各挂一个 MASTER_LIST + STOCK 接口；停用方的接口即使能返回数据也不应被选中。
+    修复前只过滤 QuoteInterface.enabled，停用提供方但其接口仍 enabled 时会被照用。
+    """
+    token = await _admin_token(client, "sm_admin_off_master@example.com")
+    pid_on = await _create_provider(client, token, name="启用提供方")
+    # 停用提供方（模拟「小熊同学」已停用）
+    off_body = dict(PROVIDER_BODY, name="小熊同学", enabled=False)
+    r = await client.post("/api/admin/quote-providers", json=off_body, headers=auth(token))
+    status, code, data, _ = env(r)
+    assert status == 200 and code == 0, data
+    pid_off = data["id"]
+    cid = await _create_category(client, token)
+    iid_on = await _create_interface(
+        client, token, pid_on, cid,
+        name="启用方主数据", purpose="MASTER_LIST", asset_class="STOCK",
+    )
+    iid_off = await _create_interface(
+        client, token, pid_off, cid,
+        name="小熊同学主数据", purpose="MASTER_LIST", asset_class="STOCK",
+    )
+
+    async def _fake_https_raw(self, itf, params, codes):
+        # 两个接口都返回数据，验证「停用方即使有响应也不被采用」
+        if itf.id == iid_off:
+            return [{"code": "00700", "name": "腾讯控股"}]
+        return [{"code": "600000", "name": "浦发银行"}]
+
+    monkeypatch.setattr(MarketDataSyncService, "_fetch_https_raw", _fake_https_raw)
+    result = await MarketDataSyncService(session).sync_security_masters(
+        SecurityType.STOCK
+    )
+    assert result["synced"] == 1  # 仅启用方接口被 upsert
+    assert result["failed"] == 0
+    used = result["used"]
+    assert used is not None
+    assert used["interfaceId"] == iid_on
+    assert used["providerId"] == pid_on
+    assert used["interfaceId"] != iid_off
+    # 主数据里只应有启用方同步来的代码
+    rows = (await session.execute(select(Security))).scalars().all()
+    assert {r.code for r in rows} == {"600000"}
+
+
+async def test_fallback_fetch_skips_disabled_provider(client, monkeypatch, session):
+    """fallback_fetch 同样须尊重提供方 enabled：停用提供方的 QUOTE 接口不参与解析。
+
+    仅停用提供方（小熊同学）挂一个能返回价格的 QUOTE 接口，启用提供方无接口；
+    同步该分类应拿不到数据（source=None），证明停用方接口被跳过。
+    """
+    token = await _admin_token(client, "sm_admin_off_fb@example.com")
+    cid = await _create_category(client, token)
+    off_body = dict(PROVIDER_BODY, name="小熊同学", enabled=False)
+    r = await client.post("/api/admin/quote-providers", json=off_body, headers=auth(token))
+    status, code, data, _ = env(r)
+    assert status == 200 and code == 0, data
+    pid_off = data["id"]
+    await _create_interface(
+        client, token, pid_off, cid,
+        name="小熊同学行情", enabled=True,
+    )
+
+    async def _fake_https_raw(self, itf, params, codes):
+        return [{"code": "600000", "price": "12.34"}]
+
+    monkeypatch.setattr(MarketDataSyncService, "_fetch_https_raw", _fake_https_raw)
+    res = await MarketDataSyncService(session).fallback_fetch(cid, ["600000"])
+    assert res.prices == {}  # 停用方接口被跳过 → 无数据
+    assert res.source is None

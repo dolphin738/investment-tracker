@@ -120,18 +120,32 @@ class MarketDataSyncService:
     # ------------------------------------------------------------------ #
     # 顺序 fallback 链
     # ------------------------------------------------------------------ #
+    def _active_provider_join(self, stmt):
+        """在 ``select(QuoteInterface[.<列>])`` 上 JOIN 所属提供方并过滤 enabled。
+
+        提供方级开关（``SecuritiesDataProvider.enabled``）是「唯一开关；禁用后不参与解析」，
+        故所有选源路径都必须连表过滤提供方 enabled，不能只看接口级 ``enabled``
+        （否则停用提供方、但其下接口仍 enabled 时会被照常选用 —— 见 #1 修复）。
+        """
+        return stmt.join(
+            SecuritiesDataProvider,
+            QuoteInterface.provider_id == SecuritiesDataProvider.id,
+        ).where(SecuritiesDataProvider.enabled == True)  # noqa: E712
+
     async def _interfaces_for_category(self, category_id: str) -> list[QuoteInterface]:
-        rows = await self.session.execute(
+        stmt = (
             select(QuoteInterface)
             .where(
                 QuoteInterface.category_id == category_id,
                 QuoteInterface.enabled == True,  # noqa: E712
             )
-            .order_by(
-                QuoteInterface.priority.is_(None),
-                QuoteInterface.priority,
-            )
         )
+        stmt = self._active_provider_join(stmt)
+        stmt = stmt.order_by(
+            QuoteInterface.priority.is_(None),
+            QuoteInterface.priority,
+        )
+        rows = await self.session.execute(stmt)
         return list(rows.scalars().all())
 
     async def fallback_fetch(
@@ -427,14 +441,14 @@ class MarketDataSyncService:
             return {"synced": 0, "failed": 0, "skipped": 0, "errors": []}
         codes = list(securities.keys())
 
-        # 涉及分类：有 enabled 接口的分类
+        # 涉及分类：有 enabled 接口（且所属提供方启用）的分类
         cat_rows = await self.session.execute(
-            select(QuoteInterface.category_id)
-            .where(
-                QuoteInterface.enabled == True,  # noqa: E712
-                QuoteInterface.category_id.isnot(None),
-            )
-            .distinct()
+            self._active_provider_join(
+                select(QuoteInterface.category_id).where(
+                    QuoteInterface.enabled == True,  # noqa: E712
+                    QuoteInterface.category_id.isnot(None),
+                )
+            ).distinct()
         )
         category_ids = [c for (c,) in cat_rows.all() if c]
 
@@ -472,10 +486,14 @@ class MarketDataSyncService:
         仅选 ``portfolio_id IS NULL`` 的系统主数据行承载全市场列表；命中优先链即停。
         返回结构化结果 ``{synced, failed, errors}``。
         """
-        stmt = select(QuoteInterface).where(
-            QuoteInterface.purpose == InterfacePurpose.MASTER_LIST,
-            QuoteInterface.enabled == True,  # noqa: E712
+        stmt = (
+            select(QuoteInterface)
+            .where(
+                QuoteInterface.purpose == InterfacePurpose.MASTER_LIST,
+                QuoteInterface.enabled == True,  # noqa: E712
+            )
         )
+        stmt = self._active_provider_join(stmt)
         if asset_class is not None:
             stmt = stmt.where(QuoteInterface.asset_class == asset_class)
         stmt = stmt.order_by(
@@ -523,13 +541,13 @@ class MarketDataSyncService:
         """遍历全部 MASTER_LIST 接口的 distinct asset_class，逐个同步（数据驱动，零硬编码）。"""
         rows = (
             await self.session.execute(
-                select(QuoteInterface.asset_class)
-                .where(
-                    QuoteInterface.purpose == InterfacePurpose.MASTER_LIST,
-                    QuoteInterface.enabled == True,  # noqa: E712
-                    QuoteInterface.asset_class.isnot(None),
-                )
-                .distinct()
+                self._active_provider_join(
+                    select(QuoteInterface.asset_class).where(
+                        QuoteInterface.purpose == InterfacePurpose.MASTER_LIST,
+                        QuoteInterface.enabled == True,  # noqa: E712
+                        QuoteInterface.asset_class.isnot(None),
+                    )
+                ).distinct()
             )
         ).all()
         asset_classes = [r[0] for r in rows if r[0] is not None]
