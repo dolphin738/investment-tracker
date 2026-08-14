@@ -216,9 +216,8 @@ function StockListPanel({
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="w-24">代码</TableHead>
+                <TableHead className="w-28">代码</TableHead>
                 <TableHead>名称</TableHead>
-                <TableHead className="w-14">市场</TableHead>
                 <TableHead className="w-16 text-right">操作</TableHead>
               </TableRow>
             </TableHeader>
@@ -227,9 +226,6 @@ function StockListPanel({
                 <TableRow key={s.id}>
                   <TableCell className="font-mono">{s.code}</TableCell>
                   <TableCell className="truncate">{s.name}</TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {s.exchange ?? '-'}
-                  </TableCell>
                   <TableCell className="text-right">
                     <Button
                       variant="ghost"

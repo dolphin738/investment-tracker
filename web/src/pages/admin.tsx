@@ -19,6 +19,26 @@ import { QuoteProviderSection } from '@/features/admin/quote-provider-section';
 import { InterfaceCategorySection } from '@/features/admin/interface-category-section';
 import { StockListTestSection } from '@/features/admin/stock-list-test-section';
 
+/** 当前激活子模块持久化键：刷新网页后仍停留在同一分页（而非回到默认第一个） */
+const ADMIN_MODULE_KEY = 'invest:admin-active-module';
+
+function readStoredModule(): string {
+  try {
+    const v = localStorage.getItem(ADMIN_MODULE_KEY);
+    return v && MODULES.some((m) => m.key === v) ? v : MODULES[0].key;
+  } catch {
+    return MODULES[0].key;
+  }
+}
+
+function storeModule(key: string): void {
+  try {
+    localStorage.setItem(ADMIN_MODULE_KEY, key);
+  } catch {
+    /* 隐私模式 / 配额：忽略持久化失败 */
+  }
+}
+
 interface AdminModule {
   key: string;
   label: string;
@@ -55,7 +75,7 @@ function findModule(key: string): AdminModule {
 
 export default function AdminPage(): JSX.Element {
   const isAdmin = useIsAdmin();
-  const [active, setActive] = useState<string>(MODULES[0].key);
+  const [active, setActive] = useState<string>(readStoredModule);
 
   if (!isAdmin) {
     return (
@@ -70,6 +90,11 @@ export default function AdminPage(): JSX.Element {
     );
   }
 
+  const handleSelect = (key: string): void => {
+    setActive(key);
+    storeModule(key);
+  };
+
   const Active = findModule(active).component;
 
   return (
@@ -80,7 +105,7 @@ export default function AdminPage(): JSX.Element {
           <button
             key={m.key}
             type="button"
-            onClick={() => setActive(m.key)}
+            onClick={() => handleSelect(m.key)}
             className={cn(
               'flex items-center rounded-md border px-3 py-1.5 text-sm transition-colors',
               active === m.key
