@@ -13,10 +13,11 @@ from typing import Optional
 from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.envelope import EnvelopeRoute
 from app.db.database import get_db
-from app.models import Security
+from app.models import PortfolioSecurity
 from app.common import get_portfolio
 from app.serializers import serialize_dividend
 from app.schemas import DividendCreateReq, DividendPatchReq
@@ -43,10 +44,14 @@ async def list_dividends(
         p.id, securityId, startDate, endDate, page, pageSize
     )
     sec_ids = [r.security_id for r in rows]
-    sec_map: dict[str, Security] = {}
+    sec_map: dict[str, PortfolioSecurity] = {}
     if sec_ids:
         secs = (
-            await db.execute(select(Security).where(Security.id.in_(sec_ids)))
+            await db.execute(
+                select(PortfolioSecurity)
+                .where(PortfolioSecurity.id.in_(sec_ids))
+                .options(selectinload(PortfolioSecurity.master))
+            )
         ).scalars().all()
         sec_map = {s.id: s for s in secs}
     items = [serialize_dividend(r, sec_map.get(r.security_id)) for r in rows]
@@ -65,7 +70,9 @@ async def create_dividend(
     db: AsyncSession = Depends(get_db),
 ):
     d = await DividendService(db).create(p.id, req)
-    sec = await db.get(Security, d.security_id)
+    sec = await db.get(PortfolioSecurity, d.security_id)
+    if sec is not None:
+        await db.refresh(sec, ["master"])
     return serialize_dividend(d, sec)
 
 
@@ -77,7 +84,9 @@ async def patch_dividend(
     div_id: str = "",
 ):
     d = await DividendService(db).patch(p.id, div_id, req)
-    sec = await db.get(Security, d.security_id)
+    sec = await db.get(PortfolioSecurity, d.security_id)
+    if sec is not None:
+        await db.refresh(sec, ["master"])
     return serialize_dividend(d, sec)
 
 

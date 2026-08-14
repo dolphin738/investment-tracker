@@ -1,4 +1,12 @@
-"""标的主数据 / 证券买卖流水 / 标的最新价（对齐 app Prisma: Security / SecurityTrade / SecurityPrice）。"""
+"""标的主数据（目录表）/ 组合持仓表（组合行）/ 证券买卖流水 / 标的最新价。
+
+拆表（ADR-003）：
+- ``securities`` 仅作系统级主数据目录表（跨组合共享搜索目录），不再承载组合行；
+  删除 ``portfolio_id`` / ``type`` / ``currency`` 列，唯一约束收敛为 ``(asset_class, code)``。
+- 新增 ``portfolio_securities`` 组合持仓表，组合私有实例，承载 trades/prices/dividends；
+  ``name/exchange`` 经 ``master_id`` JOIN 目录读取，根治「主数据改名不同步组合行」。
+- ``type`` 收敛为组合行专属、可空 override（NULL=按代码前缀推断），由序列化层 COALESCE。
+"""
 from __future__ import annotations
 
 from datetime import date, datetime
@@ -15,58 +23,84 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
-    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, CreatedAtMixin, TimestampMixin, pk_uuid
-from app.models.enums import InterfacePurpose, SecuritySide, SecurityType
+from app.models.enums import SecuritySide, SecurityType
 
 
 class Security(Base, TimestampMixin):
+    """系统级证券主数据目录表（reference data，跨组合共享搜索目录）。
+
+    仅主数据行；组合行已拆至 ``portfolio_securities``。``name/exchange`` 由组合行经
+    ``master_id`` JOIN 本表读取，故本表不承担 ``type``（类别维度由 ``asset_class`` 承担）。
+    """
+
     __tablename__ = "securities"
     __table_args__ = (
-        UniqueConstraint("portfolio_id", "code", name="uq_securities_portfolio_code"),
-        # 系统级主数据行（portfolio_id IS NULL）按 资产类别+code 唯一，避免跨类命名空间碰撞
-        Index(
-            "uq_securities_master_asset_code",
-            "asset_class",
-            "code",
-            unique=True,
-            postgresql_where=text("portfolio_id IS NULL"),
-        ),
+        # 系统级主数据按 资产类别+code 唯一，避免跨类命名空间碰撞
+        UniqueConstraint("asset_class", "code", name="uq_securities_asset_code"),
         # 录入界面证券搜索（code/name/拼音首字母 ILIKE）加速
         Index("ix_securities_pinyin_initials", "pinyin_initials"),
     )
 
     id: Mapped[str] = pk_uuid()
-    # 系统级主数据行 portfolio_id=NULL（不触发 portfolios 的 ON DELETE CASCADE）；
-    # 用户持仓行仍填真实组合 id，保持原 CASCADE 行为。
-    portfolio_id: Mapped[Optional[str]] = mapped_column(
-        String(36),
-        ForeignKey("portfolios.id", ondelete="CASCADE"),
-        nullable=True,
-    )
     code: Mapped[str] = mapped_column(String(64), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    type: Mapped[SecurityType] = mapped_column(
-        Enum(SecurityType, name="SecurityType", native_enum=True, create_type=True),
-        default=SecurityType.STOCK,
-        nullable=False,
-    )
-    currency: Mapped[str] = mapped_column(String(10), default="CNY", nullable=False)
     # 交易所/市场（SH/SZ/BJ/HK…）；主数据同步填充，缺失时由代码前缀推断
     exchange: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
     # 名称拼音首字母（如 贵州茅台→gzm）；录入界面按拼音首字母搜索，同步任务用 pypinyin 计算
     pinyin_initials: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    # 资产类别（复用 SecurityType）；主数据行 type 即 = asset_class。
-    # 与主数据部分唯一索引配套；组合行可留 NULL（唯一约束仅作用于 portfolio_id IS NULL 行）。
+    # 资产类别（复用 SecurityType）；仅用于唯一约束 + 接口配置路由，不参与类型推导
     asset_class: Mapped[Optional[SecurityType]] = mapped_column(
         Enum(SecurityType, name="SecurityType", native_enum=True, create_type=False),
         nullable=True,
     )
 
-    portfolio: Mapped["Portfolio"] = relationship(back_populates="securities")
+    # 组合持仓（master_id → 本目录行）；删除目录行级联删其组合持仓
+    holdings: Mapped[list["PortfolioSecurity"]] = relationship(
+        back_populates="master", passive_deletes=True
+    )
+
+
+class PortfolioSecurity(Base, TimestampMixin):
+    """组合持仓表（原组合行独立成表，ADR-003）。
+
+    ``master_id`` JOIN ``securities`` 读取 ``name/exchange``；``type`` 为可空 override：
+    ``NULL``=由代码前缀推断（``infer_security_type``），有值=手动覆盖。
+    """
+
+    __tablename__ = "portfolio_securities"
+    __table_args__ = (
+        UniqueConstraint(
+            "portfolio_id", "master_id", name="uq_portfolio_securities_portfolio_master"
+        ),
+        Index("ix_portfolio_securities_portfolio", "portfolio_id"),
+    )
+
+    id: Mapped[str] = pk_uuid()
+    portfolio_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("portfolios.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    master_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("securities.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    # 资产类型 override：NULL=按代码前缀推断；有值=手动覆盖
+    type: Mapped[Optional[SecurityType]] = mapped_column(
+        Enum(SecurityType, name="SecurityType", native_enum=True, create_type=False),
+        nullable=True,
+    )
+    currency: Mapped[str] = mapped_column(String(10), default="CNY", nullable=False)
+
+    master: Mapped["Security"] = relationship(back_populates="holdings")
+    portfolio: Mapped["Portfolio"] = relationship(
+        back_populates="securities", passive_deletes=True
+    )
     trades: Mapped[list["SecurityTrade"]] = relationship(
         back_populates="security", passive_deletes=True
     )
@@ -93,7 +127,7 @@ class SecurityTrade(Base, TimestampMixin):
     )
     security_id: Mapped[str] = mapped_column(
         String(36),
-        ForeignKey("securities.id", ondelete="CASCADE"),
+        ForeignKey("portfolio_securities.id", ondelete="CASCADE"),
         nullable=False,
     )
     date: Mapped[date] = mapped_column(Date, nullable=False)
@@ -116,7 +150,7 @@ class SecurityTrade(Base, TimestampMixin):
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     portfolio: Mapped["Portfolio"] = relationship(back_populates="security_trades")
-    security: Mapped["Security"] = relationship(back_populates="trades")
+    security: Mapped["PortfolioSecurity"] = relationship(back_populates="trades")
 
 
 class SecurityPrice(Base, CreatedAtMixin):
@@ -140,7 +174,7 @@ class SecurityPrice(Base, CreatedAtMixin):
     )
     security_id: Mapped[str] = mapped_column(
         String(36),
-        ForeignKey("securities.id", ondelete="CASCADE"),
+        ForeignKey("portfolio_securities.id", ondelete="CASCADE"),
         nullable=False,
     )
     price: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
@@ -154,4 +188,4 @@ class SecurityPrice(Base, CreatedAtMixin):
     )
 
     portfolio: Mapped["Portfolio"] = relationship(back_populates="security_prices")
-    security: Mapped["Security"] = relationship(back_populates="prices")
+    security: Mapped["PortfolioSecurity"] = relationship(back_populates="prices")

@@ -33,7 +33,6 @@ from app.schemas import (
     CashflowPatchReq,
     PriceCreateReq,
     PricePatchReq,
-    SecurityCreateReq,
     SecurityPatchReq,
     SecurityResolveReq,
     SnapshotCreateReq,
@@ -168,34 +167,20 @@ async def get_security(
     return serialize_security(sec)
 
 
-@router_securities.post("/{portfolio_id}/securities", response_model=SecurityOut)
-async def create_security(
-    req: SecurityCreateReq, p=Depends(get_portfolio), db: AsyncSession = Depends(get_db)
-):
-    sec = await SecurityService(db).create(p.id, req)
-    return serialize_security(sec)
-
-
 @router_securities.post("/{portfolio_id}/securities/resolve")
 async def resolve_security(
     req: SecurityResolveReq, p=Depends(get_portfolio), db: AsyncSession = Depends(get_db)
 ):
-    """录入界面证券搜索选中后的懒实例化：幂等 upsert by (portfolio_id, code)。
+    """录入界面证券搜索选中后的懒实例化：幂等 upsert by (portfolio_id, master_id)（ADR-003）。
 
-    1) 该组合已存在同 code 的 portfolio 行 → 直接返回其 id（isNew=false）；
-    2) 否则以系统主数据行（portfolio_id IS NULL、同 code）为模板实例化一条组合行；
-    3) 若主数据行也不存在（兜底）→ 按请求体 name/type 新建组合行。
-    trade 永远指向组合维度标的，不污染主数据、不破坏唯一约束（§7 ③）。
+    必须选中目录主数据（combobox 搜索 → 点击选中 → 传 master_id）；以目录主数据为模板
+    实例化一条组合持仓行（portfolio_securities），name/exchange 经 master_id JOIN 读取；
+    type 不落库（NULL），读取时由代码前缀推断。trade 永远指向组合维度标的。
     """
     sec, is_new = await SecurityService(db).resolve(p.id, req)
-    return {
-        "id": sec.id,
-        "code": sec.code,
-        "name": sec.name,
-        "type": sec.type.value,
-        "exchange": sec.exchange,
-        "isNew": is_new,
-    }
+    result = serialize_security(sec)
+    result["isNew"] = is_new
+    return result
 
 
 @router_securities.patch("/{portfolio_id}/securities/{sec_id}", response_model=SecurityOut)

@@ -23,6 +23,7 @@ import jwt
 from openpyxl import Workbook, load_workbook
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.config import get_settings
 from app.core.date_utils import today_app_tz
@@ -36,7 +37,7 @@ from app.models import (
     CashFlow,
     DailyNav,
     DailyXirr,
-    Security,
+    PortfolioSecurity,
     SecurityPrice,
     SecurityTrade,
     SnapshotSource,
@@ -45,6 +46,7 @@ from app.models import (
 from app.models.enums import CashFlowType, SecuritySide
 from app.services.cashflow import CashflowService
 from app.services.recalculation import RecalculationService
+from app.services.security import compute_type
 from app.services.snapshot import SnapshotService
 from app.services.trade import TradeService
 
@@ -307,10 +309,22 @@ async def build_export(
 ) -> tuple[list[str], list[list[str]]]:
     if type_ == "securities":
         secs = (
-            await db.execute(select(Security).where(Security.portfolio_id == portfolio_id))
+            await db.execute(
+                select(PortfolioSecurity)
+                .where(PortfolioSecurity.portfolio_id == portfolio_id)
+                .options(selectinload(PortfolioSecurity.master))
+            )
         ).scalars().all()
         cols = ["code", "name", "type", "currency"]
-        rows = [[s.code, s.name or "", s.type.value, s.currency] for s in secs]
+        rows = [
+            [
+                s.master.code if s.master else "",
+                s.master.name or "" if s.master else "",
+                compute_type(s).value,
+                s.currency,
+            ]
+            for s in secs
+        ]
         return cols, rows
     if type_ == "securityTrades":
         trades = (
@@ -321,9 +335,13 @@ async def build_export(
             )
         ).scalars().all()
         secs = (
-            await db.execute(select(Security).where(Security.portfolio_id == portfolio_id))
+            await db.execute(
+                select(PortfolioSecurity)
+                .where(PortfolioSecurity.portfolio_id == portfolio_id)
+                .options(selectinload(PortfolioSecurity.master))
+            )
         ).scalars().all()
-        code_map = {s.id: s.code for s in secs}
+        code_map = {s.id: (s.master.code if s.master else "") for s in secs}
         cols = ["date", "securityCode", "side", "quantity", "costPrice", "feeTotal", "note"]
         rows = [
             [
@@ -369,9 +387,13 @@ async def build_export(
             )
         ).scalars().all()
         secs = (
-            await db.execute(select(Security).where(Security.portfolio_id == portfolio_id))
+            await db.execute(
+                select(PortfolioSecurity)
+                .where(PortfolioSecurity.portfolio_id == portfolio_id)
+                .options(selectinload(PortfolioSecurity.master))
+            )
         ).scalars().all()
-        code_map = {s.id: s.code for s in secs}
+        code_map = {s.id: (s.master.code if s.master else "") for s in secs}
         cols = ["asOf", "securityCode", "price"]
         rows = [[p.as_of.isoformat(), code_map.get(p.security_id, ""), str(p.price)] for p in ps]
         return cols, rows

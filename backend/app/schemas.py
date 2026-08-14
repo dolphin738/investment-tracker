@@ -92,25 +92,23 @@ class CashflowPatchReq(BaseModel):
 
 
 # ── 标的 ──
-class SecurityCreateReq(BaseModel):
-    code: str
-    name: str
-    type: Optional[str] = "STOCK"
-    currency: str = "CNY"
-
-
 class SecurityPatchReq(BaseModel):
-    name: Optional[str] = None
+    """组合标的 PATCH：仅允许 type override（name 等维度归目录主数据）。"""
+
     type: Optional[str] = None
 
 
 class SecurityResolveReq(BaseModel):
-    """录入界面证券搜索选中后，懒实例化为组合标的的幂等 upsert 请求体（§7 ③）。"""
+    """录入界面证券搜索选中后，懒实例化为组合标的的幂等 upsert 请求体（ADR-003）。
 
-    code: str = Field(..., min_length=1, max_length=64)
-    name: Optional[str] = Field(None, max_length=255)
-    type: Optional[str] = None
-    exchange: Optional[str] = Field(None, max_length=10)
+    必须选中目录主数据（combobox 搜索 → 点击选中 → 传 masterId），不再支持手输 code。
+    type 为可选 override；不传则读取时由代码前缀推断（infer_security_type）。
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    master_id: str = Field(..., alias="masterId", description="目录主数据 id（securities.id）")
+    type: Optional[str] = Field(None, description="可选 type override；不传=按代码前缀推断")
 
 
 # ── 证券买卖 ──

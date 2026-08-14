@@ -30,7 +30,7 @@ class DividendRecord(Base, CreatedAtMixin):
     )
     security_id: Mapped[str] = mapped_column(
         String(36),
-        ForeignKey("securities.id", ondelete="CASCADE"),
+        ForeignKey("portfolio_securities.id", ondelete="CASCADE"),
         nullable=False,
     )
     date: Mapped[date] = mapped_column(Date, nullable=False)
@@ -44,4 +44,4 @@ class DividendRecord(Base, CreatedAtMixin):
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     portfolio: Mapped["Portfolio"] = relationship(back_populates="dividends")
-    security: Mapped["Security"] = relationship(back_populates="dividends")
+    security: Mapped["PortfolioSecurity"] = relationship(back_populates="dividends")

@@ -626,12 +626,12 @@ async def list_security_masters(
     current: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """系统级证券主数据（portfolio_id IS NULL）分页浏览；q 匹配 code/name/拼音首字母。
+    """系统级证券主数据目录表分页浏览；q 匹配 code/name/拼音首字母。
 
     任意登录用户可读（§10：录入界面证券搜索复用本端点，主数据行是系统级公共字典）；
     写入（sync）与接口测试仍仅限管理员。
     """
-    stmt = select(Security).where(Security.portfolio_id.is_(None))
+    stmt = select(Security)
     if q:
         like = f"%{q.strip()}%"
         stmt = stmt.where(

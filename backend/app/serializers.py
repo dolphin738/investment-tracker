@@ -13,11 +13,12 @@ from app.models import (
     CashBalance,
     CashFlow,
     Portfolio,
+    PortfolioSecurity,
     Security,
     SecurityPrice,
     SecurityTrade,
 )
-from app.models.enums import DividendType, SecurityType
+from app.models.enums import DividendType
 
 
 def serialize_portfolio(p: Portfolio) -> dict:
@@ -47,26 +48,36 @@ def serialize_cashflow(c: CashFlow) -> dict:
     }
 
 
-def serialize_security(s: Security) -> dict:
+def serialize_security(s: PortfolioSecurity) -> dict:
+    """组合持仓（portfolio_securities）序列化：name/exchange 经 master_id JOIN 目录。"""
+    from app.services.security import compute_type
+
+    master = s.master
+    code = master.code if master is not None else ""
+    name = master.name if master is not None else ""
+    exchange = master.exchange if master is not None else None
+    stype = compute_type(s)
     return {
         "id": s.id,
-        "code": s.code,
-        "name": s.name,
-        "type": s.type.value,
+        "code": code,
+        "name": name,
+        "type": stype.value,
+        "exchange": exchange,
         "currency": s.currency,
+        "masterId": s.master_id,
         "createdAt": s.created_at,
         "updatedAt": s.updated_at,
     }
 
 
 def serialize_security_master(s: Security) -> dict:
-    """系统级证券主数据行（portfolio_id IS NULL）序列化：左栏只读展示用。"""
+    """系统级证券主数据行（目录表）序列化：左栏只读展示用。"""
     return {
         "id": s.id,
         "code": s.code,
         "name": s.name,
         "exchange": s.exchange,
-        "type": s.type.value if isinstance(s.type, SecurityType) else s.type,
+        "assetClass": s.asset_class.value if s.asset_class is not None else None,
         "updatedAt": s.updated_at,
     }
 
@@ -133,8 +144,16 @@ def serialize_snapshot(s: AssetSnapshot, derived_total=None) -> dict:
 
 
 def serialize_dividend(d, sec=None) -> dict:
-    sec_code = sec.code if sec is not None else None
-    sec_name = sec.name if sec is not None else None
+    sec_code = (
+        sec.master.code
+        if sec is not None and sec.master is not None
+        else None
+    )
+    sec_name = (
+        sec.master.name
+        if sec is not None and sec.master is not None
+        else None
+    )
     net = d.amount - d.tax
     return {
         "id": d.id,

@@ -16,13 +16,14 @@ from fastapi import APIRouter, Depends, File, Form, UploadFile
 from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.enums import BusinessErrorCode
 from app.core.envelope import EnvelopeRoute
 from app.core.exceptions import BusinessException
 from app.core.security import CurrentUser, get_current_user
 from app.db.database import get_db
-from app.models import Security
+from app.models import PortfolioSecurity
 from app.models.enums import ExportType, ImportType
 from app.common import get_portfolio
 from app.schemas import ImportCommitReq
@@ -101,9 +102,13 @@ async def import_preview(
 
     header, data = dt._read_sheet(content, ext)
     secs = (
-        await db.execute(select(Security).where(Security.portfolio_id == p.id))
+        await db.execute(
+            select(PortfolioSecurity)
+            .where(PortfolioSecurity.portfolio_id == p.id)
+            .options(selectinload(PortfolioSecurity.master))
+        )
     ).scalars().all()
-    sec_map = {s.code: s.id for s in secs}
+    sec_map = {s.master.code: s.id for s in secs if s.master is not None}
 
     valid_rows, errors, sample, min_date = dt.validate_and_build(
         type.value, header, data, sec_map

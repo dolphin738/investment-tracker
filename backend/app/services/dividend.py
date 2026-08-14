@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums import BusinessErrorCode
 from app.core.exceptions import BusinessException
-from app.models import DividendRecord, Security
+from app.models import DividendRecord, PortfolioSecurity
 from app.models.enums import DividendType
 from app.schemas import DividendCreateReq, DividendPatchReq
 from app.services.base import PortfolioChildService, coerce_enum, split_ids
@@ -66,7 +66,7 @@ class DividendService(PortfolioChildService):
         self, portfolio_id: str, req: DividendCreateReq
     ) -> DividendRecord:
         # 二级隔离：证券必须属于本组合
-        await self.get_scoped(Security, req.securityId, portfolio_id)
+        await self.get_scoped(PortfolioSecurity, req.securityId, portfolio_id)
         tax = req.tax if req.tax is not None else Decimal(0)
         # netAmount = amount - tax 不能为负（K-2）
         if req.amount - tax < 0:
@@ -102,7 +102,7 @@ class DividendService(PortfolioChildService):
         tax = d.tax
         if req.securityId is not None:
             # 二级隔离：新证券必须属于本组合
-            await self.get_scoped(Security, req.securityId, portfolio_id)
+            await self.get_scoped(PortfolioSecurity, req.securityId, portfolio_id)
             sec_id = req.securityId
         if req.date is not None:
             d.date = req.date

@@ -20,7 +20,7 @@ from app.models.notification import Notification
 from app.models.portfolio import Portfolio
 from app.models.quote_interface import QuoteInterface
 from app.models.quote_provider import SecuritiesDataProvider
-from app.models.security import Security, SecurityPrice, SecurityTrade
+from app.models.security import PortfolioSecurity, Security, SecurityPrice, SecurityTrade
 from app.models.snapshot import AssetSnapshot
 from app.models.user import User, UserPreference
 
@@ -33,6 +33,7 @@ __all__ = [
     "Security",
     "SecurityTrade",
     "SecurityPrice",
+    "PortfolioSecurity",
     "AssetSnapshot",
     "SecuritiesDataProvider",
     "QuoteInterface",

@@ -14,6 +14,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.envelope import EnvelopeRoute
 from app.core.security import CurrentUser, get_current_user
@@ -24,7 +25,7 @@ from app.models import (
     CashFlow,
     DailyNav,
     DailyXirr,
-    Security,
+    PortfolioSecurity,
     SecurityPrice,
     SecurityTrade,
 )
@@ -40,6 +41,7 @@ from app.schemas_resp import (
 )
 from app.services.holding import HoldingService
 from app.services.recalculation import RecalculationService
+from app.services.security import compute_type
 
 
 def _period_key(d: date, granularity: str):
@@ -124,15 +126,18 @@ async def get_holdings(
     if sec_ids and len(sec_ids) > 1:
         wanted = set(sec_ids)
         views = [v for v in views if v.security_id in wanted]
-    # 标的元数据（类型筛选 + 列表展示共用）
-    sec_map = {
-        s.id: s
-        for s in (
-            await db.execute(select(Security).where(Security.portfolio_id == p.id))
-        ).scalars().all()
-    }
+    # 标的元数据（类型筛选 + 列表展示共用）：组合持仓 → master（目录）
+    holdings = (
+        await db.execute(
+            select(PortfolioSecurity)
+            .where(PortfolioSecurity.portfolio_id == p.id)
+            .options(selectinload(PortfolioSecurity.master))
+        )
+    ).scalars().all()
+    sec_map = {h.id: h for h in holdings}
     # 类型筛选（修复问题4：此前未接收后端参数 → 持仓页类型筛选器无效）。
-    # types 为逗号分隔的 SecurityType 值（如 "STOCK,FUND"），按 sec.type.value 过滤。
+    # types 为逗号分隔的 SecurityType 值（如 "STOCK,FUND"），按 compute_type
+    # （override 优先，否则代码前缀推断）过滤。
     type_set = (
         {t.strip().upper() for t in types.split(",") if t.strip()} if types else None
     )
@@ -140,9 +145,8 @@ async def get_holdings(
         views = [
             v
             for v in views
-            if (sec := sec_map.get(v.security_id)) is not None
-            and sec.type is not None
-            and sec.type.value in type_set
+            if (h := sec_map.get(v.security_id)) is not None
+            and compute_type(h).value in type_set
         ]
     # 各标的现价日期（as_of 前最后一条 SecurityPrice.as_of）
     price_rows = (
@@ -161,14 +165,18 @@ async def get_holdings(
     for v in views:
         pnl = v.market_value - v.cost_total
         ratio = (pnl / v.cost_total) if v.cost_total != ZERO else ZERO
-        sec = sec_map.get(v.security_id)
+        h = sec_map.get(v.security_id)
+        master = h.master if h is not None else None
+        sec_code = master.code if master is not None else ""
+        sec_name = master.name if master is not None else ""
+        sec_type = compute_type(h).value if h is not None else ""
         price_as_of = price_as_of_map.get(v.security_id)
         items.append(
             {
                 "securityId": v.security_id,
-                "securityCode": sec.code if sec else "",
-                "securityName": sec.name if sec else "",
-                "securityType": sec.type.value if sec and sec.type else "",
+                "securityCode": sec_code,
+                "securityName": sec_name,
+                "securityType": sec_type,
                 "quantity": str(v.quantity),
                 "avgCost": str(v.avg_cost),
                 "costTotal": str(v.cost_total),

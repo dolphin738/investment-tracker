@@ -100,7 +100,9 @@ class SecurityOut(BaseModel):
     code: str
     name: str
     type: SecurityType
+    exchange: Optional[str] = None
     currency: str
+    masterId: str
     createdAt: datetime
     updatedAt: datetime
 

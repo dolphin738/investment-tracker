@@ -29,7 +29,7 @@ class Portfolio(Base, TimestampMixin):
     cashflows: Mapped[list["CashFlow"]] = relationship(
         back_populates="portfolio", passive_deletes=True
     )
-    securities: Mapped[list["Security"]] = relationship(
+    securities: Mapped[list["PortfolioSecurity"]] = relationship(
         back_populates="portfolio", passive_deletes=True
     )
     security_trades: Mapped[list["SecurityTrade"]] = relationship(
