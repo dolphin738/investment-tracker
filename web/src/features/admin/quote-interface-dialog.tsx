@@ -64,6 +64,7 @@ const ASSET_CLASS_OPTIONS: Array<{ value: string; label: string }> = [
   { value: 'CONVERTIBLE_BOND', label: '可转债' },
   { value: 'FUND', label: '基金' },
   { value: 'ETF', label: 'ETF' },
+  { value: 'LOF', label: 'LOF' },
   { value: 'INDEX', label: '指数' },
   { value: 'BOND', label: '债券' },
   { value: 'OTHER', label: '其他' },
@@ -379,7 +380,9 @@ export function QuoteInterfaceDialog({
               </div>
             </div>
             <p className="text-xs text-muted-foreground">
-              用途选「证券列表（MASTER_LIST）」时，主数据同步按资产类别拉取全市场代码/名称/交易所（配置驱动，换数据源只改配置）；若响应为数组行（如{' '}
+              用途选「证券列表（MASTER_LIST）」时，主数据同步按此接口拉取全市场代码/名称/
+              交易所（配置驱动，换数据源只改配置）；证券的资产类型由代码前缀自动识别，不以本栏为准。
+              若响应为数组行（如{' '}
               <code className="font-mono">["code","name"]</code>），代码/名称字段填位置下标（如{' '}
               <code className="font-mono">0</code>/<code className="font-mono">1</code>）。
             </p>

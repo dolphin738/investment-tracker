@@ -67,6 +67,19 @@ import type { InterfaceTestResponse, QuoteInterface } from '@/api/quote-interfac
 
 const PAGE_SIZE = 20;
 
+/** 资产类型中文映射（证券主数据列表展示用） */
+const SECURITY_TYPE_LABEL: Record<string, string> = {
+  STOCK: '股票',
+  FUND: '基金',
+  BOND: '债券',
+  ETF: 'ETF',
+  LOF: 'LOF',
+  CONVERTIBLE_BOND: '可转债',
+  INDEX: '指数',
+  HK_STOCK: '港股',
+  OTHER: '其他',
+};
+
 export function StockListTestSection(): JSX.Element {
   // 左右联动：左栏「填入测试」追加 code 到右栏 codesText
   const [codesText, setCodesText] = useState('');
@@ -182,7 +195,7 @@ function StockListPanel({
                     {s.exchange ?? '-'}
                   </TableCell>
                   <TableCell className="text-muted-foreground">
-                    {s.type ?? '-'}
+                    {s.type ? (SECURITY_TYPE_LABEL[s.type] ?? s.type) : '-'}
                   </TableCell>
                   <TableCell className="text-right">
                     <Button
