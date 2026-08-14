@@ -39,6 +39,7 @@ from app.models.quote_provider import SecuritiesDataProvider
 from app.models.security import Security, SecurityPrice
 from app.services.notification import NotificationService
 from app.services.recalculation import RecalculationService
+from app.services.security import infer_security_type
 
 # —— 可配置阈值（ADR-002 §3 Q4 默认 3）——
 FAILURE_THRESHOLD: int = 3
@@ -528,8 +529,13 @@ class MarketDataSyncService:
         return {"synced": synced, "failed": failed, "errors": errors}
 
     async def _upsert_masters(self, itf: QuoteInterface, rows: list[Any]) -> int:
-        """把原始行 upsert 进 securities 系统主数据（portfolio_id=NULL）。"""
-        asset_class = itf.asset_class
+        """把原始行 upsert 进 securities 系统主数据（portfolio_id=NULL）。
+
+        资产类型由代码前缀推断（_infer_security_type），不再依赖接口配置的 asset_class。
+        asset_class 字段统一使用接口配置的 asset_class（如 STOCK），用于主数据唯一约束。
+        """
+        # asset_class 用于主数据唯一约束（防止不同资产类别代码碰撞）
+        asset_class = itf.asset_class or SecurityType.STOCK
         code_field = itf.resp_code_field or "code"
         name_field = itf.resp_name_field or "name"
         exchange_field = itf.resp_exchange_field
@@ -546,6 +552,8 @@ class MarketDataSyncService:
             if not exchange:
                 exchange = _infer_exchange(code)
             pinyin = _compute_pinyin_initials(name)
+            # 按代码前缀推断真实资产类型（供 resolve 时复制）
+            inferred_type = infer_security_type(code)
 
             existing = (
                 await self.session.execute(
@@ -564,7 +572,7 @@ class MarketDataSyncService:
                     code=code,
                     name=name,
                     exchange=exchange,
-                    type=asset_class,
+                    type=inferred_type,
                     pinyin_initials=pinyin,
                 )
                 self.session.add(sec)
@@ -572,7 +580,7 @@ class MarketDataSyncService:
                 existing.asset_class = asset_class
                 existing.name = name
                 existing.exchange = exchange
-                existing.type = asset_class
+                existing.type = inferred_type
                 existing.pinyin_initials = pinyin
             count += 1
         await self.session.flush()

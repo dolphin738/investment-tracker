@@ -18,6 +18,35 @@ from app.services.base import PortfolioChildService, coerce_enum
 from app.services.recalculation import RecalculationResult, RecalculationService
 
 
+def infer_security_type(code: str) -> SecurityType:
+    """按代码前缀推断资产类型（供主数据同步 / resolve 使用）。
+
+    规则：
+    - 000xxx / 399xxx / 0003xx → 指数（INDEX）
+    - 5xxxxx / 15xxxx / 51xxxx → ETF
+    - 16xxxx → LOF（归入 FUND）
+    - 12xxxx → 可转债（CONVERTIBLE_BOND）
+    - 其他 → A 股股票（STOCK）
+    """
+    if not code:
+        return SecurityType.STOCK
+    c = str(code)
+    # 指数：000xxx（沪深指数）、399xxx（深证指数）、0003xx（中证指数）
+    if c.startswith("000") or c.startswith("399"):
+        return SecurityType.INDEX
+    # ETF：上交所 5xxxxx、深交所 15xxxx
+    if c.startswith("5") or c.startswith("15"):
+        return SecurityType.ETF
+    # LOF：深交所 16xxxx（归入 FUND）
+    if c.startswith("16"):
+        return SecurityType.FUND
+    # 可转债：深交所 12xxxx
+    if c.startswith("12"):
+        return SecurityType.CONVERTIBLE_BOND
+    # 默认：A 股股票
+    return SecurityType.STOCK
+
+
 class SecurityService(PortfolioChildService):
     async def list_stmt(self, portfolio_id: str):
         """构造带排序的查询（分页交给 router 的 paginate）。"""
@@ -62,6 +91,8 @@ class SecurityService(PortfolioChildService):
 
         返回 (security, is_new)。命中已有组合行 → is_new=False；否则新建（以主数据行模板或
         请求体兜底）→ is_new=True。
+
+        资产类型始终使用代码前缀推断（infer_security_type），不依赖主数据行的 type。
         """
         existing = (
             await self.session.execute(
@@ -85,16 +116,18 @@ class SecurityService(PortfolioChildService):
         ).scalar_one_or_none()
         if master is not None:
             name = master.name
-            stype = master.type
             exchange = master.exchange
+            # 有主数据时，使用代码前缀推断资产类型（不从主数据复制）
+            stype = infer_security_type(req.code)
         else:
             name = req.name or req.code
+            exchange = req.exchange
+            # 无主数据时，用请求体的 type 兜底（保留原有逻辑）
             stype = (
                 coerce_enum(SecurityType, req.type, "type")
                 if req.type
-                else SecurityType.STOCK
+                else infer_security_type(req.code)
             )
-            exchange = req.exchange
 
         sec = Security(
             portfolio_id=portfolio_id,
