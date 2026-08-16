@@ -185,17 +185,52 @@ export type NavMetric = typeof NavMetric[keyof typeof NavMetric];
 
 export const SecurityType = {
   STOCK: 'STOCK',
-  FUND: 'FUND',
+  ON_EXCHANGE_FUND: 'ON_EXCHANGE_FUND',
   BOND: 'BOND',
   OTHER: 'OTHER',
   // 证券主数据多资产类别扩展
   HK_STOCK: 'HK_STOCK',
   CONVERTIBLE_BOND: 'CONVERTIBLE_BOND',
-  ETF: 'ETF',
   INDEX: 'INDEX',
-  LOF: 'LOF',
+  OFF_EXCHANGE_FUND: 'OFF_EXCHANGE_FUND',
 } as const;
 export type SecurityType = (typeof SecurityType)[keyof typeof SecurityType];
+
+/** 资产类别中文标签（主数据列表等界面展示用，全项目唯一真源）。
+ * 覆盖 SecurityType 全部成员 + 主数据行兜底类别 UNCATEGORIZED（代码无法可靠推断时落在未分类）。
+ * 注意：UNCATEGORIZED 不入 SecurityType const（避免成为接口可选同步类别），仅在此映射与后端枚举对齐。 */
+export const SECURITY_TYPE_LABELS: Record<string, string> = {
+  STOCK: '股票',
+  HK_STOCK: '港股',
+  ON_EXCHANGE_FUND: '场内基金',
+  OFF_EXCHANGE_FUND: '场外基金',
+  BOND: '债券',
+  CONVERTIBLE_BOND: '可转债',
+  INDEX: '指数',
+  OTHER: '其他',
+  UNCATEGORIZED: '未分类',
+};
+
+/** 取资产类别中文标签；空值或未知值回退「未分类」/原字符串，避免界面露出裸枚举。 */
+export function securityTypeLabel(value: string | null | undefined): string {
+  if (!value) return SECURITY_TYPE_LABELS.UNCATEGORIZED;
+  return SECURITY_TYPE_LABELS[value] ?? value;
+}
+
+/** 交易所中文标签（主数据列表交易所筛选 / 展示用，全项目唯一真源）。
+ * 覆盖主数据 exchange 列全部大写取值；其余（如 NULL / 未知）由 exchangeLabel 兜底。 */
+export const EXCHANGE_LABELS: Record<string, string> = {
+  SH: '沪市',
+  SZ: '深市',
+  BJ: '北交所',
+  HK: '港股',
+};
+
+/** 取交易所中文标签；空值或未知值回退原字符串，避免界面露出裸枚举。 */
+export function exchangeLabel(value: string | null | undefined): string {
+  if (!value) return value ?? '';
+  return EXCHANGE_LABELS[value] ?? value;
+}
 
 // ============================================================================
 // 概览数据新鲜度（DASH-P1-03 / AL-015）

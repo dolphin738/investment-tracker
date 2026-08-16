@@ -826,7 +826,7 @@ PG 原生枚举类型名 `interface_direction`（由迁移创建）。
     /** SecuritySide */
     SecuritySide: 'BUY_SEC' | 'SELL_SEC';
     /** SecurityType */
-    SecurityType: 'STOCK' | 'FUND' | 'BOND' | 'OTHER' | 'HK_STOCK' | 'CONVERTIBLE_BOND' | 'ETF' | 'INDEX' | 'LOF';
+    SecurityType: 'STOCK' | 'ON_EXCHANGE_FUND' | 'BOND' | 'OTHER' | 'HK_STOCK' | 'CONVERTIBLE_BOND' | 'INDEX' | 'OFF_EXCHANGE_FUND';
     /** SnapshotCreateReq */
     SnapshotCreateReq: {
         /** Date */

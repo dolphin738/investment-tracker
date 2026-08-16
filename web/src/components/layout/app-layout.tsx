@@ -19,6 +19,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Sidebar } from './sidebar';
+import { RoutePersistence } from '@/components/route-persistence';
 import { PortfolioSelector } from '@/features/portfolio/portfolio-selector';
 import { PortfolioDialog } from '@/features/portfolio/portfolio-dialog';
 import { useAuthStore, useIsAdmin } from '@/stores/auth.store';
@@ -167,6 +168,7 @@ export function AppLayout(): JSX.Element {
 
         {/* 主内容区 */}
         <main className="flex-1 overflow-x-hidden p-4 md:p-6">
+          <RoutePersistence />
           <Outlet />
         </main>
       </div>

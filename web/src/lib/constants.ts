@@ -32,6 +32,11 @@ export const ROUTE_PATH = {
   ADMIN: '/admin',
 } as const;
 
+// ===== 路由持久化键 =====
+// 命名风格与 invest:admin-active-module 一致（invest: 前缀 + 短横线语义）。
+export const LAST_ROUTE_KEY = 'invest:last-route';
+export const AUTH_RETURN_KEY = 'invest:auth-return';
+
 // ===== 查询维度选项（用于 UI 下拉/Tab） =====
 export const GRANULARITY_OPTIONS = [
   { value: 'day', label: '按日' },

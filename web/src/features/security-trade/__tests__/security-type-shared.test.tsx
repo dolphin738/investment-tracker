@@ -207,16 +207,15 @@ describe('SecurityType 单一定义（shared）', () => {
   it('类型键值一一对应（含主数据扩展；无 CASH）', () => {
     expect(SharedSecurityType).toEqual({
       STOCK: 'STOCK',
-      FUND: 'FUND',
+      ON_EXCHANGE_FUND: 'ON_EXCHANGE_FUND',
       BOND: 'BOND',
       OTHER: 'OTHER',
       HK_STOCK: 'HK_STOCK',
       CONVERTIBLE_BOND: 'CONVERTIBLE_BOND',
-      ETF: 'ETF',
       INDEX: 'INDEX',
-      LOF: 'LOF',
+      OFF_EXCHANGE_FUND: 'OFF_EXCHANGE_FUND',
     });
-    expect(Object.keys(SharedSecurityType)).toHaveLength(9);
+    expect(Object.keys(SharedSecurityType)).toHaveLength(8);
   });
 
   it('无 enum 反向映射污染（键集合 === 值集合，遍历下拉不会多出条目）', () => {
@@ -227,10 +226,10 @@ describe('SecurityType 单一定义（shared）', () => {
 
   it('成员访问方式与旧 enum 写法保持兼容（SecurityType.STOCK === "STOCK"）', () => {
     expect(SharedSecurityType.STOCK).toBe('STOCK');
-    expect(SharedSecurityType.FUND).toBe('FUND');
+    expect(SharedSecurityType.ON_EXCHANGE_FUND).toBe('ON_EXCHANGE_FUND');
     expect(SharedSecurityType.BOND).toBe('BOND');
     expect(SharedSecurityType.OTHER).toBe('OTHER');
-    expect(SharedSecurityType.LOF).toBe('LOF');
+    expect(SharedSecurityType.OFF_EXCHANGE_FUND).toBe('OFF_EXCHANGE_FUND');
   });
 });
 
@@ -259,7 +258,7 @@ describe('证券买卖表单证券搜索（shared SecurityType 驱动 resolve）
           code: '110011',
           name: '易方达',
           exchange: 'SH',
-          assetClass: 'FUND',
+          assetClass: 'ON_EXCHANGE_FUND',
           updatedAt: '2026-08-13T00:00:00.000Z',
         },
       ],

@@ -115,7 +115,7 @@ const ITEMS: HoldingResponse[] = [
     securityId: 's-b',
     securityCode: '000002',
     securityName: '乙基金',
-    securityType: 'FUND',
+    securityType: 'ON_EXCHANGE_FUND',
     quantity: 200,
     avgCost: 100,
     costTotal: 20000,

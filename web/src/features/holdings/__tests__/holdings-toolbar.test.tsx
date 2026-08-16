@@ -110,7 +110,7 @@ vi.mock('@/components/ui/select', async () => {
 
 const SECURITIES: Security[] = [
   { id: 's-a', name: '甲股票', code: '600000', type: SecurityType.STOCK },
-  { id: 's-b', name: '乙基金', code: '000002', type: SecurityType.FUND },
+  { id: 's-b', name: '乙基金', code: '000002', type: SecurityType.ON_EXCHANGE_FUND },
 ] as unknown as Security[];
 
 const BASE_STATE: HoldingsFilterState = {
@@ -273,7 +273,7 @@ describe('HoldingsToolbar — I-05 统一筛选器', () => {
       sec: ['s-b'],
       scenario: FeeScenario.SELL,
       closed: true,
-      types: [SecurityType.FUND],
+      types: [SecurityType.ON_EXCHANGE_FUND],
       range: '3m',
     });
 

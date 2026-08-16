@@ -27,7 +27,7 @@ function makeSecurity(id: string, type: SecurityType): Security {
 const SECURITIES: Security[] = [
   makeSecurity('s-stock-1', SecurityType.STOCK),
   makeSecurity('s-stock-2', SecurityType.STOCK),
-  makeSecurity('s-fund-1', SecurityType.FUND),
+  makeSecurity('s-fund-1', SecurityType.ON_EXCHANGE_FUND),
 ];
 
 describe('deriveTradeSecurityFilter · 三态语义', () => {
@@ -88,7 +88,7 @@ describe('deriveTradeSecurityFilter · 三态语义', () => {
 
   it('🔴 类型与证券交集为空 → empty（不得退化成 ready+空数组）', () => {
     const r = deriveTradeSecurityFilter({
-      types: [SecurityType.FUND],
+      types: [SecurityType.ON_EXCHANGE_FUND],
       sec: ['s-stock-1'],
       securities: SECURITIES,
       securitiesLoading: false,
@@ -131,7 +131,7 @@ describe('deriveTradeSecurityFilter · 三态语义', () => {
 
   it('多类型多选 → 并集去重', () => {
     const r = deriveTradeSecurityFilter({
-      types: [SecurityType.STOCK, SecurityType.FUND],
+      types: [SecurityType.STOCK, SecurityType.ON_EXCHANGE_FUND],
       sec: [],
       securities: SECURITIES,
       securitiesLoading: false,

@@ -74,7 +74,8 @@ import type { SecurityTradeQuery } from '@/api/types';
 // ===== 常量 =====
 const SECURITY_TYPE_LABEL: Record<string, string> = {
   STOCK: '股票',
-  FUND: '基金',
+  ON_EXCHANGE_FUND: '场内基金',
+  OFF_EXCHANGE_FUND: '场外基金',
   BOND: '债券',
   CASH: '现金',
   OTHER: '其他',

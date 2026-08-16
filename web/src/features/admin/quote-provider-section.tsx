@@ -45,6 +45,7 @@ import {
 } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Switch } from '@/components/ui/switch';
 import {
   Table,
   TableBody,
@@ -75,6 +76,7 @@ import {
   useQuoteInterfaces,
   useQuoteInterfacesAll,
   useReorderInterfaces,
+  useUpdateInterface,
 } from '@/hooks/use-quote-interface';
 import { useInterfaceCategories } from '@/hooks/use-interface-category';
 import type { QuoteInterface } from '@/api/quote-interface.api';
@@ -91,12 +93,36 @@ function useCategoryLabelMap(): Map<string, string> {
   }, [categories]);
 }
 
-/** 启用状态徽标：启用 → success「启用」；关闭 → secondary「停用」。两处状态显示共用，文案统一。 */
-function EnabledBadge({ enabled }: { enabled: boolean }): JSX.Element {
-  return enabled ? (
-    <Badge variant="success">启用</Badge>
-  ) : (
-    <Badge variant="secondary">停用</Badge>
+/**
+ * 接口级内联开关：直接调用接口更新 mutation 即时切换该接口的 enabled。
+ *
+ * providerEnabled 为 false（父级总闸已停用）时，开关置灰并提示「父级已停用」，
+ * 避免「开了接口却没数据」的困惑。该提示仅影响 UI，不改变选源语义
+ * （选源仍由后端 provider.enabled AND interface.enabled 共同决定）。
+ */
+function InterfaceEnabledSwitch({
+  item,
+  providerEnabled,
+}: {
+  item: QuoteInterface;
+  providerEnabled: boolean;
+}): JSX.Element {
+  const upd = useUpdateInterface();
+  const disabled = !providerEnabled || upd.isPending;
+  return (
+    <div className="flex items-center gap-1.5">
+      <Switch
+        checked={item.enabled}
+        disabled={disabled}
+        onCheckedChange={() =>
+          upd.mutate({ id: item.id, body: { enabled: !item.enabled } })
+        }
+        aria-label={item.enabled ? '停用接口' : '启用接口'}
+      />
+      {!providerEnabled && (
+        <span className="text-xs text-muted-foreground">父级已停用</span>
+      )}
+    </div>
   );
 }
 
@@ -434,7 +460,7 @@ function ProviderInterfaces({ providerId }: { providerId: string }): JSX.Element
                       </TableCell>
                       <TableCell className="whitespace-nowrap align-middle">{it.http_method ?? '-'}</TableCell>
                       <TableCell className="whitespace-nowrap align-middle">
-                        <EnabledBadge enabled={providerEnabled && it.enabled} />
+                        <InterfaceEnabledSwitch item={it} providerEnabled={providerEnabled} />
                       </TableCell>
                       <TableCell className="text-right align-middle">
                         <div className="flex justify-end gap-1">
@@ -538,8 +564,9 @@ function OverviewInterfaceRow({
       </TableCell>
       <TableCell className="whitespace-nowrap align-middle">{item.http_method ?? '-'}</TableCell>
       <TableCell className="whitespace-nowrap align-middle">
-        <EnabledBadge
-          enabled={(provider?.enabled ?? false) && item.enabled}
+        <InterfaceEnabledSwitch
+          item={item}
+          providerEnabled={provider?.enabled ?? false}
         />
       </TableCell>
     </TableRow>
@@ -583,8 +610,9 @@ function SortableOverviewRow({
       </TableCell>
       <TableCell className="whitespace-nowrap align-middle">{item.http_method ?? '-'}</TableCell>
       <TableCell className="whitespace-nowrap align-middle">
-        <EnabledBadge
-          enabled={(provider?.enabled ?? false) && item.enabled}
+        <InterfaceEnabledSwitch
+          item={item}
+          providerEnabled={provider?.enabled ?? false}
         />
       </TableCell>
     </TableRow>

@@ -4,7 +4,7 @@
  * URL key（对齐增量设计 §4.4.2 / §6.2.5，均小写；等于默认值不写入）：
  * - `date`      YYYY-MM-DD 持仓日期 as-of（缺省 = todayInAppTzIso()）
  * - `closed`    1/0 「显示已清仓」（持仓专属；初值 = UserPreference.showLiquidated，URL 参数优先）
- * - `types`     STOCK,FUND,... 类型多选（持仓专属；空 = 全部）
+ * - `types`     STOCK,ON_EXCHANGE_FUND,... 类型多选（持仓专属；空 = 全部）
  * - `sec`       标的多选（三板块；逗号分隔；空 = 全部）—— 🆕 I-05 升级 arrayCodec 多值
  * - `range`     1w|1m|3m|6m|1y|ytd|all|custom（买卖明细/分红费用日期范围；缺省 = 偏好 defaultDateRange）
  * - `from`/`to` YYYY-MM-DD（仅 range=custom 生效）
@@ -60,16 +60,16 @@ export interface HoldingsFilterState {
 /**
  * 标的类型多选选项（与 shared `SecurityType` 对齐）。
  *
- * 说明：增量设计文案「股票/ETF/基金/债券/其他」中的「ETF」在本系统归入
- * `FUND`（证券枚举为 STOCK/FUND/BOND/CASH/OTHER，后端白名单同样只认这 5 类），
- * 故不单列 ETF 选项。
+ * 说明：场内基金（ON_EXCHANGE_FUND）合并原 ETF/LOF；场外基金（OFF_EXCHANGE_FUND）
+ * 为银行/第三方代销开放式基金，二者分开筛选。
  */
 export const HOLDINGS_TYPE_OPTIONS: ReadonlyArray<{
   value: SecurityType;
   label: string;
 }> = [
   { value: SecurityType.STOCK, label: '股票' },
-  { value: SecurityType.FUND, label: '基金' },
+  { value: SecurityType.ON_EXCHANGE_FUND, label: '场内基金' },
+  { value: SecurityType.OFF_EXCHANGE_FUND, label: '场外基金' },
   { value: SecurityType.BOND, label: '债券' },
   { value: SecurityType.OTHER, label: '其他' },
 ];

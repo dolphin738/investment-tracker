@@ -13,7 +13,7 @@ import { login as loginApi, register as registerApi, getProfile } from '@/api/au
 import { useAuthStore } from '@/stores/auth.store';
 import { usePortfolioStore } from '@/stores/portfolio.store';
 import { usePreferenceStore } from '@/stores/preference.store';
-import { ROUTE_PATH } from '@/lib/constants';
+import { AUTH_RETURN_KEY, ROUTE_PATH } from '@/lib/constants';
 import type { LoginRequest, RegisterRequest } from '@/api/types';
 
 /**
@@ -39,7 +39,18 @@ export function useLogin() {
       resetSessionState(queryClient);
       loginStore(data.accessToken, data.user);
       toast.success('登录成功');
-      navigate(ROUTE_PATH.DASHBOARD);
+      // 登录回跳：优先回到登录前意图路由，否则回默认首页。
+      let target: string = ROUTE_PATH.DASHBOARD;
+      try {
+        const saved = sessionStorage.getItem(AUTH_RETURN_KEY);
+        if (saved) {
+          target = saved;
+          sessionStorage.removeItem(AUTH_RETURN_KEY);
+        }
+      } catch {
+        /* 忽略读取失败，回退默认首页 */
+      }
+      navigate(target, { replace: true });
     },
   });
 }

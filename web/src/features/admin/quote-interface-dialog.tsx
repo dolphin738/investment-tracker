@@ -2,12 +2,12 @@
  * features/admin/quote-interface-dialog.tsx — 提供方接口新增/编辑对话框
  *
  * 字段：categoryId（Select 读分类，纯外键，不允许自定义）、name、endpoint、http_method、
- * params（JSON textarea）、enabled、description、timeout、retry_count、rate_limit。
+ * params（键值对增删，与接口测试面板一致）、enabled、description、timeout、retry_count、rate_limit。
  * 不含 direction（后端落库，UI 暂不暴露）。
  */
 
 import { useEffect, useState } from 'react';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Plus, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -29,6 +29,12 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { toast } from 'sonner';
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from '@/components/ui/tabs';
 import type { HttpMethod, QuoteInterface } from '@/api/quote-interface.api';
 import {
   useCreateInterface,
@@ -36,57 +42,70 @@ import {
 } from '@/hooks/use-quote-interface';
 import { useInterfaceCategories } from '@/hooks/use-interface-category';
 
-/**
- * 归一化用户可能误输入的全角/不可见字符，避免 JSON.parse 误报"不是合法 JSON"。
- * 常见场景：中文输入法下敲出的全角花括号 ｛｝ / 全角引号 ＂" "，以及复制带入的 BOM、零宽空格。
- */
-function normalizeJsonInput(raw: string): string {
-  return raw
-    .replace(/[﻿\u200B\u200C\u200D\uFEFF\u00AD\u2060]/g, '') // 去除 BOM 与零宽字符
-    .replace(/\uFF5B/g, '{') // ｛ → {
-    .replace(/\uFF5D/g, '}') // ｝ → }
-    .replace(/[\uFF02\u201C\u201D]/g, '"') // 全角/弯双引号 → "
-    .replace(/[\uFF07\u2018\u2019]/g, "'"); // 全角/弯单引号 → '
+/** 由表单的响应解析协议字段拼成 response_parse 对象（全空则返回 null）。 */
+function buildResponseParse(form: FormState): Record<string, string> | null {
+  const rp: Record<string, string> = {};
+  if (form.rpFormat.trim()) rp.format = form.rpFormat.trim();
+  // 仅文本分隔格式才需要编码/分隔符/行提取正则；json 不持久化这些字段
+  if (form.rpFormat === 'text_split') {
+    if (form.rpEncoding.trim()) rp.encoding = form.rpEncoding.trim();
+    if (form.rpSep.trim()) rp.sep = form.rpSep.trim();
+    if (form.rpLineRegex.trim()) rp.line_regex = form.rpLineRegex.trim();
+  }
+  if (form.rpCodeParam.trim()) rp.code_param = form.rpCodeParam.trim();
+  if (form.rpCodePrefix.trim()) rp.code_prefix = form.rpCodePrefix.trim();
+  return Object.keys(rp).length ? rp : null;
 }
 
 const HTTP_METHODS: HttpMethod[] = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'];
-
-/** 接口用途（§11：QUOTE 价格行情 / MASTER_LIST 证券列表） */
-const PURPOSE_OPTIONS: Array<{ value: string; label: string }> = [
-  { value: 'QUOTE', label: '价格行情（QUOTE）' },
-  { value: 'MASTER_LIST', label: '证券列表（MASTER_LIST）' },
-];
 
 /** 资产类别（复用 SecurityType；排除 CASH——现金不作主数据字典） */
 const ASSET_CLASS_OPTIONS: Array<{ value: string; label: string }> = [
   { value: 'STOCK', label: '股票（A股）' },
   { value: 'HK_STOCK', label: '港股' },
   { value: 'CONVERTIBLE_BOND', label: '可转债' },
-  { value: 'FUND', label: '基金' },
-  { value: 'ETF', label: 'ETF' },
-  { value: 'LOF', label: 'LOF' },
+  { value: 'ON_EXCHANGE_FUND', label: '场内基金' },
+  { value: 'OFF_EXCHANGE_FUND', label: '场外基金' },
   { value: 'INDEX', label: '指数' },
   { value: 'BOND', label: '债券' },
   { value: 'OTHER', label: '其他' },
 ];
+
+/** 响应解析协议格式（json 默认 / text_split 非 JSON 文本分隔） */
+const RP_FORMAT_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: 'json', label: 'JSON（默认）' },
+  { value: 'text_split', label: '文本分隔（如腾讯财经 ~）' },
+];
+
+/** 参数模板行（与接口测试面板一致：键值对增删） */
+interface ParamRow {
+  key: string;
+  value: string;
+}
 
 interface FormState {
   categoryId: string;
   name: string;
   endpoint: string;
   httpMethod: string;
-  params: string;
+  params: ParamRow[];
   enabled: boolean;
   description: string;
   timeout: string;
   retryCount: string;
   rateLimit: string;
-  purpose: string;
-  assetClass: string;
+  assetClass: string[];
   respCodeField: string;
   respPriceField: string;
   respNameField: string;
   respExchangeField: string;
+  // —— 响应解析协议（覆盖非 JSON 文本源，如腾讯财经 ~ 分隔）——
+  rpFormat: string;
+  rpEncoding: string;
+  rpSep: string;
+  rpLineRegex: string;
+  rpCodeParam: string;
+  rpCodePrefix: string;
 }
 
 function toForm(edit: QuoteInterface | null): FormState {
@@ -96,18 +115,23 @@ function toForm(edit: QuoteInterface | null): FormState {
       name: '',
       endpoint: '',
       httpMethod: '',
-      params: '',
+      params: [{ key: '', value: '' }],
       enabled: true,
       description: '',
       timeout: '',
       retryCount: '',
       rateLimit: '',
-      purpose: 'QUOTE',
-      assetClass: '',
+      assetClass: [],
       respCodeField: '',
       respPriceField: '',
       respNameField: '',
       respExchangeField: '',
+      rpFormat: 'json',
+      rpEncoding: '',
+      rpSep: '~',
+      rpLineRegex: '',
+      rpCodeParam: '',
+      rpCodePrefix: '',
     };
   }
   return {
@@ -115,18 +139,28 @@ function toForm(edit: QuoteInterface | null): FormState {
     name: edit.name,
     endpoint: edit.endpoint ?? '',
     httpMethod: edit.http_method ?? '',
-    params: edit.params ? JSON.stringify(edit.params, null, 2) : '',
+    params:
+      edit.params && typeof edit.params === 'object'
+        ? Object.entries(edit.params as Record<string, unknown>).map(
+            ([k, v]) => ({ key: k, value: v == null ? '' : String(v) }),
+          )
+        : [{ key: '', value: '' }],
     enabled: edit.enabled,
     description: edit.description ?? '',
     timeout: edit.timeout != null ? String(edit.timeout) : '',
     retryCount: edit.retry_count != null ? String(edit.retry_count) : '',
     rateLimit: edit.rate_limit ?? '',
-    purpose: edit.purpose ?? 'QUOTE',
-    assetClass: edit.asset_class ?? '',
+    assetClass: edit.asset_class ?? [],
     respCodeField: edit.resp_code_field ?? '',
     respPriceField: edit.resp_price_field ?? '',
     respNameField: edit.resp_name_field ?? '',
     respExchangeField: edit.resp_exchange_field ?? '',
+    rpFormat: (edit.response_parse?.format as string) ?? 'json',
+    rpEncoding: (edit.response_parse?.encoding as string) ?? '',
+    rpSep: (edit.response_parse?.sep as string) ?? '~',
+    rpLineRegex: (edit.response_parse?.line_regex as string) ?? '',
+    rpCodeParam: (edit.response_parse?.code_param as string) ?? '',
+    rpCodePrefix: (edit.response_parse?.code_prefix as string) ?? '',
   };
 }
 
@@ -148,9 +182,13 @@ export function QuoteInterfaceDialog({
   const updateMut = useUpdateInterface();
 
   const [form, setForm] = useState<FormState>(() => toForm(editing));
+  const [activeTab, setActiveTab] = useState('basic');
 
   useEffect(() => {
-    if (open) setForm(toForm(editing));
+    if (open) {
+      setForm(toForm(editing));
+      setActiveTab('basic');
+    }
   }, [open, editing]);
 
   const pending = createMut.isPending || updateMut.isPending;
@@ -165,20 +203,11 @@ export function QuoteInterfaceDialog({
       return;
     }
 
-    let parsedParams: Record<string, unknown> | null = null;
-    const rawParams = form.params.trim();
-    if (rawParams) {
-      try {
-        const parsed = JSON.parse(normalizeJsonInput(rawParams));
-        if (parsed !== null && typeof parsed !== 'object') {
-          throw new Error('params 必须是 JSON 对象');
-        }
-        parsedParams = parsed as Record<string, unknown>;
-      } catch {
-        toast.error('参数模板不是合法 JSON');
-        return;
-      }
-    }
+    const parsedParams: Record<string, unknown> = {};
+    form.params.forEach((r) => {
+      const k = r.key.trim();
+      if (k) parsedParams[k] = r.value;
+    });
 
     const payload = {
       category_id: form.categoryId.trim(),
@@ -194,15 +223,12 @@ export function QuoteInterfaceDialog({
       timeout: form.timeout.trim() ? Number(form.timeout) : null,
       retry_count: form.retryCount.trim() ? Number(form.retryCount) : null,
       rate_limit: form.rateLimit.trim() || null,
-      purpose: form.purpose as 'QUOTE' | 'MASTER_LIST',
-      asset_class:
-        !form.assetClass || form.assetClass === '__none__'
-          ? null
-          : form.assetClass,
+      asset_class: form.assetClass.length ? form.assetClass : null,
       resp_code_field: form.respCodeField.trim() || null,
       resp_price_field: form.respPriceField.trim() || null,
       resp_name_field: form.respNameField.trim() || null,
       resp_exchange_field: form.respExchangeField.trim() || null,
+      response_parse: buildResponseParse(form),
     };
 
     if (editing) {
@@ -217,9 +243,19 @@ export function QuoteInterfaceDialog({
 
   const close = (): void => onOpenChange(false);
 
+  const addParamRow = (): void =>
+    setForm({ ...form, params: [...form.params, { key: '', value: '' }] });
+  const updateParamRow = (idx: number, patch: Partial<ParamRow>): void =>
+    setForm({
+      ...form,
+      params: form.params.map((r, i) => (i === idx ? { ...r, ...patch } : r)),
+    });
+  const removeParamRow = (idx: number): void =>
+    setForm({ ...form, params: form.params.filter((_, i) => i !== idx) });
+
   return (
     <Dialog open={open} onOpenChange={(v) => (v ? onOpenChange(true) : close())}>
-      <DialogContent className="max-w-xl">
+      <DialogContent className="max-w-xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{editing ? '编辑接口' : '新增接口'}</DialogTitle>
           <DialogDescription>
@@ -227,7 +263,23 @@ export function QuoteInterfaceDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4">
+        <Tabs value={activeTab} onValueChange={setActiveTab}>
+          <TabsList className="w-full">
+            <TabsTrigger value="basic" className="flex-1">
+              基本信息
+            </TabsTrigger>
+            <TabsTrigger value="mapping" className="flex-1">
+              字段映射
+            </TabsTrigger>
+            <TabsTrigger value="parse" className="flex-1">
+              响应解析
+            </TabsTrigger>
+            <TabsTrigger value="advanced" className="flex-1">
+              高级设置
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="basic" className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="qi-type">接口分类</Label>
             <Select
@@ -290,47 +342,54 @@ export function QuoteInterfaceDialog({
             </div>
           </div>
 
-          <div className="space-y-3 rounded-md border bg-muted/40 p-3">
-            <div className="text-sm font-medium">接口用途与证券列表配置</div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="qi-purpose">用途</Label>
-                <Select
-                  value={form.purpose}
-                  onValueChange={(v) => setForm({ ...form, purpose: v })}
-                >
-                  <SelectTrigger id="qi-purpose">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {PURPOSE_OPTIONS.map((o) => (
-                      <SelectItem key={o.value} value={o.value}>
-                        {o.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="qi-asset-class">资产类别</Label>
-                <Select
-                  value={form.assetClass}
-                  onValueChange={(v) => setForm({ ...form, assetClass: v })}
-                >
-                  <SelectTrigger id="qi-asset-class">
-                    <SelectValue placeholder="不设置" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none__">不设置</SelectItem>
-                    {ASSET_CLASS_OPTIONS.map((o) => (
-                      <SelectItem key={o.value} value={o.value}>
-                        {o.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+          <div className="space-y-2">
+            <Label>资产类别（可多选）</Label>
+            <div className="flex flex-wrap gap-2">
+              {ASSET_CLASS_OPTIONS.map((o) => {
+                const selected = form.assetClass.includes(o.value);
+                return (
+                  <button
+                    type="button"
+                    key={o.value}
+                    aria-pressed={selected}
+                    onClick={() =>
+                      setForm({
+                        ...form,
+                        assetClass: selected
+                          ? form.assetClass.filter((v) => v !== o.value)
+                          : [...form.assetClass, o.value],
+                      })
+                    }
+                    className={
+                      'rounded-full border px-3 py-1 text-sm transition-colors ' +
+                      (selected
+                        ? 'border-primary bg-primary text-primary-foreground'
+                        : 'border-input bg-background hover:bg-accent hover:text-accent-foreground')
+                    }
+                  >
+                    {o.label}
+                  </button>
+                );
+              })}
             </div>
+            <p className="text-xs text-muted-foreground">
+              可多选：勾选的类别决定该接口参与哪些「同步选源批次」调用；证券主数据的资产类别由代码前缀自动识别，不以本栏为准。
+            </p>
+          </div>
+
+          <div className="flex items-center justify-between rounded-md border p-3">
+            <Label htmlFor="qi-enabled" className="text-sm">
+              启用
+            </Label>
+            <Switch
+              id="qi-enabled"
+              checked={form.enabled}
+              onCheckedChange={(v) => setForm({ ...form, enabled: v })}
+            />
+          </div>
+        </TabsContent>
+
+        <TabsContent value="mapping" className="space-y-3">
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="qi-resp-code">响应代码字段</Label>
@@ -386,17 +445,161 @@ export function QuoteInterfaceDialog({
               <code className="font-mono">["code","name"]</code>），代码/名称字段填位置下标（如{' '}
               <code className="font-mono">0</code>/<code className="font-mono">1</code>）。
             </p>
-          </div>
+        </TabsContent>
 
+        <TabsContent value="parse" className="space-y-3">
+            <div className="space-y-2">
+              <Label htmlFor="qi-rp-format">响应格式</Label>
+              <Select
+                value={form.rpFormat}
+                onValueChange={(v) => setForm({ ...form, rpFormat: v })}
+              >
+                <SelectTrigger id="qi-rp-format">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {RP_FORMAT_OPTIONS.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>
+                      {o.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {form.rpFormat === 'text_split' && (
+              <>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="qi-rp-encoding">编码</Label>
+                    <Input
+                      id="qi-rp-encoding"
+                      placeholder="utf-8（腾讯财经填 gbk）"
+                      value={form.rpEncoding}
+                      onChange={(e) =>
+                        setForm({ ...form, rpEncoding: e.target.value })
+                      }
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="qi-rp-sep">分隔符</Label>
+                    <Input
+                      id="qi-rp-sep"
+                      placeholder="~"
+                      value={form.rpSep}
+                      onChange={(e) => setForm({ ...form, rpSep: e.target.value })}
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="qi-rp-line-regex">行提取正则</Label>
+                  <Input
+                    id="qi-rp-line-regex"
+                    placeholder='v_(\w+)="([^"]*)"'
+                    value={form.rpLineRegex}
+                    onChange={(e) =>
+                      setForm({ ...form, rpLineRegex: e.target.value })
+                    }
+                  />
+                </div>
+              </>
+            )}
+
+            <div className="space-y-2">
+              <Label htmlFor="qi-rp-code-param">代码参数名</Label>
+              <Input
+                id="qi-rp-code-param"
+                placeholder="code（腾讯财经填 q）"
+                value={form.rpCodeParam}
+                onChange={(e) =>
+                  setForm({ ...form, rpCodeParam: e.target.value })
+                }
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="qi-rp-code-prefix">代码前缀补全</Label>
+              <Select
+                value={form.rpCodePrefix || 'none'}
+                onValueChange={(v) =>
+                  setForm({ ...form, rpCodePrefix: v === 'none' ? '' : v })
+                }
+              >
+                <SelectTrigger id="qi-rp-code-prefix">
+                  <SelectValue placeholder="原样（不补全）" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">原样（不补全）</SelectItem>
+                  <SelectItem value="auto">
+                    自动补交易所前缀（覆盖 A股/场内基金/港股）
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                选「自动」后，位数感知补全：5 位纯数字补 hk（港股，00700→hk00700）；
+                6 位纯数字按首位推断 sh/sz/bj 裸拼（A股/场内基金，如 600519→sh600519、
+                000001→sz000001、510300→sh510300，腾讯/新浪风格）；
+                已带前缀（sh600519/hk00700）或非数字（AAPL）原样发送，绝不重复加字母。
+                东方财富等直接吃纯数字代码的接口保持「原样」即可。
+              </p>
+            </div>
+
+            <p className="text-xs text-muted-foreground">
+              响应格式选「文本分隔」时，按 sep 拆分每行、按 line_regex 提取带前缀代码（group1）与内容（group2）；
+              代码前缀（sh/sz/hk/us）会被保留用于归一化。编码默认 utf-8（腾讯财经需 gbk），
+              代码参数名默认 code（腾讯财经为 q，且调用路径请以{' '}
+              <code className="font-mono">q=</code> 结尾以走内联形态）。
+            </p>
+        </TabsContent>
+
+        <TabsContent value="advanced" className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="qi-params">参数模板（JSON）</Label>
-            <Textarea
-              id="qi-params"
-              placeholder='{"code": "string"}'
-              rows={3}
-              value={form.params}
-              onChange={(e) => setForm({ ...form, params: e.target.value })}
-            />
+            <div className="flex items-center justify-between">
+              <Label htmlFor="qi-params">参数模板</Label>
+              <Button variant="ghost" size="sm" onClick={addParamRow}>
+                <Plus className="mr-1 h-3.5 w-3.5" /> 添加参数
+              </Button>
+            </div>
+            {form.params.length === 0 && (
+              <p className="text-xs text-muted-foreground">
+                暂无可编辑参数，点击「添加参数」新增键值对（如 type / region）
+              </p>
+            )}
+            <div className="space-y-2">
+              {form.params.map((row, idx) => (
+                <div key={idx} className="flex items-center gap-2">
+                  <Input
+                    className="w-2/5"
+                    placeholder="参数名"
+                    value={row.key}
+                    onChange={(e) =>
+                      updateParamRow(idx, { key: e.target.value })
+                    }
+                  />
+                  <Input
+                    className="flex-1"
+                    placeholder="参数值"
+                    value={row.value}
+                    onChange={(e) =>
+                      updateParamRow(idx, { value: e.target.value })
+                    }
+                  />
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => removeParamRow(idx)}
+                    aria-label="删除参数"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              这些参数会作为查询条件随每次调用发送（如 iTick 的{' '}
+              <code className="font-mono">type</code> /{' '}
+              <code className="font-mono">region</code>）；空值参数在请求时自动忽略。
+            </p>
           </div>
 
           <div className="space-y-2">
@@ -448,18 +651,8 @@ export function QuoteInterfaceDialog({
               />
             </div>
           </div>
-
-          <div className="flex items-center justify-between rounded-md border p-3">
-            <Label htmlFor="qi-enabled" className="text-sm">
-              启用
-            </Label>
-            <Switch
-              id="qi-enabled"
-              checked={form.enabled}
-              onCheckedChange={(v) => setForm({ ...form, enabled: v })}
-            />
-          </div>
-        </div>
+        </TabsContent>
+        </Tabs>
 
         <DialogFooter>
           <Button variant="outline" onClick={close}>

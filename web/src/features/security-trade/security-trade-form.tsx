@@ -48,9 +48,8 @@ import type { SecurityMaster } from '@/api/security-master.api';
 /** 资产类型选项（供手动修改使用） */
 const SECURITY_TYPE_OPTIONS: ReadonlyArray<{ value: SecurityType; label: string }> = [
   { value: SecurityType.STOCK, label: '股票' },
-  { value: SecurityType.ETF, label: 'ETF' },
-  { value: SecurityType.LOF, label: 'LOF' },
-  { value: SecurityType.FUND, label: '基金' },
+  { value: SecurityType.ON_EXCHANGE_FUND, label: '场内基金' },
+  { value: SecurityType.OFF_EXCHANGE_FUND, label: '场外基金' },
   { value: SecurityType.BOND, label: '债券' },
   { value: SecurityType.CONVERTIBLE_BOND, label: '可转债' },
   { value: SecurityType.INDEX, label: '指数' },

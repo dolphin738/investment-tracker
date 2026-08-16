@@ -19,10 +19,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import type { InterfaceCategory } from '@/api/interface-category.api';
-import {
-  useCreateInterfaceCategory,
-  useUpdateInterfaceCategory,
-} from '@/hooks/use-interface-category';
+import { useUpdateInterfaceCategory } from '@/hooks/use-interface-category';
 
 interface FormState {
   label: string;
@@ -52,7 +49,6 @@ export function InterfaceCategoryDialog({
   onOpenChange,
   editing,
 }: InterfaceCategoryDialogProps): JSX.Element {
-  const createMut = useCreateInterfaceCategory();
   const updateMut = useUpdateInterfaceCategory();
   const [form, setForm] = useState<FormState>(() => toForm(editing));
 
@@ -60,7 +56,7 @@ export function InterfaceCategoryDialog({
     if (open) setForm(toForm(editing));
   }, [open, editing]);
 
-  const pending = createMut.isPending || updateMut.isPending;
+  const pending = updateMut.isPending;
 
   const handleSubmit = (): void => {
     if (!form.label.trim()) {
@@ -76,8 +72,6 @@ export function InterfaceCategoryDialog({
         { id: editing.id, body: payload },
         { onSuccess: () => onOpenChange(false) },
       );
-    } else {
-      createMut.mutate(payload, { onSuccess: () => onOpenChange(false) });
     }
   };
 
@@ -87,9 +81,9 @@ export function InterfaceCategoryDialog({
     <Dialog open={open} onOpenChange={(v) => (v ? onOpenChange(true) : close())}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>{editing ? '编辑分类' : '新增分类'}</DialogTitle>
+          <DialogTitle>编辑分类</DialogTitle>
           <DialogDescription>
-            {editing ? '修改接口分类' : '新增一个接口分类（用于接口下拉与汇总）'}
+            修改接口分类
           </DialogDescription>
         </DialogHeader>
 

@@ -18,6 +18,8 @@ export interface InterfaceCategory {
   label: string;
   icon: string | null;
   sort_order: number;
+  /** 系统内置分类（不可删除，不可新增同名） */
+  system?: boolean;
   created_at: string;
   updated_at: string;
 }
