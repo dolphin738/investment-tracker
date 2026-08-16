@@ -178,11 +178,11 @@ backend/app/
 | | currency | String(10) | default 'CNY' | |
 | | exchange | String(10) | NULL | 交易所/市场（SH/SZ/BJ/HK…）；主数据同步填充，缺失时按代码前缀推断 |
 | | pinyin_initials | String(64) | NULL | 名称拼音首字母（如 贵州茅台→gzm）；录入界面按拼音首字母搜索，同步由 `pypinyin` 计算 |
-| | asset_class | Enum(SecurityType) | NOT NULL | 资产类别（复用 SecurityType），即原主数据行 `type` 语义 |
-| | (uq_securities_master_asset_code) | 部分唯一索引 | `UNIQUE(asset_class, code)` | 系统主数据跨资产类别命名空间隔离（§11.4） |
+| | asset_class | Enum(SecurityType) | NULL（可空；未分类落 `UNCATEGORIZED`，主数据行允许 `asset_class IS NULL`） | 资产类别（复用 SecurityType），即原主数据行 `type` 语义；列表筛选 `UNCATEGORIZED` 兼容 NULL |
+| | (uq_securities_asset_code) | 普通唯一索引 | `UNIQUE(asset_class, code)` | 系统主数据跨资产类别命名空间隔离（ADR-003 拆表后无 `portfolio_id` 列，非部分索引；确定性 id `uuid5(asset_class, code)`，迁移 `q9a8b7c6d5e4`，删除重建保持同一 id，§11.4） |
 | `portfolio_securities`（组合持仓表） | id | String(36) UUID | PK | 组合级证券实例（ADR-003：每个组合的持仓行独立） |
 | | portfolio_id | String(36) | FK→portfolios.id CASCADE | 归属组合 |
-| | master_id | String(36) | FK→portfolio_securities.id CASCADE | 关联目录主数据（code/name/asset_class 取自此处） |
+| | master_id | String(36) | FK→securities.id **CASCADE** | 关联目录主数据（code/name/asset_class 取自此处）；`DELETE /securities/masters` 端点孤儿守卫保证只删无引用的孤儿（被引用进 `skipped`），DB 层 `RESTRICT` 兜底见 `docs/plan-security-master-delete-hardening-2026-08-17.md`（待实施） |
 | | code | String(64) | NOT NULL | 冗余代码（来自主数据，便于查询） |
 | | name | String(255) | NOT NULL | 冗余名称（来自主数据） |
 | | type | Enum(SecurityType) | NULL（可空 override） | 证券类型覆盖；NULL 时读取由 `compute_type` COALESCE 重推为 `asset_class`（与含费单价/费用口径无关） |
@@ -705,7 +705,8 @@ User (1) ──< Portfolio (N)
 
 | Method | Path | 说明 | 请求体 / 参数 | 响应 data |
 |--------|------|------|--------------|-----------|
-| GET | `/api/admin/securities/masters` | 系统级证券主数据分页/搜索（`q` 匹配 code/name/拼音首字母）；任意登录用户可读（录入搜索复用），写入与测试仅 admin | `?page&pageSize&q` | `Paginated<SecurityMaster>` |
+| GET | `/api/admin/securities/masters` | 系统级证券主数据分页/搜索（`q` 匹配 code/name/拼音首字母；`asset_class` 按类别过滤、`exchange` 按交易所过滤；默认全类别、STOCK 置顶排序）；任意登录用户可读（录入搜索复用），写入与测试仅 admin | `?page&pageSize&q&asset_class&exchange` | `Paginated<SecurityMaster>` |
+| DELETE | `/api/admin/securities/masters` | 批量/跨页删除证券主数据（admin）：`ids[]` / `all`（跨页全选，按同列表筛选定位孤儿）/ 可选 `q&asset_class&exchange`；孤儿守卫只删无 `portfolio_securities` 引用的孤儿，被引用进 `skipped`，单事务返回 `{deleted, skipped}` | `SecurityMasterDeleteBody{ ids?, all?, q?, asset_class?, exchange? }` | `{ deleted, skipped }` |
 | POST | `/api/admin/securities/sync` | 手动触发全量同步（遍历全部 `purpose=MASTER_LIST` 且 `enabled` 接口，按 `asset_class` 分组，复用 QUOTE 分派与 `priority` 降级链，§11.1） | — | `{ synced, by_asset_class }` |
 | POST | `/api/admin/quote-interfaces/:interfaceId/test` | 单接口测试：按配置实际拉取一次，回传 `raw`+`parsed`+错误/耗时；**不计入** `consecutive_failures` | `InterfaceTestRequest{ params?, codes? }` | `{ ok, raw, parsed, error?, httpStatus?, durationMs? }` |
 
@@ -1271,7 +1272,7 @@ sequenceDiagram
 - `_normalize_rows(payload)`：保留 dict 行与数组行（如 `["sz301141","中科磁业"]`）。
 - `_row_get(row, field)`：dict 行按字段名取值；数组行按 `resp_*` 配置的**位置下标**（如 `0`/`1`）取值。
 - `_parse_price_rows` / `_parse_test_rows` / `_upsert_masters` 均经 `_row_get` 取值。
-- `_infer_exchange(code)`：缺失交易所字段时按代码前缀推断（`6`/`9`→SH、`0`/`3`→SZ、`8`/`4`→BJ、`sh`/`sz`/`bj` 前缀、港股 5 位码→HK）。
+- `_infer_exchange(code)` / `infer_asset_class(code, exchange)` / `infer_exchange_prefix(code)`：已收敛到**单一事实来源 `classification.py`**（`backend/app/services/classification.py`），`security.py`、`market_data_sync.py`、接口测试代码补全均 import 调用，旧 `_infer_exchange` / `_infer_cn_exchange` 重复实现已删除。推断规则要点：显式 `sh/sz/bj/hk` 前缀优先；纯数字 ≤5 位→HK（须先于 A 股首位规则，避免 `02318` 等港股被误归 BJ/SZ）；`920xxx`→BJ（特判于 `9→SH` 之前）；首位 `6/9`→SH、`0/3`→SZ、`8/4`→BJ、`5`→SH（沪市基金）；首位 `1`：`11xxxx` 沪可转债→SH，其余（`12/13/15/16/18xxxx`）→SZ。
 
 ### 11.4 优先级降级链与失败告警（ADR-002）
 

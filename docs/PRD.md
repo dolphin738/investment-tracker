@@ -1339,22 +1339,25 @@ HAVING COUNT(*) > 1;
 
 - **归一化 `_normalize_rows`**：保留 dict 行与数组行（如 `["sz301141","中科磁业"]`）；数组行按 `resp_*` 配置的**位置下标**取值（`0`=code、`1`=name、`2`=price），dict 行按字段名。
 - **字段映射**：`resp_code_field`（默认 `code`）/ `resp_price_field`（默认 `price`）用于 QUOTE；`resp_name_field`（默认 `name`）/ `resp_exchange_field` 用于 MASTER_LIST。数组行一律填下标。
-- **交易所推断 `_infer_exchange`**：`resp_exchange_field` 缺失时按代码前缀推断（`6`/`9`→SH、`0`/`3`→SZ、`8`/`4`→BJ、`sh`/`sz`/`bj` 前缀、港股 5 位码→HK）。
+- **交易所 / 资产类别推断（单一事实来源 `classification.py`）**：所有「代码 → 交易所 / 资产类别」规则已收敛到 `backend/app/services/classification.py`（`infer_exchange` / `infer_exchange_prefix` / `infer_asset_class`），`security.py`、`market_data_sync.py`、接口测试代码补全均 import 调用，**禁止各自重复维护**前缀映射（旧 `_infer_exchange` / `_infer_cn_exchange` 重复实现已删除，含旧 `_infer_cn_exchange` 把 `2` 开头误判 SZ 的潜在 bug）。推断规则要点：`resp_exchange_field` 缺失时按代码前缀推断——显式 `sh/sz/bj/hk` 前缀优先；纯数字 ≤5 位→HK（须先于 A 股首位规则，避免 `02318` 等港股被误归 BJ/SZ）；`920xxx`→BJ（特判于 `9→SH` 之前）；首位 `6/9`→SH、`0/3`→SZ、`8/4`→BJ、`5`→SH（沪市基金）；首位 `1`：`11xxxx` 沪可转债→SH，其余（`12/13/15/16/18xxxx` 深市可转债/债券/基金）→SZ。
 
 ## 11.4 多资产类别扩展（数据驱动）
 
 - **`SecurityType` 扩展**：`STOCK` / `FUND` / `BOND` / `OTHER` / `HK_STOCK` / `CONVERTIBLE_BOND` / `ETF` / `INDEX` / `LOF`（`CASH` 已移除，新建标的隐藏该选项；自动/手动推断按代码前缀区分 A股/ETF/LOF/指数/可转债）。
-- **`securities` 表新增字段**：`asset_class`（= `SecurityType`，主数据行 `type` 即 = `asset_class`）、`exchange`、`pinyin_initials`；部分唯一索引 `uq_securities_master_asset_code` = `(asset_class, code) WHERE portfolio_id IS NULL`（跨资产类别命名空间隔离）。
+- **`securities` 表字段**：`asset_class`（= `SecurityType`，**可空**；未分类落 `UNCATEGORIZED`，主数据行允许 `asset_class IS NULL`，列表筛选 `UNCATEGORIZED` 兼容 NULL）、`exchange`、`pinyin_initials`；**确定性 id** `id = uuid5(固定命名空间, f"{asset_class.value}|{code}")`（迁移 `q9a8b7c6d5e4_deterministic_security_master_id`），由 `market_data_sync.master_id_for` 派生，删除重建保持同一 id，使 `portfolio_securities.master_id` 引用稳定可重建。唯一约束为**普通（非部分）唯一索引** `uq_securities_asset_code` = `(asset_class, code)`（ADR-003 拆表后 `securities` 已无 `portfolio_id` 列，不再有 `WHERE portfolio_id IS NULL` 部分索引，部分唯一索引名 `uq_securities_master_asset_code` 已废弃）；`asset_class` 为 NULL 时 Postgres 允许多个 NULL 共存，故未分类证券靠同步去重保证 code 唯一。
 - 新增资产类别 = 配置一条 `asset_class` 不同的 MASTER_LIST 接口，同步循环零代码改动。
 
 ## 11.5 同步与接口测试端点
 
 | 端点 | 说明 | 权限 |
 |------|------|------|
-| `GET /api/admin/securities/masters?page&pageSize&q` | 系统主数据分页/搜索（q 匹配 code/name/拼音首字母） | 任意登录用户可读（录入搜索复用）；写入与测试仅 admin |
+| `GET /api/admin/securities/masters?page&pageSize&q&asset_class&exchange` | 系统主数据分页/搜索（`q` 匹配 code/name/拼音首字母）；`asset_class` 按资产类别过滤（`UNCATEGORIZED` 兼容 `asset_class IS NULL`），`exchange` 按交易所过滤（SH/SZ/BJ/HK，非法/空值忽略）。**默认全类别**，排序 STOCK 置顶、HK_STOCK 次之、其余居中、未分类/NULL 垫底，单类别筛选退化为 code 稳定排序 | 任意登录用户可读（录入搜索复用）；写入与测试仅 admin |
+| `DELETE /api/admin/securities/masters` | 批量/跨页删除证券主数据（admin）。请求体 `SecurityMasterDeleteBody`：`ids[]`（逐页选）/ `all`（跨页全选，按 `q/asset_class/exchange` 同列表逻辑定位全部孤儿）/ 可选 `q/asset_class/exchange`。**孤儿守卫**：先剔不存在与被组合持仓引用的 id（计入 `skipped`，reason「已被组合持仓引用，删除将级联清除用户数据，已跳过」），仅物理删除无任何 `portfolio_securities` 引用的孤儿；单事务提交。返回 `{ deleted, skipped }` | admin |
 | `POST /api/admin/securities/sync` | 手动触发全量同步（遍历 MASTER_LIST 接口）；响应含 `used[]`（本次各资产类别命中的提供方/接口，camelCase），前端在同步按钮旁展示「本次同步来源」 | admin |
 | `POST /api/admin/quote-interfaces/{interfaceId}/test` | 单接口测试，回传 `raw`+`parsed`+错误/耗时（不计入失败计数） | admin |
 | `POST /api/portfolios/:id/securities/resolve` | 录入时选中主数据后实例化为组合标的（lazy） | 组合归属用户 |
+
+> **删除保护（纵深防御 · 当前 = 应用层孤儿守卫）**：`portfolio_securities.master_id → securities.id` 外键为 `ON DELETE CASCADE`；当前唯一防线是 `DELETE /securities/masters` 端点的孤儿守卫（只删孤儿、被引用进 `skipped`）。数据库层暂无硬兜底，故绕过该入口的裸 `DELETE` 会级联清持仓——**计划**补 `ON DELETE RESTRICT`（见 `docs/plan-security-master-delete-hardening-2026-08-17.md`，待实施）。确定性 id（`uuid5(asset_class, code)`）只保证身份稳定、不替代孤儿守卫。
 
 ## 11.6 决策点锁定（权威）
 
@@ -1469,7 +1472,8 @@ price(s, date)   = SecurityPrice 中 asOf ≤ date 的最后一条（向前沿�
 | `GET /api/auth/profile`                                     | P0    | 当前用户读取（**Web 客户端绑定此路径**）                                                                                      |
 | `GET /api/auth/me`                                          | P0    | 当前用户（Python 重建等价端点，须与 `/profile` 并存，见 ARCH §4.3）                                                              |
 | `POST /api/auth/login`（冷静期信号扩展）                             | P1    | 软删账户 + 密码正确时返回冷静期业务码                                                                                          |
-| `GET /api/admin/securities/masters`                              | P0    | 系统级证券主数据分页/搜索（`q` 匹配 code/name/拼音首字母；录入搜索复用，§11.5）                                                   |
+| `GET /api/admin/securities/masters`                              | P0    | 系统级证券主数据分页/搜索（`q`/`asset_class`/`exchange` 过滤；录入搜索复用，§11.5）                                              |
+| `DELETE /api/admin/securities/masters`                           | P0    | 批量/跨页删除证券主数据（孤儿守卫：被组合持仓引用进 `skipped`，仅删孤儿；`all`=跨页全选，§11.5）                                   |
 | `POST /api/admin/securities/sync`                                | P0    | 手动触发证券主数据全量同步（遍历 MASTER_LIST 接口，配置驱动，§11）                                                               |
 | `POST /api/admin/quote-interfaces/{interfaceId}/test`            | P1    | 单接口测试：按接口配置实际拉取，回传 `raw`+`parsed`+错误/耗时（不计入 `consecutive_failures`）                                    |
 | `POST /api/portfolios/:id/securities/resolve`                    | P0    | 录入时按主数据 `code` 选中后实例化为组合标的（lazy，§10 决策移除「新建标的」）                                                    |
