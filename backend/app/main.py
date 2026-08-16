@@ -8,12 +8,13 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.exceptions import HTTPException as StarletteHTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
 from app.core.config import get_settings
 from app.core.envelope import EnvelopeJSONResponse, EnvelopeRoute
@@ -115,6 +116,28 @@ app.include_router(calculation.router_nav)
 app.include_router(calculation.router_recalculate)
 app.include_router(internal.router)
 app.include_router(admin.router_admin)
+
+
+# SPA 前端托管 + 深链回退（部署配置：Docker 单镜像时由后端 serve web/dist）
+# 仅当 FRONTEND_DIR 配置且目录存在时启用；默认不启用，保持 API-only 形态。
+_frontend_dir = Path(settings.FRONTEND_DIR)
+if settings.FRONTEND_DIR and _frontend_dir.is_dir():
+    _index_html = _frontend_dir / "index.html"
+
+    @app.get("/{full_path:path}")
+    async def serve_spa(full_path: str):
+        # API 路径绝不由 SPA 接管：已注册的 /api 路由优先匹配；
+        # 未注册的 /api/* 抛出 404，交由全局异常处理器返回统一信封。
+        if full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="Not Found")
+        # 已构建的静态资源（js/css/img/字体等）按真实路径返回，并防止目录穿越
+        candidate = (_frontend_dir / full_path).resolve()
+        if candidate.is_file() and str(candidate).startswith(str(_frontend_dir.resolve())):
+            return FileResponse(candidate)
+        # 深链（如 /holdings、/admin）→ 回退 index.html，交给前端路由解析
+        if _index_html.is_file():
+            return FileResponse(_index_html)
+        raise HTTPException(status_code=404, detail="Frontend not built")
 
 
 def _custom_openapi() -> dict:

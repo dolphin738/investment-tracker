@@ -15,22 +15,15 @@ class CashFlowType(str, enum.Enum):
 
 class SecurityType(str, enum.Enum):
     STOCK = "STOCK"
-    FUND = "FUND"
+    ON_EXCHANGE_FUND = "ON_EXCHANGE_FUND"  # 场内基金（含原 ETF/LOF 合并）
     BOND = "BOND"
     OTHER = "OTHER"
     # —— 证券主数据多资产类别扩展（§11.3，配置驱动，零硬编码）——
     HK_STOCK = "HK_STOCK"
     CONVERTIBLE_BOND = "CONVERTIBLE_BOND"
-    ETF = "ETF"
     INDEX = "INDEX"
-    LOF = "LOF"
-
-
-class InterfacePurpose(str, enum.Enum):
-    """提供方接口用途：价格行情 vs 证券列表（§7 ① / §11）。"""
-
-    QUOTE = "QUOTE"
-    MASTER_LIST = "MASTER_LIST"
+    OFF_EXCHANGE_FUND = "OFF_EXCHANGE_FUND"  # 场外基金（银行/第三方代销开放式基金）
+    UNCATEGORIZED = "UNCATEGORIZED"  # 未分类：代码无法可靠推断具体类别时兜底（如场外基金与 A股 同前缀）
 
 
 class SecuritySide(str, enum.Enum):

@@ -29,7 +29,7 @@ from app.models.quote_interface import QuoteInterface
 from app.models.quote_provider import SecuritiesDataProvider
 from app.models.security import PortfolioSecurity, Security, SecurityPrice
 from app.models.user import User
-from app.services.market_data_sync import MarketDataSyncService
+from app.services.market_data_sync import MarketDataSyncService, QUOTE_CAT_ID
 from app.services.recalculation import RecalculationService
 
 pytestmark = pytest.mark.asyncio
@@ -48,7 +48,8 @@ async def _seed_provider_category(session, *, priority_seq=(1, 2)):
         config={"base_url": "https://x.example.com"},
         enabled=True,
     )
-    category = InterfaceCategory(id=_uid(), label="A股行情")
+    # 行情接口归属「证券行情」固定分类（reform 后 sync_portfolio_prices 按 QUOTE_CAT_ID 路由）
+    category = InterfaceCategory(id=QUOTE_CAT_ID, label="证券行情", system=True)
     session.add_all([provider, category])
     await session.flush()
     itfs = []

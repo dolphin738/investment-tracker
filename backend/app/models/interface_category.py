@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from sqlalchemy import Integer, String, Text
+from sqlalchemy import Boolean, Integer, String, Text, false
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, TimestampMixin, pk_uuid
@@ -24,3 +24,7 @@ class InterfaceCategory(Base, TimestampMixin):
     label: Mapped[str] = mapped_column(String(128), nullable=False)
     icon: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    system: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false(),
+        comment="系统内置分类（不可删除，不可新增同名）",
+    )

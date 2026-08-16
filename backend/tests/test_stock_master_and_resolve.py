@@ -19,9 +19,15 @@ from sqlalchemy import select
 
 import app.db.database as dbmod
 from app.core.security import create_access_token
-from app.models import Portfolio, PortfolioSecurity, Security, User
-from app.models.enums import InterfacePurpose, SecurityType
-from app.services.market_data_sync import MarketDataSyncService
+from app.models import InterfaceCategory, Portfolio, PortfolioSecurity, Security, User
+from app.models.enums import SecurityType
+from app.services.market_data_sync import (
+    MASTER_LIST_CAT_ID,
+    QUOTE_CAT_ID,
+    MarketDataSyncService,
+    _infer_exchange,
+    master_id_for,
+)
 
 from tests.helpers import auth, env, register_login
 
@@ -85,6 +91,18 @@ async def _create_interface(
     return data["id"]
 
 
+async def _seed_fixed_categories(session):
+    """按迁移种子重建 2 个固定系统分类（_clean_db 会 TRUNCATE，故测试内重建）。
+
+    路由同步引擎按固定 UUID（MASTER_LIST_CAT_ID / QUOTE_CAT_ID）识别「证券列表 /
+    证券行情」分类；主数据/行情同步测试须保证对应分类行存在（category_id 为 FK）。
+    """
+    for cid, label in ((MASTER_LIST_CAT_ID, "证券列表"), (QUOTE_CAT_ID, "证券行情")):
+        if await session.get(InterfaceCategory, cid) is None:
+            session.add(InterfaceCategory(id=cid, label=label, system=True))
+    await session.commit()
+
+
 async def _seed_master(session, code, name, typ, pinyin, exchange=None):
     sec = Security(
         asset_class=typ,
@@ -136,6 +154,76 @@ async def test_list_security_masters_pagination_and_search(client, session):
     r = await client.get("/api/admin/securities/masters?q=pfyh", headers=auth(token))
     _, _, data, _ = env(r)
     assert data["total"] == 1 and data["items"][0]["code"] == "sh600000"
+
+
+async def test_list_security_masters_filter_by_asset_class_and_stats(client, session):
+    """asset_class 过滤参数 + /stats 分类计数端点。"""
+    token = await _admin_token(client, "sm_admin_filter@example.com")
+    await _seed_master(session, "sh600000", "浦发银行", SecurityType.STOCK, "pfyh", "SH")
+    await _seed_master(session, "sz000001", "平安银行", SecurityType.STOCK, "payh", "SZ")
+    await _seed_master(session, "hk00700", "腾讯控股", SecurityType.HK_STOCK, "txkg", "HK")
+
+    # 按类别过滤：仅 STOCK
+    r = await client.get(
+        "/api/admin/securities/masters?asset_class=STOCK", headers=auth(token)
+    )
+    status, code, data, _ = env(r)
+    assert status == 200 and code == 0
+    assert data["total"] == 2
+    assert {i["code"] for i in data["items"]} == {"sh600000", "sz000001"}
+
+    # 按类别过滤：仅 HK_STOCK
+    r = await client.get(
+        "/api/admin/securities/masters?asset_class=HK_STOCK", headers=auth(token)
+    )
+    _, _, data, _ = env(r)
+    assert data["total"] == 1 and data["items"][0]["code"] == "hk00700"
+
+    # 分类计数端点
+    r = await client.get("/api/admin/securities/masters/stats", headers=auth(token))
+    status, code, data, _ = env(r)
+    assert status == 200 and code == 0
+    counts = data["counts"]
+    assert counts.get("STOCK") == 2
+    assert counts.get("HK_STOCK") == 1
+
+
+async def test_list_security_masters_filter_by_exchange(client, session):
+    """exchange 过滤参数（SH/SZ/BJ/HK）独立生效，与 asset_class 可叠加。"""
+    token = await _admin_token(client, "sm_admin_exch@example.com")
+    await _seed_master(session, "sh600000", "浦发银行", SecurityType.STOCK, "pfyh", "SH")
+    await _seed_master(session, "sz000001", "平安银行", SecurityType.STOCK, "payh", "SZ")
+    await _seed_master(session, "bj920021", "贝特瑞", SecurityType.STOCK, "btr", "BJ")
+    await _seed_master(session, "hk00700", "腾讯控股", SecurityType.HK_STOCK, "txkg", "HK")
+
+    # 仅 SH
+    r = await client.get(
+        "/api/admin/securities/masters?exchange=SH", headers=auth(token)
+    )
+    _, _, data, _ = env(r)
+    assert data["total"] == 1 and data["items"][0]["code"] == "sh600000"
+
+    # 仅 HK
+    r = await client.get(
+        "/api/admin/securities/masters?exchange=HK", headers=auth(token)
+    )
+    _, _, data, _ = env(r)
+    assert data["total"] == 1 and data["items"][0]["code"] == "hk00700"
+
+    # exchange 与 asset_class 叠加：STOCK + SZ
+    r = await client.get(
+        "/api/admin/securities/masters?asset_class=STOCK&exchange=SZ",
+        headers=auth(token),
+    )
+    _, _, data, _ = env(r)
+    assert data["total"] == 1 and data["items"][0]["code"] == "sz000001"
+
+    # 非法 exchange 值被忽略（不过滤成空）
+    r = await client.get(
+        "/api/admin/securities/masters?exchange=XXX", headers=auth(token)
+    )
+    _, _, data, _ = env(r)
+    assert data["total"] == 4
 
 
 async def test_list_security_masters_excludes_portfolio_rows(client, session):
@@ -359,16 +447,16 @@ async def test_sync_security_masters_dispatch_uses_provider_access_method(
     """
     token = await _admin_token(client, "sm_admin_8@example.com")
     pid = await _create_provider(client, token)  # access_method=https
-    cid = await _create_category(client, token)
-    # §11 配置能力：create schema 现已透传 purpose/asset_class，经 API 直接建 MASTER_LIST 接口
+    await _seed_fixed_categories(session)
+    cid = MASTER_LIST_CAT_ID
+    # 主数据接口归属「证券列表」固定分类（reform 后按 category_id 路由）
     iid = await _create_interface(
         client,
         token,
         pid,
         cid,
         name="A股主数据",
-        purpose=InterfacePurpose.MASTER_LIST.value,
-        asset_class=SecurityType.STOCK.value,
+        asset_class=[SecurityType.STOCK.value],
     )
 
     async def _fake_https_raw(self, itf, params, codes):
@@ -414,20 +502,19 @@ async def test_quote_interface_test_dispatch_uses_provider_access_method(
 
 
 async def test_quote_interface_create_update_master_list_fields(client):
-    """§11 配置能力：接口 create/update 透传 purpose/asset_class/resp_name_field/resp_exchange_field。"""
+    """接口 create/update 透传 asset_class/resp_name_field/resp_exchange_field（分类即用途，不再单独传 purpose）。"""
     token = await _admin_token(client, "sm_admin_10@example.com")
     pid = await _create_provider(client, token)
     cid = await _create_category(client, token)
 
-    # create：设 MASTER_LIST + HK_STOCK + 自定义解析字段
+    # create：设 HK_STOCK + 自定义解析字段（reform 后分类即用途，不再单独传 purpose）
     iid = await _create_interface(
         client,
         token,
         pid,
         cid,
         name="港股主数据",
-        purpose="MASTER_LIST",
-        asset_class="HK_STOCK",
+        asset_class=["HK_STOCK"],
         resp_name_field="sec_name",
         resp_exchange_field="market",
     )
@@ -436,22 +523,20 @@ async def test_quote_interface_create_update_master_list_fields(client):
     )
     status, code, data, _ = env(r)
     assert status == 200 and code == 0
-    assert data["purpose"] == "MASTER_LIST"
-    assert data["asset_class"] == "HK_STOCK"
+    assert data["asset_class"] == ["HK_STOCK"]
     assert data["resp_name_field"] == "sec_name"
     assert data["resp_exchange_field"] == "market"
 
     # update：显式改值生效；未提供的字段保持原值（service 约定 None=未提供）
     r = await client.patch(
         f"/api/admin/quote-providers/interfaces/{iid}",
-        json={"purpose": "QUOTE", "resp_name_field": "name"},
+        json={"resp_name_field": "name"},
         headers=auth(token),
     )
     status, code, data, _ = env(r)
     assert status == 200 and code == 0
-    assert data["purpose"] == "QUOTE"
     assert data["resp_name_field"] == "name"
-    assert data["asset_class"] == "HK_STOCK"
+    assert data["asset_class"] == ["HK_STOCK"]
     assert data["resp_exchange_field"] == "market"
 
 
@@ -459,15 +544,15 @@ async def test_sync_security_masters_array_rows_positional(client, monkeypatch, 
     """小熊同学类数组行响应 [[code,name],...]：resp_* 配下标 0/1，同步落主数据并推断交易所。"""
     token = await _admin_token(client, "sm_admin_11@example.com")
     pid = await _create_provider(client, token)  # https
-    cid = await _create_category(client, token)
+    await _seed_fixed_categories(session)
+    cid = MASTER_LIST_CAT_ID
     iid = await _create_interface(
         client,
         token,
         pid,
         cid,
         name="A股股票列表（数组行）",
-        purpose="MASTER_LIST",
-        asset_class="STOCK",
+        asset_class=["STOCK"],
         resp_code_field="0",
         resp_name_field="1",
     )
@@ -484,6 +569,11 @@ async def test_sync_security_masters_array_rows_positional(client, monkeypatch, 
         SecurityType.STOCK
     )
     assert result["synced"] == 3
+    # 本次同步使用的接口及其获取条数（供前端「同步旁展示」）
+    assert result["used"] is not None
+    assert result["used"]["interfaceId"] == iid
+    assert result["used"]["fetched"] == 3
+    assert result["used"]["status"] == "ok"
     rows = {
         r.code: r
         for r in (
@@ -510,27 +600,26 @@ async def test_sync_all_security_masters_returns_used_per_asset_class(
     """
     token = await _admin_token(client, "sm_admin_12@example.com")
     pid = await _create_provider(client, token)  # access_method=https
+    await _seed_fixed_categories(session)
     iid_stock = await _create_interface(
         client,
         token,
         pid,
-        await _create_category(client, token),
+        MASTER_LIST_CAT_ID,
         name="A股主数据",
-        purpose="MASTER_LIST",
-        asset_class="STOCK",
+        asset_class=["STOCK"],
     )
     iid_hk = await _create_interface(
         client,
         token,
         pid,
-        await _create_category(client, token),
+        MASTER_LIST_CAT_ID,
         name="港股主数据",
-        purpose="MASTER_LIST",
-        asset_class="HK_STOCK",
+        asset_class=["HK_STOCK"],
     )
 
     async def _fake_https_raw(self, itf, params, codes):
-        if itf.asset_class == SecurityType.HK_STOCK:
+        if SecurityType.HK_STOCK.value in (itf.asset_class or []):
             return [{"code": "00700", "name": "腾讯控股"}]
         return [{"code": "600000", "name": "浦发银行"}]
 
@@ -547,6 +636,49 @@ async def test_sync_all_security_masters_returns_used_per_asset_class(
         assert "providerName" in u and "interfaceId" in u
 
 
+async def test_sync_all_fetches_multi_asset_interface_once(client, monkeypatch, session):
+    """多选优化：服务多个 asset_class 的接口在整轮 sync_all 中只被请求一次。
+
+    回归：多选前每个 asset_class 批次都会把该接口当候选，重复请求同一端点。
+    本用例建 1 个 MASTER_LIST 接口服务 [STOCK, HK_STOCK]，断言底层 _fetch_https_raw
+    整轮仅被调用 1 次，且两类别行均被正确逐行归类（归 STOCK / HK_STOCK）。
+    """
+    token = await _admin_token(client, "sm_admin_dedup@example.com")
+    pid = await _create_provider(client, token)  # access_method=https
+    await _seed_fixed_categories(session)
+    await _create_interface(
+        client,
+        token,
+        pid,
+        MASTER_LIST_CAT_ID,
+        name="A股_港股主数据",
+        asset_class=["STOCK", "HK_STOCK"],
+    )
+
+    calls = {"n": 0}
+
+    async def _fake_https_raw(self, itf, params, codes):
+        calls["n"] += 1
+        # 两类别行同端点一次返回，由 infer_security_type 逐行归类
+        return [
+            {"code": "600000", "name": "浦发银行"},
+            {"code": "hk00700", "name": "腾讯控股"},
+        ]
+
+    monkeypatch.setattr(MarketDataSyncService, "_fetch_https_raw", _fake_https_raw)
+    result = await MarketDataSyncService(session).sync_all_security_masters()
+    assert result["failed"] == 0
+    # 关键断言：同端点整轮只请求一次（多选冗余消除）
+    assert calls["n"] == 1
+    # 两类别行均被正确归类（infer_security_type 逐行推断，与组合持仓 type 同源）
+    rows = (await session.execute(select(Security))).scalars().all()
+    by_code = {r.code: r.asset_class for r in rows}
+    assert by_code.get("sh600000") == SecurityType.STOCK
+    assert by_code.get("hk00700") == SecurityType.HK_STOCK
+    # used 跨批次去重后仍只含该接口一次
+    assert result["used"] is not None and len(result["used"]) == 1
+
+
 async def test_sync_skips_disabled_provider_master_interfaces(client, monkeypatch, session):
     """主数据同步须尊重提供方 enabled：停用提供方（如「小熊同学」）的接口不被采用。
 
@@ -561,14 +693,15 @@ async def test_sync_skips_disabled_provider_master_interfaces(client, monkeypatc
     status, code, data, _ = env(r)
     assert status == 200 and code == 0, data
     pid_off = data["id"]
-    cid = await _create_category(client, token)
+    await _seed_fixed_categories(session)
+    cid = MASTER_LIST_CAT_ID
     iid_on = await _create_interface(
         client, token, pid_on, cid,
-        name="启用方主数据", purpose="MASTER_LIST", asset_class="STOCK",
+        name="启用方主数据", asset_class=["STOCK"],
     )
     iid_off = await _create_interface(
         client, token, pid_off, cid,
-        name="小熊同学主数据", purpose="MASTER_LIST", asset_class="STOCK",
+        name="小熊同学主数据", asset_class=["STOCK"],
     )
 
     async def _fake_https_raw(self, itf, params, codes):
@@ -632,10 +765,11 @@ async def test_sync_dedupes_master_code_across_formats(client, monkeypatch, sess
     """
     token = await _admin_token(client, "sm_dedup_1@example.com")
     pid = await _create_provider(client, token)
-    cid = await _create_category(client, token)
+    await _seed_fixed_categories(session)
+    cid = MASTER_LIST_CAT_ID
     await _create_interface(
         client, token, pid, cid,
-        name="主数据接口", purpose="MASTER_LIST", asset_class="STOCK",
+        name="主数据接口", asset_class=["STOCK"],
     )
 
     # 第一次同步：源返回无后缀代码（数字启发式推断 SZ → sz000001）
@@ -719,3 +853,554 @@ async def test_dedupe_masters_merges_existing_duplicate_rows(client, session):
     ).scalars().all()
     assert len(holdings) == 1
     assert holdings[0].master_id == rows[0].id
+
+
+async def test_infer_exchange_rules():
+    """_infer_exchange 数字码交易所推断规则（§11.4 修复点）。"""
+    # 显式前缀
+    assert _infer_exchange("sh600000") == "SH"
+    assert _infer_exchange("sz000001") == "SZ"
+    assert _infer_exchange("bj920021") == "BJ"
+    assert _infer_exchange("hk00700") == "HK"
+    # 北交所主板 920xxx（须特判于 9→SH 之前）
+    assert _infer_exchange("920000") == "BJ"
+    # 港股 5 位码（须先于 SH/SZ/BJ 数字规则，修正 80016/02318 误归 BJ/SZ）
+    assert _infer_exchange("80016") == "HK"
+    assert _infer_exchange("02318") == "HK"
+    assert _infer_exchange("00700") == "HK"
+    # 1xxxxx：沪可转债 / 深可转债 / 深市基金（修正可转债漏前缀）
+    assert _infer_exchange("110002") == "SH"
+    assert _infer_exchange("120002") == "SZ"
+    assert _infer_exchange("150001") == "SZ"
+    assert _infer_exchange("160001") == "SZ"
+    # 主线 A股 / 沪市基金
+    assert _infer_exchange("600000") == "SH"
+    assert _infer_exchange("000001") == "SZ"
+    assert _infer_exchange("300001") == "SZ"
+    assert _infer_exchange("500001") == "SH"
+
+
+async def test_normalize_and_dedupe_reclassifies_corrupt_masters(session):
+    """sync_all 末尾自愈：从数字码重推，修正存量错标行并合并重复。
+
+    覆盖：北京 920xxx 误归 SH、港股 5 位码误归 BJ/SZ、可转债漏交易所前缀、
+    以及同一证券因错标产生 sh/sz 双前缀重复。
+    """
+    # 北京 920xxx 被旧逻辑误存为 SH
+    session.add(Security(asset_class=SecurityType.STOCK, code="sh920000", name="安徽凤凰", exchange="SH"))
+    # 港股 5 位码 80016 被旧 head 规则误存为 BJ
+    session.add(Security(asset_class=SecurityType.HK_STOCK, code="bj80016", name="新鸿基地产－Ｒ", exchange="BJ"))
+    # 港股 02318 被误存为 SZ
+    session.add(Security(asset_class=SecurityType.HK_STOCK, code="sz02318", name="中国平安", exchange="SZ"))
+    # 可转债 110002 漏交易所前缀（exchange=NULL）
+    session.add(Security(asset_class=SecurityType.CONVERTIBLE_BOND, code="110002", name="南山转债", exchange=None))
+    # 重复：同一北京 920000 另一源误存为 SZ（应合并进 bj920000）
+    session.add(Security(asset_class=SecurityType.STOCK, code="sz920000", name="安徽凤凰", exchange="SZ"))
+    await session.flush()
+
+    # 直接调用自愈（无需 MASTER_LIST 接口）
+    removed = await MarketDataSyncService(session)._normalize_and_dedupe_masters()
+    # sh920000 / sz920000 重分类后都变成 bj920000 → 合并掉 1 条
+    assert removed == 1
+
+    rows = (await session.execute(select(Security))).scalars().all()
+    by_code = {r.code: r for r in rows}
+    # 北京 920xxx → BJ（重复已合并）
+    assert "bj920000" in by_code
+    assert by_code["bj920000"].exchange == "BJ"
+    assert by_code["bj920000"].asset_class == SecurityType.STOCK
+    # 港股 5 位码 → HK
+    assert "hk80016" in by_code and by_code["hk80016"].exchange == "HK"
+    assert by_code["hk80016"].asset_class == SecurityType.HK_STOCK
+    assert "hk02318" in by_code and by_code["hk02318"].exchange == "HK"
+    assert by_code["hk02318"].asset_class == SecurityType.HK_STOCK
+    # 可转债 → 补 SH 前缀
+    assert "sh110002" in by_code and by_code["sh110002"].exchange == "SH"
+    assert by_code["sh110002"].asset_class == SecurityType.CONVERTIBLE_BOND
+
+
+async def test_dedupe_masters_reclassifies_delisted_bonds_to_uncategorized(session):
+    """退市可转债（名称含「退债」）无论代码前缀归到哪个交易所，统一归入未分类。
+
+    覆盖：原被 4xxxxx 数字规则误归北交所（BJ）的「xx退债」应在自愈后落到 UNCATEGORIZED，
+    而普通可转债不受影响。
+    """
+    # 上交所退市可转债（代码 4xxxxx 旧规则会误归 BJ）
+    session.add(Security(asset_class=SecurityType.BOND, code="bj404001", name="航信退债", exchange="BJ"))
+    # 深交所退市可转债
+    session.add(
+        Security(asset_class=SecurityType.CONVERTIBLE_BOND, code="sz123999", name="X退债", exchange="SZ")
+    )
+    # 普通可转债（不应受影响，仍归可转债）
+    session.add(
+        Security(asset_class=SecurityType.CONVERTIBLE_BOND, code="110002", name="南山转债", exchange=None)
+    )
+    await session.flush()
+
+    await MarketDataSyncService(session)._normalize_and_dedupe_masters()
+
+    rows = (await session.execute(select(Security))).scalars().all()
+    by_name = {r.name: r for r in rows}
+    assert by_name["航信退债"].asset_class == SecurityType.UNCATEGORIZED
+    assert by_name["X退债"].asset_class == SecurityType.UNCATEGORIZED
+    # 普通可转债不受影响
+    assert by_name["南山转债"].asset_class == SecurityType.CONVERTIBLE_BOND
+
+
+async def test_list_security_masters_uncategorized_matches_value(client, session):
+    """未分类筛选：主数据行 asset_class 为显式值 'UNCATEGORIZED'（非 NULL）也应命中。"""
+    token = await _admin_token(client, "sm_uncat_val@example.com")
+    async with dbmod.AsyncSessionLocal() as s:
+        s.add(Security(asset_class=SecurityType.UNCATEGORIZED, code="sh123456", name="某未分类证券", exchange="SH"))
+        s.add(Security(asset_class=SecurityType.STOCK, code="sh600000", name="平安银行", exchange="SH"))
+        await s.commit()
+    r = await client.get(
+        "/api/admin/securities/masters?asset_class=UNCATEGORIZED", headers=auth(token)
+    )
+    status, code, data, _ = env(r)
+    assert status == 200 and code == 0
+    codes = [i["code"] for i in data["items"]]
+    assert "sh123456" in codes
+    assert "sh600000" not in codes
+
+
+# --------------------------------------------------------------------------- #
+# DELETE /api/admin/securities/masters：批量/单行删除（拦截被组合持仓引用的主数据）
+# --------------------------------------------------------------------------- #
+async def _delete_masters(client, token, ids):
+    """调用 DELETE 删除主数据，返回原始 httpx 响应。
+
+    注意：httpx 的 delete() 便捷方法不接受 content/json 参数，须走 request()。
+    """
+    return await client.request(
+        "DELETE",
+        "/api/admin/securities/masters",
+        json={"ids": ids},
+        headers=auth(token),
+    )
+
+
+async def _seed_user_portfolio_and_holding(session, email: str, master_id: str):
+    """建普通用户 + 组合 + 一条引用该主数据的组合持仓（用于引用拦截验证）。"""
+    user = User(id=str(uuid.uuid4()), email=email, password_hash="x", role="user")
+    session.add(user)
+    await session.flush()
+    pf = Portfolio(id=str(uuid.uuid4()), user_id=user.id, name="P")
+    session.add(pf)
+    await session.flush()
+    holding = PortfolioSecurity(
+        id=str(uuid.uuid4()),
+        portfolio_id=pf.id,
+        master_id=master_id,
+        type=SecurityType.STOCK,
+    )
+    session.add(holding)
+    await session.commit()
+    return user, pf, holding
+
+
+async def test_delete_security_master_intercepted_when_referenced(client, session):
+    """被组合持仓引用的主数据禁止删除：计入 skipped，原行保留。"""
+    token = await _admin_token(client, "del_ref_admin@example.com")
+    master = await _seed_master(
+        session, "sh600000", "浦发银行", SecurityType.STOCK, "pfyh", "SH"
+    )
+    await _seed_user_portfolio_and_holding(
+        session, "del_ref_user@example.com", master.id
+    )
+
+    r = await _delete_masters(client, token, [master.id])
+    status, code, data, _ = env(r)
+    assert status == 200 and code == 0
+    assert data["deleted"] == 0
+    assert len(data["skipped"]) == 1
+    assert data["skipped"][0]["id"] == master.id
+    assert "引用" in data["skipped"][0]["reason"]
+
+    # 引用拦截下原行仍存在
+    remaining = (
+        await session.execute(select(Security).where(Security.id == master.id))
+    ).scalars().all()
+    assert len(remaining) == 1
+
+
+async def test_delete_security_master_orphans(client, session):
+    """删除孤儿主数据：两条均成功删除，表中对应行消失。"""
+    token = await _admin_token(client, "del_orphan_admin@example.com")
+    m1 = await _seed_master(session, "sh600000", "浦发银行", SecurityType.STOCK, "pfyh", "SH")
+    m2 = await _seed_master(session, "sz000001", "平安银行", SecurityType.STOCK, "payh", "SZ")
+
+    r = await _delete_masters(client, token, [m1.id, m2.id])
+    status, code, data, _ = env(r)
+    assert status == 200 and code == 0
+    assert data["deleted"] == 2
+    assert data["skipped"] == []
+
+    # 表中对应行已消失
+    remaining = (await session.execute(select(Security))).scalars().all()
+    assert {r2.id for r2 in remaining} == set()
+
+
+async def test_delete_security_master_batch_mixed(client, session):
+    """批量混合：1 孤儿 + 1 被引用 + 1 不存在 id → 删 1，skipped 恰含被引用与不存在两项。"""
+    token = await _admin_token(client, "del_mix_admin@example.com")
+    orphan = await _seed_master(session, "sh600000", "浦发银行", SecurityType.STOCK, "pfyh", "SH")
+    referenced = await _seed_master(session, "sz000001", "平安银行", SecurityType.STOCK, "payh", "SZ")
+    await _seed_user_portfolio_and_holding(
+        session, "del_mix_user@example.com", referenced.id
+    )
+    nonexistent = str(uuid.uuid4())
+
+    r = await _delete_masters(client, token, [orphan.id, referenced.id, nonexistent])
+    status, code, data, _ = env(r)
+    assert status == 200 and code == 0
+    assert data["deleted"] == 1
+    assert {s["id"] for s in data["skipped"]} == {referenced.id, nonexistent}
+    reasons = {s["id"]: s["reason"] for s in data["skipped"]}
+    assert "引用" in reasons[referenced.id]
+    assert reasons[nonexistent] == "主数据不存在"
+
+    # 孤儿被删、被引用与不存在的未受影响
+    remaining = (
+        await session.execute(
+            select(Security).where(Security.id.in_([orphan.id, referenced.id]))
+        )
+    ).scalars().all()
+    assert {r2.id for r2 in remaining} == {referenced.id}
+
+
+async def test_delete_security_master_dedup_duplicate_ids(client, session):
+    """边界：重复 id 去重只删一次，表中无残留。"""
+    token = await _admin_token(client, "del_dup_admin@example.com")
+    m = await _seed_master(session, "sh600000", "浦发银行", SecurityType.STOCK, "pfyh", "SH")
+
+    r = await _delete_masters(client, token, [m.id, m.id, m.id])
+    status, code, data, _ = env(r)
+    assert status == 200 and code == 0
+    assert data["deleted"] == 1
+
+    remaining = (await session.execute(select(Security))).scalars().all()
+    assert len(remaining) == 0
+
+
+async def test_delete_security_master_empty_ids_returns_400(client, session):
+    """边界：空 ids [] → 400。"""
+    token = await _admin_token(client, "del_empty_admin@example.com")
+    r = await _delete_masters(client, token, [])
+    assert r.status_code == 400
+
+
+async def test_delete_security_master_requires_admin(client, session):
+    """权限：非管理员（普通登录用户）删除主数据 → 403。"""
+    creds = await register_login(client, email="del_user_1@example.com", password="pw123456")
+    r = await _delete_masters(client, creds["token"], [str(uuid.uuid4())])
+    assert r.status_code == 403
+
+
+async def test_delete_security_master_stats_and_list_updated(client, session):
+    """回归：删除后类别计数减少、列表 total 减少。"""
+    token = await _admin_token(client, "del_reg_admin@example.com")
+    await _seed_master(session, "sh600000", "浦发银行", SecurityType.STOCK, "pfyh", "SH")
+    m2 = await _seed_master(session, "sz000001", "平安银行", SecurityType.STOCK, "payh", "SZ")
+
+    # 删前断言有 2 条 STOCK
+    r = await client.get("/api/admin/securities/masters/stats", headers=auth(token))
+    _, _, data, _ = env(r)
+    assert data["counts"].get("STOCK") == 2
+
+    r = await _delete_masters(client, token, [m2.id])
+    status, code, data, _ = env(r)
+    assert status == 200 and code == 0
+    assert data["deleted"] == 1
+
+    # stats 计数减少
+    r = await client.get("/api/admin/securities/masters/stats", headers=auth(token))
+    _, _, data, _ = env(r)
+    assert data["counts"].get("STOCK") == 1
+
+    # 列表 total 减少
+    r = await client.get("/api/admin/securities/masters", headers=auth(token))
+    _, _, data, _ = env(r)
+    assert data["total"] == 1
+
+
+async def test_delete_security_master_all_deletes_orphans_only(client, session):
+    """all=True：删除「当前筛选条件下全部孤儿主数据」，被引用的转入 skipped。"""
+    token = await _admin_token(client, "del_all_admin@example.com")
+    o1 = await _seed_master(session, "sh600000", "浦发银行", SecurityType.STOCK, "pfyh", "SH")
+    o2 = await _seed_master(session, "sz000001", "平安银行", SecurityType.STOCK, "payh", "SZ")
+    o3 = await _seed_master(session, "hk00700", "腾讯控股", SecurityType.HK_STOCK, "txkh", "HK")
+    referenced = await _seed_master(session, "bj600519", "贵州茅台", SecurityType.STOCK, "gzmz", "SH")
+    await _seed_user_portfolio_and_holding(session, "del_all_user@example.com", referenced.id)
+
+    r = await client.request(
+        "DELETE",
+        "/api/admin/securities/masters",
+        json={"all": True},
+        headers=auth(token),
+    )
+    status, code, data, _ = env(r)
+    assert status == 200 and code == 0
+    assert data["deleted"] == 3  # 三个孤儿
+    assert len(data["skipped"]) == 1
+    assert data["skipped"][0]["id"] == referenced.id
+    assert "引用" in data["skipped"][0]["reason"]
+
+    # 被引用的原行保留
+    remaining = (
+        await session.execute(select(Security).where(Security.id == referenced.id))
+    ).scalars().all()
+    assert len(remaining) == 1
+
+
+async def test_delete_security_master_all_respects_filter(client, session):
+    """all=True 配合 asset_class 筛选：仅删除该类别孤儿，其余类别不受影响。"""
+    token = await _admin_token(client, "del_all_flt_admin@example.com")
+    stock1 = await _seed_master(session, "sh600000", "浦发银行", SecurityType.STOCK, "pfyh", "SH")
+    stock2 = await _seed_master(session, "sz000001", "平安银行", SecurityType.STOCK, "payh", "SZ")
+    hk = await _seed_master(session, "hk00700", "腾讯控股", SecurityType.HK_STOCK, "txkh", "HK")
+
+    r = await client.request(
+        "DELETE",
+        "/api/admin/securities/masters",
+        json={"all": True, "asset_class": "STOCK"},
+        headers=auth(token),
+    )
+    status, code, data, _ = env(r)
+    assert status == 200 and code == 0
+    assert data["deleted"] == 2  # 仅 STOCK 孤儿
+    assert data["skipped"] == []
+
+    # HK_STOCK 不受影响
+    remaining = (
+        await session.execute(select(Security).where(Security.id == hk.id))
+    ).scalars().all()
+    assert len(remaining) == 1
+    # STOCK 已删
+    gone = (
+        await session.execute(select(Security).where(Security.id.in_([stock1.id, stock2.id])))
+    ).scalars().all()
+    assert gone == []
+
+
+# --------------------------------------------------------------------------- #
+# 证券主数据 id 确定性派生（业务键 (asset_class, code) → 稳定 uuid5）
+# --------------------------------------------------------------------------- #
+class _FakeMasterInterface:
+    """最小接口桩：仅需 _upsert_masters 读取的字段。"""
+
+    resp_code_field = "code"
+    resp_name_field = "name"
+    resp_exchange_field = None
+
+
+async def test_master_id_for_is_deterministic(session):
+    """master_id_for：同 (asset_class, code) 多次调用返回同一 36 字符 UUID；不同 key 不同；输出合法 UUID。"""
+    a = master_id_for(SecurityType.STOCK, "sh600000")
+    b = master_id_for(SecurityType.STOCK, "sh600000")
+    assert a == b
+    assert len(a) == 36
+    # 合法 UUID
+    assert uuid.UUID(a) is not None
+
+    # 不同 code → 不同 id
+    assert master_id_for(SecurityType.STOCK, "sz000001") != a
+    # 不同 asset_class（同 code）→ 不同 id
+    assert master_id_for(SecurityType.HK_STOCK, "sh600000") != a
+    # asset_class=None 哨兵分支也确定性且独立于 STOCK
+    null_id = master_id_for(None, "sh600000")
+    assert null_id != a
+    assert len(null_id) == 36 and uuid.UUID(null_id) is not None
+
+
+async def test_upsert_masters_assigns_deterministic_id_and_survives_delete_rebuild(
+    session,
+):
+    """_upsert_masters 新插入行用确定性 id；删除该主数据后再次同步同 (ac, code) 得同一 id。"""
+    svc = MarketDataSyncService(session)
+    n = await svc._upsert_masters(
+        _FakeMasterInterface(), [{"code": "600000", "name": "浦发银行"}]
+    )
+    assert n == 1
+    row = (
+        await session.execute(
+            select(Security).where(
+                Security.asset_class == SecurityType.STOCK,
+                Security.code == "sh600000",
+            )
+        )
+    ).scalar_one()
+    id1 = row.id
+    assert id1 == master_id_for(SecurityType.STOCK, "sh600000")
+
+    # 模拟「删除后重新同步」：直接 DELETE 该行并提交
+    await session.delete(row)
+    await session.commit()
+
+    # 再次同步同 (ac, code)
+    svc2 = MarketDataSyncService(session)
+    n2 = await svc2._upsert_masters(
+        _FakeMasterInterface(), [{"code": "600000", "name": "浦发银行"}]
+    )
+    assert n2 == 1
+    row2 = (
+        await session.execute(
+            select(Security).where(
+                Security.asset_class == SecurityType.STOCK,
+                Security.code == "sh600000",
+            )
+        )
+    ).scalar_one()
+    id2 = row2.id
+    assert id2 == id1  # 删除重建保持同一 id
+    assert id2 == master_id_for(SecurityType.STOCK, "sh600000")
+
+
+async def test_conflict_merge_keeps_canonical_id_stable(session):
+    """冲突合并（含 asset_class=NULL 分支）后，同一 (ac, code) 的确定性 id 始终可由 master_id_for 复现。
+
+    注：合并保留行的 id 为历史值（随机），但 (ac, code) 这一业务键唯一确定其确定性 id；
+    删除该保留行并重新同步即重建为 master_id_for(ac, code)，保证外键引用稳定可重建。
+    """
+    # 两条重复 STOCK+sh600000（不同 code 字符串，重规范后同 (STOCK, sh600000)）
+    s1 = Security(
+        asset_class=SecurityType.STOCK, code="600000", name="浦发银行",
+        exchange="SH", pinyin_initials="pfyh",
+    )
+    s2 = Security(
+        asset_class=SecurityType.STOCK, code="600000.SZ", name="浦发银行",
+        exchange="SZ", pinyin_initials="pfyh",
+    )
+    # asset_class=NULL 分支：原存 NULL，重推断归 STOCK → 同样并入 (STOCK, sh600000)
+    s3 = Security(
+        asset_class=None, code="600000", name="浦发银行",
+        exchange="SH", pinyin_initials="pfyh",
+    )
+    session.add_all([s1, s2, s3])
+    await session.flush()
+
+    removed = await MarketDataSyncService(session)._normalize_and_dedupe_masters()
+    assert removed == 2  # 合并掉 2 条重复
+
+    rows = (await session.execute(select(Security))).scalars().all()
+    assert len(rows) == 1
+    kept = rows[0]
+    assert kept.code == "sh600000"
+    assert kept.asset_class == SecurityType.STOCK
+
+    # 该 (ac, code) 的确定性 id 唯一确定；删除→重建得同一 id
+    expected = master_id_for(SecurityType.STOCK, "sh600000")
+    await session.delete(kept)
+    await session.commit()
+    svc = MarketDataSyncService(session)
+    await svc._upsert_masters(
+        _FakeMasterInterface(), [{"code": "600000", "name": "浦发银行"}]
+    )
+    rebuilt = (
+        await session.execute(
+            select(Security).where(Security.code == "sh600000")
+        )
+    ).scalar_one()
+    assert rebuilt.id == expected
+
+
+async def test_rebuild_keeps_foreign_key_intact(session):
+    """重建后 portfolio_securities.master_id 均指向存在的 securities.id（无孤儿）。
+
+    设计说明：securities.id 经确定性派生后，被引用主数据删除会随 ondelete=CASCADE 级联删除
+    其组合持仓（删除端点对此拦截，本系统既有设计）；无引用的孤儿主数据删除后重新同步可得
+    同一确定性 id。本用例验证：(1) 既有持仓外键全部成立（无孤儿）；(2) 删除一个孤儿主数据并
+    重建后，另一组合持仓仍指向存在的 securities.id（无孤儿遗留）。
+    """
+    svc = MarketDataSyncService(session)
+    await svc._upsert_masters(
+        _FakeMasterInterface(),
+        [{"code": "600000", "name": "浦发银行"}, {"code": "000001", "name": "平安银行"}],
+    )
+    masters = {
+        r.code: r
+        for r in (await session.execute(select(Security))).scalars().all()
+    }
+    m1 = masters["sh600000"]
+    m2 = masters["sz000001"]
+
+    # 两个组合各持有一项（互相独立）
+    u1 = User(id=str(uuid.uuid4()), email="det_fk_u1@example.com",
+              password_hash="x", role="user")
+    session.add(u1)
+    await session.flush()
+    pf1 = Portfolio(id=str(uuid.uuid4()), user_id=u1.id, name="P1")
+    session.add(pf1)
+    await session.flush()
+    session.add(PortfolioSecurity(
+        id=str(uuid.uuid4()), portfolio_id=pf1.id, master_id=m1.id,
+        type=SecurityType.STOCK,
+    ))
+
+    u2 = User(id=str(uuid.uuid4()), email="det_fk_u2@example.com",
+              password_hash="x", role="user")
+    session.add(u2)
+    await session.flush()
+    pf2 = Portfolio(id=str(uuid.uuid4()), user_id=u2.id, name="P2")
+    session.add(pf2)
+    await session.flush()
+    session.add(PortfolioSecurity(
+        id=str(uuid.uuid4()), portfolio_id=pf2.id, master_id=m2.id,
+        type=SecurityType.STOCK,
+    ))
+    await session.commit()
+
+    # FK 全部成立：每条持仓都指向存在的 securities.id（无孤儿）
+    holdings = (await session.execute(select(PortfolioSecurity))).scalars().all()
+    assert len(holdings) == 2
+    for ps in holdings:
+        exists = (
+            await session.execute(
+                select(Security.id).where(Security.id == ps.master_id)
+            )
+        ).scalar_one_or_none()
+        assert exists is not None
+
+    # 删除 m1（其持仓随 ondelete=CASCADE 级联删除），重建 m1
+    await session.delete(m1)
+    await session.commit()
+    svc2 = MarketDataSyncService(session)
+    await svc2._upsert_masters(
+        _FakeMasterInterface(), [{"code": "600000", "name": "浦发银行"}]
+    )
+    new_m1 = (
+        await session.execute(
+            select(Security).where(Security.code == "sh600000")
+        )
+    ).scalar_one()
+    assert new_m1.id == master_id_for(SecurityType.STOCK, "sh600000")
+
+    # m2 的持仓仍指向存在的 securities；无孤儿残留
+    remaining = (await session.execute(select(PortfolioSecurity))).scalars().all()
+    assert len(remaining) == 1
+    assert remaining[0].master_id == m2.id
+    assert (
+        await session.execute(
+            select(Security.id).where(Security.id == remaining[0].master_id)
+        )
+    ).scalar_one_or_none() is not None
+
+
+async def test_migration_invariant_all_securities_id_is_deterministic(session):
+    """迁移不变量（验证用）：经 conftest 对测试库 alembic upgrade head 后，所有 securities
+    行 id == master_id_for(asset_class, code)，且 portfolio_securities 无孤儿。"""
+    rows = (await session.execute(select(Security))).scalars().all()
+    for r in rows:
+        assert r.id == master_id_for(r.asset_class, r.code), (
+            f"securities.id 未对齐确定性派生: {r.id} vs {master_id_for(r.asset_class, r.code)}"
+        )
+
+    # 无孤儿外键
+    orphan = (
+        await session.execute(
+            select(PortfolioSecurity.id).join(
+                Security, PortfolioSecurity.master_id == Security.id, isouter=True
+            ).where(Security.id.is_(None))
+        )
+    ).scalars().all()
+    assert orphan == []

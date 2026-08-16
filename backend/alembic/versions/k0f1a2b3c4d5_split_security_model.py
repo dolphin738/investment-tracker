@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
 from app.models.enums import SecurityType
 
@@ -64,10 +65,9 @@ def upgrade() -> None:
         ),
         sa.Column(
             "type",
-            sa.Enum(
+            postgresql.ENUM(
                 SecurityType,
                 name="SecurityType",
-                native_enum=True,
                 create_type=False,
             ),
             nullable=True,
@@ -171,10 +171,9 @@ def downgrade() -> None:
         "securities",
         sa.Column(
             "type",
-            sa.Enum(
+            postgresql.ENUM(
                 SecurityType,
                 name="SecurityType",
-                native_enum=True,
                 create_type=False,
             ),
             nullable=True,

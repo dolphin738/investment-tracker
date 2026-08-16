@@ -52,6 +52,10 @@ class Settings(BaseSettings):
     # 生产环境必须改为强随机值（对齐「受保护内部端点」）。
     INTERNAL_CLEANUP_TOKEN: str = "change-me-internal"
 
+    # 前端静态托管（Docker 单镜像部署：由后端 serve web/dist）
+    # 默认空字符串 = 不托管前端（保持 API-only 形态）；部署时设为 dist 绝对路径
+    FRONTEND_DIR: str = ""
+
     # 可选定时调度器（APScheduler，收盘后全量刷新行情，默认关闭）。
     # 仅当 QUOTE_SYNC_SCHEDULER_ENABLED=True 时应用启动才会注册 job（且懒导入 apscheduler），
     # 未安装 akshare / 未启用环境启动不报错。

@@ -20,8 +20,11 @@
 """
 from __future__ import annotations
 
+import asyncio
 import re
 import time
+import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
@@ -32,17 +35,30 @@ import pypinyin
 from pypinyin import Style
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import exists as sa_exists
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from app.core.date_utils import today_app_tz
-from app.models.enums import InterfacePurpose, SecurityType
+from app.models.enums import SecurityType
 from app.models.quote_interface import QuoteInterface
 from app.models.quote_provider import SecuritiesDataProvider
 from app.models.security import PortfolioSecurity, Security, SecurityPrice
 from app.services.notification import NotificationService
 from app.services.recalculation import RecalculationService
+from app.services.classification import (
+    EXCHANGE_PREFIX,
+    infer_exchange,
+    infer_exchange_prefix,
+)
+from app.services.security import infer_security_type
+
+# 交易所推断规则统一收敛到 app.services.classification（单一事实来源）。
+# 以下别名仅用于兼容内部调用命名与既有测试，规则逻辑不再在此处维护。
+# 注意：infer_exchange_prefix 对 5 位纯数字返回 "hk"（与 _apply_code_prefix 的
+# 港股分支一致），旧 _infer_cn_exchange 对 5 位码按首位判定已不再使用。
+_infer_exchange = infer_exchange
+_infer_cn_exchange = infer_exchange_prefix
 
 # —— 可配置阈值（ADR-002 §3 Q4 默认 3）——
 FAILURE_THRESHOLD: int = 3
@@ -50,6 +66,101 @@ FAILURE_THRESHOLD: int = 3
 DEFAULT_TIMEOUT: int = 5
 # 单链总超时预算（秒，ADR-002 §2.3 封顶 ≤8s）
 CHAIN_BUDGET: int = 8
+# 重试退避基数与上限（秒）— 指数退避：base * 2^attempt，封顶 cap
+RETRY_BACKOFF_BASE: float = 0.5
+RETRY_BACKOFF_CAP: float = 5.0
+
+# 固定接口分类 id（接口分类改版：分类即用途，见 plan-interface-category-reform-2026-08-15）。
+# 与迁移 o3d4e5f6a7b8_reform_2_categories 中 INSERT 的显式 id 保持一致；路由按此硬编码选源。
+# 列是 String(36)（非 PG 原生 UUID 类型），故用简短数字 id，不依赖 gen_random_uuid()。
+MASTER_LIST_CAT_ID = "1"  # 证券列表（主数据拉取）
+QUOTE_CAT_ID = "2"        # 证券行情（价格行情）
+
+# 参数占位符（接口模板里常见的示例值，如 string / 示例 / example）。
+# 这些值并非真实业务参数，发出去会导致上游按占位符过滤（如小熊同学 keyWord=string 返回空列表），
+# 故在构建请求时与空值一并忽略。集合刻意保持极小，避免误伤真实参数。
+_PLACEHOLDER_PARAM_VALUES = {"string", "示例", "example", "占位", "占位符", "placeholder", "xxx"}
+
+
+def _is_placeholder_param_value(v: Any) -> bool:
+    """参数值是否为模板占位符（不应作为真实查询参数发送）。"""
+    if isinstance(v, str):
+        return v.strip().lower() in _PLACEHOLDER_PARAM_VALUES
+    return False
+
+
+def _apply_code_prefix(code: str, mode: Optional[str]) -> str:
+    """按 ``code_prefix`` 模式补全代码前缀。
+
+    ``"auto"``（位数感知，单接口覆盖 A股/场内基金/港股，腾讯/新浪风格）：
+    - **5 位纯数字** → 补 ``hk``（港股恒为 5 位，如 ``00700`` → ``hk00700``）；
+    - **6 位纯数字** → 按首位推断 sh/sz/bj（A股/场内基金风格，如 ``600519`` → ``sh600519``、
+      ``000001`` → ``sz000001``、``510300`` → ``sh510300``）；
+    - **已带前缀**（如 ``sh600519`` / ``hk00700``）或**非数字**（如 ``AAPL``）→ 原样返回，
+      绝不重复加字母。
+
+    其他 / 空：原样返回。
+    """
+    if mode != "auto" or not code or not code.isdigit():
+        return code
+    if len(code) == 5:
+        return "hk" + code
+    if len(code) == 6:
+        ex = _infer_cn_exchange(code)
+        if ex:
+            return ex + code
+    return code
+
+
+class _InterfaceRateLimiter:
+    """按接口维度的固定间隔限流器，落实 ``rate_limit`` 字段。
+
+    键为接口 id；``acquire`` 保证同一接口两次「实际请求」之间至少间隔 ``interval`` 秒。
+    实例跨协程/跨请求共享（模块级单例），避免批量同步中单接口被瞬时打爆。
+    """
+
+    def __init__(self) -> None:
+        self._locks: dict[str, asyncio.Lock] = {}
+        self._next_allowed: dict[str, float] = {}
+
+    def _lock(self, key: str) -> asyncio.Lock:
+        lock = self._locks.get(key)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._locks[key] = lock
+        return lock
+
+    async def acquire(self, interface_id: str, interval: float) -> None:
+        if interval is None or interval <= 0:
+            return
+        async with self._lock(interface_id):
+            now = time.monotonic()
+            nxt = self._next_allowed.get(interface_id, 0.0)
+            if now < nxt:
+                await asyncio.sleep(nxt - now)
+            self._next_allowed[interface_id] = time.monotonic() + interval
+
+
+# 模块级单例：覆盖全部接口调用路径（HTTPS / SDK / 测试面板）
+_RATE_LIMITER = _InterfaceRateLimiter()
+
+
+def _parse_rate_limit(value: Optional[str]) -> Optional[float]:
+    """解析 ``rate_limit`` 自由文本为「最小请求间隔（秒）」。
+
+    支持 ``N/min``、``N/sec``、``N/hour``（及 s/m/h 缩写）。解析失败返回 None（不限流）。
+    """
+    if not value:
+        return None
+    m = re.match(r"^\s*(\d+(?:\.\d+)?)\s*/\s*(min|sec|hour|m|s|h)\s*$", value, re.IGNORECASE)
+    if not m:
+        return None
+    n = float(m.group(1))
+    if n <= 0:
+        return None
+    unit = m.group(2).lower()
+    per = {"sec": 1, "s": 1, "min": 60, "m": 60, "hour": 3600, "h": 3600}[unit]
+    return per / n
 
 
 @dataclass
@@ -60,36 +171,11 @@ class FetchResult:
     source: Optional[str]
 
 
-def _infer_exchange(code: str) -> Optional[str]:
-    """代码前缀启发式推断交易所（缺失 resp_exchange_field 时兜底，§11.4）。"""
-    if not code:
-        return None
-    c = str(code).lower()
-    if c.startswith("sh"):
-        return "SH"  # 上交所（含代码自带前缀，如 sh600000）
-    if c.startswith("sz"):
-        return "SZ"  # 深交所（如 sz301141）
-    if c.startswith("bj"):
-        return "BJ"  # 北交所（如 bj920021）
-    head = code[0]
-    if head in ("6", "9"):
-        return "SH"  # 上交所
-    if head in ("0", "3"):
-        return "SZ"  # 深交所
-    if head in ("8", "4"):
-        return "BJ"  # 北交所
-    if head == "5":
-        return "SH"  # 基金（上交所）
-    if len(code) <= 5:
-        return "HK"  # 港股 5 位码
-    return None
-
-
 def _norm_exchange(ex: Optional[str]) -> Optional[str]:
     """把源返回的交易所字符串规范到枚举值 SH/SZ/BJ/HK（兼容中文/大小写/代码）。
 
     源响应里的交易所可能形如 ``"SH"`` / ``"sz"`` / ``"上海"`` / ``".SZ"`` / ``"XHKG"`` 等，
-    统一归一为 SH/SZ/BJ/HK 便于 ``_EXCHANGE_PREFIX`` 拼前缀 + 存储一致。
+    统一归一为 SH/SZ/BJ/HK 便于 ``EXCHANGE_PREFIX`` 拼前缀 + 存储一致。
     """
     if not ex:
         return None
@@ -103,7 +189,27 @@ def _norm_exchange(ex: Optional[str]) -> Optional[str]:
     return mapping.get(e)
 
 
-_EXCHANGE_PREFIX = {"SH": "sh", "SZ": "sz", "BJ": "bj", "HK": "hk"}
+# --------------------------------------------------------------------------- #
+# 证券主数据确定性 id（业务自然键 (asset_class, code) → uuid5 确定性派生）
+# --------------------------------------------------------------------------- #
+# 固定命名空间（写入代码即锁死，不可更改，否则全部 id 重算）
+SECURITY_MASTER_NAMESPACE = uuid.UUID("b3f7e0c2-1a4d-4e9b-9c2a-000000000001")
+
+
+def master_id_for(asset_class: "SecurityType | None", code: str) -> str:
+    """由业务自然键 ``(asset_class, code)`` 确定性派生 ``securities.id``。
+
+    关键性质：相同 ``(asset_class, code)`` 永远得到同一 36 字符 UUID 字符串；
+    证券被删除后重新同步（再次走 ``_upsert_masters`` 同参）将得到与删除前完全相同的
+    id，保证 ``portfolio_securities.master_id`` 外键引用稳定、可重建。
+
+    - ``asset_class`` 为 ``SecurityType`` 枚举，必须用 ``.value``（如 ``"STOCK"``），
+      不得用 ``str(枚举)``（会得到 ``"SecurityType.STOCK"`` 这类错误键）。
+    - ``asset_class`` 为 ``None`` 时用哨兵 ``"NULL"``，与 ``_upsert_masters`` 的查重键
+      ``(asset_class, code)`` 完全一致，保证幂等。
+    """
+    ac = asset_class.value if asset_class is not None else "NULL"  # 哨兵
+    return str(uuid.uuid5(SECURITY_MASTER_NAMESPACE, f"{ac}|{code}"))
 
 
 def _normalize_master_code(raw: str, exchange: Optional[str] = None) -> str:
@@ -113,7 +219,7 @@ def _normalize_master_code(raw: str, exchange: Optional[str] = None) -> str:
     统一规范为带交易所前缀的数字串，供 ``(asset_class, code)`` 唯一约束去重 + 前端带前缀展示：
 
     - 显式前缀（``sh/sz/bj/hk``）或后缀（``.SH/.SZ/.HK/.BJ``）→ 直接取下划线前的交易所 + 数字
-    - 纯数字无交易所信息 → 用 ``exchange`` 参数或数字启发式推断前缀（``_infer_exchange``）
+    - 纯数字无交易所信息 → 用 ``exchange`` 参数或数字启发式推断前缀（``infer_exchange``）
 
     例：``sh600000``→``sh600000``，``600000.SH``→``sh600000``，``000001.SZ``→``sz000001``，
     ``00700.HK``→``hk00700``，``600000``（无交易所）→``sh600000``（数字推断上交所）。
@@ -137,8 +243,8 @@ def _normalize_master_code(raw: str, exchange: Optional[str] = None) -> str:
     digits = re.sub(r"\D", "", s)
     if not digits:
         return s
-    ex = _norm_exchange(exchange) or _infer_exchange(digits)
-    prefix = _EXCHANGE_PREFIX.get(ex or "", "")
+    ex = _norm_exchange(exchange) or infer_exchange(digits)
+    prefix = EXCHANGE_PREFIX.get(ex or "", "")
     return f"{prefix}{digits}"
 
 
@@ -288,6 +394,35 @@ class MarketDataSyncService:
             return [payload]
         return []
 
+    async def _guarded_fetch(
+        self, itf: QuoteInterface, do_fetch: Callable[[], Awaitable[Any]]
+    ) -> Any:
+        """统一的「频率限制 + 重试」包装，覆盖所有接口调用路径。
+
+        - 频率限制：按 ``itf.rate_limit`` 解析的间隔做固定间隔节流（仅当配置了 rate_limit）。
+        - 重试：最多 ``1 + (retry_count or 0)`` 次；配置类错误（ValueError，如缺 base_url /
+          函数不存在）不重试直接抛出；其余异常按指数退避重试。
+        """
+        interval = _parse_rate_limit(itf.rate_limit)
+        if interval is not None:
+            await _RATE_LIMITER.acquire(itf.id, interval)
+        max_attempts = 1 + max(0, itf.retry_count or 0)
+        last_exc: Optional[BaseException] = None
+        for attempt in range(max_attempts):
+            try:
+                return await do_fetch()
+            except ValueError:
+                # 配置/参数错误，重试无意义
+                raise
+            except Exception as exc:  # noqa: BLE001  其余异常按退避重试
+                last_exc = exc
+                if attempt < max_attempts - 1:
+                    backoff = min(RETRY_BACKOFF_BASE * (2 ** attempt), RETRY_BACKOFF_CAP)
+                    await asyncio.sleep(backoff)
+        if last_exc is not None:
+            raise last_exc
+        raise RuntimeError("接口请求重试耗尽但未捕获异常")
+
     async def _fetch_https_raw(
         self, itf: QuoteInterface, params: Optional[dict[str, Any]], codes: Optional[list[str]]
     ) -> list[dict]:
@@ -296,24 +431,92 @@ class MarketDataSyncService:
         base_url = config.get("base_url")
         if not base_url or not itf.endpoint:
             raise ValueError("HTTPS 接口缺少 base_url 或 endpoint")
-        url = base_url.rstrip("/") + "/" + itf.endpoint.lstrip("/")
+        rp = itf.response_parse or {}
+        # 参数传递：值为空（None / "" / 空列表）或模板占位符（如 string / 示例）直接忽略，
+        # 不进入请求——避免 ?key= 这类无效参数，以及占位符把上游过滤成空列表
+        # （如小熊同学 keyWord=string 返回 data:[]）。
         params = {
             k: (",".join(v) if isinstance(v, list) else v)
             for k, v in (params or {}).items()
+            if v not in (None, "", [])
+            and not _is_placeholder_param_value(v)
         }
+        # 代码参数名（默认 code）；endpoint 以 "=" 结尾时直接拼到路径
+        # （腾讯财经 q= 内联形态：qt.gtimg.cn/q=sh600519）。
+        code_param = rp.get("code_param")
+        inline = itf.endpoint.endswith("=")
         if codes is not None:
-            # 通用做法：以逗号拼接 code 列表覆盖 code 参数（如小熊同学 /stock）
-            params["code"] = ",".join(codes)
+            # code_prefix=auto：纯数字代码按交易所推断补 sh/sz/bj 前缀（腾讯/新浪风格）；
+            # 已带前缀或非数字代码原样保留，绝不重复加字母。
+            prefix_mode = rp.get("code_prefix")
+            if prefix_mode:
+                codes = [_apply_code_prefix(c, prefix_mode) for c in codes]
+            joined = ",".join(codes)
+            if inline:
+                url = base_url.rstrip("/") + "/" + itf.endpoint.lstrip("/") + joined
+            else:
+                params[code_param or "code"] = joined
+                url = base_url.rstrip("/") + "/" + itf.endpoint.lstrip("/")
+        else:
+            url = base_url.rstrip("/") + "/" + itf.endpoint.lstrip("/")
         timeout = itf.timeout or DEFAULT_TIMEOUT
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            resp = await client.request(itf.http_method or "GET", url, params=params)
-        self._last_http_status = resp.status_code
-        if resp.status_code >= 500:
-            raise RuntimeError(f"上游 5xx: {resp.status_code}")
-        if resp.status_code in (401, 403):
-            raise RuntimeError(f"鉴权失败: {resp.status_code}")
-        resp.raise_for_status()
-        return self._normalize_rows(resp.json())
+
+        async def _do() -> list[dict]:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                resp = await client.request(itf.http_method or "GET", url, params=params)
+            self._last_http_status = resp.status_code
+            if resp.status_code >= 500:
+                raise RuntimeError(f"上游 5xx: {resp.status_code}")
+            if resp.status_code in (401, 403):
+                raise RuntimeError(f"鉴权失败: {resp.status_code}")
+            resp.raise_for_status()
+            if (rp.get("format") or "json").lower() == "text_split":
+                # 非 JSON 文本（如腾讯财经 ~ 分隔 + gbk 编码）：按 response_parse 解析
+                enc = rp.get("encoding") or "utf-8"
+                resp.encoding = enc
+                return self._parse_text_split(resp.text, rp)
+            return self._normalize_rows(resp.json())
+
+        return await self._guarded_fetch(itf, _do)
+
+    @staticmethod
+    def _parse_text_split(text: str, rp: dict) -> list[dict]:
+        """文本分隔响应 → 行列表（dict 行：键为字符串下标 + 可选 ``_code`` 前缀代码）。
+
+        覆盖腾讯财经等 ``~`` 分隔纯文本接口（非 JSON）。行提取正则 ``line_regex``：
+
+        - 2 个捕获组（如 ``v_(\\w+)="([^"]*)"``）：group1=变量名中的带前缀代码
+          （如 ``sz000001``），group2=引号内内容 → 拆 ``sep`` 后每行注入 ``_code``，
+          便于直接归一化（含市场前缀，美股等也不会丢前缀）。
+        - 1 个捕获组：仅内容，代码回退到 ``fields[idx]``（``resp_code_field`` 配下标）。
+        - 无正则：整段按 ``sep`` 拆成单行（兜底）。
+
+        批量响应（``v_aa="...";v_bb="..."``）用 ``re.finditer`` 逐段提取；``[^"]*``
+        保证不跨段贪婪合并。
+        """
+        sep = rp.get("sep", "~")
+        line_regex = rp.get("line_regex")
+        rows: list[dict] = []
+        if not line_regex:
+            fields = text.split(sep)
+            rows.append({str(i): v for i, v in enumerate(fields)})
+            return rows
+        for m in re.finditer(line_regex, text, re.DOTALL):
+            ng = m.lastindex or 0
+            if ng >= 2:
+                code = m.group(1)
+                content = m.group(2)
+            elif ng == 1:
+                code = None
+                content = m.group(1)
+            else:
+                continue
+            fields = content.split(sep)
+            row: dict[str, Any] = {str(i): v for i, v in enumerate(fields)}
+            if code is not None:
+                row["_code"] = code
+            rows.append(row)
+        return rows
 
     async def _fetch_sdk_raw(
         self, itf: QuoteInterface, params: Optional[dict[str, Any]], codes: Optional[list[str]]
@@ -333,27 +536,36 @@ class MarketDataSyncService:
                 "SDK 接入方式必须在接口「调用路径」填写 akshare 顶层函数名"
                 "（或提供方 config.sdk_func 配置）"
             )
-        # 懒导入：模块级不 import akshare（见文件头约束）
-        import akshare  # noqa: PLC0415
-
-        func = getattr(akshare, sdk_func, None)
-        if func is None:
-            raise ValueError(f"akshare 中不存在函数 {sdk_func}")
+        # SDK 同步阻塞调用：放入线程并施加超时，避免阻塞事件循环且无超时保护。
+        # 仅当显式配置 timeout 才生效；未配置沿用历史无超时行为，避免破坏慢接口。
+        timeout = itf.timeout
         params = {**(params or {})}
         if codes:
             # codes 非空时透传（如 stock_zh_a_spot 按 code 入参）
             params = {**params, "codes": codes}
-        df = func(**params)
-        if df is None or getattr(df, "empty", False):
+
+        async def _do() -> list[dict]:
+            # 懒导入：模块级不 import akshare（见文件头约束）
+            import akshare  # noqa: PLC0415
+
+            func = getattr(akshare, sdk_func, None)
+            if func is None:
+                raise ValueError(f"akshare 中不存在函数 {sdk_func}")
+            df = await asyncio.wait_for(
+                asyncio.to_thread(func, **params), timeout=timeout
+            )
+            if df is None or getattr(df, "empty", False):
+                return []
+            if hasattr(df, "to_dict"):
+                return [dict(r) for r in df.to_dict("records")]
+            if hasattr(df, "iterrows"):  # 兼容非 pandas DataFrame 替身（测试）
+                return [
+                    (r.to_dict() if hasattr(r, "to_dict") else dict(r))
+                    for _, r in df.iterrows()
+                ]
             return []
-        if hasattr(df, "to_dict"):
-            return [dict(r) for r in df.to_dict("records")]
-        if hasattr(df, "iterrows"):  # 兼容非 pandas DataFrame 替身（测试）
-            return [
-                (r.to_dict() if hasattr(r, "to_dict") else dict(r))
-                for _, r in df.iterrows()
-            ]
-        return []
+
+        return await self._guarded_fetch(itf, _do)
 
     async def _fetch_https(
         self, itf: QuoteInterface, codes: Optional[list[str]]
@@ -504,33 +716,18 @@ class MarketDataSyncService:
             return {"synced": 0, "failed": 0, "skipped": 0, "errors": []}
         codes = list(securities.keys())
 
-        # 涉及分类：有 enabled 接口（且所属提供方启用）的分类
-        cat_rows = await self.session.execute(
-            self._active_provider_join(
-                select(QuoteInterface.category_id).where(
-                    QuoteInterface.enabled == True,  # noqa: E712
-                    QuoteInterface.category_id.isnot(None),
-                )
-            ).distinct()
-        )
-        category_ids = [c for (c,) in cat_rows.all() if c]
-
+        # 行情同步仅查「证券行情」固定分类（分类即用途，见 reform 方案）；
+        # 顺带修掉旧实现"主数据分类也被当行情源"的潜在 bug。
         synced = 0
         failed = 0
         errors: list[str] = []
-        for cat_id in category_ids:
-            try:
-                result = await self.fallback_fetch(cat_id, codes)
-            except Exception as exc:  # 整条链异常（不应发生，fallback 已吞异常）
-                failed += 1
-                errors.append(str(exc))
+        result = await self.fallback_fetch(QUOTE_CAT_ID, codes)
+        for code, price in result.prices.items():
+            sid = securities.get(code)
+            if sid is None:
                 continue
-            for code, price in result.prices.items():
-                sid = securities.get(code)
-                if sid is None:
-                    continue
-                await self._upsert_price(portfolio_id, sid, price, as_of, result.source)
-                synced += 1
+            await self._upsert_price(portfolio_id, sid, price, as_of, result.source)
+            synced += 1
 
         # 重建快照/净值（不 commit，由调用方提交）
         await RecalculationService(self.session).recalculateRange(
@@ -539,26 +736,32 @@ class MarketDataSyncService:
         return {"synced": synced, "failed": failed, "skipped": 0, "errors": errors}
 
     # ------------------------------------------------------------------ #
-    # 证券主数据同步（配置驱动，purpose=MASTER_LIST，§7 ① / §11）
+    # 证券主数据同步（配置驱动，归属「证券列表」分类，§7 ① / §11）
     # ------------------------------------------------------------------ #
     async def sync_security_masters(
-        self, asset_class: Optional[SecurityType] = None
+        self,
+        asset_class: Optional[str] = None,
+        _fetch_cache: Optional[dict[str, Optional[list[Any]]]] = None,
     ) -> dict[str, Any]:
-        """配置驱动同步某资产类别的证券主数据（purpose=MASTER_LIST 接口，priority 降级链）。
+        """配置驱动同步某资产类别的证券主数据（归属「证券列表」分类的接口，priority 降级链）。
 
         仅选 ``portfolio_id IS NULL`` 的系统主数据行承载全市场列表；命中优先链即停。
         返回结构化结果 ``{synced, failed, errors}``。
+
+        ``_fetch_cache``（内部参数）：按接口 id 缓存原始行，使服务多个 asset_class 的接口
+        在 ``sync_all_security_masters`` 的多批次遍历中，同端点只请求一次（消除多选冗余调用）。
         """
         stmt = (
             select(QuoteInterface)
             .where(
-                QuoteInterface.purpose == InterfacePurpose.MASTER_LIST,
+                QuoteInterface.category_id == MASTER_LIST_CAT_ID,
                 QuoteInterface.enabled == True,  # noqa: E712
             )
         )
         stmt = self._active_provider_join(stmt)
         if asset_class is not None:
-            stmt = stmt.where(QuoteInterface.asset_class == asset_class)
+            # asset_class 为多选数组：选中包含该类别的接口（ac = ANY(asset_class)）
+            stmt = stmt.where(QuoteInterface.asset_class.any(asset_class))
         stmt = stmt.order_by(
             QuoteInterface.priority.is_(None),
             QuoteInterface.priority,
@@ -570,15 +773,23 @@ class MarketDataSyncService:
         errors: list[str] = []
         used: Optional[dict[str, Any]] = None
         for itf in interfaces:
-            try:
-                rows = await self._call_interface_raw(itf, itf.params, None)
-            except Exception as exc:
-                rows = None
-                errors.append(f"{itf.name}: {exc}")
+            # 多选优化：同一接口服务多个 asset_class 时，各批次都会把它当候选；
+            # 用按接口 id 的缓存确保同端点整轮只请求一次（upsert 去重不变）。
+            if _fetch_cache is not None and itf.id in _fetch_cache:
+                rows = _fetch_cache[itf.id]
+            else:
+                try:
+                    rows = await self._call_interface_raw(itf, itf.params, None)
+                except Exception as exc:
+                    rows = None
+                    errors.append(f"{itf.name}: {exc}")
+                if _fetch_cache is not None:
+                    _fetch_cache[itf.id] = rows
             if rows:  # 有响应 → 解析 upsert + 标记成功 + 优先链命中即停
+                fetched = len(rows)
                 synced += await self._upsert_masters(itf, rows)
                 await self._mark_success(itf.id)
-                # 记录本次实际使用的接口与提供方（供前端展示「本次同步来源」）
+                # 记录本次实际使用的接口与提供方（供前端展示「本次同步来源」+ 各接口获取条数）
                 provider = await self.session.get(
                     SecuritiesDataProvider, itf.provider_id
                 )
@@ -587,6 +798,8 @@ class MarketDataSyncService:
                     "providerName": provider.name if provider else itf.provider_id,
                     "interfaceId": itf.id,
                     "interfaceName": itf.name,
+                    "fetched": fetched,
+                    "status": "ok",
                 }
                 break
             # 无响应：计数，继续下一接口（priority 降级）
@@ -601,25 +814,31 @@ class MarketDataSyncService:
         }
 
     async def sync_all_security_masters(self) -> dict[str, Any]:
-        """遍历全部 MASTER_LIST 接口的 distinct asset_class，逐个同步（数据驱动，零硬编码）。"""
+        """遍历全部 MASTER_LIST 接口 asset_class 数组展开后的 distinct 类别，逐个同步。
+
+        多选优化：同一接口服务多个 asset_class 时，其原始拉取按接口 id 缓存
+        （见 sync_security_masters 的 _fetch_cache），保证同端点整轮只请求一次。
+        """
         rows = (
             await self.session.execute(
                 self._active_provider_join(
-                    select(QuoteInterface.asset_class).where(
-                        QuoteInterface.purpose == InterfacePurpose.MASTER_LIST,
+                    select(func.unnest(QuoteInterface.asset_class)).where(
+                        QuoteInterface.category_id == MASTER_LIST_CAT_ID,
                         QuoteInterface.enabled == True,  # noqa: E712
                         QuoteInterface.asset_class.isnot(None),
                     )
                 ).distinct()
             )
         ).all()
-        asset_classes = [r[0] for r in rows if r[0] is not None]
+        asset_classes = [r[0] for r in rows if r[0]]
         synced = 0
         failed = 0
         errors: list[str] = []
         used_list: list[dict[str, Any]] = []
+        # 按接口 id 缓存原始行：服务多 asset_class 的接口整轮只请求一次
+        fetch_cache: dict[str, Optional[list[Any]]] = {}
         for ac in asset_classes:
-            res = await self.sync_security_masters(ac)
+            res = await self.sync_security_masters(ac, _fetch_cache=fetch_cache)
             synced += res["synced"]
             failed += res["failed"]
             errors.extend(res["errors"])
@@ -644,11 +863,18 @@ class MarketDataSyncService:
         }
 
     async def _normalize_and_dedupe_masters(self) -> int:
-        """扫描系统主数据：统一 code 为「交易所前缀 + 数字」，并合并 ``(asset_class, code)`` 碰撞的重复行。
+        """扫描系统主数据并自愈：
 
-        修复旧数据：不同源带/不带交易所字母（如 ``"000001"`` vs ``"000001.SZ"``）曾绕过
-        ``(asset_class, code)`` 唯一约束被当成两条追加写入。下次 ``sync_all`` 自动自愈，
-        清空「如 2 个平安银行」类存量重复。
+        1) 逐行从**数字码**重推交易所 / 资产类别 / 规范码（``infer_security_type`` +
+           ``_infer_exchange``），忽略已存错的 ``exchange``（避免错标被继承），修正历史错位：
+           - 北京主板 ``920xxx`` 曾被误判 SH → 归 BJ
+           - 港股 5 位码（``80016``/``02318``…）曾被 head 规则误归 BJ/SZ → 归 HK
+           - 可转债 ``11xxxx``/``12xxxx``、深市基金 ``15/16xxxx`` 曾漏交易所前缀
+             （``_infer_exchange`` 无对应分支返回 None）→ 补 SH/SZ 前缀
+        2) 按 ``(asset_class, 规范code)`` 合并重复行（不同源带/不带交易所字母导致的历史重复）。
+
+        顺序：先在内存完成「重推断 + 分组」，再删除重复行，最后统一 ``flush``——
+        避免两行在重推断后短暂撞 ``(asset_class, code)`` 唯一约束。
 
         合并规则：按 ``(asset_class, 规范code)`` 分组，保留 ``updated_at`` 最新行，其余删除；
         删除前把其 ``portfolio_securities`` 引用安全转移到保留行（保留行已在该组合持有同一标的
@@ -658,55 +884,74 @@ class MarketDataSyncService:
         rows = (
             await self.session.execute(select(Security))
         ).scalars().all()
-        groups: dict[tuple, list[Security]] = {}
-        for s in rows:
-            norm = _normalize_master_code(s.code)
-            groups.setdefault((s.asset_class, norm), []).append(s)
 
+        # 1) 逐行从数字码重推「交易所 / 资产类别 / 规范码」目标值（忽略已存错的 exchange，
+        #    以免错标被继承）。仅计算、暂不改写，避免两行重推断后短暂撞唯一约束。
+        targets: dict[Security, tuple[str, Optional[str], Any]] = {}
+        for s in rows:
+            digits = re.sub(r"\D", "", s.code or "")
+            if not digits:
+                continue
+            ex = infer_exchange(digits)
+            code = _normalize_master_code(digits, ex)
+            ac = infer_security_type(code, ex)
+            # 退市可转债（名称含「退债」）：归入未分类，避免占错类别
+            if s.name and "退债" in s.name:
+                ac = SecurityType.UNCATEGORIZED
+            targets[s] = (code, ex, ac)
+
+        # 2) 按目标 (asset_class, 规范code) 分组
+        groups: dict[tuple, list[Security]] = {}
+        for s, t in targets.items():
+            groups.setdefault(t, []).append(s)
+
+        # 整个方法在 no_autoflush 下进行：重推断的待定改动不会在删除 dup 前被提前 flush 触发
         removed = 0
         ps_alias = aliased(PortfolioSecurity)
-        for (asset_class, norm), items in groups.items():
-            if len(items) == 1:
-                if items[0].code != norm:
-                    items[0].code = norm  # 规范化孤立行
-                continue
-            items.sort(key=lambda x: (x.updated_at or datetime.min), reverse=True)
-            keep = items[0]
-            # 先安全转移并删除重复行；此时 keep.code 暂不动，避免与尚存的 dup 撞唯一约束
-            for dup in items[1:]:
-                # 转移组合持仓引用到 keep：仅当 keep 尚未在该组合持有该标的时
-                await self.session.execute(
-                    update(PortfolioSecurity)
-                    .where(
-                        PortfolioSecurity.master_id == dup.id,
-                        ~sa_exists().where(
-                            ps_alias.portfolio_id == PortfolioSecurity.portfolio_id,
-                            ps_alias.master_id == keep.id,
-                        ),
+        with self.session.no_autoflush:
+            for (code, ex, ac), items in groups.items():
+                if len(items) == 1:
+                    s = items[0]
+                    s.code, s.exchange, s.asset_class = code, ex, ac
+                    await self.session.flush()  # 单行无撞键风险
+                    continue
+                items.sort(key=lambda x: (x.updated_at or datetime.min), reverse=True)
+                keep = items[0]
+                # 先安全转移并删除重复行；此时 keep 仍保留旧 code，无撞键风险
+                for dup in items[1:]:
+                    # 转移组合持仓引用到 keep：仅当 keep 尚未在该组合持有该标的时
+                    await self.session.execute(
+                        update(PortfolioSecurity)
+                        .where(
+                            PortfolioSecurity.master_id == dup.id,
+                            ~sa_exists().where(
+                                ps_alias.portfolio_id == PortfolioSecurity.portfolio_id,
+                                ps_alias.master_id == keep.id,
+                            ),
+                        )
+                        .values(master_id=keep.id)
                     )
-                    .values(master_id=keep.id)
-                )
-                # 清除无法转移（keep 已持有 → 属重复持仓）的残留引用
-                await self.session.execute(
-                    sa_delete(PortfolioSecurity).where(
-                        PortfolioSecurity.master_id == dup.id
+                    # 清除无法转移（keep 已持有 → 属重复持仓）的残留引用
+                    await self.session.execute(
+                        sa_delete(PortfolioSecurity).where(
+                            PortfolioSecurity.master_id == dup.id
+                        )
                     )
-                )
-                await self.session.delete(dup)
-                removed += 1
-            await self.session.flush()  # 先落库删掉 dup，腾出唯一键
-            keep.code = norm  # 再规范化保留行（此时无撞键风险）
-        await self.session.flush()
+                    await self.session.delete(dup)
+                await self.session.flush()  # 先落库删掉 dup
+                # 再对保留行应用重推断结果（此时 dup 已删，无撞键风险）
+                keep.code, keep.exchange, keep.asset_class = code, ex, ac
+                await self.session.flush()
+                removed += len(items) - 1
         return removed
 
     async def _upsert_masters(self, itf: QuoteInterface, rows: list[Any]) -> int:
         """把原始行 upsert 进 securities 系统主数据目录表（ADR-003 后仅主数据行）。
 
-        asset_class 字段统一使用接口配置的 asset_class（如 STOCK），用于主数据唯一约束；
-        目录表不再承载 type（类别维度由 asset_class 承担，组合行 type 由代码前缀推断）。
+        行级 asset_class 由代码前缀 + 交易所**逐行推断**（infer_security_type，与组合持仓 type 同源）：
+        港股经交易所识别归 HK_STOCK，无法可靠区分的类（如场外基金）落 UNCATEGORIZED；
+        接口 asset_class 仅用于同步选源批次归属，不再强制打标。
         """
-        # asset_class 用于主数据唯一约束（防止不同资产类别代码碰撞）
-        asset_class = itf.asset_class or SecurityType.STOCK
         code_field = itf.resp_code_field or "code"
         name_field = itf.resp_name_field or "name"
         exchange_field = itf.resp_exchange_field
@@ -719,15 +964,19 @@ class MarketDataSyncService:
             raw_code = str(code)
             name = _row_get(r, name_field)
             name = str(name) if name is not None else raw_code
-            # 交易所推断须用原始 code（如 bj920021→BJ、sh600000→SH），先于归一化
+            # 交易所推断须用原始 code（如 bj920021→BJ、sh600000→SH、hk00700→HK），先于归一化
             exchange = _row_get(r, exchange_field) if exchange_field else None
             if not exchange:
-                exchange = _infer_exchange(raw_code)
+                exchange = infer_exchange(raw_code)
             # 存储用「交易所前缀 + 数字」：不同源（000001 / 000001.SZ / sh600000）统一规范，
             # 落到同一 (asset_class, code) → 命中已存在行 UPDATE 而非追加 → 去重（如 2 个平安银行）；
-            # 跨市场代码天然区分（sz000012 南玻A vs sh000012 国债指数）不会误合并
             code = _normalize_master_code(raw_code, exchange)
             pinyin = _compute_pinyin_initials(name)
+            # 行级资产类别：逐行按代码前缀 + 交易所推断（与持仓 type 同源）
+            asset_class = infer_security_type(code, exchange)
+            # 退市可转债（名称含「退债」）：归入未分类，避免占错类别（如被 4xxxxx 误归北交所）
+            if name and "退债" in name:
+                asset_class = SecurityType.UNCATEGORIZED
 
             existing = (
                 await self.session.execute(
@@ -740,6 +989,7 @@ class MarketDataSyncService:
 
             if existing is None:
                 sec = Security(
+                    id=master_id_for(asset_class, code),
                     asset_class=asset_class,
                     code=code,
                     name=name,

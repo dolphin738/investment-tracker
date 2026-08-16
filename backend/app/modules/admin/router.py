@@ -31,15 +31,15 @@ from typing import Any, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from sqlalchemy import or_, select
+from sqlalchemy import case, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common import paginate
 from app.core.envelope import EnvelopeRoute
 from app.core.security import CurrentUser, get_current_user, require_admin
 from app.db.database import get_db
-from app.models import Portfolio, Security
-from app.models.enums import InterfaceDirection, InterfacePurpose, QuoteProviderAccessMethod, SecurityType
+from app.models import Portfolio, PortfolioSecurity, Security
+from app.models.enums import InterfaceDirection, QuoteProviderAccessMethod
 from app.models.notification import Notification
 from app.serializers import serialize_security_master
 from app.services import InterfaceCategoryService, QuoteInterfaceService
@@ -56,13 +56,6 @@ def _check_config(access_method: QuoteProviderAccessMethod, config: dict[str, An
     elif access_method == QuoteProviderAccessMethod.SDK:
         if not isinstance(config.get("sdk_name"), str) or not config.get("sdk_name"):
             raise ValueError("SDK 接入方式必须提供 sdk_name（字符串，如 akshare）")
-
-
-# 接口分类 id 必须是合法 UUID（外键引用 quote_provider_interface_categories.id）
-UUID_PATTERN: str = (
-    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
-    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
-)
 
 
 # --------------------------------------------------------------------------- #
@@ -113,7 +106,7 @@ class QuoteProviderOut(BaseModel):
 # --------------------------------------------------------------------------- #
 class QuoteInterfaceCreate(BaseModel):
     category_id: str = Field(
-        ..., pattern=UUID_PATTERN, description="接口分类 id（UUID，外键→interface_categories.id）"
+        ..., description="接口分类 id（外键→quote_provider_interface_categories.id）"
     )
     name: str = Field(..., min_length=1, max_length=255)
     endpoint: Optional[str] = Field(None, max_length=512)
@@ -125,18 +118,20 @@ class QuoteInterfaceCreate(BaseModel):
     timeout: Optional[int] = None
     retry_count: Optional[int] = None
     rate_limit: Optional[str] = Field(None, max_length=64)
-    # —— 接口用途 / 资产类别 / 列表解析字段（§7 ① / §11，MASTER_LIST 配置能力）——
-    purpose: InterfacePurpose = InterfacePurpose.QUOTE
-    asset_class: Optional[SecurityType] = None
+    # —— 资产类别 / 列表解析字段（§7 ① / §11，MASTER_LIST 配置能力）——
+    # asset_class 多选：仅用于「同步选源批次归属」，行级归类由代码推断决定
+    asset_class: Optional[list[str]] = None
     resp_code_field: Optional[str] = Field(None, max_length=64)
     resp_price_field: Optional[str] = Field(None, max_length=64)
     resp_name_field: Optional[str] = Field(None, max_length=64)
     resp_exchange_field: Optional[str] = Field(None, max_length=64)
+    # —— 响应解析协议（覆盖非 JSON 文本源，如腾讯财经 ~ 分隔）——
+    response_parse: Optional[dict[str, Any]] = None
 
 
 class QuoteInterfaceUpdate(BaseModel):
     category_id: Optional[str] = Field(
-        None, pattern=UUID_PATTERN, description="接口分类 id（UUID），可空表示未分类"
+        None, description="接口分类 id，可空表示未分类（外键→quote_provider_interface_categories.id）"
     )
     name: Optional[str] = Field(None, min_length=1, max_length=255)
     endpoint: Optional[str] = Field(None, max_length=512)
@@ -148,12 +143,12 @@ class QuoteInterfaceUpdate(BaseModel):
     timeout: Optional[int] = None
     retry_count: Optional[int] = None
     rate_limit: Optional[str] = Field(None, max_length=64)
-    purpose: Optional[InterfacePurpose] = None
-    asset_class: Optional[SecurityType] = None
+    asset_class: Optional[list[str]] = None
     resp_code_field: Optional[str] = Field(None, max_length=64)
     resp_price_field: Optional[str] = Field(None, max_length=64)
     resp_name_field: Optional[str] = Field(None, max_length=64)
     resp_exchange_field: Optional[str] = Field(None, max_length=64)
+    response_parse: Optional[dict[str, Any]] = None
 
 
 class QuoteInterfaceOut(BaseModel):
@@ -171,12 +166,12 @@ class QuoteInterfaceOut(BaseModel):
     retry_count: Optional[int]
     rate_limit: Optional[str]
     priority: Optional[int] = None
-    purpose: str
-    asset_class: Optional[str] = None
+    asset_class: Optional[list[str]] = None
     resp_code_field: str
     resp_price_field: str
     resp_name_field: Optional[str] = None
     resp_exchange_field: Optional[str] = None
+    response_parse: Optional[dict[str, Any]] = None
     created_at: datetime
     updated_at: datetime
 
@@ -186,7 +181,7 @@ class QuoteInterfaceOut(BaseModel):
 class QuoteInterfaceReorder(BaseModel):
     """同分类内拖拽调序请求体（前端 dnd 产生的完整有序 id 列表）。"""
 
-    category_id: str = Field(..., description="接口分类 id（UUID）")
+    category_id: str = Field(..., description="接口分类 id")
     ordered_ids: list[str] = Field(
         ..., description="该分类下完整接口 id 列表，顺序即新优先级"
     )
@@ -225,6 +220,8 @@ class InterfaceCategoryOut(BaseModel):
     label: str
     icon: Optional[str]
     sort_order: int
+    # 系统内置分类（固定 2 类：证券列表 / 证券行情）：前端据此隐藏删除入口
+    system: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -322,7 +319,7 @@ async def create_provider_interface(
     provider = await provider_svc.get(provider_id)
     if provider is None:
         raise HTTPException(status_code=404, detail="提供方不存在")
-    # 预校验分类存在：category_id 是外键，传入「格式合法但不存在」的 uuid 必须在
+    # 预校验分类存在：category_id 是外键，传入「格式合法但不存在」的 id 必须在
     # 写入前拦截为 400，否则 flush() 触发外键 IntegrityError 会被兜底成 500（见 QA 回归）。
     cat_svc = InterfaceCategoryService(db)
     category = await cat_svc.get_or_none(body.category_id)
@@ -342,12 +339,12 @@ async def create_provider_interface(
         timeout=body.timeout,
         retry_count=body.retry_count,
         rate_limit=body.rate_limit,
-        purpose=body.purpose.value,
         asset_class=body.asset_class,
         resp_code_field=body.resp_code_field,
         resp_price_field=body.resp_price_field,
         resp_name_field=body.resp_name_field,
         resp_exchange_field=body.resp_exchange_field,
+        response_parse=body.response_parse,
     )
     await db.commit()
     await db.refresh(obj)
@@ -475,12 +472,12 @@ async def update_interface(
         timeout=body.timeout,
         retry_count=body.retry_count,
         rate_limit=body.rate_limit,
-        purpose=body.purpose.value if body.purpose is not None else None,
         asset_class=body.asset_class,
         resp_code_field=body.resp_code_field,
         resp_price_field=body.resp_price_field,
         resp_name_field=body.resp_name_field,
         resp_exchange_field=body.resp_exchange_field,
+        response_parse=body.response_parse,
     )
     await db.commit()
     await db.refresh(obj)
@@ -563,6 +560,7 @@ async def create_interface_category(
     db: AsyncSession = Depends(get_db),
 ) -> InterfaceCategoryOut:
     svc = InterfaceCategoryService(db)
+    # 系统分类同名校验统一在 service 层（单一事实来源，覆盖非 HTTP 调用方）
     cat = await svc.create(
         label=body.label, icon=body.icon, sort_order=body.sort_order
     )
@@ -603,6 +601,7 @@ async def delete_interface_category(
     cat = await svc.get(category_id)
     if cat is None:
         raise HTTPException(status_code=404, detail="分类不存在")
+    # 系统分类不可删除的校验统一在 service 层
     await svc.delete(cat)
     await db.commit()
     return {"id": category_id, "deleted": True}
@@ -618,20 +617,21 @@ class InterfaceTestRequest(BaseModel):
     codes: Optional[list[str]] = None
 
 
-@router_admin.get("/securities/masters")
-async def list_security_masters(
-    page: int = Query(1, ge=1),
-    pageSize: int = Query(20, ge=1, le=200),
-    q: Optional[str] = Query(None, description="匹配 code/name/拼音首字母（ILIKE）"),
-    current: CurrentUser = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> dict:
-    """系统级证券主数据目录表分页浏览；q 匹配 code/name/拼音首字母。
-
-    任意登录用户可读（§10：录入界面证券搜索复用本端点，主数据行是系统级公共字典）；
-    写入（sync）与接口测试仍仅限管理员。
+class SecurityMasterDeleteBody(BaseModel):
+    """批量/单行删除证券主数据请求体。
+    - ids：待删除主数据 id 列表（all=False 时必填，可含重复，后端去重）。
+    - all=True：删除「当前筛选条件下全部孤儿主数据」（跨所有页），忽略 ids；
+      q/asset_class/exchange 与列表端点一致，用于定位目标集合。
     """
-    stmt = select(Security)
+    ids: list[str] = []
+    all: bool = False
+    q: Optional[str] = None
+    asset_class: Optional[str] = None
+    exchange: Optional[str] = None
+
+
+def _apply_master_filters(stmt, q, asset_class, exchange):
+    """证券主数据列表/删除共用的筛选逻辑（q/asset_class/exchange）。"""
     if q:
         like = f"%{q.strip()}%"
         stmt = stmt.where(
@@ -641,8 +641,151 @@ async def list_security_masters(
                 Security.pinyin_initials.ilike(like),
             )
         )
-    stmt = stmt.order_by(Security.code.asc())
+    if asset_class:
+        if asset_class == "UNCATEGORIZED":
+            stmt = stmt.where(
+                or_(Security.asset_class.is_(None), Security.asset_class == "UNCATEGORIZED")
+            )
+        else:
+            stmt = stmt.where(Security.asset_class == asset_class)
+    if exchange:
+        ex = exchange.strip().upper()
+        if ex in ("SH", "SZ", "BJ", "HK"):
+            stmt = stmt.where(Security.exchange == ex)
+    return stmt
+
+
+@router_admin.get("/securities/masters")
+async def list_security_masters(
+    page: int = Query(1, ge=1),
+    pageSize: int = Query(20, ge=1, le=200),
+    q: Optional[str] = Query(None, description="匹配 code/name/拼音首字母（ILIKE）"),
+    asset_class: Optional[str] = Query(
+        None,
+        description="按资产类别过滤（SecurityType 值；UNCATEGORIZED=未分类，兼容主数据行 asset_class 为 NULL）",
+    ),
+    exchange: Optional[str] = Query(
+        None,
+        description="按交易所过滤（SH/SZ/BJ/HK；主数据行 exchange 可空，传入空字符串不做过滤）",
+    ),
+    current: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """系统级证券主数据目录表分页浏览；q 匹配 code/name/拼音首字母。
+
+    任意登录用户可读（§10：录入界面证券搜索复用本端点，主数据行是系统级公共字典）；
+    写入（sync）与接口测试仍仅限管理员。
+    """
+    stmt = select(Security)
+    stmt = _apply_master_filters(stmt, q, asset_class, exchange)
+    # 全部分类视图下，按类别排序使「股票」置顶、「未分类」垫底，
+    # 单类别筛选时整列类别一致，退化为 code 稳定排序，不影响筛选结果。
+    category_rank = case(
+        (Security.asset_class == "STOCK", 0),
+        (Security.asset_class == "HK_STOCK", 1),
+        (Security.asset_class.is_(None), 9),
+        (Security.asset_class == "UNCATEGORIZED", 9),
+        else_=3,
+    )
+    stmt = stmt.order_by(category_rank.asc(), Security.code.asc())
     return await paginate(db, stmt, page, pageSize, serialize_security_master)
+
+
+@router_admin.get("/securities/masters/stats")
+async def security_master_stats(
+    current: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """系统级证券主数据按资产类别统计条数（公共字典统计，任意登录用户可读）。
+
+    返回 ``{counts: {资产类别: 条数}}``；主数据行 asset_class 为 NULL 时归入
+    ``UNCATEGORIZED``（未分类）以便前端与统一中文标签对齐。
+    """
+    rows = (
+        await db.execute(
+            select(Security.asset_class, func.count())
+            .group_by(Security.asset_class)
+        )
+    ).all()
+    counts: dict[str, int] = {}
+    for ac, cnt in rows:
+        key = ac.value if ac is not None else "UNCATEGORIZED"
+        counts[key] = cnt
+    return {"counts": counts}
+
+
+@router_admin.delete("/securities/masters")
+async def delete_security_masters(
+    body: SecurityMasterDeleteBody,
+    current: CurrentUser = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """批量/单行删除证券主数据（系统级目录表）。
+
+    删除权限等同 ``POST /securities/sync``（``require_admin``）：非管理员 → 403，未登录 → 401。
+
+    单事务（结尾仅一处 ``await db.commit()``）：先剔除「不存在」与「被组合持仓引用」的 id
+    （计入 skipped），仅删除孤儿主数据，绝不波及用户数据——组合持仓/交易/价格/分红经
+    ``FK ondelete=CASCADE`` 仅在删除「被引用」行时才级联，而本端点只删 **无任何
+    portfolio_securities 引用** 的孤儿，DB 级联对孤儿无可删子行。
+
+    - 默认（``all=False``）：按请求体传入的 ``ids`` 删除（去重后逐个校验）。
+    - ``all=True``：删除「当前筛选条件下全部孤儿主数据」（跨所有页），忽略 ``ids``；
+      ``q/asset_class/exchange`` 与列表端点一致，用于定位目标集合。该模式下候选 id 全部
+      来自数据库，天然存在，``skipped`` 仅含被组合持仓引用的 id。
+
+    返回 ``{deleted, skipped}``；skipped 每项 ``{id, reason}``。
+    """
+    # all 模式：按当前筛选条件拉取全部匹配 id，忽略 ids
+    if body.all:
+        match_stmt = _apply_master_filters(
+            select(Security.id), body.q, body.asset_class, body.exchange
+        )
+        matched = (await db.execute(match_stmt)).scalars().all()
+        candidate_ids = list(dict.fromkeys(matched))
+    else:
+        if not body.ids:
+            raise HTTPException(status_code=400, detail="ids 不能为空或格式非法")
+        candidate_ids = list(dict.fromkeys(body.ids))
+
+    skipped: list[dict[str, str]] = []
+
+    # 1) 存在性校验（all 模式下天然全存在，不会进入 skipped）
+    existing = (
+        await db.execute(select(Security.id).where(Security.id.in_(candidate_ids)))
+    ).scalars().all()
+    existing_set = set(existing)
+    for i in candidate_ids:
+        if i not in existing_set:
+            skipped.append({"id": i, "reason": "主数据不存在"})
+
+    # 2) 引用校验：被组合持仓引用的主数据不删，避免级联清除用户数据
+    referenced = (
+        await db.execute(
+            select(func.distinct(PortfolioSecurity.master_id)).where(
+                PortfolioSecurity.master_id.in_(existing)
+            )
+        )
+    ).scalars().all()
+    referenced_set = set(referenced)
+    for i in candidate_ids:
+        if i in referenced_set:
+            skipped.append(
+                {
+                    "id": i,
+                    "reason": "已被组合持仓引用，删除将级联清除用户数据，已跳过",
+                }
+            )
+
+    # 3) 仅删孤儿（存在且未被引用）
+    deletable = [
+        i for i in candidate_ids if i in existing_set and i not in referenced_set
+    ]
+    if deletable:
+        await db.execute(delete(Security).where(Security.id.in_(deletable)))
+
+    await db.commit()
+    return {"deleted": len(deletable), "skipped": skipped}
 
 
 @router_admin.post("/securities/sync")

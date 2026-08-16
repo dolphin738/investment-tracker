@@ -30,48 +30,17 @@ from app.models import (
 from app.models.enums import SecurityType
 from app.schemas import SecurityPatchReq, SecurityResolveReq
 from app.services.base import PortfolioChildService, coerce_enum
+from app.services.classification import infer_asset_class
 from app.services.recalculation import RecalculationResult, RecalculationService
 
 
 def infer_security_type(code: str, exchange: Optional[str] = None) -> SecurityType:
-    """按代码前缀推断资产类型（供主数据同步 / resolve 使用）。
+    """按代码前缀 + 交易所推断资产类型（主数据入库 / 组合持仓 type 共用）。
 
-    代码可能自带交易所前缀（如 sh510050 / sz159915 / bj920021，小熊同学等接口返回），
-    需先剥离前缀再按数字前缀判断；指数与深市 000 开头股票代码相同，须结合交易所区分。
-
-    规则：
-    - ETF：5xxxxx（沪）/ 15xxxx（深）
-    - LOF：16xxxx（深）/ 501/502（沪）
-    - 可转债：11xxxx（沪）/ 12xxxx（深）
-    - 指数：399xxx（深）；000xxx 且为上交所（sh 前缀或 exchange=SH）→ 指数
-    - 其他 → A 股股票（STOCK）
+    规则已统一收敛到 ``app.services.classification.infer_asset_class``（单一事实来源），
+    本函数仅作兼容别名，所有分类判断逻辑只在 classification 模块维护一份。
     """
-    if not code:
-        return SecurityType.STOCK
-    c = str(code).strip().lower()
-    # 剥离交易所前缀（sh/sz/bj），并据此确认交易所
-    exch = (exchange or "").upper()
-    if c.startswith(("sh", "sz", "bj")):
-        exch = c[:2].upper()
-        c = c[2:]
-    if not c:
-        return SecurityType.STOCK
-    # ETF：沪 5xxxxx、深 15xxxx
-    if c.startswith("5") or c.startswith("15"):
-        return SecurityType.ETF
-    # LOF：深 16xxxx、沪 501/502
-    if c.startswith("16") or c.startswith("501") or c.startswith("502"):
-        return SecurityType.LOF
-    # 可转债：沪 11xxxx、深 12xxxx
-    if c.startswith("11") or c.startswith("12"):
-        return SecurityType.CONVERTIBLE_BOND
-    # 指数：深 399xxx；000xxx 且为上交所 → 指数（避免误判深市股票）
-    if c.startswith("399"):
-        return SecurityType.INDEX
-    if c.startswith("000") and exch == "SH":
-        return SecurityType.INDEX
-    # 默认：A 股股票
-    return SecurityType.STOCK
+    return infer_asset_class(code, exchange)
 
 
 def compute_type(

@@ -136,7 +136,7 @@ async def get_holdings(
     ).scalars().all()
     sec_map = {h.id: h for h in holdings}
     # 类型筛选（修复问题4：此前未接收后端参数 → 持仓页类型筛选器无效）。
-    # types 为逗号分隔的 SecurityType 值（如 "STOCK,FUND"），按 compute_type
+    # types 为逗号分隔的 SecurityType 值（如 "STOCK,ON_EXCHANGE_FUND"），按 compute_type
     # （override 优先，否则代码前缀推断）过滤。
     type_set = (
         {t.strip().upper() for t in types.split(",") if t.strip()} if types else None

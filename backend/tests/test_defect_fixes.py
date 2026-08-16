@@ -640,7 +640,7 @@ async def test_p4_holdings_type_filter(client):
         json={"asOf": str(D1), "amount": 90000},
     )
     stock = await seed_security(client, pid, "600000", "股", h, type="STOCK")
-    fund = await seed_security(client, pid, "500001", "基", h, type="FUND")
+    fund = await seed_security(client, pid, "500001", "基", h, type="ON_EXCHANGE_FUND")
     await client.post(
         f"/api/portfolios/{pid}/security-prices", headers=h,
         json={"securityId": stock, "price": 10, "asOf": str(D1)},
@@ -672,17 +672,17 @@ async def test_p4_holdings_type_filter(client):
     )
     _, _, sth, _ = env(r)
     assert len(sth["items"]) == 1 and sth["items"][0]["securityType"] == "STOCK"
-    # 仅 FUND
+    # 仅 场内基金（ON_EXCHANGE_FUND）
     r = await client.get(
         f"/api/portfolios/{pid}/holdings", headers=h,
-        params={"asOf": str(D1), "types": "FUND"},
+        params={"asOf": str(D1), "types": "ON_EXCHANGE_FUND"},
     )
     _, _, fnd, _ = env(r)
-    assert len(fnd["items"]) == 1 and fnd["items"][0]["securityType"] == "FUND"
+    assert len(fnd["items"]) == 1 and fnd["items"][0]["securityType"] == "ON_EXCHANGE_FUND"
     # 多类型
     r = await client.get(
         f"/api/portfolios/{pid}/holdings", headers=h,
-        params={"asOf": str(D1), "types": "STOCK,FUND"},
+        params={"asOf": str(D1), "types": "STOCK,ON_EXCHANGE_FUND"},
     )
     _, _, both, _ = env(r)
     assert len(both["items"]) == 2

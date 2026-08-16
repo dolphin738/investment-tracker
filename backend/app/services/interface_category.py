@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import Optional
 
+from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -47,6 +48,19 @@ class InterfaceCategoryService:
         icon: Optional[str] = None,
         sort_order: int = 0,
     ) -> InterfaceCategory:
+        # 不可创建与已有系统内置分类同名的分类（分类即用途，系统分类不可被覆盖）
+        dup = (
+            await self.session.execute(
+                select(InterfaceCategory).where(
+                    InterfaceCategory.system == True,  # noqa: E712
+                    InterfaceCategory.label == label,
+                )
+            )
+        ).scalars().first()
+        if dup is not None:
+            raise HTTPException(
+                status_code=400, detail="已存在同名系统分类，不可重复创建"
+            )
         obj = InterfaceCategory(label=label, icon=icon, sort_order=sort_order)
         self.session.add(obj)
         await self.session.flush()
@@ -72,5 +86,7 @@ class InterfaceCategoryService:
         return obj
 
     async def delete(self, obj: InterfaceCategory) -> None:
+        if obj.system:
+            raise HTTPException(status_code=400, detail="系统内置分类不可删除")
         await self.session.delete(obj)
         await self.session.flush()

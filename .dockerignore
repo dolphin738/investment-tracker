@@ -1,0 +1,30 @@
+# 注意：.dockerignore 必须位于构建上下文根目录（即本仓库根）。
+# Docker 仅读取构建上下文根目录下的 .dockerignore，移入子目录（如 docker/）将使其失效，
+# 导致所有文件被打进镜像、可能泄露 .env。因此即便 Dockerfile 已移至 docker/ 子目录，本文件仍保留在根目录。
+
+# 版本控制与本地环境
+.git
+.gitignore
+.codebase-memory
+
+# 前端构建缓存（容器内重新构建）
+web/node_modules
+web/dist
+**/node_modules
+**/dist
+
+# 后端虚拟环境与字节码
+backend/.venv
+**/__pycache__
+*.pyc
+
+# 敏感配置（运行时用 --env-file 注入）
+backend/.env
+backend/.env.example
+
+# 本地开发脚本（不进镜像）
+dev-scripts
+
+# 系统与编辑器
+.DS_Store
+*.log
