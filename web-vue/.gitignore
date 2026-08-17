@@ -19,4 +19,7 @@ coverage/
 # 环境变量（真实凭据勿提交）
 .env
 .env.*
-!.env.example
+!.env.example# Playwright 产物（E2E 报告/失败痕迹）
+test-results/
+playwright-report/
+blob-report/
