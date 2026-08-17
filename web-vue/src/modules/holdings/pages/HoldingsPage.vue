@@ -52,6 +52,7 @@ import { useSecurities } from '@/composables/use-securities';
 import { useHoldings } from '../composables/use-holdings';
 import { useTransactions } from '@/modules/cashflow/composables/use-transactions';
 import SecurityTradeForm from '@/modules/security-trade/components/SecurityTradeForm.vue';
+import SecurityTradeList from '@/modules/security-trade/components/SecurityTradeList.vue';
 import DividendList from '@/modules/security-income/components/DividendList.vue';
 import {
   ENTRY_BUTTON_ICON_CLASS,
@@ -63,6 +64,7 @@ import { usePortfolioStore } from '@/stores/portfolio.store';
 import { usePreferenceStore } from '@/stores/preference.store';
 import { todayInAppTzIso, toIsoDate } from '@/lib/constants';
 import { useUrlState } from '@/lib/url-query';
+import type { SecurityTradeQuery } from '@/api/types';
 import { formatCurrency, formatPercent, cn } from '@/lib/utils';
 
 // ===== 常量 =====
@@ -220,6 +222,20 @@ const tradeSecurityFilter = computed(() =>
     securitiesLoading: securities.isLoading.value,
   }),
 );
+
+/**
+ * 【买卖明细板块】列表查询参数：由统一筛选器派生（证券 ID 集合 + 日期范围）。
+ * securityId 由 tradeSecurityFilter.ids 映射；空集合表示不施加标的约束（查全部）。
+ * 组件内会依据 filterState 短路：loading/empty 时不发此查询。
+ */
+const tradeQuery = computed<SecurityTradeQuery>(() => ({
+  securityId:
+    tradeSecurityFilter.value.ids.length > 0
+      ? tradeSecurityFilter.value.ids.join(',')
+      : undefined,
+  startDate: startDate.value,
+  endDate: endDate.value,
+}));
 
 /**
  * 【A4】持仓列表前端排序（决策 Q-5 甲）：默认按市值降序。
@@ -526,18 +542,15 @@ function refetchHoldings(): void {
         </Card>
       </TabsContent>
 
-      <!-- ============ 买卖明细 Tab（security-trade 模块归属后续批次） ============ -->
+      <!-- ============ 买卖明细 Tab（security-trade 模块） ============ -->
       <TabsContent value="trades" class="mt-4 space-y-4">
-        <Card>
-          <CardContent class="py-10 text-center text-sm text-muted-foreground">
-            买卖明细列表将在 security-trade 模块批次迁移后接入
-            <p class="mt-1 text-xs">
-              筛选联动已就绪（当前有效标的
-              {{ tradeSecurityFilter.state === 'ready' ? tradeSecurityFilter.ids.length : 0 }}
-              项，日期范围 {{ startDate }} 至 {{ endDate }}）
-            </p>
-          </CardContent>
-        </Card>
+        <SecurityTradeList
+          :portfolio-id="currentPortfolioId ?? ''"
+          :query="tradeQuery"
+          side-filter="all"
+          :filter-state="tradeSecurityFilter.state"
+          filtered-empty-text="当前筛选条件下没有匹配的标的，暂无买卖流水"
+        />
       </TabsContent>
 
       <!-- ============ 分红 Tab（security-income 模块归属本批次） ============ -->
