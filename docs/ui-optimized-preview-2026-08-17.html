@@ -1,0 +1,566 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>投资收益统计系统 — 优化后演示</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --card: #ffffff;
+    --border: #e4e7ec;
+    --muted: #f1f3f6;
+    --muted-fg: #667085;
+    --fg: #101828;
+    --primary: #111827;
+    --primary-fg: #ffffff;
+    --accent: #2b6df6;
+    --up: #c81e1e;
+    --down: #16a34a;
+    --destructive: #d92d20;
+    --radius: 10px;
+    --shadow: 0 1px 2px rgba(16,24,40,.05), 0 1px 3px rgba(16,24,40,.06);
+    --shadow-lg: 0 8px 24px rgba(16,24,40,.08);
+    --sidebar-w: 224px;
+    --topbar-h: 52px;
+    --maxw: 1200px;
+  }
+  [data-theme="dark"] {
+    --bg: #0c1117;
+    --card: #141a21;
+    --border: #222b36;
+    --muted: #1c242e;
+    --muted-fg: #98a2b3;
+    --fg: #e4e7ec;
+    --primary: #1c242e;
+    --primary-fg: #e4e7ec;
+    --accent: #5b8def;
+    --shadow: 0 1px 2px rgba(0,0,0,.3);
+    --shadow-lg: 0 8px 24px rgba(0,0,0,.4);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg); color: var(--fg); line-height: 1.55; font-size: 14px;
+  }
+  button { font-family: inherit; cursor: pointer; }
+
+  /* ===== 布局骨架 ===== */
+  .shell { display: flex; min-height: 100vh; }
+  .sidebar {
+    width: var(--sidebar-w); flex-shrink: 0; background: var(--card);
+    border-right: 1px solid var(--border); position: sticky; top: 0; height: 100vh;
+    display: flex; flex-direction: column; padding: 14px 12px;
+  }
+  .brand {
+    display: flex; align-items: center; gap: 10px; padding: 4px 8px 16px;
+    border-bottom: 1px solid var(--border); margin-bottom: 12px;
+  }
+  .brand .logo {
+    width: 28px; height: 28px; border-radius: 8px; background: var(--accent);
+    display: grid; place-items: center; color: #fff; font-weight: 800; font-size: 13px;
+    flex-shrink: 0;
+  }
+  .brand .name { font-size: 14px; font-weight: 700; letter-spacing: .3px; }
+  .brand .sub { font-size: 10px; color: var(--muted-fg); }
+  .nav-group { font-size: 11px; color: var(--muted-fg); padding: 10px 10px 4px; letter-spacing: .5px; }
+  .nav-item {
+    display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px;
+    font-size: 13px; color: var(--muted-fg); margin-bottom: 2px; border: 1px solid transparent;
+    width: 100%; text-align: left; background: transparent; transition: background .12s, color .12s;
+  }
+  .nav-item:hover { background: var(--muted); color: var(--fg); }
+  .nav-item.active { background: var(--primary); color: var(--primary-fg); font-weight: 600; }
+  .nav-item .ico {
+    width: 15px; height: 15px; border-radius: 4px; flex-shrink: 0;
+    background: currentColor; opacity: .75; mask-size: contain; -webkit-mask-size: contain;
+  }
+  .sidebar .spacer { flex: 1; }
+  .theme-toggle {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--muted); font-size: 12px; color: var(--fg); margin-top: 8px;
+  }
+  .theme-toggle .sw {
+    width: 34px; height: 18px; border-radius: 999px; background: var(--border); position: relative;
+  }
+  .theme-toggle .sw::after {
+    content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px;
+    border-radius: 50%; background: var(--accent); transition: left .15s;
+  }
+  [data-theme="dark"] .theme-toggle .sw::after { left: 18px; }
+
+  .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .topbar {
+    height: var(--topbar-h); background: var(--card); border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: flex-end; gap: 16px; padding: 0 20px;
+    position: sticky; top: 0; z-index: 10;
+  }
+  .clock { font-size: 12px; color: var(--muted-fg); font-variant-numeric: tabular-nums; }
+  .avatar {
+    width: 28px; height: 28px; border-radius: 50%; background: var(--accent); color: #fff;
+    display: grid; place-items: center; font-size: 12px; font-weight: 700;
+  }
+  .content {
+    flex: 1; padding: 20px; width: 100%; max-width: var(--maxw); margin: 0 auto;
+  }
+  /* 窄屏侧边栏收纳 */
+  @media (max-width: 860px) {
+    .sidebar { display: none; }
+    .content { padding: 14px; }
+  }
+
+  /* ===== 页头（统一 PageHeader 风格）===== */
+  .page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 18px; flex-wrap: wrap; }
+  .page-head .t { font-size: 20px; font-weight: 700; letter-spacing: .2px; }
+  .page-head .sub { font-size: 12.5px; color: var(--muted-fg); margin-top: 2px; }
+  .btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600;
+    padding: 8px 14px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--card); color: var(--fg); transition: background .12s, border-color .12s;
+  }
+  .btn:hover { background: var(--muted); }
+  .btn.primary { background: var(--primary); color: var(--primary-fg); border-color: var(--primary); }
+  .btn.primary:hover { opacity: .9; background: var(--primary); }
+  .btn.ghost { border-color: transparent; background: transparent; }
+  .btn.sm { padding: 5px 10px; font-size: 12px; }
+
+  /* ===== 指标卡 ===== */
+  .metric-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 18px; }
+  @media (max-width: 1080px) { .metric-grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 520px) { .metric-grid { grid-template-columns: 1fr; } }
+  .metric {
+    background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 14px 16px; box-shadow: var(--shadow);
+  }
+  .metric .lbl { font-size: 12px; color: var(--muted-fg); display: flex; align-items: center; gap: 6px; }
+  .metric .val {
+    font-size: 22px; font-weight: 800; margin-top: 4px; letter-spacing: -.2px;
+    font-variant-numeric: tabular-nums;
+  }
+  .metric .chg { font-size: 12px; margin-top: 4px; display: inline-flex; align-items: center; gap: 4px; }
+  .metric .chg.up { color: var(--up); }
+  .metric .chg.down { color: var(--down); }
+  .metric .chg.flat { color: var(--muted-fg); }
+
+  /* ===== 卡片 ===== */
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+  @media (max-width: 900px) { .grid-2 { grid-template-columns: 1fr; } }
+  .card {
+    background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 16px; box-shadow: var(--shadow);
+  }
+  .card .ct { font-size: 14px; font-weight: 700; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between; }
+  .card .ct .more { font-size: 12px; color: var(--muted-fg); font-weight: 500; }
+  .row { display: flex; justify-content: space-between; align-items: center; font-size: 13px; padding: 8px 0; border-bottom: 1px dashed var(--border); }
+  .row:last-child { border-bottom: none; }
+  .row .k { color: var(--muted-fg); }
+  .row .v { font-variant-numeric: tabular-nums; font-weight: 600; }
+  .up { color: var(--up); } .down { color: var(--down); }
+
+  /* 迷你柱状示意 */
+  .bars { display: flex; align-items: flex-end; gap: 6px; height: 120px; padding-top: 8px; }
+  .bars .b { flex: 1; border-radius: 4px 4px 0 0; background: var(--accent); opacity: .85; min-height: 6px; }
+  .bars .b.alt { background: var(--up); opacity: .55; }
+  .bars-x { display: flex; justify-content: space-between; font-size: 10px; color: var(--muted-fg); margin-top: 6px; }
+
+  /* 迷你折线示意 */
+  .spark { width: 100%; height: 90px; display: block; }
+
+  /* ===== 表格 ===== */
+  .tbl-wrap { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow); }
+  table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.tbl th {
+    text-align: left; font-size: 12px; font-weight: 600; color: var(--muted-fg);
+    padding: 10px 14px; background: var(--muted); border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  table.tbl td { padding: 10px 14px; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+  table.tbl tr:last-child td { border-bottom: none; }
+  table.tbl tr:hover td { background: var(--muted); }
+  .badge {
+    display: inline-flex; align-items: center; font-size: 11px; font-weight: 600;
+    padding: 2px 8px; border-radius: 999px;
+  }
+  .badge.gray { background: var(--muted); color: var(--muted-fg); }
+  .badge.blue { background: #e8f0fe; color: #1d4ed8; }
+  .badge.green { background: #e7f7ec; color: var(--down); }
+  .badge.red { background: #fdeaea; color: var(--up); }
+  [data-theme="dark"] .badge.blue { background: #1b2a4a; color: #93b4f8; }
+  [data-theme="dark"] .badge.green { background: #12321f; color: #6ed68c; }
+  [data-theme="dark"] .badge.red { background: #3a1d1d; color: #f09090; }
+
+  /* ===== 空态（统一） ===== */
+  .empty {
+    background: var(--card); border: 1px dashed var(--border); border-radius: var(--radius);
+    padding: 40px 20px; text-align: center;
+  }
+  .empty .t { font-size: 15px; font-weight: 700; margin-bottom: 6px; }
+  .empty .d { font-size: 13px; color: var(--muted-fg); margin-bottom: 16px; }
+
+  /* ===== 表单（错误走 token） ===== */
+  .form-card { max-width: 420px; }
+  .field { margin-bottom: 14px; }
+  .field label { font-size: 13px; font-weight: 600; display: block; margin-bottom: 5px; }
+  .input {
+    width: 100%; height: 36px; border: 1px solid var(--border); border-radius: 8px;
+    padding: 0 12px; font-size: 13px; background: var(--card); color: var(--fg);
+    outline: none; transition: border-color .12s, box-shadow .12s;
+  }
+  .input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(43,109,246,.15); }
+  .err { color: var(--destructive); font-size: 12px; margin-top: 4px; }
+
+  /* ===== 页面显示控制 ===== */
+  .page { display: none; }
+  .page.active { display: block; animation: fade .18s ease; }
+  @keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+  .hint {
+    font-size: 12px; color: var(--muted-fg); background: var(--muted);
+    border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; margin-bottom: 14px;
+  }
+  .hint b { color: var(--fg); }
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <!-- ===== 侧边栏 ===== -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="logo">投</div>
+      <div>
+        <div class="name">投资收益统计系统</div>
+        <div class="sub">Portfolio Return Tracker</div>
+      </div>
+    </div>
+
+    <div class="nav-group">总览</div>
+    <button class="nav-item active" data-page="overview"><span class="ico"></span>概览</button>
+    <button class="nav-item" data-page="holdings"><span class="ico"></span>持仓信息</button>
+    <button class="nav-item" data-page="cashflows"><span class="ico"></span>出入金</button>
+    <button class="nav-item" data-page="snapshots"><span class="ico"></span>资产快照</button>
+
+    <div class="nav-group">分析</div>
+    <button class="nav-item" data-page="analysis"><span class="ico"></span>年化收益</button>
+    <button class="nav-item" data-page="analysis"><span class="ico"></span>净值分析</button>
+
+    <div class="spacer"></div>
+    <div class="theme-toggle" id="themeToggle">
+      <span>外观主题</span><span class="sw"></span>
+    </div>
+  </aside>
+
+  <!-- ===== 主区 ===== -->
+  <div class="main">
+    <div class="topbar">
+      <span class="clock" id="clock">2026-08-17 10:24:36</span>
+      <div class="avatar">张</div>
+    </div>
+
+    <div class="content">
+
+      <!-- ============ 概览 ============ -->
+      <section class="page active" id="page-overview">
+        <div class="page-head">
+          <div>
+            <div class="t">概览</div>
+            <div class="sub">数据截止 2026-08-16 · 每 30 秒自动同步</div>
+          </div>
+          <div class="btn-row">
+            <button class="btn primary" onclick="goto('cashflows')">录入出入金</button>
+            <button class="btn primary" onclick="goto('holdings')">录入买卖</button>
+          </div>
+        </div>
+
+        <div class="metric-grid">
+          <div class="metric"><div class="lbl">当前总资产</div><div class="val">¥1,234,567.89</div><div class="chg up">+2.10% 较昨日</div></div>
+          <div class="metric"><div class="lbl">持仓市值</div><div class="val">¥987,654.32</div><div class="chg up">+1.30% 较昨日</div></div>
+          <div class="metric"><div class="lbl">现金余额</div><div class="val">¥246,913.57</div><div class="chg flat">与上次一致</div></div>
+          <div class="metric"><div class="lbl">累计收益</div><div class="val">¥134,567.89</div><div class="chg up">+12.23% 年化</div></div>
+        </div>
+
+        <div class="grid-2">
+          <div class="card">
+            <div class="ct">总资产趋势 <span class="more">近一年</span></div>
+            <svg class="spark" viewBox="0 0 560 90" preserveAspectRatio="none">
+              <polyline points="0,70 40,66 80,68 120,60 160,62 200,55 240,58 280,50 320,52 360,44 400,46 440,38 480,42 520,32 560,28"
+                fill="none" stroke="var(--accent)" stroke-width="2.5" />
+              <polyline points="0,72 40,70 80,70 120,66 160,66 200,63 240,63 280,60 320,60 360,56 400,56 440,52 480,52 520,48 560,46"
+                fill="none" stroke="var(--up)" stroke-width="2" opacity=".45" stroke-dasharray="4 3" />
+            </svg>
+            <div class="bars-x"><span>08-16</span><span>09-16</span><span>10-16</span><span>11-16</span><span>12-16</span><span>01-16</span><span>02-16</span><span>03-16</span><span>04-16</span><span>05-16</span><span>06-16</span><span>07-16</span><span>08-16</span></div>
+          </div>
+          <div class="card">
+            <div class="ct">资产构成 <span class="more">按类型</span></div>
+            <div class="row"><span class="k">股票</span><span class="v">¥421,330.12 <span class="up">42.5%</span></span></div>
+            <div class="row"><span class="k">基金</span><span class="v">¥298,765.43 <span class="up">30.1%</span></span></div>
+            <div class="row"><span class="k">ETF</span><span class="v">¥179,251.62 <span class="up">18.1%</span></span></div>
+            <div class="row"><span class="k">现金</span><span class="v">¥92,220.72 <span class="up">9.3%</span></span></div>
+            <div class="row"><span class="k">合计</span><span class="v">¥991,567.89</span></div>
+          </div>
+        </div>
+
+        <div class="tbl-wrap">
+          <div class="card" style="border:none;box-shadow:none;padding:16px 16px 0">
+            <div class="ct" style="margin-bottom:0">近期出入金 <span class="more">查看全部</span></div>
+          </div>
+          <table class="tbl">
+            <thead><tr><th>日期</th><th>类型</th><th>金额</th><th>备注</th></tr></thead>
+            <tbody>
+              <tr><td>2026-08-14</td><td><span class="badge blue">存入</span></td><td class="up">+¥20,000.00</td><td>工资转投</td></tr>
+              <tr><td>2026-08-02</td><td><span class="badge red">取出</span></td><td class="down">-¥5,000.00</td><td>日常开支</td></tr>
+              <tr><td>2026-07-20</td><td><span class="badge blue">存入</span></td><td class="up">+¥10,000.00</td><td>季度奖金</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ============ 持仓 ============ -->
+      <section class="page" id="page-holdings">
+        <div class="page-head">
+          <div>
+            <div class="t">持仓信息</div>
+            <div class="sub">共 6 只标的 · 数据截止 2026-08-16</div>
+          </div>
+          <div class="btn-row">
+            <button class="btn" onclick="document.getElementById('tradeDialog').style.display='flex'">录入买卖</button>
+            <button class="btn primary" onclick="goto('analysis')">查看收益分析</button>
+          </div>
+        </div>
+
+        <div class="tbl-wrap">
+          <table class="tbl">
+            <thead><tr><th>代码</th><th>名称</th><th>类型</th><th>持仓数量</th><th>成本价</th><th>最新价</th><th>市值</th><th>浮动盈亏</th></tr></thead>
+            <tbody>
+              <tr><td>600519</td><td>贵州茅台</td><td><span class="badge gray">股票</span></td><td>100</td><td>¥1,680.00</td><td>¥1,725.00</td><td>¥172,500.00</td><td class="up">+¥4,500.00 (+2.68%)</td></tr>
+              <tr><td>510300</td><td>沪深300ETF</td><td><span class="badge gray">ETF</span></td><td>20,000</td><td>¥3.90</td><td>¥4.02</td><td>¥80,400.00</td><td class="up">+¥2,400.00 (+3.08%)</td></tr>
+              <tr><td>110011</td><td>易方达优质精选</td><td><span class="badge gray">基金</span></td><td>15,000</td><td>¥5.20</td><td>¥5.12</td><td>¥76,800.00</td><td class="down">-¥1,200.00 (-1.54%)</td></tr>
+              <tr><td>600036</td><td>招商银行</td><td><span class="badge gray">股票</span></td><td>2,000</td><td>¥32.10</td><td>¥33.50</td><td>¥67,000.00</td><td class="up">+¥2,800.00 (+4.36%)</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ============ 出入金 ============ -->
+      <section class="page" id="page-cashflows">
+        <div class="page-head">
+          <div>
+            <div class="t">出入金</div>
+            <div class="sub">记录账户资金的存入与取出</div>
+          </div>
+          <div class="btn-row">
+            <button class="btn" onclick="document.getElementById('cashDialog').style.display='flex'">现金余额</button>
+            <button class="btn primary" onclick="document.getElementById('cashDialog').style.display='flex'">录入出入金</button>
+          </div>
+        </div>
+
+        <div class="grid-2" style="grid-template-columns:repeat(4,1fr);margin-bottom:16px">
+          <div class="metric"><div class="lbl">累计存入</div><div class="val">¥1,100,000.00</div></div>
+          <div class="metric"><div class="lbl">累计取出</div><div class="val">¥150,000.00</div></div>
+          <div class="metric"><div class="lbl">净投入</div><div class="val">¥950,000.00</div></div>
+          <div class="metric"><div class="lbl">当前现金余额</div><div class="val">¥246,913.57</div></div>
+        </div>
+
+        <div class="tbl-wrap">
+          <table class="tbl">
+            <thead><tr><th>日期</th><th>类型</th><th>金额</th><th>备注</th><th></th></tr></thead>
+            <tbody>
+              <tr><td>2026-08-14</td><td><span class="badge blue">存入</span></td><td class="up">+¥20,000.00</td><td>工资转投</td><td><button class="btn sm ghost">编辑</button></td></tr>
+              <tr><td>2026-08-02</td><td><span class="badge red">取出</span></td><td class="down">-¥5,000.00</td><td>日常开支</td><td><button class="btn sm ghost">编辑</button></td></tr>
+              <tr><td>2026-07-20</td><td><span class="badge blue">存入</span></td><td class="up">+¥10,000.00</td><td>季度奖金</td><td><button class="btn sm ghost">编辑</button></td></tr>
+              <tr><td>2026-07-05</td><td><span class="badge red">取出</span></td><td class="down">-¥2,000.00</td><td>还款</td><td><button class="btn sm ghost">编辑</button></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ============ 资产快照 ============ -->
+      <section class="page" id="page-snapshots">
+        <div class="page-head">
+          <div>
+            <div class="t">资产快照</div>
+            <div class="sub">默认由系统每日自动记录，也可手工补录</div>
+          </div>
+          <div class="btn-row">
+            <button class="btn primary" onclick="document.getElementById('snapDialog').style.display='flex'">手工补录</button>
+          </div>
+        </div>
+
+        <div class="tbl-wrap">
+          <table class="tbl">
+            <thead><tr><th>快照日期</th><th>总资产</th><th>现金余额</th><th>来源</th><th></th></tr></thead>
+            <tbody>
+              <tr><td>2026-08-16</td><td>¥1,234,567.89</td><td>¥246,913.57</td><td><span class="badge gray">自动</span></td><td><button class="btn sm ghost">详情</button></td></tr>
+              <tr><td>2026-08-15</td><td>¥1,221,000.00</td><td>¥240,000.00</td><td><span class="badge gray">自动</span></td><td><button class="btn sm ghost">详情</button></td></tr>
+              <tr><td>2026-08-01</td><td>¥1,190,500.00</td><td>¥235,000.00</td><td><span class="badge blue">手工</span></td><td><button class="btn sm ghost">详情</button></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ============ 分析（含空态演示） ============ -->
+      <section class="page" id="page-analysis">
+        <div class="page-head">
+          <div>
+            <div class="t">年化收益分析</div>
+            <div class="sub">XIRR 口径 · 数据截止 2026-08-16</div>
+          </div>
+        </div>
+
+        <div class="metric-grid" style="grid-template-columns:repeat(2,1fr)">
+          <div class="metric"><div class="lbl">年化收益率 (XIRR)</div><div class="val">12.23%</div><div class="chg up">较上月 +1.42%</div></div>
+          <div class="metric"><div class="lbl">累计收益率</div><div class="val">14.17%</div><div class="chg up">较上月 +1.90%</div></div>
+        </div>
+
+        <div class="card" style="margin-bottom:16px">
+          <div class="ct">年度收益 <span class="more">单位：元</span></div>
+          <div class="bars">
+            <div class="b alt" style="height:26%"></div><div class="b" style="height:38%"></div>
+            <div class="b alt" style="height:18%"></div><div class="b" style="height:46%"></div>
+            <div class="b alt" style="height:34%"></div><div class="b" style="height:64%"></div>
+            <div class="b alt" style="height:52%"></div><div class="b" style="height:78%"></div>
+            <div class="b alt" style="height:60%"></div><div class="b" style="height:88%"></div>
+            <div class="b alt" style="height:72%"></div><div class="b" style="height:100%"></div>
+          </div>
+          <div class="bars-x"><span>2025-08</span><span>09</span><span>10</span><span>11</span><span>12</span><span>2026-01</span><span>02</span><span>03</span><span>04</span><span>05</span><span>06</span><span>07</span><span>08</span></div>
+        </div>
+
+        <div class="hint"><b>统一空态示例：</b>当组合为空时，全站使用同一套 EmptyState 组件与文案，并带行动入口。</div>
+        <div class="empty">
+          <div class="t">还没有投资组合</div>
+          <div class="d">创建组合后即可开始录入出入金和买卖数据。</div>
+          <button class="btn primary" onclick="goto('holdings')">去创建组合</button>
+        </div>
+      </section>
+
+      <!-- ============ 登录（含 token 错误色演示） ============ -->
+      <section class="page" id="page-login">
+        <div class="page-head"><div><div class="t">投资收益统计系统</div><div class="sub">登录后继续使用</div></div></div>
+        <div class="card form-card">
+          <div class="field"><label>邮箱</label><input class="input" value="user@example.com" /></div>
+          <div class="field"><label>密码</label><input class="input" type="password" value="123" /></div>
+          <div class="err">密码至少需要 6 位（错误提示已使用主题色 token）</div>
+          <div style="display:flex;gap:8px;margin-top:14px">
+            <button class="btn primary" style="flex:1">登录</button>
+            <button class="btn">注册</button>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </div>
+
+  <!-- ===== 模拟对话框：录入买卖 ===== -->
+  <div id="tradeDialog" class="dialog-mask" style="display:none" onclick="if(event.target===this)this.style.display='none'">
+    <div class="dialog">
+      <div class="d-head">录入买卖 <span class="d-x" onclick="document.getElementById('tradeDialog').style.display='none'">×</span></div>
+      <div class="field"><label>标的名称</label><input class="input" placeholder="从目录主数据中选择" /></div>
+      <div class="field"><label>方向</label>
+        <div style="display:flex;gap:8px"><button class="btn primary sm">买入</button><button class="btn sm">卖出</button></div>
+      </div>
+      <div class="field"><label>数量</label><input class="input" placeholder="0" /></div>
+      <div class="field"><label>成交价</label><input class="input" placeholder="0.00" /></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn" onclick="this.parentElement.parentElement.parentElement.style.display='none'">取消</button><button class="btn primary">保存</button></div>
+    </div>
+  </div>
+
+  <!-- ===== 模拟对话框：出入金 ===== -->
+  <div id="cashDialog" class="dialog-mask" style="display:none" onclick="if(event.target===this)this.style.display='none'">
+    <div class="dialog">
+      <div class="d-head">录入出入金 <span class="d-x" onclick="document.getElementById('cashDialog').style.display='none'">×</span></div>
+      <div class="field"><label>方向</label>
+        <div style="display:flex;gap:8px"><button class="btn primary sm">存入</button><button class="btn sm">取出</button></div>
+      </div>
+      <div class="field"><label>金额</label><input class="input" placeholder="0.00" /></div>
+      <div class="field"><label>日期</label><input class="input" placeholder="2026-08-17" /></div>
+      <div class="field"><label>备注</label><input class="input" placeholder="可选" /></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn" onclick="this.parentElement.parentElement.parentElement.style.display='none'">取消</button><button class="btn primary">保存</button></div>
+    </div>
+  </div>
+
+  <!-- ===== 模拟对话框：快照 ===== -->
+  <div id="snapDialog" class="dialog-mask" style="display:none" onclick="if(event.target===this)this.style.display='none'">
+    <div class="dialog">
+      <div class="d-head">手工补录快照 <span class="d-x" onclick="document.getElementById('snapDialog').style.display='none'">×</span></div>
+      <div class="field"><label>快照日期</label><input class="input" placeholder="2026-08-17" /></div>
+      <div class="field"><label>总资产</label><input class="input" placeholder="0.00" /></div>
+      <div class="field"><label>现金余额</label><input class="input" placeholder="0.00" /></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn" onclick="this.parentElement.parentElement.parentElement.style.display='none'">取消</button><button class="btn primary">保存</button></div>
+    </div>
+  </div>
+
+</div>
+
+<style>
+  .dialog-mask {
+    position: fixed; inset: 0; background: rgba(16,24,40,.45); z-index: 100;
+    display: flex; align-items: center; justify-content: center; padding: 16px;
+  }
+  .dialog {
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    width: 100%; max-width: 420px; padding: 20px; box-shadow: var(--shadow-lg);
+  }
+  .d-head { font-size: 15px; font-weight: 700; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; }
+  .d-x { cursor: pointer; color: var(--muted-fg); font-size: 18px; line-height: 1; }
+</style>
+
+<script>
+  // 时钟
+  function tick() {
+    var d = new Date();
+    var p = function (n) { return String(n).padStart(2, "0"); };
+    document.getElementById("clock").textContent =
+      d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) +
+      " " + p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds());
+  }
+  tick(); setInterval(tick, 1000);
+
+  // 页面切换
+  function goto(name) {
+    document.querySelectorAll(".page").forEach(function (el) { el.classList.remove("active"); });
+    document.getElementById("page-" + name).classList.add("active");
+    document.querySelectorAll(".nav-item").forEach(function (el) {
+      el.classList.toggle("active", el.getAttribute("data-page") === name);
+    });
+    window.scrollTo(0, 0);
+  }
+  document.querySelectorAll(".nav-item").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var pages = btn.getAttribute("data-page");
+      var names = pages.split(",");
+      // 分析菜单指向 analysis；登录页由概览页脚注演示
+      document.querySelectorAll(".page").forEach(function (el) { el.classList.remove("active"); });
+      document.getElementById("page-" + (names.length > 1 ? names[1] : names[0])).classList.add("active");
+      document.querySelectorAll(".nav-item").forEach(function (el) {
+        el.classList.toggle("active", el === btn);
+      });
+      window.scrollTo(0, 0);
+    });
+  });
+
+  // 主题切换
+  var toggle = document.getElementById("themeToggle");
+  function setTheme(t) {
+    document.documentElement.setAttribute("data-theme", t);
+  }
+  toggle.addEventListener("click", function () {
+    var cur = document.documentElement.getAttribute("data-theme");
+    setTheme(cur === "dark" ? "light" : "dark");
+  });
+
+  // 侧边栏"年化收益"进入分析页
+  document.querySelectorAll('.nav-item[data-page="analysis"]').forEach(function (el) {
+    el.addEventListener("click", function () {
+      document.querySelectorAll(".page").forEach(function (p) { p.classList.remove("active"); });
+      document.getElementById("page-analysis").classList.add("active");
+      document.querySelectorAll(".nav-item").forEach(function (n) {
+        n.classList.toggle("active", n === el);
+      });
+      window.scrollTo(0, 0);
+    });
+  });
+</script>
+</body>
+</html>

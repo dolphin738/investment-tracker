@@ -1,0 +1,22 @@
+# 依赖
+node_modules/
+.pnpm-store/
+
+# 构建产物
+dist/
+dist-node/
+*.tsbuildinfo
+
+# Vite 启动临时文件
+vite.config.ts.timestamp-*.mjs
+
+# 测试覆盖率
+coverage/
+
+# 日志
+*.log
+
+# 环境变量（真实凭据勿提交）
+.env
+.env.*
+!.env.example

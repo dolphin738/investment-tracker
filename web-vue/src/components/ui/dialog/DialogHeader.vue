@@ -1,0 +1,14 @@
+<script setup lang="ts">
+/**
+ * ui/dialog/DialogHeader — 对话框头部容器
+ */
+import { cn } from '@/lib/utils';
+
+const props = defineProps<{ class?: string }>();
+</script>
+
+<template>
+  <div :class="cn('flex flex-col space-y-1.5 text-center sm:text-left', props.class)">
+    <slot />
+  </div>
+</template>

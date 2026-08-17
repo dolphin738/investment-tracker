@@ -1,0 +1,14 @@
+<script setup lang="ts">
+/**
+ * ui/table/TableBody — 表体分组（tbody）
+ */
+import { cn } from '@/lib/utils';
+
+const props = defineProps<{ class?: string }>();
+</script>
+
+<template>
+  <tbody :class="cn('[&_tr:last-child]:border-0', props.class)">
+    <slot />
+  </tbody>
+</template>

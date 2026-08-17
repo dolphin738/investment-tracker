@@ -1,0 +1,13 @@
+{
+  // 工程脚本编译配置（vite/tailwind 等根目录 ts 文件）
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "outDir": "./dist-node",
+    "composite": true,
+    "noEmit": false,
+    "types": ["node"]
+  },
+  "include": ["vite.config.ts", "tailwind.config.ts", "vitest.config.ts", "postcss.config.js"]
+}

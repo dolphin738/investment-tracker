@@ -1,0 +1,8 @@
+{
+  // 根 tsconfig：仅做 project references 聚合，实际编译配置见 app / node 两个子项目
+  "files": [],
+  "references": [
+    { "path": "./tsconfig.app.json" },
+    { "path": "./tsconfig.node.json" }
+  ]
+}

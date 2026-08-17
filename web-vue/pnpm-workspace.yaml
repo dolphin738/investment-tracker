@@ -1,0 +1,9 @@
+allowBuilds:
+  esbuild: set this to true or false
+  vue-demi: set this to true or false
+# pnpm 工作区配置：批准依赖的安装期构建脚本
+# - esbuild：vite 依赖
+# - vue-demi：vue-echarts 依赖，postinstall 按 Vue 版本切换入口
+onlyBuiltDependencies:
+  - esbuild
+  - vue-demi
