@@ -1,11 +1,11 @@
 {
     "schema_version": 2,
-    "commit": "cf434b9b392b6b946ad7c14873c2a93aa3a43165",
-    "indexed_at": "2026-08-16T20:33:40Z",
+    "commit": "a547ccf199da7d74336be5edb8a4d613ac663d5b",
+    "indexed_at": "2026-08-17T01:19:32Z",
     "project": "investment-return-tracker",
-    "nodes": 4596,
-    "edges": 17602,
+    "nodes": 4598,
+    "edges": 17597,
     "original_size": 17432576,
-    "compressed_size": 3289525,
+    "compressed_size": 3289259,
     "compression_level": 3
 }
