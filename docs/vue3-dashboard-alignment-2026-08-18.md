@@ -493,3 +493,71 @@ Vue 测试覆盖显著优于 React，**无需补测**。
 | 无回归 | 维持现状即满足（Vue 分析模块测试全绿） |
 | 结论 | **本页无需实现动作，对齐闭环**（computeDailyDetails 单测为可选 P3） |
 
+
+---
+
+# 附篇：设置页（Settings）对齐审查
+
+> 审查日期：2026-08-18（追加）
+> 审查对象：`web/src/pages/settings.tsx`（React 源，911 行） vs `web-vue/src/modules/settings/pages/SettingsPage.vue`（Vue 目标，896 行）
+> 配套文件：两端 `data-transfer`（ExportPanel / ImportDialog / ImportTemplateButtons）、账户三 dialog（ChangeEmail/ChangePassword/EditProfile）、偏好 hooks（usePreferences/useUpdatePreferences）
+> 方法：MCP 代码图谱索引定位 + 逐区块通读两端源码 + 偏好字段/危险区二次确认/数据管理组件比对 + 测试覆盖对账
+> 性质：**先分析、后实现**（q-1 工作流）。本文仅陈述审查结论，**不含代码改动**。
+
+## 28. 设置页总体结论
+
+**web-vue 设置页与 web 设置页功能基本对齐（≈ 98%），无功能行为缺口，无需代码改动；仅 1 处 P2 测试覆盖缺口（默认日期范围下拉 3 例，可选补）。**
+
+- ✅ 四大区块逐项对齐：账户（用户摘要 + 改邮箱/改密码/编辑资料三 dialog + 退出登录）、偏好设置（10 字段 + 乐观更新 + 默认组合下拉 + 保存按钮）、数据管理（导出 7 类 / 导入预览提交 / 模板按钮）、危险操作区（清空数据 / 注销账户，均 AlertDialog 二次确认）。
+- ✅ 数据转移组件（ExportPanel/ImportDialog/ImportTemplateButtons）两端模块对应齐全（Vue 在 `modules/data-transfer/components/`）。
+- ⚠️ **P2 测试缺口（可选）**：React 有 `settings-default-date-range.test.tsx`（3 例：7 项下拉逐项断言 / 保存 payload / 1w·6m 白名单载体），Vue 无对等覆盖。
+
+## 29. 逐区块对账表（React ↔ Vue）
+
+| # | 区块/行为 | React | Vue | 结论 |
+|---|---|---|---|---|
+| 1 | 页头「设置」+ 描述（组合管理收敛到账户页提示） | ✅ | ✅ | 一致 |
+| 2 | 账户卡：头像/昵称/邮箱 + 修改邮箱 / 修改密码 / 编辑资料（三 dialog）+ 退出登录 | ✅ | ✅ | 一致 |
+| 3 | 偏好设置：10 字段（defaultGranularity / defaultDateRange / aggregation / weekStartsOn / navDecimals / xirrDecimals / theme / staleDays / amountThousands / amountAbbrev） | ✅ | ✅ | 一致（字段逐项同源 DEFAULT_PREFERENCES） |
+| 4 | 偏好服务端加载 → 回填表单 + 写入 preference.store（刷新保持） | ✅ | ✅ | 一致 |
+| 5 | 保存偏好：乐观更新（失败回滚）+ 成功后覆盖 store + 切默认组合 | ✅ | ✅ | 一致 |
+| 6 | 「默认组合」下拉（哨兵 __none__ 映射 + 选择后切换视图） | ✅ | ✅ | 一致 |
+| 7 | 币种 CNY / 语言 zh-CN 禁用下拉（待后端集成提示） | ✅ | ✅ | 一致 |
+| 8 | 数据管理：导出（ExportPanel：7 类多选 + 格式 + 串行下载，SET-P0-03） | ✅ | ✅ | 一致 |
+| 9 | 数据管理：导入（ImportTemplateButtons + 选择文件并导入 → ImportDialog 预览提交，SET-P0-04/FLOW-P1-01） | ✅ | ✅ | 一致 |
+| 10 | 导入提示（先导出备份 / 追加写入 / 快照按日覆盖） | ✅ | ✅ | 一致（Vue Ⓘ vs React ⓘ 符号，语义同） |
+| 11 | 危险区：清空当前组合数据（SET-P0-05：disabled/title + AlertDialog 名称二次确认） | ✅ | ✅ | 一致 |
+| 12 | 危险区：注销账户（SET-P1-06：30 天冷静期文案 + AlertDialog 邮箱二次确认） | ✅ | ✅ | 一致 |
+| 13 | 测试覆盖 | ✅ 8 例（5 + default-date-range 3） | ⚠️ 5 例（偏好链路） | **Vue 略少（缺 date-range 3 例，P2 可选）** |
+
+## 30. 差异详情与结论
+
+### 30.1 无功能行为缺口
+
+§29 对账表 13 项中 12 项完全一致。设置页是迁移中最早完成且最复杂的页面之一，四大区块（账户/偏好/数据管理/危险区）在 Vue 中逐项对应，含乐观更新链路、危险操作二次确认（名称/邮箱）等高风险细节。
+
+### 30.2 P2 测试覆盖缺口（可选补，0.5 人天）
+
+React `settings-default-date-range.test.tsx` 锁死的 3 例 Vue 无对等：
+1. 「默认日期范围」下拉恰为 7 项，value/label 与 `QUICK_RANGE_OPTIONS` 逐项一致
+2. 修改下拉 → 保存偏好 → mutation payload `defaultDateRange = 1w`
+3. 「近6月」可选（后端白名单扩展 1w/6m 的前端载体）
+
+**建议**：在 `settings-page.test.ts` 中追加或新建 `settings-default-date-range.test.ts` 对等 3 例（非阻塞，Vue 核心偏好链路 5 例已绿）。
+
+### 30.3 测试对等性
+
+| 测试 | React | Vue | 结论 |
+|---|---|---|---|
+| 渲染/分区/无组合管理模块/默认组合下拉/同步一次 | ✅ settings.test 5 例 | ✅ settings-page.test（偏好回显/保存/乐观更新 5 例） | 对等（侧重略异） |
+| 默认日期范围下拉（7 项/保存 payload/1w·6m） | ✅ 3 例 | ❌ 无 | **缺口（P2 可选）** |
+
+## 31. 设置页验收标准
+
+| 项 | 标准 |
+|---|---|
+| 功能对齐 | 已对齐（无功能行为缺口） |
+| 测试对等（可选 P2） | 补 default-date-range 3 例对等测试 |
+| 无回归 | 维持现状即满足（Vue settings-page 5 例全绿） |
+| 结论 | 功能层面**本页无需实现动作**；P2 测试补强为可选 |
+
