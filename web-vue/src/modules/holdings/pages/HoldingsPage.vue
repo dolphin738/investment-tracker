@@ -65,6 +65,7 @@ import { usePreferenceStore } from '@/stores/preference.store';
 import { todayInAppTzIso, toIsoDate } from '@/lib/constants';
 import { useUrlState } from '@/lib/url-query';
 import type { SecurityTradeQuery } from '@/api/types';
+import { SecuritySide } from '@/lib/types';
 import { formatCurrency, formatPercent, cn } from '@/lib/utils';
 
 // ===== 常量 =====
@@ -228,14 +229,21 @@ const tradeSecurityFilter = computed(() =>
  * securityId 由 tradeSecurityFilter.ids 映射；空集合表示不施加标的约束（查全部）。
  * 组件内会依据 filterState 短路：loading/empty 时不发此查询。
  */
-const tradeQuery = computed<SecurityTradeQuery>(() => ({
-  securityId:
-    tradeSecurityFilter.value.ids.length > 0
-      ? tradeSecurityFilter.value.ids.join(',')
-      : undefined,
-  startDate: startDate.value,
-  endDate: endDate.value,
-}));
+const tradeQuery = computed<SecurityTradeQuery>(() => {
+  const q: SecurityTradeQuery = {
+    securityId:
+      tradeSecurityFilter.value.ids.length > 0
+        ? tradeSecurityFilter.value.ids.join(',')
+        : undefined,
+    startDate: startDate.value,
+    endDate: endDate.value,
+  };
+  // 【对齐 React 226-240 行】场景筛选传导：scenario=BUY/SELL → 后端 side 参数
+  // （HoldingsToolbar 的 scenario 控件与 URL 联动，买卖明细列表按场景过滤）
+  if (holdingsQuery.scenario === 'BUY') q.side = SecuritySide.BUY_SEC;
+  if (holdingsQuery.scenario === 'SELL') q.side = SecuritySide.SELL_SEC;
+  return q;
+});
 
 /**
  * 【A4】持仓列表前端排序（决策 Q-5 甲）：默认按市值降序。
