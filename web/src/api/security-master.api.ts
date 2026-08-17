@@ -116,7 +116,16 @@ export function syncSecurityMasters(): Promise<SecurityMasterSyncResult> {
 export function deleteSecurityMasters(
   params: SecurityMasterDeleteParams,
 ): Promise<SecurityMasterDeleteResult> {
+  // 与 listSecurityMasters 保持一致：后端 body 字段为 snake_case，
+  // 须把 camelCase 的 assetClass 转为 asset_class，否则类别筛选会失效
+  // （all=true 时退化为删除全部孤儿主数据）。
+  const body: Record<string, unknown> = {};
+  if (params.ids != null) body.ids = params.ids;
+  if (params.all != null) body.all = params.all;
+  if (params.q) body.q = params.q;
+  if (params.assetClass) body.asset_class = params.assetClass;
+  if (params.exchange) body.exchange = params.exchange;
   return http.delete<SecurityMasterDeleteResult>('/admin/securities/masters', {
-    data: params,
+    data: body,
   });
 }
