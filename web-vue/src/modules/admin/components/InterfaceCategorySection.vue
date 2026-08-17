@@ -7,10 +7,9 @@
  * 仅允许编辑展示名/图标/排序；系统内置分类以 badge 标注。
  */
 
-import { h, type Component } from 'vue';
-import * as LucideIcons from 'lucide-vue-next';
 import { Pencil } from 'lucide-vue-next';
 import { Button } from '@/components/ui/button';
+import DynamicIcon from '@/components/common/DynamicIcon.vue';
 import {
   Card,
   CardContent,
@@ -43,22 +42,6 @@ function openEdit(cat: InterfaceCategory): void {
 function close(): void {
   dialogOpen.value = false;
   editing.value = null;
-}
-
-/**
- * 动态渲染分类图标：按 c.icon 字符串名从 lucide-vue-next 取组件；
- * 缺失或库中不存在回退到 Tag。
- */
-function CategoryIcon({ name }: { name: string | null }) {
-  const Icons = LucideIcons as unknown as Record<
-    string,
-    Component
-  >;
-  const Comp = name ? Icons[name] : undefined;
-  if (Comp) {
-    return h(Comp, { class: 'h-4 w-4' });
-  }
-  return h(LucideIcons.Tag, { class: 'h-4 w-4 text-muted-foreground' });
 }
 </script>
 
@@ -108,7 +91,7 @@ function CategoryIcon({ name }: { name: string | null }) {
               </span>
             </TableCell>
             <TableCell>
-              <CategoryIcon :name="c.icon" />
+              <DynamicIcon :name="c.icon" icon-class="h-4 w-4" />
             </TableCell>
             <TableCell>{{ c.sort_order }}</TableCell>
             <TableCell class="text-right">
