@@ -357,3 +357,71 @@ React 用 emoji 符号强化语义，Vue 用纯文字，共 4 处：
 | 无回归 | 维持现状即满足（Vue snapshot-form 6 用例全绿） |
 | 结论 | 功能层面**本页无需实现动作**；视觉 emoji 为可选打磨项 |
 
+
+---
+
+# 附篇：收益分析页（XIRR Analysis）对齐审查
+
+> 审查日期：2026-08-18（追加）
+> 审查对象：`web/src/pages/xirr-analysis.tsx`（React 源，288 行） vs `web-vue/src/modules/analysis/pages/XirrAnalysisPage.vue`（Vue 目标，301 行）
+> 配套文件：两端 `DimensionSwitcher` / `use-range-preference-sync` / `use-query-data`（useXirrSeries/useLatestXirr/useYearStartXirr）/ `XirrTrendChart` / `YearlyBarChart`
+> 方法：MCP 代码图谱索引定位 + 逐区块通读两端源码 + 数据流（维度→查询参数→图表/表格）比对 + 测试覆盖对账
+> 性质：**先分析、后实现**（q-1 工作流）。本文仅陈述审查结论，**不含代码改动**。
+
+## 20. 收益分析页总体结论
+
+**web-vue 收益分析页与 web 收益分析页功能 100% 对齐，无功能缺口，无需代码改动。**
+
+- ✅ 逐区块核对（§21 对账表 12 项）全部一致：维度切换（含偏好对齐守卫与用户交互标记）、当前累计 XIRR + 较年初双卡（独立 year-start 查询）、XIRR 趋势图（null 断线）、年度柱状图（当年高亮）、明细表（倒序 + 环比变化）。
+- ✅ 测试覆盖 **Vue 更优**：React 仅图表组件测试（xirr-trend-chart），Vue 有**页面级测试**（`xirr-analysis-page.test.ts`）+ chart-options/dimension/use-range-preference-sync 三组纯逻辑测试。
+- ⚠️ 仅 2 处**视觉微调**（Vue 优于 React，非缺口）：双卡 CardTitle 与明细表单元格补了 `tabular-nums`（等宽数字防跳动）。**建议保持现状**。
+
+## 21. 逐区块对账表（React ↔ Vue）
+
+| # | 区块/行为 | React | Vue | 结论 |
+|---|---|---|---|---|
+| 1 | 无组合分支（请先选择一个投资组合） | ✅ | ✅ | 一致 |
+| 2 | 页头「收益分析（XIRR）」+ 说明 | ✅ | ✅ | 一致 |
+| 3 | DimensionSwitcher（维度 Tabs + 快捷范围 + 起止日期，flex 包裹左对齐） | ✅ | ✅ | 一致（受控绑定 + 交互守卫） |
+| 4 | 偏好对齐守卫 useRangePreferenceSync（URL 无参且未交互时对齐一次） | ✅ | ✅ | 一致 |
+| 5 | 维度变更标记交互（防偏好弹回） | ✅ | ✅ | 一致 |
+| 6 | toDimensionQueryParams 剥离 quick（防后端 forbidNonWhitelisted 400） | ✅ | ✅ | 一致 |
+| 7 | useXirrSeries / useLatestXirr / useYearStartXirr（较年初独立日粒度查询，ANL-P0-04） | ✅ | ✅ | 一致 |
+| 8 | 当前累计 XIRR 卡（最新日期 / 暂无数据） | ✅ | ✅ | 一致（Vue 补 tabular-nums） |
+| 9 | 较年初变化卡（formatChange pp，单位提示） | ✅ | ✅ | 一致（Vue 补 tabular-nums） |
+| 10 | XirrTrendChart（connectNulls=false + 标题按维度 labelOf） | ✅ | ✅ | 一致 |
+| 11 | 年度柱状图（granularity≠year 且有数据，aggregateByYear 取每年末值，highlightCurrentYear） | ✅ | ✅ | 一致 |
+| 12 | 明细表（倒序、label/XIRR/环比 formatChange、骨架/空态） | ✅ | ✅ | 一致（Vue 单元格补 tabular-nums） |
+
+## 22. 差异详情与结论
+
+### 22.1 无功能行为缺口
+
+§21 对账表 12 项全部一致。数据流（维度 → toDimensionQueryParams → 系列查询 → 图表/表格/双卡）逐环节同构，含最易踩坑的两处：
+- **偏好对齐守卫**：两端都只在「URL 无参且用户未交互」时对齐一次，手动改范围后不再弹回（持仓页 QA Bug 同款防护）。
+- **较年初基准解耦**：两端都用独立 `useYearStartXirr`（当年首个非空 XIRR），与页面维度/范围无关（Part A2 缺陷修复已平移）。
+
+### 22.2 视觉微调（Vue 优于 React，建议保持）
+
+- 双卡 `CardTitle` 与明细表三个单元格 Vue 补了 `tabular-nums`（等宽数字，切换小数位/涨跌时不跳动）。React 未加。**非缺口，保持现状即可**。
+
+### 22.3 测试对等性
+
+| 测试 | React | Vue | 结论 |
+|---|---|---|---|
+| 图表组件（xirr-trend-chart） | ✅ | ✅（chart-options.test） | 对等 |
+| 页面级（维度切换/双卡/图表/表格渲染） | ❌ 无 | ✅ `xirr-analysis-page.test.ts` | **Vue 更优** |
+| 纯逻辑（dimension 序列化 / range 对齐） | （散落） | ✅ dimension.test + use-range-preference-sync.test | Vue 更优 |
+
+Vue 测试覆盖显著优于 React，**无需补测**。
+
+## 23. 收益分析页验收标准
+
+| 项 | 标准 |
+|---|---|
+| 功能对齐 | 已 100% 对齐，无改动项 |
+| 无回归 | 维持现状即满足（Vue xirr-analysis-page 等测试全绿） |
+| 结论 | **本页无需实现动作，对齐闭环** |
+
+> 注：净值分析页（NavAnalysis，`/analysis/nav`）不在本轮审查范围（用户指定「收益分析页面」= XIRR）；如需可另开附篇。
+
