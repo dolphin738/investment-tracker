@@ -218,3 +218,72 @@
 - **持仓页功能对齐度 ≈ 97%**：唯一实质缺口为 `tradeQuery` 缺 scenario→side 传导，按 React 逐字对齐补 5 行即可闭合（≤ 0.25 人天）。
 - 测试覆盖缺口（P2）建议同步补齐，**不阻塞**功能对齐。
 - 建议评审后：先做 §9.1（P1）→ 视需要做 §9.2（P2）→ 按项目约定提交（不 push）。
+
+---
+
+# 附篇：出入金页（Transactions / Cashflow）对齐审查
+
+> 审查日期：2026-08-18（追加）
+> 审查对象：`web/src/pages/transactions.tsx`（React 源，505 行） vs `web-vue/src/modules/cashflow/pages/TransactionsPage.vue`（Vue 目标，516 行）
+> 配套文件：两端 `CashflowList` / `CashBalanceForm` / `CashBalanceHistory` / `query-params` / `use-transactions` / `use-cash-balances`（Vue 组件位于 `modules/cash-balance/`）
+> 方法：MCP 代码图谱索引定位 + 逐区块通读两端源码 + 子组件/回调接口比对 + 测试覆盖对账
+> 性质：**先分析、后实现**（q-1 工作流）。本文仅陈述审查结论，**不含代码改动**。
+
+## 12. 出入金页总体结论
+
+**web-vue 出入金页与 web 出入金页功能 100% 对齐，无功能缺口，无需代码改动。**
+
+- ✅ 逐区块核对（§13 对账表 16 项）全部一致：早退分支、页头双录入按钮、统一筛选器（类型/日期/排序/重置）、两 Tab、出入金流水列表、现金余额板块（当前余额/提示/变更历史）、录入/编辑弹窗、FLOW-P0-06 软提示程序化切换。
+- ✅ 测试覆盖对等且 Vue 更优：`query-params.test` 两端 8 用例**完全一致**；Vue 另有 `cashflow-form.test`（5 用例）与 `cashflow-list.test`（3 用例），React 侧对应断言散落在 features 测试中。
+- ⚠️ 仅 1 处**非功能差异**（展示样式，语义等价，无需改动）：无组合 / 未选组合空态，React 用纯文本 Card，Vue 用 `EmptyState` 组件包裹，文案一致。
+
+## 13. 逐区块对账表（React ↔ Vue）
+
+| # | 区块/行为 | React | Vue | 结论 |
+|---|---|---|---|---|
+| 1 | 早退分支（组合 loading / 无组合 / 未选组合） | ✅ | ✅ | 一致（空态 Vue 用 EmptyState 包裹，文案一致） |
+| 2 | 页头：录入现金余额 + 录入出入金（ENTRY 规格，水平并排） | ✅ | ✅ | 一致 |
+| 3 | 统一筛选器 Card：类型多选（不勾选=全部，仅流水）/ DateRangeQuickPicker / 排序（仅流水）/ 重置 | ✅ | ✅ | 一致（Label 并入「不勾选=全部」的等高布局同款） |
+| 4 | URL query 单一来源（types/range/startDate/endDate/sortBy/sortOrder/page/pageSize） | ✅ | ✅ | 一致（Vue 用 vue-router query 等价实现） |
+| 5 | 快捷范围受控回显（URL range 唯一真相源 + 偏好回落，派生式非 effect） | ✅ | ✅ | 一致 |
+| 6 | 类型切换 / 排序切换 / 分页（page/pageSize 变更重置 page） | ✅ | ✅ | 一致 |
+| 7 | 重置：清空全部 query（回落 全部 + date desc + 第 1 页 + 20 条） | ✅ | ✅ | 一致 |
+| 8 | listQuery：日期范围 + 仅非默认排序透传（F5 白名单 400 防护） | ✅ | ✅ | 一致 |
+| 9 | 两 Tab（出入金流水/现金余额），受控 + 软提示程序化切换 | ✅ | ✅ | 一致 |
+| 10 | 出入金流水卡 → CashflowList（query/types/page/pageSize + 分页回调 + onClearFilter） | ✅ | ✅ | 一致 |
+| 11 | 现金余额卡：当前余额（未维护提示 / 自 X 起沿用） | ✅ | ✅ | 一致 |
+| 12 | CASH-P0-03 两条 ⓘ 提示 | ✅ | ✅ | 一致 |
+| 13 | 余额变更历史 → CashBalanceHistory（受日期范围约束 + onEdit/onClearFilter） | ✅ | ✅ | 一致 |
+| 14 | 录入/编辑出入金弹窗（CashflowForm + onSuccess 关闭） | ✅ | ✅ | 一致 |
+| 15 | 录入/编辑现金余额弹窗（CashBalanceForm 双模式，编辑标题区分） | ✅ | ✅ | 一致 |
+| 16 | FLOW-P0-06 软提示监听（CASH_BALANCE_FOCUS_EVENT → 切 tab + 开弹窗） | ✅ | ✅ | 一致（onMounted/onBeforeUnmount 对称） |
+
+## 14. 差异详情与结论
+
+### 14.1 无功能缺口
+
+§13 对账表 16 项全部一致，**无需任何代码改动**。出入金页是继概览页（98%）、持仓页（97%）之后**完全对齐**的一页 —— 该页在早期批次已整体平移且测试覆盖充分（Vue `cashflow-form.test`/`cashflow-list.test`/`query-params.test` 三文件 16 用例，含表单校验/提交/编辑回填/列表渲染/空态清除筛选/URL 编解码）。
+
+### 14.2 非功能差异（可选，不改）
+
+- **无组合/未选组合空态**：React `Card + 纯文本`；Vue `Card + EmptyState`（title/description 拆行）。文案语义一致（「暂无投资组合，请先在账户页『我的组合』创建组合」），仅呈现结构不同。若追求像素级一致可改用纯文本，但**无业务影响，建议保持现状**（EmptyState 是 Vue 统一空态组件，符合项目规范）。
+
+### 14.3 测试对等性
+
+| 测试文件 | React | Vue | 结论 |
+|---|---|---|---|
+| query-params URL 编解码 | ✅ 8 用例 | ✅ 8 用例 | **完全一致** |
+| 表单（CashflowForm） | （散落） | ✅ 5 用例 | Vue 更全 |
+| 列表（CashflowList 渲染/空态） | （散落） | ✅ 3 用例 | Vue 更全 |
+| 页面级（transactions.tsx） | ❌ 无 | ❌ 无 | 两端一致（无页面级测试） |
+
+两端均无页面级测试，但核心行为（URL 编解码/表单/列表）均有对等或更优覆盖；**无需补测**。
+
+## 15. 出入金页验收标准
+
+| 项 | 标准 |
+|---|---|
+| 功能对齐 | 已 100% 对齐，无改动项 |
+| 无回归 | 维持现状即满足（既有 Vue 测试 16 用例全绿） |
+| 结论 | **本页无需实现动作，对齐闭环** |
+
