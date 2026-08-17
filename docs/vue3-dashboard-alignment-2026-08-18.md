@@ -121,3 +121,100 @@
 - **概览页功能对齐度 ≈ 98%**：唯一实质缺口为「录入买卖弹窗占位」，替换为既有 `SecurityTradeForm` 即可闭合（≤ 0.25 人天）。
 - 测试覆盖缺口（P2）建议同步补齐，但**不阻塞**功能对齐。
 - 建议评审后：先做 §4.1（P1 功能对齐）→ 视需要做 §4.2（P2 测试补强）→ 按项目约定提交（不 push）。
+
+---
+
+# 附篇：持仓页（Holdings）对齐审查
+
+> 审查日期：2026-08-18（追加）
+> 审查对象：`web/src/pages/HoldingsPage.tsx`（React 源，603 行） vs `web-vue/src/modules/holdings/pages/HoldingsPage.vue`（Vue 目标，580 行）
+> 配套文件：两端 `HoldingsToolbar` / `trade-security-filter` / `query-params` / `use-holdings`；React `DividendFeeSection` vs Vue `DividendList`（分红板块）；两端测试文件
+> 方法：MCP 代码图谱索引定位 + 逐区块通读两端源码 + 子组件/查询参数接口比对 + 测试覆盖对账
+> 性质：**先分析、后实现**（q-1 工作流）。本文仅陈述审查结论，**不含代码改动**。
+
+## 7. 持仓页总体结论
+
+**web-vue 持仓页与 web 持仓页功能基本对齐（≈ 97%），存在 1 处实质功能缺口（scenario→side 传导缺失）+ 1 处测试覆盖缺口（P2）。**
+
+- ✅ **主体全部对齐**：早退分支、页头（PriceFreshnessBadge + 录入买卖）、I-05 统一筛选器、三 Tab（持仓/买卖明细/分红）、【A】汇总 5 卡、【B】持仓列表 11 列（徽标/InlinePriceEditor/占比进度条）、排序（市值降序 + 已清仓垫底）、错误重试/骨架/空态、录入买卖弹窗（SecurityTradeForm 已挂载）、买卖明细 Tab（SecurityTradeList，Task #20 已实现）、分红 Tab（DividendList = React DividendFeeSection 忠实平移）。
+- ⚠️ **1 处功能缺口（P1，改动极小）**：`scenario`（买入/卖出/全部）筛选**未传导到「买卖明细」的后端查询** —— React 将 `scenario=BUY/SELL` 映射为 `tradeQuery.side`（`BUY_SEC/SELL_SEC`），Vue 的 `tradeQuery` 只含 `securityId + startDate + endDate`，无 `side`。HoldingsToolbar 的 scenario 控件照常渲染并写 URL，但「买卖明细」列表不按场景过滤（行为与 React 不一致）。
+- ⚠️ **1 处测试覆盖缺口（P2）**：React `holdings-page.test.tsx` ~20+ 用例 + `holdings-unified-filter.test.tsx`，Vue `holdings-page.test.ts` 仅 4 用例；关键行为（Tabs 互斥、红涨绿跌边界、占比 NaN 防护、xirrDecimals 联动、scenario 传导）无回归保障。
+
+## 8. 逐区块对账表（React ↔ Vue）
+
+| # | 区块/行为 | React | Vue | 结论 |
+|---|---|---|---|---|
+| 1 | 早退分支（组合 loading / 无组合 / 未选组合） | ✅ | ✅ | 一致 |
+| 2 | 页头：PriceFreshnessBadge + 「+录入买卖」（ENTRY 规格） | ✅ | ✅ | 一致 |
+| 3 | I-05 统一筛选器（HoldingsToolbar：range/date/sec/scenario/types/closed，URL 单一来源 + 用户交互守卫 + 偏好对齐 watch） | ✅ | ✅ | 一致 |
+| 4 | as-of 下限 minDate（baseDate → 首笔交易 → 创建日 → 今天） | ✅ | ✅ | 一致 |
+| 5 | 日期范围解析（custom 用 from/to；否则 resolveQuickRange + all 以 baseDate 起） | ✅ | ✅ | 一致 |
+| 6 | tradeSecurityFilter 三态派生（deriveTradeSecurityFilter 纯函数） | ✅ | ✅ | 一致 |
+| 7 | **tradeQuery：scenario → side 传导** | ✅ `scenario=BUY→side=BUY_SEC / SELL→side=SELL_SEC` | ⚠️ **无 side 字段** | **缺口（P1）** |
+| 8 | 持仓排序（市值降序 + 正常在前已清仓垫底） | ✅ | ✅ | 一致（quantity 两端同为 number，Vue 直接比较无碍） |
+| 9 | 三 Tab（持仓/买卖明细/分红）+ 默认持仓 | ✅ | ✅ | 一致 |
+| 10 | 【A】汇总 5 卡（总市值/总成本/浮盈/总盈亏率/标的数，红涨绿跌） | ✅ | ✅ | 一致 |
+| 11 | 【B】持仓列表 11 列（标的+已清仓/成本估值徽标、类型徽标、数量、成本价、现价 InlinePriceEditor、成本额、市值、浮动盈亏±着色、盈亏率、占比+进度条） | ✅ | ✅ | 一致（表头顺序逐项对齐） |
+| 12 | 列表错误态（重试）/ 骨架 / 空态（两种描述 + 录入按钮） | ✅ | ✅ | 一致 |
+| 13 | 买卖明细 Tab → SecurityTradeList（筛选由统一筛选器派生） | ✅ | ✅ | 一致（Task #20 已落地） |
+| 14 | 分红 Tab → DividendList（= React DividendFeeSection 平移，含汇总/按标的表/明细 CRUD/税后净额口径） | ✅ | ✅ | 一致 |
+| 15 | 录入买卖弹窗（SecurityTradeForm + success 关闭） | ✅ | ✅ | 一致 |
+| 16 | 测试覆盖 | 2 页级文件 ~20+ 用例 | 1 文件 4 用例 | **缺口（P2）** |
+
+## 9. 差异详情与对齐方案
+
+### 9.1 【P1 功能缺口】tradeQuery 补 scenario → side 传导
+
+- **现状**：`HoldingsPage.vue` 231-238 行 `tradeQuery` 只含 `securityId / startDate / endDate`；React 226-240 行含 `q.side = BUY_SEC / SELL_SEC` 映射。
+- **影响**：用户在统一筛选器选「场景=买入/卖出」后，「买卖明细」Tab 仍显示全部流水（后端查询无 side 参数），与 React 行为不一致。
+- **改动点（1 处，约 5 行）**：
+  ```ts
+  const tradeQuery = computed<SecurityTradeQuery>(() => {
+    const q: SecurityTradeQuery = {
+      securityId: tradeSecurityFilter.value.ids.length > 0
+        ? tradeSecurityFilter.value.ids.join(',') : undefined,
+      startDate: startDate.value,
+      endDate: endDate.value,
+    };
+    if (holdingsQuery.scenario === 'BUY') q.side = SecuritySide.BUY_SEC;
+    if (holdingsQuery.scenario === 'SELL') q.side = SecuritySide.SELL_SEC;
+    return q;
+  });
+  ```
+  需补 `import { SecuritySide } from '@/lib/types'`（页面当前未导入）。
+- **风险**：极低 —— 与 React 逐字对齐，SecurityTradeList 已按 query 传参。
+- **工作量**：≤ 0.25 人天。
+
+### 9.2 【P2 测试覆盖缺口】按 React 语义补 holdings 测试
+
+- **React `holdings-page.test.tsx` 锁死的行为**（Vue 无对等覆盖）：
+  - A1 Tabs 互斥（切 Tab 后旧面板卸载）
+  - A2 11 列 + 红涨绿跌边界（盈利/亏损/持平 `pnl=0 → text-up`）
+  - A3 汇总 5 项 + `lg:grid-cols-5` + 负盈亏率 text-down
+  - A4 市值降序 + 不污染缓存
+  - A5 占比进度条（aria-valuenow、NaN 边界 `totalMarketValue=0`、aggregate 缺失时占比归 0 且汇总卡不渲染）
+  - 偏好 xirrDecimals 联动（盈亏率/总盈亏率跟随、占比固定 2 位）
+- **React `holdings-unified-filter.test.tsx`**：统一筛选器 URL 联动（Vue `holdings-page.test.ts` 仅 1 例 as-of 变更覆盖该域）
+- **建议补 1 个测试文件（约 8-10 用例）**：`holdings-page-alignment.test.ts` —— Tabs 互斥、红涨绿跌三态、占比 NaN/aggregate 缺失边界、xirrDecimals 联动、scenario→side 传导（新增 §9.1 后钉死）。
+- **工作量**：0.5–1 人天。非阻塞。
+
+### 9.3 已确认无差异（无需改动）
+
+§8 对账表 #1–6、#8–15 全部一致，不做任何改动。其中：
+- 分红板块：Vue `DividendList` 注释明示「平移自 React `dividend-fee-section.tsx`，行为契约一致」，含税后净额口径与「分红不参与 XIRR/净值」提示，无差异。
+- 排序数量比较：两端 `HoldingResponse.quantity` 类型均为 `number`，Vue 直接 `a.quantity > 0` 与 React `Number(a.quantity) > 0` 语义等价，无需改动。
+
+## 10. 持仓页验收标准
+
+| 项 | 标准 |
+|---|---|
+| 功能对齐 | 统一筛选器「场景=买入/卖出」→ 买卖明细列表按 side 过滤（与 React 一致） |
+| 无回归 | `vue-tsc --noEmit` 0 错误；`vitest run` 全绿（含既有 holdings 测试） |
+| E2E | 既有 Playwright 9 例全绿（holdings spec 含买卖明细 Tab） |
+| 测试对等（可选 P2） | 新增 holdings 对齐测试全部通过 |
+
+## 11. 持仓页结论
+
+- **持仓页功能对齐度 ≈ 97%**：唯一实质缺口为 `tradeQuery` 缺 scenario→side 传导，按 React 逐字对齐补 5 行即可闭合（≤ 0.25 人天）。
+- 测试覆盖缺口（P2）建议同步补齐，**不阻塞**功能对齐。
+- 建议评审后：先做 §9.1（P1）→ 视需要做 §9.2（P2）→ 按项目约定提交（不 push）。
