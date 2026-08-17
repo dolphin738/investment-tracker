@@ -561,3 +561,77 @@ React `settings-default-date-range.test.tsx` 锁死的 3 例 Vue 无对等：
 | 无回归 | 维持现状即满足（Vue settings-page 5 例全绿） |
 | 结论 | 功能层面**本页无需实现动作**；P2 测试补强为可选 |
 
+
+---
+
+# 附篇：系统管理页（Admin）对齐审查
+
+> 审查日期：2026-08-18（追加）
+> 审查对象：`web/src/pages/admin.tsx`（124 行）+ `web/src/features/admin/*`（8 组件） vs `web-vue/src/modules/admin/pages/AdminPage.vue`（117 行）+ `components/*`（13 组件）+ `composables/*`（6 个）+ `features/reorder.ts`
+> 方法：MCP 代码图谱索引定位 + 逐区块通读两端源码 + 三大模块（来源/分类/股票列表测试）组件与交互比对 + 测试覆盖对账
+> 性质：**先分析、后实现**（q-1 工作流）。本文仅陈述审查结论，**不含代码改动**。
+
+## 32. 系统管理页总体结论
+
+**web-vue 系统管理页与 web 系统管理页功能基本对齐（≈ 99%），无功能行为缺口，无需代码改动；仅 1 处 P2 测试覆盖缺口（React 4 个 admin 测试文件 vs Vue 1 个）。**
+
+- ✅ 三大模块（接口API来源 / 接口分类管理 / 股票列表和测试）与 localStorage 激活模块持久化、非管理员守卫全部对齐。
+- ✅ 提供方列表（HTTPS/SDK 分区 + 行操作 停用/启用·编辑·删除 + 展开接口子表 + 顶层「按分类汇总」总览 + 接口内联开关）、接口分类管理（分类 CRUD + **拖拽排序**：React DndContext vs Vue vue-draggable-plus + `reorder.ts` 同算法）、股票列表测试区（左主数据只读+搜索+分页+批量/单行删除；右 MasterStatsPanel+InterfaceTestPanel+SYNC_SOURCE_KEY 同步来源持久化）全部对齐。
+- ⚠️ 复核排除：React 文件头注释提及「设为默认 / 切换当前」，**实际代码未实现**（行操作仅 停用/启用·编辑·删除），与 Vue 一致，非缺口。
+- ⚠️ **P2 测试缺口（可选）**：React 有 `admin.test.tsx` / `quote-provider-section.test.tsx` / `stock-list-test-section.test.tsx` / `notification-bell.test.tsx` 4 文件；Vue 仅 `reorder.test.ts`（拖拽算法）。
+
+## 33. 逐区块对账表（React ↔ Vue）
+
+| # | 区块/行为 | React | Vue | 结论 |
+|---|---|---|---|---|
+| 1 | AdminPage：3 模块注册表 + localStorage 持久化 + 非管理员守卫 | ✅ | ✅ | 一致 |
+| 2 | 提供方列表：HTTPS / SDK 分区 + 接入方式列 + 状态 Badge | ✅ | ✅ | 一致 |
+| 3 | 提供方行操作：停用/启用（title 语义一致）+ 编辑 + 删除 | ✅ | ✅ | 一致（「设为默认/切换当前」两端均未实现，注释过时） |
+| 4 | 提供方展开区：接口子表（按分类分组）+ 新增/编辑/删除接口 | ✅ | ✅ | 一致（Vue `ProviderInterfaces.vue`） |
+| 5 | 接口内联开关（即时 mutation 切换 enabled） | ✅ | ✅ | 一致（Vue `InterfaceEnabledSwitch.vue`） |
+| 6 | 顶层「按分类汇总所有提供方接口」总览 | ✅ | ✅ | 一致（Vue `InterfacesByCategoryOverview` + `OverviewCategoryGroup`） |
+| 7 | **拖拽排序（B15 · ADR-002 优先级链 priority=index）** | ✅ DndContext+SortableContext | ✅ vue-draggable-plus + reorder.ts 同算法 | 一致 |
+| 8 | QuoteProviderDialog / QuoteInterfaceDialog（字段含 timeout/retry_count/rate_limit 韧性三件套 + params 键值对增删）/ InterfaceCategoryDialog | ✅ | ✅ | 一致 |
+| 9 | 接口分类管理（分类 CRUD + DynamicIcon 动态图标，Task #18 已改懒加载） | ✅ | ✅ | 一致 |
+| 10 | 股票列表和测试：左 StockListPanel（系统级主数据只读/搜索/分页/批量单行删除） | ✅ | ✅ | 一致 |
+| 11 | 右 MasterStatsPanel（同步来源+按类别分布）+ InterfaceTestPanel（接口测试面板） | ✅ | ✅ | 一致 |
+| 12 | 同步来源持久化 SYNC_SOURCE_KEY（同步按钮与统计块共享） | ✅ | ✅ | 一致 |
+| 13 | 测试覆盖 | ✅ 4 文件 | ⚠️ 1 文件（reorder.test.ts） | **缺口（P2 可选）** |
+
+## 34. 差异详情与结论
+
+### 34.1 无功能行为缺口
+
+§33 对账表 13 项中 12 项完全一致。最复杂的三块均已对齐：
+- **拖拽排序**：Vue 用 `vue-draggable-plus` 重写 React 的 dnd-kit（DndContext/SortableContext），`features/reorder.ts` 的 `computeReorderedIds` 算法与 React 同构（ADR-002 优先级链：priority = index），并有 `reorder.test.ts` 锁死（React 该算法测试内嵌在 quote-provider-section.test）。
+- **接口韧性字段**：Vue QuoteInterfaceDialog 含 timeout / retry_count / rate_limit 三件套（后端韧性字段，2026-08-15 已落地）。
+- **股票列表测试区**：两端均含「本次同步来源」localStorage 持久化 + 批量/单行删除（require_admin）。
+
+### 34.2 P2 测试覆盖缺口（可选补，0.5-1 人天）
+
+React 4 个 admin 测试文件锁死的行为 Vue 无对等（仅 reorder.test.ts）：
+- `admin.test.tsx`：模块切换 + 非管理员守卫 + 激活模块持久化
+- `quote-provider-section.test.tsx`：提供方列表渲染/停用启用/展开接口子表/拖拽排序
+- `stock-list-test-section.test.tsx`：主数据列表/搜索/批量删除/统计块
+- `notification-bell.test.tsx`：通知铃铛（布局层组件，Vue 在 AppLayout）
+
+**建议**（可选，非阻塞）：按需补 `admin-page.test.ts`（模块切换/守卫）+ `quote-provider-section.test.ts`（列表/操作/拖拽）对等用例。
+
+### 34.3 测试对等性
+
+| 测试 | React | Vue | 结论 |
+|---|---|---|---|
+| 页面级（模块切换/守卫/持久化） | ✅ admin.test.tsx | ❌ | 缺口（P2） |
+| 提供方列表/操作/拖拽 | ✅ quote-provider-section.test.tsx | ⚠️ 仅 reorder.test.ts | 缺口（P2） |
+| 股票列表测试区 | ✅ stock-list-test-section.test.tsx | ❌ | 缺口（P2） |
+| 通知铃铛（布局层） | ✅ notification-bell.test.tsx | ❌（在 AppLayout） | 布局范围外 |
+
+## 35. 系统管理页验收标准
+
+| 项 | 标准 |
+|---|---|
+| 功能对齐 | 已对齐（无功能行为缺口） |
+| 测试对等（可选 P2） | 补 admin-page + quote-provider-section 对等测试 |
+| 无回归 | 维持现状即满足（Vue reorder.test.ts 全绿；拖拽已在 E2E admin spec 覆盖 DynamicIcon 渲染） |
+| 结论 | 功能层面**本页无需实现动作**；P2 测试补强为可选 |
+
