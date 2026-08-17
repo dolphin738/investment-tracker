@@ -1,0 +1,123 @@
+# Vue3 迁移对齐审查：概览页（Dashboard）
+
+> 审查日期：2026-08-18
+> 审查对象：`web/src/pages/dashboard.tsx`（React 源，799 行） vs `web-vue/src/modules/overview/pages/DashboardPage.vue`（Vue 目标，776 行）
+> 配套文件：两端 `overview-query-params.ts`（各 72 行，逐字对齐）、`asset-metrics.ts` / `features/asset-metrics.ts`（8 卡构造器）、React 5 个 dashboard 测试 vs Vue 1 个 dashboard 测试
+> 方法：逐区块通读两端源码 + 接口比对（子组件 props/emits、composable 签名、API 契约）+ 测试覆盖对账
+> 性质：**先分析、后实现**（q-1 工作流）。本文档仅陈述审查结论与对齐方案，**不含代码改动**。
+
+---
+
+## 1. 总体结论
+
+**web-vue 概览页与 web 概览页功能已高度对齐（≈ 98%），仅存 1 处实质功能缺口 + 1 处测试覆盖缺口。**
+
+- ✅ **功能主体全部对齐**：版面骨架、8 指标卡（资产构成/收益表现分组）、趋势分析区（筛选栏 → 总资产 hero 图 → 四宫格）、全部早退分支、URL 持久化、偏好对齐守卫、ENTRY 录入按钮规格、新鲜度组件 —— 逐行核对一致（见 §3 对账表）。
+- ⚠️ **1 处功能缺口（P1，改动极小）**：「录入买卖」弹窗在 Vue 中是**占位提示**（`证券买卖录入表单将在后续批次迁移`），React 挂载真实 `SecurityTradeForm`。**Vue 的 `SecurityTradeForm.vue` 早已存在**（`66313be` 起被证券买卖列表页编辑弹窗使用），接口 `portfolioId` prop + `success` emit 与 React 用法完全兼容 —— 只需在 DashboardPage 挂载即可闭合。
+- ⚠️ **1 处测试覆盖缺口（P2）**：React 5 个测试文件（~40 用例）锁死概览页行为，Vue 仅 1 个测试文件 4 用例，关键行为（引导卡失败不伪装空态、快捷范围解析、组合对比 NaN 防护等）无回归保障。
+
+---
+
+## 2. React 概览页功能清单（目标契约）
+
+数据与状态（全部经 URL `g/range/from/to` 持久化）：
+| 数据源 | 用途 |
+|---|---|
+| `usePortfolios()` | 组合列表 + loading（无组合 → 欢迎空态） |
+| `useUrlState(createOverviewSchema(默认粒度, 默认范围))` | g/range/from/to URL 状态 |
+| `resolveQuickRange(range, { allRangeStart: baseDate })` | startDate/endDate；custom 用 from/to；all 以组合首日起点，无首日回落兜底 |
+| `useRangePreferenceSync` | URL 无参且未交互时补齐偏好默认范围 |
+| `getOverview`（`['overview', id]`） | 概览聚合（总资产/净值/XIRR/收益率/freshness/holdingsSummary） |
+| `useXirrSeries / useNavSeries`（维度+范围+LAST；nav 用 `NavMetric.BOTH` 双线） | 趋势序列 |
+| `useLatestXirr / useLatestNav` | 最新值兜底 |
+| `useLatestCashBalance` | 现金余额卡 |
+| `listTransactions(pageSize=5)` | 近期出入金（最近 5 笔） |
+| `getPortfoliosSummary`（`['portfolios','summary']`） | 组合表现对比 |
+| `buildOverviewMetrics`（8 卡，group: asset/return） | 指标卡展示模型（金额/比率/涨跌/空态口径统一） |
+
+版面与交互：
+1. **早退分支**（按序）：组合 loading 骨架 → 无组合欢迎 EmptyState → 未选组合提示卡 → overview+latestNav 双 loading 骨架 → 双 error 失败重试（重新加载按钮）。
+2. **页头**：title「概览」；description = 有 `latestDate` 显「数据截止 X」否则「最近 12 个月收益概览」；actions = `PriceFreshnessBadge` + 「+录入出入金」「+录入买卖」（ENTRY 规格：主色 sm Plus）。
+3. **FreshnessBanner**：`ov.freshness` 存在才渲染（DASH-P1-03）。
+4. **区一「关键指标」**：Section（资产家底与收益表现一眼看全）→ `资产构成` 4 卡（当前总资产/持仓市值/现金余额/净投入，首卡 `border-primary/30`）→ `收益表现` 4 卡（累计收益率/当年收益率/年化XIRR/累计净值）；网格 `grid-cols-1 sm:2 md:4`。
+5. **区二「趋势分析」**：筛选栏（Tabs 日/周/月/年 + 共享 DateRangeQuickPicker 受控回显 URL range，`markRangeInteracted`）→ `TotalAssetTrendChart` hero → `hasNoData`（`!isLoading && !isError && !data`）时渲染三步引导卡（DASH-P0-06，替代四宫格）→ 四宫格：
+   - `NavTrendChart`（净值趋势 累计+当年）
+   - `XirrTrendChart`（XIRR 趋势，connectNulls=false）
+   - **近期出入金**卡：标题 + 「查看全部 → /cashflows」（DASH-P0-05）+ 5 笔列表（MM-dd、存入/取出着色 + /-、note 截断 120px）+ 空态 EmptyState（「还没有出入金记录」+ 录入按钮）
+   - **组合表现对比**卡：名称 + 总资产 + 累计收益率（`!= null` 判空，正红负绿）+ XIRR（小字前缀「XIRR」）+ 空态「暂无组合数据」
+6. **录入弹窗**：`Dialog` + `CashflowForm`（onSuccess 关闭）/ `Dialog` + `SecurityTradeForm`（onSuccess 关闭）。
+
+---
+
+## 3. 逐区块对账表（React ↔ Vue）
+
+| # | 区块/行为 | React | Vue | 结论 |
+|---|---|---|---|---|
+| 1 | 版面骨架（页头+新鲜度 → 关键指标 → 趋势分析，space-y-8） | ✅ | ✅ | 一致 |
+| 2 | 早退分支四态（loading/无组合/未选/双 loading/双 error） | ✅ | ✅ | 一致（含错误重试按钮） |
+| 3 | URL 状态 g/range/from/to + schema 由偏好构建 | ✅ | ✅ | 一致（`useUrlState` 双侧同源） |
+| 4 | resolveQuickRange + custom/all 语义 | ✅ | ✅ | 一致 |
+| 5 | useRangePreferenceSync 偏好对齐守卫 | ✅ | ✅ | 一致（`modules/analysis/composables/use-range-preference-sync`） |
+| 6 | overview/xirrSeries/navSeries(BOTH)/latestXirr/latestNav/latestBalance/recent/portfolioSummary 查询 | ✅ | ✅ | 一致（queryKey/参数逐项同构） |
+| 7 | buildOverviewMetrics 8 卡 + asset/return 分组 | ✅ | ✅ | 一致（含 total-asset 描边） |
+| 8 | 页头 actions：PriceFreshnessBadge + 两个录入按钮（ENTRY 规格） | ✅ | ✅ | 一致 |
+| 9 | FreshnessBanner 条件渲染 | ✅ | ✅ | 一致 |
+| 10 | 筛选栏：Tabs 粒度 + DateRangeQuickPicker + markRangeInteracted | ✅ | ✅ | 一致 |
+| 11 | TotalAssetTrendChart hero（含手工记录标记） | ✅ | ✅ | 一致（props 逐项） |
+| 12 | hasNoData 判定 + 三步引导卡（DASH-P0-06） | ✅ | ✅ | 一致（Vue 内联，React 独立组件，结构相同） |
+| 13 | 四宫格：NavTrendChart / XirrTrendChart(connectNulls=false) | ✅ | ✅ | 一致 |
+| 14 | 近期出入金卡（查看全部链接/5 笔/着色/空态+录入按钮） | ✅ | ✅ | 一致 |
+| 15 | 组合表现对比卡（累计收益率 != null 判空/涨跌色/XIRR/空态） | ✅ | ✅ | 一致 |
+| 16 | 录入出入金弹窗（CashflowForm） | ✅ | ✅ | 一致 |
+| 17 | **录入买卖弹窗（SecurityTradeForm）** | ✅ 真实表单 | ⚠️ **占位提示** | **缺口（P1）** |
+| 18 | 测试覆盖 | 5 文件 ~40 用例 | 1 文件 4 用例 | **缺口（P2）** |
+
+---
+
+## 4. 差异详情与对齐方案
+
+### 4.1 【P1 功能缺口】录入买卖弹窗占位 → 挂载真实 SecurityTradeForm
+
+- **现状**：`DashboardPage.vue` 765-771 行渲染「证券买卖录入表单将在后续批次迁移」占位。
+- **事实核查**：Vue `modules/security-trade/components/SecurityTradeForm.vue` **已存在**（651 行，Task #20 后已被 `SecurityTradeList.vue` 编辑弹窗使用）；接口 `defineProps<{ portfolioId: string }>` + `defineEmits<{ success: [] }>`，与 React `SecurityTradeForm portfolioId onSuccess` 用法完全兼容。
+- **改动点（1 处）**：
+  1. `DashboardPage.vue` script：`import SecurityTradeForm from '@/modules/security-trade/components/SecurityTradeForm.vue'`
+  2. 模板：占位 div 替换为 `<SecurityTradeForm :portfolio-id="currentPortfolioId" @success="tradeOpen = false" />`
+- **风险**：极低 —— 复用既有组件，无新依赖；`SecurityTradeForm` 内部 `useSecurities`/mutation 均已在列表页验证。
+- **工作量**：≤ 0.25 人天。
+
+### 4.2 【P2 测试覆盖缺口】按 React 语义补 dashboard 测试
+
+- **现状**：`web-vue/src/modules/overview/__tests__/dashboard-page.test.ts` 仅 4 用例（无组合空态 / 未选组合 / 有数据渲染 / 引导卡渲染）。
+- **React 侧 5 文件锁死的行为**（Vue 无对等覆盖）：
+  - `dashboard-alignment`（A6 查看全部链接位置 / A7 引导卡：空态 8 卡照常、行动按钮开弹窗、有数据不出现、**overview 失败不伪装空态** / A8 快捷范围 7 项文案、all 回落、维度粒度下发）
+  - `dashboard-comparison`（组合对比两列渲染 / **NaN 防护**（字符串比率、null/undefined 判空）/ 涨跌色 / xirrDecimals 联动）
+  - `dashboard-fusion`（8 卡与 buildOverviewMetrics 一致）
+  - `dashboard-hooks-order` / `dashboard-layout`（结构性守卫）
+- **建议补 2 个测试文件（约 12-14 用例）**：
+  1. `dashboard-guide-range.test.ts`：对等 A7/A8 —— 引导卡四态（含失败不伪装空态）、快捷范围解析下发、all 回落、维度粒度。
+  2. `dashboard-comparison.test.ts`：对等组合对比 —— 两列渲染、NaN 防护、涨跌色边界（-0.00000001）、xirrDecimals 联动。
+- **工作量**：0.5–1 人天。非阻塞（功能已对齐，属回归保障）。
+
+### 4.3 已确认无差异（无需改动）
+
+§3 对账表 #1–16 全部一致，**不做任何改动**（避免无谓 diff）。
+
+---
+
+## 5. 验收标准
+
+| 项 | 标准 |
+|---|---|
+| 功能对齐 | 「录入买卖」弹窗打开真实 SecurityTradeForm，录入成功后关闭并关闭弹窗 |
+| 无回归 | `vue-tsc --noEmit` 0 错误；`vitest run` 全绿（含既有 dashboard-page.test.ts 4 例） |
+| E2E | 既有 Playwright 9 例全绿（概览 spec 不受影响） |
+| 测试对等（可选 P2） | 新增 2 个测试文件全部通过 |
+
+---
+
+## 6. 结论
+
+- **概览页功能对齐度 ≈ 98%**：唯一实质缺口为「录入买卖弹窗占位」，替换为既有 `SecurityTradeForm` 即可闭合（≤ 0.25 人天）。
+- 测试覆盖缺口（P2）建议同步补齐，但**不阻塞**功能对齐。
+- 建议评审后：先做 §4.1（P1 功能对齐）→ 视需要做 §4.2（P2 测试补强）→ 按项目约定提交（不 push）。
