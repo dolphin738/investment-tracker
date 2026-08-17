@@ -256,7 +256,7 @@ function handleConfirmReset(): void {
       class="mb-3 flex flex-wrap items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800"
     >
       <span>
-        当前有 {{ manualStats.manualCount }} 条手工记录，其中
+        ⚠️ 当前有 {{ manualStats.manualCount }} 条手工记录，其中
         {{ manualStats.diffOverThresholdCount }} 条与自动值差异 &gt; 1%
       </span>
       <Button
@@ -289,7 +289,7 @@ function handleConfirmReset(): void {
               type="checkbox"
               class="h-3.5 w-3.5"
             />
-            自动
+            🤖 自动
           </label>
           <label class="flex items-center gap-1.5 text-sm">
             <input
@@ -297,7 +297,7 @@ function handleConfirmReset(): void {
               type="checkbox"
               class="h-3.5 w-3.5"
             />
-            手工
+            ✋ 手工
           </label>
         </div>
       </div>
@@ -349,9 +349,9 @@ function handleConfirmReset(): void {
                 variant="secondary"
                 class="bg-up-soft text-up"
               >
-                手工
+                ✋ 手工
               </Badge>
-              <Badge v-else variant="outline">自动</Badge>
+              <Badge v-else variant="outline">🤖 自动</Badge>
             </TableCell>
             <TableCell class="text-sm">
               <template v-if="s.source === 'MANUAL'">
