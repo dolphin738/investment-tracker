@@ -425,3 +425,71 @@ Vue 测试覆盖显著优于 React，**无需补测**。
 
 > 注：净值分析页（NavAnalysis，`/analysis/nav`）不在本轮审查范围（用户指定「收益分析页面」= XIRR）；如需可另开附篇。
 
+
+---
+
+# 附篇：净值分析页（Nav Analysis）对齐审查
+
+> 审查日期：2026-08-18（追加）
+> 审查对象：`web/src/pages/nav-analysis.tsx`（React 源，413 行） vs `web-vue/src/modules/analysis/pages/NavAnalysisPage.vue`（Vue 目标，366 行）+ `nav-daily-details.ts`（纯函数抽取）
+> 配套文件：两端 `DimensionSwitcher` / `use-range-preference-sync` / `use-query-data`（useNavSeries/useLatestNav）/ `NavTrendChart` / `MonthlyHeatmap`
+> 方法：MCP 代码图谱索引定位 + 逐区块通读两端源码 + 数据流（维度+指标 → 双查询 → 图表/热力图/明细表）比对 + 纯函数逐字核对 + 测试覆盖对账
+> 性质：**先分析、后实现**（q-1 工作流）。本文仅陈述审查结论，**不含代码改动**。
+
+## 24. 净值分析页总体结论
+
+**web-vue 净值分析页与 web 净值分析页功能 100% 对齐，无功能缺口，无需代码改动。**
+
+- ✅ 逐区块核对（§25 对账表 14 项）全部一致：维度切换 + 指标单选（累计/当年/对比）、当前净值 4 卡摘要、净值趋势双线图（按指标三态标题）、月度收益热力图（独立日维度查询）、每日净值明细表（`computeDailyDetails` 纯函数：每日收益 = Δnav × 前日份额、收益% 数学等价、份额 6 位小数、正红负绿、脚注）。
+- ✅ 测试覆盖 **Vue 更优或对等**：React 仅 `nav-trend-chart.test.tsx`（图表组件）；Vue 有 `chart-options.test.ts`（含 nav option 断言）+ `xirr-analysis-page.test.ts`（页面级，同模块范式）。
+- ⚠️ 仅视觉微调（Vue 优于 React，非缺口）：4 卡与明细表单元格补 `tabular-nums` 等宽数字。**建议保持现状**。
+
+## 25. 逐区块对账表（React ↔ Vue）
+
+| # | 区块/行为 | React | Vue | 结论 |
+|---|---|---|---|---|
+| 1 | 无组合分支 | ✅ | ✅ | 一致 |
+| 2 | 页头「净值分析」+ 说明 | ✅ | ✅ | 一致 |
+| 3 | DimensionSwitcher + 指标单选 RadioGroup（累计/当年/对比） | ✅ | ✅ | 一致（受控 + 交互守卫） |
+| 4 | 维度初始值含 aggregation 偏好（ANL-P0-03） | ✅ | ✅ | 一致 |
+| 5 | 偏好对齐守卫（URL 无参且未交互才对齐） | ✅ | ✅ | 一致 |
+| 6 | toDimensionQueryParams 剥离 quick（防 400） | ✅ | ✅ | 一致 |
+| 7 | series 查询（dimensionParams + metric） | ✅ | ✅ | 一致 |
+| 8 | **daySeries 独立日维度查询**（热力图+明细表技术必需，DAY 硬编码） | ✅ | ✅ | 一致 |
+| 9 | 当前净值 4 卡（累计净值/当年净值/累计收益/当年收益） | ✅ | ✅ | 一致（Vue 补 tabular-nums） |
+| 10 | NavTrendChart（按 metric 三态标题） | ✅ | ✅ | 一致 |
+| 11 | MonthlyHeatmap（dayData） | ✅ | ✅ | 一致 |
+| 12 | computeDailyDetails（升序计算/倒序展示、Δnav×prevShares、收益% diff/prevNav、稀疏日期口径） | ✅ | ✅ | 一致（Vue 抽纯函数文件，逻辑逐字对应） |
+| 13 | 明细表 6 列 + 正红负绿 + 份额 6 位小数 + 脚注 | ✅ | ✅ | 一致（Vue 单元格补 tabular-nums） |
+| 14 | 问题④：未选中指标不下发 null（图表按 metric 注册 series） | ✅ | ✅ | 一致 |
+
+## 26. 差异详情与结论
+
+### 26.1 无功能行为缺口
+
+§25 对账表 14 项全部一致。最易出错的两处均已对齐：
+- **daySeries 独立查询**：每日明细与热力图固定日粒度，两端都独立查询（不随维度粒度变化），且把 `metric` 一并传入。
+- **computeDailyDetails 纯函数**：Vue 抽为独立 `nav-daily-details.ts` 文件（注释含 Part E-8/F10 公式等价性说明），与 React 内联实现逐行对应；`NavMetric` 在 Vue 位于 `lib/types`（React 为 api/types re-export），语义一致。
+
+### 26.2 视觉微调（Vue 优于 React，建议保持）
+
+- 4 卡 `CardTitle` 与明细表全部单元格 Vue 补 `tabular-nums`。React 未加。**非缺口，保持现状即可**。
+
+### 26.3 测试对等性
+
+| 测试 | React | Vue | 结论 |
+|---|---|---|---|
+| 图表组件（nav-trend-chart） | ✅ `nav-trend-chart.test.tsx` | ✅ `chart-options.test.ts` | 对等 |
+| 页面级（分析模块范式） | ❌ | ✅ `xirr-analysis-page.test.ts` 等 | Vue 更优 |
+| computeDailyDetails 纯函数 | （内联，无独立测试） | ❌ 无独立测试 | 两端均无（可选补） |
+
+两端均无 `computeDailyDetails` 独立测试（Vue 已抽纯函数、测试友好），如需可补 1 个纯函数测试文件（P3，非阻塞）。
+
+## 27. 净值分析页验收标准
+
+| 项 | 标准 |
+|---|---|
+| 功能对齐 | 已 100% 对齐，无改动项 |
+| 无回归 | 维持现状即满足（Vue 分析模块测试全绿） |
+| 结论 | **本页无需实现动作，对齐闭环**（computeDailyDetails 单测为可选 P3） |
+
