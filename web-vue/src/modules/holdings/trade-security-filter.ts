@@ -19,8 +19,9 @@ import type { SecurityType } from '@/lib/types';
  * 「买卖明细」板块的标的过滤三态。
  *
  * React 版定义在 features/security-trade/security-trade-list.tsx 并由本模块
- * re-export；Vue 版 security-trade 模块尚未迁移（后续批次），此处先行在本
- * 模块内定义同名契约，后续批次接线时保持字面量联合一致即可。
+ * re-export；Vue 版 security-trade 模块已迁移（modules/security-trade），此处的
+ * 同名契约保留在本模块内以维持 holdings ↔ security-trade 的耦合内聚。
+ * 三态字面量联合须与 security-trade 侧保持一致。
  */
 export type TradeFilterState = 'ready' | 'loading' | 'empty';
 
