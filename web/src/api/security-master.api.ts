@@ -107,9 +107,20 @@ export function getSecurityMasterStats(): Promise<SecurityMasterStats> {
   return http.get<SecurityMasterStats>('/admin/securities/masters/stats');
 }
 
+/** 主数据同步调用的客户端超时（覆盖 axios 实例默认的 30s）。
+ *
+ * 实测 dev 库同步耗时 62s（3 个 MASTER_LIST 接口 + 12k 行 upsert + 自愈去重）。
+ * 30s 超时会让 axios 提前 abort，但后端进程仍在跑且最终会 commit，
+ * 前端却因「网络异常 + 同步失败」两条 toast 误判为失败——属于 30s < 实际耗时。
+ * 180s 给 12k~30k 行留足余量；该同步是手动触发、有明确预期，不是高频热路径。
+ */
+const SYNC_MASTER_TIMEOUT_MS = 180_000;
+
 /** 手动触发主数据全量同步 */
 export function syncSecurityMasters(): Promise<SecurityMasterSyncResult> {
-  return http.post<SecurityMasterSyncResult>('/admin/securities/sync');
+  return http.post<SecurityMasterSyncResult>('/admin/securities/sync', undefined, {
+    timeout: SYNC_MASTER_TIMEOUT_MS,
+  });
 }
 
 /** 批量/单行删除系统级证券主数据（仅管理员；被组合持仓引用的主数据会被跳过） */
