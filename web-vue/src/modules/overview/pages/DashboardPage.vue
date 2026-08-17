@@ -46,6 +46,7 @@ import TableSkeleton from '@/components/common/TableSkeleton.vue';
 import EmptyState from '@/components/common/EmptyState.vue';
 import PageHeader from '@/components/common/PageHeader.vue';
 import CashflowForm from '@/modules/cashflow/components/CashflowForm.vue';
+import SecurityTradeForm from '@/modules/security-trade/components/SecurityTradeForm.vue';
 import { buildOverviewMetrics } from '../features/asset-metrics';
 import {
   createOverviewSchema,
@@ -760,15 +761,12 @@ const summaryList = computed(() => portfolioSummary.data.value ?? []);
           <DialogHeader>
             <DialogTitle>{{ ENTRY_BUTTON_LABELS.securityTrade }}</DialogTitle>
           </DialogHeader>
-          <!--
-            SecurityTradeForm（证券买卖录入表单）属证券买卖批次迁移范围，
-            该批次落地前此处为占位提示，避免空白弹窗。
-          -->
-          <div
-            class="flex min-h-[120px] items-center justify-center text-sm text-muted-foreground"
-          >
-            证券买卖录入表单将在后续批次迁移
-          </div>
+          <!-- SecurityTradeForm：录入买卖流水并维护现价（对齐 React dashboard 用法，
+               success → 关闭弹窗；持仓、净值与收益自动推导） -->
+          <SecurityTradeForm
+            :portfolio-id="currentPortfolioId"
+            @success="tradeOpen = false"
+          />
         </DialogContent>
       </Dialog>
     </template>
