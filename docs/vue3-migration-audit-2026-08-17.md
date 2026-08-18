@@ -41,16 +41,16 @@
 
 ## 3. 规模对比（真实数据）
 
-| 指标 | web (React) | web-vue (Vue3) | 说明 |
-|---|---|---|---|
-| 非测试源文件 | 151 | 247 | Vue 单文件组件 + barrel 拆分，文件更多属正常 |
-| 总行数 | 26,291 | 26,301 | 体量对等，非空壳 |
-| 业务模块行数 | features 10,611 | modules 17,290 | Vue SFC 含模板更冗长；且含页面/组件/组合式全量 |
-| 页面 `.vue/.tsx` | 12 | 12（路由引用） | + 各模块 `pages/` 子目录 |
-| UI 组件 | 19 + 6 图表 | 19 + 6 图表 | 一一对应 |
-| 状态 | 3 zustand | 3 pinia | 直映 |
-| hooks→composables | 22 扁平 hooks | 4 扁平 + 各模块 `composables/` | **重组而非丢失**：逻辑下沉到模块作用域（如 `modules/holdings/composables/use-holdings.ts`、`modules/auth/composables/use-auth.ts`） |
-| 测试文件 | 48 | 51（+9 E2E 例） | 单测 392 例全绿 + Playwright E2E 9 例全绿；对账结论见 §5.1（缺口已关闭） |
+| 指标                | web (React)     | web-vue (Vue3)            | 说明                                                                                                             |
+| ----------------- | --------------- | ------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| 非测试源文件            | 151             | 247                       | Vue 单文件组件 + barrel 拆分，文件更多属正常                                                                                  |
+| 总行数               | 26,291          | 26,301                    | 体量对等，非空壳                                                                                                       |
+| 业务模块行数            | features 10,611 | modules 17,290            | Vue SFC 含模板更冗长；且含页面/组件/组合式全量                                                                                   |
+| 页面 `.vue/.tsx`    | 12              | 12（路由引用）                  | + 各模块 `pages/` 子目录                                                                                             |
+| UI 组件             | 19 + 6 图表       | 19 + 6 图表                 | 一一对应                                                                                                           |
+| 状态                | 3 zustand       | 3 pinia                   | 直映                                                                                                             |
+| hooks→composables | 22 扁平 hooks     | 4 扁平 + 各模块 `composables/` | **重组而非丢失**：逻辑下沉到模块作用域（如 `modules/holdings/composables/use-holdings.ts`、`modules/auth/composables/use-auth.ts`） |
+| 测试文件              | 48              | 51（+9 E2E 例）              | 单测 392 例全绿 + Playwright E2E 9 例全绿；对账结论见 §5.1（缺口已关闭）                                                            |
 
 ---
 
@@ -83,16 +83,16 @@
 
 **已确认无「整模块未迁移」** —— 16 个业务模块均有实质实现。早期报告的类型/测试缺陷**均已解决**；仅以下局部缺口：
 
-| 项 | 类型 | 说明 | 严重度 | 状态 |
-|---|---|---|---|---|
-| `vue-tsc` 12 处类型错误 | 缺陷（已修复） | echarts option 类型 + SnapshotForm `zodToTypedSchema`/字段收窄 | — | ✅ 二次实测 0 错误 |
-| 测试 3 失败用例 | 缺陷（已修复） | portfolio 提交接线 / register 文案 / snapshot 表单 | — | ✅ 二次实测 263 例全绿 |
-| 后端导出接口未实现 | 功能缺口（非 Vue 失败） | `SnapshotsPage` 的 **Gap D**：导出按钮作占位禁用（SET-P0-03 同口径，后端端点未就绪） | 中（前端已正确降级） | ⏸ 待后端，前端已降级 |
-| `holdings/trade-security-filter.ts` 过时注释 | 文档噪音 | 注释曾称「security-trade 模块尚未迁移」，但 `SecurityTradeForm.vue`（651 行）**实际已迁移** | 低 | ✅ 本次已修正注释 |
-| React 残留 import | **无** | 6 处「命中」全部位于注释（如"zustand→pinia 逐行等价"），**零真实 React 运行时依赖** | — | ✅ 确认干净 |
-| 未完成标记 | 噪音 | 9 处「命中」多为「骨架屏/skeleton」组件名与「版面骨架」布局注释，均为真实组件 | — | ✅ 误报 |
-| 测试文件对等 | ✅ 已达成 | React 48 ↔ Vue 48（376 例全绿）；残余 3 个 React 文件指向真实功能缺口，见 §5.1 | — | ✅ 文件对等；§5.1 两项功能缺口单列 |
-| AdminPage chunk 882KB | 构建体积 | vite build 告警（>500KB 阈值），非阻断 | 低 | ⏳ 可后续 `manualChunks` 优化 |
+| 项                                        | 类型             | 说明                                                                    | 严重度        | 状态                      |
+| ---------------------------------------- | -------------- | --------------------------------------------------------------------- | ---------- | ----------------------- |
+| `vue-tsc` 12 处类型错误                       | 缺陷（已修复）        | echarts option 类型 + SnapshotForm `zodToTypedSchema`/字段收窄              | —          | ✅ 二次实测 0 错误             |
+| 测试 3 失败用例                                | 缺陷（已修复）        | portfolio 提交接线 / register 文案 / snapshot 表单                            | —          | ✅ 二次实测 263 例全绿          |
+| 后端导出接口未实现                                | 功能缺口（非 Vue 失败） | `SnapshotsPage` 的 **Gap D**：导出按钮作占位禁用（SET-P0-03 同口径，后端端点未就绪）          | 中（前端已正确降级） | ⏸ 待后端，前端已降级             |
+| `holdings/trade-security-filter.ts` 过时注释 | 文档噪音           | 注释曾称「security-trade 模块尚未迁移」，但 `SecurityTradeForm.vue`（651 行）**实际已迁移** | 低          | ✅ 本次已修正注释               |
+| React 残留 import                          | **无**          | 6 处「命中」全部位于注释（如"zustand→pinia 逐行等价"），**零真实 React 运行时依赖**              | —          | ✅ 确认干净                  |
+| 未完成标记                                    | 噪音             | 9 处「命中」多为「骨架屏/skeleton」组件名与「版面骨架」布局注释，均为真实组件                          | —          | ✅ 误报                    |
+| 测试文件对等                                   | ✅ 已达成          | React 48 ↔ Vue 48（376 例全绿）；残余 3 个 React 文件指向真实功能缺口，见 §5.1             | —          | ✅ 文件对等；§5.1 两项功能缺口单列    |
+| AdminPage chunk 882KB                    | 构建体积           | vite build 告警（>500KB 阈值），非阻断                                          | 低          | ⏳ 可后续 `manualChunks` 优化 |
 
 ### 5.1 React↔Vue 测试逐文件对账（三次实测后）
 
