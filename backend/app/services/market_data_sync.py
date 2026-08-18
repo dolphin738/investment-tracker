@@ -908,7 +908,8 @@ class MarketDataSyncService:
                 continue
             ex = infer_exchange(digits)
             code = _normalize_master_code(digits, ex)
-            ac = infer_security_type(code, ex)
+            # 传名称：混合段场内基金需靠 ETF/LOF/REIT/封闭 等名称标记判定场内
+            ac = infer_security_type(code, ex, s.name or "")
             targets[s] = (code, ex, ac)
 
         # 2) 按目标 (asset_class, 规范code) 分组
@@ -1001,8 +1002,9 @@ class MarketDataSyncService:
             # 落到同一 (asset_class, code) → 命中已存在行 UPDATE 而非追加 → 去重（如 2 个平安银行）；
             code = _normalize_master_code(raw_code, exchange)
             pinyin = _compute_pinyin_initials(name)
-            # 行级资产类别：逐行按代码前缀 + 交易所推断（与持仓 type 同源）
-            asset_class = infer_security_type(code, exchange)
+            # 行级资产类别：逐行按代码前缀 + 交易所 + 名称推断（与持仓 type 同源；
+            # 混合段场内基金需靠名称标记 ETF/LOF/REIT/封闭 判定场内）
+            asset_class = infer_security_type(code, exchange, name)
 
             existing = (
                 await self.session.execute(

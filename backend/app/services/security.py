@@ -34,13 +34,18 @@ from app.services.classification import infer_asset_class
 from app.services.recalculation import RecalculationResult, RecalculationService
 
 
-def infer_security_type(code: str, exchange: Optional[str] = None) -> SecurityType:
-    """按代码前缀 + 交易所推断资产类型（主数据入库 / 组合持仓 type 共用）。
+def infer_security_type(
+    code: str, exchange: Optional[str] = None, name: str = ""
+) -> SecurityType:
+    """按代码前缀 + 交易所 + 名称推断资产类型（主数据入库 / 组合持仓 type 共用）。
 
     规则已统一收敛到 ``app.services.classification.infer_asset_class``（单一事实来源），
     本函数仅作兼容别名，所有分类判断逻辑只在 classification 模块维护一份。
+
+    注意：混合段场内基金（510xxx/500xxx/15xxxxx…）必须传 ``name`` 才能靠
+    ETF/LOF/REIT/封闭 等名称标记判定场内，缺省会误判为场外。
     """
-    return infer_asset_class(code, exchange)
+    return infer_asset_class(code, exchange, name=name)
 
 
 def compute_type(
@@ -59,7 +64,7 @@ def compute_type(
     if master is None:
         master = getattr(holding, "master", None)
     if master is not None:
-        return infer_security_type(master.code, master.exchange)
+        return infer_security_type(master.code, master.exchange, master.name or "")
     return SecurityType.STOCK
 
 
