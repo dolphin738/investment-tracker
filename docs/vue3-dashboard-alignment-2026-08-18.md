@@ -69,7 +69,7 @@
 | 14 | 近期出入金卡（查看全部链接/5 笔/着色/空态+录入按钮） | ✅ | ✅ | 一致 |
 | 15 | 组合表现对比卡（累计收益率 != null 判空/涨跌色/XIRR/空态） | ✅ | ✅ | 一致 |
 | 16 | 录入出入金弹窗（CashflowForm） | ✅ | ✅ | 一致 |
-| 17 | **录入买卖弹窗（SecurityTradeForm）** | ✅ 真实表单 | ⚠️ **占位提示** | **缺口（P1）** |
+| 17 | **录入买卖弹窗（SecurityTradeForm）** | ✅ 真实表单 | ✅ 已挂载真实表单 | 已闭合（2026-08-18，见 §4.1 更新） |
 | 18 | 测试覆盖 | 5 文件 ~40 用例 | 1 文件 4 用例 | **缺口（P2）** |
 
 ---
@@ -77,6 +77,8 @@
 ## 4. 差异详情与对齐方案
 
 ### 4.1 【P1 功能缺口】录入买卖弹窗占位 → 挂载真实 SecurityTradeForm
+
+> ✅ **状态：已闭合（2026-08-18）**。`DashboardPage.vue` 已挂载真实 `SecurityTradeForm`（commit `c21e1cf`），下方为修复前的分析记录，保留备查。
 
 - **现状**：`DashboardPage.vue` 765-771 行渲染「证券买卖录入表单将在后续批次迁移」占位。
 - **事实核查**：Vue `modules/security-trade/components/SecurityTradeForm.vue` **已存在**（651 行，Task #20 后已被 `SecurityTradeList.vue` 编辑弹窗使用）；接口 `defineProps<{ portfolioId: string }>` + `defineEmits<{ success: [] }>`，与 React `SecurityTradeForm portfolioId onSuccess` 用法完全兼容。
@@ -582,21 +584,21 @@ React `settings-default-date-range.test.tsx` 锁死的 3 例 Vue 无对等：
 
 ## 33. 逐区块对账表（React ↔ Vue）
 
-| # | 区块/行为 | React | Vue | 结论 |
-|---|---|---|---|---|
-| 1 | AdminPage：3 模块注册表 + localStorage 持久化 + 非管理员守卫 | ✅ | ✅ | 一致 |
-| 2 | 提供方列表：HTTPS / SDK 分区 + 接入方式列 + 状态 Badge | ✅ | ✅ | 一致 |
-| 3 | 提供方行操作：停用/启用（title 语义一致）+ 编辑 + 删除 | ✅ | ✅ | 一致（「设为默认/切换当前」两端均未实现，注释过时） |
-| 4 | 提供方展开区：接口子表（按分类分组）+ 新增/编辑/删除接口 | ✅ | ✅ | 一致（Vue `ProviderInterfaces.vue`） |
-| 5 | 接口内联开关（即时 mutation 切换 enabled） | ✅ | ✅ | 一致（Vue `InterfaceEnabledSwitch.vue`） |
-| 6 | 顶层「按分类汇总所有提供方接口」总览 | ✅ | ✅ | 一致（Vue `InterfacesByCategoryOverview` + `OverviewCategoryGroup`） |
-| 7 | **拖拽排序（B15 · ADR-002 优先级链 priority=index）** | ✅ DndContext+SortableContext | ✅ vue-draggable-plus + reorder.ts 同算法 | 一致 |
-| 8 | QuoteProviderDialog / QuoteInterfaceDialog（字段含 timeout/retry_count/rate_limit 韧性三件套 + params 键值对增删）/ InterfaceCategoryDialog | ✅ | ✅ | 一致 |
-| 9 | 接口分类管理（分类 CRUD + DynamicIcon 动态图标，Task #18 已改懒加载） | ✅ | ✅ | 一致 |
-| 10 | 股票列表和测试：左 StockListPanel（系统级主数据只读/搜索/分页/批量单行删除） | ✅ | ✅ | 一致 |
-| 11 | 右 MasterStatsPanel（同步来源+按类别分布）+ InterfaceTestPanel（接口测试面板） | ✅ | ✅ | 一致 |
-| 12 | 同步来源持久化 SYNC_SOURCE_KEY（同步按钮与统计块共享） | ✅ | ✅ | 一致 |
-| 13 | 测试覆盖 | ✅ 4 文件 | ⚠️ 1 文件（reorder.test.ts） | **缺口（P2 可选）** |
+| #   | 区块/行为                                                                                                                        | React                        | Vue                                   | 结论                                                               |
+| --- | ---------------------------------------------------------------------------------------------------------------------------- | ---------------------------- | ------------------------------------- | ---------------------------------------------------------------- |
+| 1   | AdminPage：3 模块注册表 + localStorage 持久化 + 非管理员守卫                                                                                | ✅                            | ✅                                     | 一致                                                               |
+| 2   | 提供方列表：HTTPS / SDK 分区 + 接入方式列 + 状态 Badge                                                                                      | ✅                            | ✅                                     | 一致                                                               |
+| 3   | 提供方行操作：停用/启用（title 语义一致）+ 编辑 + 删除                                                                                            | ✅                            | ✅                                     | 一致（「设为默认/切换当前」两端均未实现，注释过时）                                       |
+| 4   | 提供方展开区：接口子表（按分类分组）+ 新增/编辑/删除接口                                                                                               | ✅                            | ✅                                     | 一致（Vue `ProviderInterfaces.vue`）                                 |
+| 5   | 接口内联开关（即时 mutation 切换 enabled）                                                                                               | ✅                            | ✅                                     | 一致（Vue `InterfaceEnabledSwitch.vue`）                             |
+| 6   | 顶层「按分类汇总所有提供方接口」总览                                                                                                           | ✅                            | ✅                                     | 一致（Vue `InterfacesByCategoryOverview` + `OverviewCategoryGroup`） |
+| 7   | **拖拽排序（B15 · ADR-002 优先级链 priority=index）**                                                                                  | ✅ DndContext+SortableContext | ✅ vue-draggable-plus + reorder.ts 同算法 | 一致                                                               |
+| 8   | QuoteProviderDialog / QuoteInterfaceDialog（字段含 timeout/retry_count/rate_limit 韧性三件套 + params 键值对增删）/ InterfaceCategoryDialog | ✅                            | ✅                                     | 一致                                                               |
+| 9   | 接口分类管理（分类 CRUD + DynamicIcon 动态图标，Task #18 已改懒加载）                                                                            | ✅                            | ✅                                     | 一致                                                               |
+| 10  | 股票列表和测试：左 StockListPanel（系统级主数据只读/搜索/分页/批量单行删除）                                                                              | ✅                            | ✅                                     | 一致                                                               |
+| 11  | 右 MasterStatsPanel（同步来源+按类别分布）+ InterfaceTestPanel（接口测试面板）                                                                   | ✅                            | ✅                                     | 一致                                                               |
+| 12  | 同步来源持久化 SYNC_SOURCE_KEY（同步按钮与统计块共享）                                                                                          | ✅                            | ✅                                     | 一致                                                               |
+| 13  | 测试覆盖                                                                                                                         | ✅ 4 文件                       | ⚠️ 1 文件（reorder.test.ts）              | **缺口（P2 可选）**                                                    |
 
 ## 34. 差异详情与结论
 
