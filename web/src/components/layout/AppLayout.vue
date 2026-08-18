@@ -7,7 +7,7 @@
  *
  * B3 批次：补全组合切换器（PortfolioSelector）与新建组合对话框（PortfolioDialog）。
  * B4 批次：受保护路由内挂 PreferenceBootstrap（服务端偏好引导加载 + 默认组合生效）。
- * 通知铃 / 路由持久化属后续批次，此处不占位。
+ * B6 批次：通知铃（管理面行情同步告警，仅 admin 显示）已接线；路由持久化属后续批次。
  */
 
 import { onBeforeUnmount, onMounted, ref } from 'vue';
@@ -24,6 +24,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import UserAvatar from '@/components/common/UserAvatar.vue';
 import Sidebar from './Sidebar.vue';
+import NotificationBell from '@/modules/admin/components/NotificationBell.vue';
 import PortfolioSelector from '@/modules/portfolio/components/PortfolioSelector.vue';
 import PortfolioDialog from '@/modules/portfolio/components/PortfolioDialog.vue';
 import PreferenceBootstrap from '@/modules/overview/components/PreferenceBootstrap.vue';
@@ -96,6 +97,9 @@ function handleLogout(): void {
           <CalendarDays class="h-3.5 w-3.5" />
           {{ now }}
         </span>
+
+        <!-- 管理面站内信通知铃（仅 admin 可见） -->
+        <NotificationBell v-if="isAdmin" />
 
         <!-- 组合切换器（含「新建组合」内联入口） -->
         <PortfolioSelector :on-create-click="() => (portfolioDialogOpen = true)" />
