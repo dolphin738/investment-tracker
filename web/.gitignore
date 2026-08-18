@@ -19,7 +19,12 @@ coverage/
 # 环境变量（真实凭据勿提交）
 .env
 .env.*
-!.env.example# Playwright 产物（E2E 报告/失败痕迹）
+!.env.example
+
+# Vite/Vitest 运行期临时残留（含沙箱 crash 场景）
+_tmp_*
+
+# Playwright 产物（E2E 报告/失败痕迹）
 test-results/
 playwright-report/
 blob-report/

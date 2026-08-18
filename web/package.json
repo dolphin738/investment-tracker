@@ -1,5 +1,5 @@
 {
-  "name": "@investment-tracker/web-vue",
+  "name": "@investment-tracker/web",
   "version": "1.0.0",
   "private": true,
   "type": "module",

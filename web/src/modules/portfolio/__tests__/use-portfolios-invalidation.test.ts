@@ -10,7 +10,7 @@
  * 3. 归档/删除的是当前选中组合 → 立即清空 portfolio store 当前选择；
  *    非当前组合 → 选择保持不变
  *
- * 该组合式在 web-vue 中**已完整实现**（modules/portfolio/composables/use-portfolios.ts），
+ * 该组合式在 web 中**已完整实现**（modules/portfolio/composables/use-portfolios.ts），
  * 本测试为功能缺口复核后的契约补强，与 React 测试逐条对齐。
  */
 

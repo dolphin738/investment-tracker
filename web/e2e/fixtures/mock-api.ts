@@ -3,7 +3,7 @@
  *
  * 拦截浏览器发出的全部 `/api/**` 请求并按「方法 + 路径」返回 fixture JSON，
  * 使 E2E 验收完全不依赖真实后端 / 数据库：
- * - 数据契约对齐 web-vue/src/api/types.ts（字段名/类型与生成 schema 一致）；
+ * - 数据契约对齐 web/src/api/types.ts（字段名/类型与生成 schema 一致）；
  * - 金额一律字符串（后端 NUMERIC 序列化约定），缺失字段 formatCurrency 返回 '-'
  *   不会崩溃，故 fixture 只保证「被页面消费的字段」完整。
  *
