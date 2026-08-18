@@ -164,6 +164,17 @@ const { data: securities, isLoading: secLoading } = useSecurities(props.portfoli
 const today = toIsoDate(new Date());
 const submitting = ref(false);
 const currentSecurityType = ref<SecurityType | null>(null);
+/**
+ * 当前选中标的的展示元数据（编辑错位标的修复）：resolve 成功后缓存选中主数据的
+ * name/code/type，使「当前标的不在组合证券字典内」时也能正确回显名称与资产类型，
+ * 不再停滞在「加载中 / 已不在可选列表」。
+ */
+const resolvedSecurity = ref<{
+  id: string;
+  name: string;
+  code: string;
+  type: SecurityType;
+} | null>(null);
 
 const {
   handleSubmit,
@@ -204,8 +215,9 @@ const [noteModel, noteAttrs] = defineField('note');
 watch(
   () => props.trade,
   (trade) => {
-    // 切换记录时清掉手动覆盖的类型,交由下方推导 watch 重新带出
+    // 切换记录时清掉手动覆盖的类型与缓存元数据,交由下方推导 watch 重新带出
     currentSecurityType.value = null;
+    resolvedSecurity.value = null;
     if (trade) {
       const feeTotal = Number(trade.feeTotal);
       const baseAmount = Number(trade.quantity) * Number(trade.costPrice);
@@ -256,21 +268,29 @@ const selectedSecurityId = computed(
 /**
  * 资产类型首帧推导:编辑态 / 异步加载完成后,从标的列表推导当前资产类型;
  * 仅在尚未被手动覆盖(currentSecurityType 为 null)时推导。
+ * 组合字典未命中时回退到 resolve 缓存元数据(resolvedSecurity),避免「加载中」停滞。
  */
 watch(
-  [securities, selectedSecurityId, currentSecurityType],
+  [securities, selectedSecurityId, currentSecurityType, resolvedSecurity],
   () => {
     if (currentSecurityType.value || !selectedSecurityId.value) return;
     const found = (securities.value ?? []).find(
       (s) => s.id === selectedSecurityId.value,
     );
-    if (found?.type) currentSecurityType.value = found.type as SecurityType;
+    if (found?.type) {
+      currentSecurityType.value = found.type as SecurityType;
+      return;
+    }
+    if (resolvedSecurity.value?.id === selectedSecurityId.value) {
+      currentSecurityType.value = resolvedSecurity.value.type;
+    }
   },
 );
 
 /**
  * 当前选中标的的展示文本(编辑态回显,INC-02 保底语义):
  * - 列表已到且含当前标的 → 名称(代码)
+ * - resolve 缓存的选中元数据命中 → 名称(代码)（标的不在组合字典也能正常显示）
  * - 列表未到 → 当前标的(加载中…)
  * - 列表已到但当前标的不在 → 当前标的(已不在可选列表)
  */
@@ -280,6 +300,9 @@ const selectedSecurityLabel = computed(() => {
     (s) => s.id === selectedSecurityId.value,
   );
   if (found) return `${found.name}（${found.code}）`;
+  if (resolvedSecurity.value?.id === selectedSecurityId.value) {
+    return `${resolvedSecurity.value.name}（${resolvedSecurity.value.code}）`;
+  }
   return secLoading.value ? '当前标的（加载中…）' : '当前标的（已不在可选列表）';
 });
 
@@ -289,8 +312,14 @@ const resolveSecurityMutation = useMutation({
     resolveSecurity(props.portfolioId, { masterId }),
   onSuccess: (res) => {
     securityIdModel.value = res.id;
-    // 记录当前证券的类型(后端由代码前缀推断),供手动修改使用
+    // 记录当前证券的类型(后端由代码前缀推断)与展示元数据,供手动修改/错位标回显使用
     currentSecurityType.value = res.type as SecurityType;
+    resolvedSecurity.value = {
+      id: res.id,
+      name: res.name,
+      code: res.code,
+      type: res.type as SecurityType,
+    };
   },
 });
 
@@ -301,6 +330,7 @@ function handleSelectMaster(master: { id: string }): void {
 function handleClear(): void {
   securityIdModel.value = '';
   currentSecurityType.value = null;
+  resolvedSecurity.value = null;
 }
 
 /** 手动修改资产类型 */
@@ -499,7 +529,15 @@ const onSubmit = handleSubmit((values) => {
           :disabled="!selectedSecurityId || updateSecurityPending"
         >
           <SelectTrigger id="st-security-type">
-            <SelectValue :placeholder="selectedSecurityId ? '加载中…' : '请先选择标的'" />
+            <SelectValue
+              :placeholder="
+                selectedSecurityId
+                  ? secLoading
+                    ? '加载中…'
+                    : '无法推断类型'
+                  : '请先选择标的'
+              "
+            />
           </SelectTrigger>
           <SelectContent>
             <SelectItem
