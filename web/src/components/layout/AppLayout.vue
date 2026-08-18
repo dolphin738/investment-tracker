@@ -28,7 +28,7 @@ import PortfolioSelector from '@/modules/portfolio/components/PortfolioSelector.
 import PortfolioDialog from '@/modules/portfolio/components/PortfolioDialog.vue';
 import PreferenceBootstrap from '@/modules/overview/components/PreferenceBootstrap.vue';
 import { useAuthStore, useIsAdmin } from '@/stores/auth.store';
-import { ROUTE_PATH, nowInAppTzIso } from '@/lib/constants';
+import { APP_NAME, ROUTE_PATH, nowInAppTzIso } from '@/lib/constants';
 
 /**
  * BaselineClock — 顶栏「项目基准时间」实时时钟。
@@ -84,7 +84,7 @@ function handleLogout(): void {
           <Menu v-else class="h-5 w-5" />
         </Button>
         <div class="flex items-center gap-2">
-          <span class="text-lg font-bold tracking-tight">投资收益统计</span>
+          <span class="text-lg font-bold tracking-tight">{{ APP_NAME }}</span>
         </div>
       </div>
 
@@ -166,7 +166,7 @@ function handleLogout(): void {
       </div>
 
       <!-- 主内容区（PreferenceBootstrap：首屏引导加载服务端偏好 + 默认组合生效） -->
-      <main class="flex-1 overflow-x-hidden p-4 md:p-6">
+      <main class="mx-auto w-full max-w-[1440px] flex-1 overflow-x-hidden p-4 md:p-6">
         <PreferenceBootstrap>
           <RouterView />
         </PreferenceBootstrap>

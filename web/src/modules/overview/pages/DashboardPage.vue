@@ -21,6 +21,7 @@
  */
 
 import { computed, ref } from 'vue';
+import { ROUTE_PATH } from '@/lib/constants';
 import { RouterLink } from 'vue-router';
 import { ArrowUpFromLine, ArrowLeftRight, Plus } from 'lucide-vue-next';
 import { useQuery } from '@tanstack/vue-query';
@@ -610,7 +611,7 @@ const summaryList = computed(() => portfolioSummary.data.value ?? []);
               <!-- DASH-P0-05：跳转出入金页查看完整流水 -->
               <div class="flex items-center gap-3">
                 <RouterLink
-                  to="/cashflows"
+                  :to="ROUTE_PATH.TRANSACTIONS"
                   class="text-xs text-muted-foreground hover:underline"
                 >
                   查看全部

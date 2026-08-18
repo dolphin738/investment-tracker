@@ -446,6 +446,8 @@ const onSubmit = handleSubmit((values) => {
 <template>
   <form @submit="onSubmit">
     <div class="space-y-4">
+      <div class="border-t border-border pt-4 text-sm font-semibold">基本信息</div>
+
       <!-- 方向 -->
       <div class="space-y-2">
         <Label for="st-side">方向 *</Label>
@@ -515,6 +517,8 @@ const onSubmit = handleSubmit((values) => {
           更新中...
         </p>
       </div>
+
+      <div class="border-t border-border pt-4 text-sm font-semibold">数量与成交</div>
 
       <!-- 数量 -->
       <div class="space-y-2">
@@ -620,6 +624,8 @@ const onSubmit = handleSubmit((values) => {
           </span>
         </div>
       </div>
+
+      <div class="border-t border-border pt-4 text-sm font-semibold">备注</div>
 
       <!-- 备注 -->
       <div class="space-y-2">

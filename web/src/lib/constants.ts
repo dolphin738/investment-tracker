@@ -9,6 +9,9 @@
 
 import { ExportType } from '@/lib/types';
 
+// ===== 系统名称（全站统一，维护此处即可）=====
+export const APP_NAME = '投资收益统计系统';
+
 // ===== API 路径前缀 =====
 export const API_PREFIX = '/api';
 export const API_BASE_URL = '/api';
@@ -71,7 +74,7 @@ export const EXPORT_TYPE_OPTIONS = [
   { value: ExportType.CASH_FLOWS, label: '出入金流水' },
   { value: ExportType.CASH_BALANCES, label: '现金余额记录' },
   { value: ExportType.SECURITY_PRICES, label: '证券价格记录' },
-  { value: ExportType.ASSET_SNAPSHOTS, label: '资产快照' },
+  { value: ExportType.ASSET_SNAPSHOTS, label: '资产记录' },
   { value: ExportType.NAV_SERIES, label: '净值序列' },
 ] as const;
 

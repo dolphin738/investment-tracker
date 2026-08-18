@@ -79,12 +79,12 @@ function handleEdit(item: AssetSnapshot): void {
   <div v-else class="space-y-6">
     <div class="flex flex-wrap items-center justify-between gap-3">
       <div>
-        <h1 class="text-2xl font-bold tracking-tight">历史总资产记录</h1>
+        <h1 class="text-2xl font-bold tracking-tight">资产记录</h1>
         <p class="text-sm text-muted-foreground">
-          🤖 默认由系统每日自动记录；✋ 您也可手工补录或修正某日数值
+          默认由系统每日自动记录，您也可手工补录或修正某日数值
         </p>
         <p class="text-sm text-muted-foreground">
-          ⓘ 每天只保留一条记录：手工记录会取代当天的自动记录
+          每天只保留一条记录：手工记录会取代当天的自动记录
         </p>
       </div>
       <div class="flex items-center gap-2">
@@ -117,7 +117,7 @@ function handleEdit(item: AssetSnapshot): void {
       <CardHeader>
         <CardTitle class="text-base">历史记录</CardTitle>
         <CardDescription>
-          来源 🤖自动 = 系统按交易/余额推导；✋手工 = 用户录入（可重置）
+          来源自动 = 系统按交易/余额推导；手工 = 用户录入（可重置）
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -133,12 +133,12 @@ function handleEdit(item: AssetSnapshot): void {
     <div
       class="space-y-1 rounded-md border border-border bg-card px-4 py-3 text-xs text-muted-foreground"
     >
-      <p>ⓘ「沿用」= 当日无价格/现金更新，按前值沿用</p>
-      <p>ⓘ「按成本」= 存在无价格记录的标的，按成本价估值</p>
-      <p>ⓘ 每天唯一一条记录；手工录入会取代该日自动记录</p>
-      <p>✎ = 编辑该日记录（保存后该日变为手工记录）</p>
-      <p>🗑 = 删除该日记录（事件日会被系统重新生成自动值）</p>
-      <p>↺ = 撤销手工修改、恢复系统计算值（仅手工记录可用）</p>
+      <p>「沿用」= 当日无价格/现金更新，按前值沿用</p>
+      <p>「按成本」= 存在无价格记录的标的，按成本价估值</p>
+      <p>每天唯一一条记录；手工录入会取代该日自动记录</p>
+      <p>「编辑」= 修改该日记录（保存后该日变为手工记录）</p>
+      <p>「删除」= 删除该日记录（事件日会被系统重新生成自动值）</p>
+      <p>「撤销」= 撤销手工修改、恢复系统计算值（仅手工记录可用）</p>
     </div>
 
     <!-- 新建弹窗 -->
