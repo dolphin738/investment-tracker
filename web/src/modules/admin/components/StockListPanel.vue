@@ -335,7 +335,7 @@ function formatExchangeCode(code: string): string {
           删除({{ selectAll ? total : selectedIds.size }})
         </Button>
         <Button
-          v-if="isAdmin && !selectAll && total > PAGE_SIZE"
+          v-if="isAdmin && !selectAll"
           variant="link"
           size="sm"
           data-testid="select-all-pages"
