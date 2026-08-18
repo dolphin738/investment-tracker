@@ -15,15 +15,17 @@
  * 5. 持仓专属折叠区：类型多选 + 显示已清仓开关（可折叠避免卡片过重）
  *
  * 纯受控组件：状态由 useUrlState 持有（URL query 持久化），本组件只负责渲染 + change 回调。
- * 零新依赖：多选下拉沿用自绘 checkbox 面板范式。
+ * 证券筛选复用 SecuritySearchCombobox 的「全市场主数据搜索」范式：按 code 映射到本组合
+ * 已有持仓标的 id 后多选（无新增/绑定副作用），已选项以标签展示可移除。
  */
 import { computed, ref } from 'vue';
-import { Check, ChevronDown, Filter } from 'lucide-vue-next';
+import { Check, ChevronDown, Filter, X } from 'lucide-vue-next';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { SearchInput } from '@/components/ui/search-input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+import SecuritySearchCombobox from '@/components/common/SecuritySearchCombobox.vue';
+import { toast } from '@/composables/use-toast';
 import {
   Select,
   SelectContent,
@@ -58,23 +60,9 @@ const emit = defineEmits<{
   change: [patch: Partial<HoldingsFilterState>];
 }>();
 
-const secOpen = ref(false);
-const secQuery = ref('');
 const typesOpen = ref(false);
 const holdingsOpen = ref(false);
 const maxDate = todayInAppTzIso();
-
-// 证券筛选：文本框模糊匹配（code/name，覆盖所有标的类型，I-05 升级）
-const q = computed(() => secQuery.value.trim().toLowerCase());
-const filteredSecurities = computed(() =>
-  q.value
-    ? props.securities.filter(
-        (s) =>
-          s.name.toLowerCase().includes(q.value) ||
-          s.code.toLowerCase().includes(q.value),
-      )
-    : props.securities,
-);
 
 // 起止日期回显：range=custom 用 from/to；否则按快捷项解析（含「全部」以 baseDate 为起点）
 const displayRange = computed(() =>
@@ -85,11 +73,10 @@ const displayRange = computed(() =>
       }),
 );
 
-/** 证券搜索输入：同步过滤词并展开面板（对齐 React 版 onChange 里 setSecOpen(true)） */
-function onSecQueryInput(v: string | number): void {
-  secQuery.value = String(v);
-  secOpen.value = true;
-}
+/** 已选证券（用于标签展示与移除） */
+const selectedSecurities = computed(() =>
+  props.securities.filter((s) => props.value.sec.includes(s.id)),
+);
 
 function toggleSecurity(id: string): void {
   const next = props.value.sec.includes(id)
@@ -98,21 +85,28 @@ function toggleSecurity(id: string): void {
   emit('change', { sec: next });
 }
 
+function removeSecurity(id: string): void {
+  emit('change', { sec: props.value.sec.filter((s) => s !== id) });
+}
+
+/**
+ * 全市场主数据搜索选中后，按 code 映射到本组合已有持仓标的 id 再筛选（多选）。
+ * 未命中（该标的不在本组合）仅提示，不写入/新增组合，避免静默产生「新增/绑定标的」副作用。
+ */
+function handleSelectMaster(master: { code: string }): void {
+  const matched = props.securities.find((s) => s.code === master.code);
+  if (!matched) {
+    toast.warning('该标的不在本组合持仓中，未加入筛选');
+    return;
+  }
+  toggleSecurity(matched.id);
+}
+
 function toggleType(t: SecurityType): void {
   const next = props.value.types.includes(t)
     ? props.value.types.filter((x) => x !== t)
     : [...props.value.types, t];
   emit('change', { types: next });
-}
-
-/**
- * 证券面板延迟关闭（120ms）：给面板项 click 留出触发窗口，
- * 面板项 mousedown.prevent 已保持输入框焦点，与 React 版 onBlur 行为一致。
- */
-function scheduleCloseSecPanel(): void {
-  window.setTimeout(() => {
-    secOpen.value = false;
-  }, 120);
 }
 
 /** 快捷范围 / 自定义起止变更：快捷项写 range 并清空 from/to；手动改日期写 custom */
@@ -173,58 +167,40 @@ function handleRangeChange(r: {
       </div>
 
       <!--
-        ③ 证券：文本框模糊匹配（code/name，覆盖全部标的类型；多选保持 sec=ID 契约）。
-        面板开合：容器 focusin 展开输入获焦；focusout（blur 不冒泡，focusout 冒泡）
-        延迟 120ms 关面板，面板项 mousedown.prevent 保持输入框焦点，
-        与 React 版 onFocus/onBlur 行为一致。
+        ③ 证券：与「证券主数据搜索栏」一致的搜索式选定（多选）。
+        搜索全市场主数据（提供方），选中后按 code 映射到本组合已有持仓标的 id 写入 sec；
+        已选项以标签展示、可移除。未命中本组合的标的不写入（无新增/绑定副作用）。
       -->
-      <div
-        class="relative space-y-1.5"
-        @focusin="secOpen = true"
-        @focusout="scheduleCloseSecPanel"
-      >
+      <div class="space-y-1.5">
         <Label class="text-xs text-muted-foreground">证券</Label>
-        <SearchInput
-          :model-value="secQuery"
-          type="text"
-          :placeholder="
-            value.sec.length === 0 ? '搜索代码或名称' : `已选 ${value.sec.length} 项`
-          "
-          class="w-[180px]"
-          @update:model-value="onSecQueryInput"
-          @clear="secQuery = ''"
-        />
+        <div class="w-[240px]">
+          <SecuritySearchCombobox
+            id="holdings-sec-filter"
+            :value="value.sec.length > 0 ? `已选 ${value.sec.length} 项` : ''"
+            placeholder="搜索代码 / 名称（全市场）"
+            @select="handleSelectMaster"
+            @clear="emit('change', { sec: [] })"
+          />
+        </div>
         <div
-          v-if="secOpen"
-          class="absolute z-20 mt-1 max-h-60 w-[240px] overflow-auto rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md"
+          v-if="selectedSecurities.length > 0"
+          class="flex max-w-[280px] flex-wrap gap-1 pt-0.5"
         >
-          <p
-            v-if="filteredSecurities.length === 0"
-            class="px-2 py-2 text-xs text-muted-foreground"
+          <span
+            v-for="s in selectedSecurities"
+            :key="s.id"
+            class="inline-flex max-w-full items-center gap-1 rounded border border-border bg-muted/40 px-1.5 py-0.5 text-xs"
           >
-            无匹配标的
-          </p>
-          <label
-            v-for="sec in filteredSecurities"
-            :key="sec.id"
-            class="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-muted"
-            @mousedown.prevent
-          >
-            <input
-              type="checkbox"
-              :checked="value.sec.includes(sec.id)"
-              class="h-3.5 w-3.5 accent-primary"
-              @change="toggleSecurity(sec.id)"
-            />
-            <span class="flex-1 truncate">
-              {{ sec.name }}
-              <span class="ml-1 text-xs text-muted-foreground">{{ sec.code }}</span>
-            </span>
-            <Check
-              v-if="value.sec.includes(sec.id)"
-              class="h-3.5 w-3.5 text-primary"
-            />
-          </label>
+            <span class="truncate">{{ s.name }}</span>
+            <button
+              type="button"
+              class="shrink-0 text-muted-foreground hover:text-foreground"
+              :aria-label="`移除 ${s.name}`"
+              @click="removeSecurity(s.id)"
+            >
+              <X class="h-3 w-3" />
+            </button>
+          </span>
         </div>
       </div>
 

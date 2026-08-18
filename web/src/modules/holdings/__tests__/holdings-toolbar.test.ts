@@ -16,10 +16,26 @@
 import { describe, expect, it, vi } from 'vitest';
 import { mount } from '@vue/test-utils';
 import { defineComponent, h, nextTick } from 'vue';
+import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query';
+import { createPinia } from 'pinia';
 import HoldingsToolbar from '../components/HoldingsToolbar.vue';
+import SecuritySearchCombobox from '@/components/common/SecuritySearchCombobox.vue';
 import { SecurityType } from '@/lib/types';
 import type { HoldingsFilterState } from '../query-params';
 import type { Security } from '@/api/types';
+
+vi.mock('vue-sonner', () => ({
+  toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() },
+}));
+
+vi.mock('@/api/security-master.api', () => ({
+  listSecurityMasters: vi.fn().mockResolvedValue({
+    items: [],
+    total: 0,
+    page: 1,
+    pageSize: 20,
+  }),
+}));
 
 // reka-ui Select 的原生替身：Select 收集 slot 中的 option 值并转发 update:model-value
 vi.mock('@/components/ui/select', async () => {
@@ -113,6 +129,9 @@ const BASE_STATE: HoldingsFilterState = {
 /** 挂载受控工具栏，返回 wrapper 与 change 侦测（onXxx 形式挂事件监听） */
 function mountToolbar(overrides: Partial<HoldingsFilterState> = {}) {
   const onChange = vi.fn();
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
   const wrapper = mount(HoldingsToolbar, {
     props: {
       value: { ...BASE_STATE, ...overrides },
@@ -120,6 +139,9 @@ function mountToolbar(overrides: Partial<HoldingsFilterState> = {}) {
       allRangeStart: '2024-01-01',
       securities: SECURITIES,
       onChange,
+    },
+    global: {
+      plugins: [[VueQueryPlugin, { queryClient }], createPinia()],
     },
   });
   return { wrapper, onChange };
@@ -165,21 +187,28 @@ describe('HoldingsToolbar 统一筛选器', () => {
     expect(onChange).toHaveBeenCalledWith({ date: '2026-05-01' });
   });
 
-  it('证券多选：输入过滤 + 勾选 → change({ sec })', async () => {
+  it('证券：主数据搜索选中 → 按 code 映射并加入 sec（多选），标签可移除', async () => {
     const { wrapper, onChange } = mountToolbar();
-    // 证券搜索框（text 输入，位于 as-of 之后）
-    const search = wrapper.find('input[type="text"]');
-    await search.setValue('乙');
+    const combobox = wrapper.findComponent(SecuritySearchCombobox);
+    expect(combobox.exists()).toBe(true);
+    // 模拟选中全市场主数据（code=000002，对应组合内已持仓 s-b）
+    combobox.vm.$emit('select', { id: 'm-2', code: '000002', name: '乙基金' });
     await nextTick();
-    // 过滤后面板仅显示乙基金
-    const panel = wrapper.find('[data-testid="holdings-unified-filter"]');
-    expect(panel.text()).toContain('乙基金');
-    expect(panel.text()).not.toContain('甲股票');
-    // 勾选乙基金
-    const box = wrapper.find('input[type="checkbox"]');
-    expect((box.element as HTMLInputElement).value).toBe('on');
-    await box.trigger('change');
     expect(onChange).toHaveBeenCalledWith({ sec: ['s-b'] });
+    // 已选项渲染为标签，点击移除按钮 → sec 清空
+    // （纯受控组件：emit 后父级回灌 value 才会渲染标签）
+    onChange.mockClear();
+    await wrapper.setProps({ value: { ...BASE_STATE, sec: ['s-b'] } });
+    const removeBtn = wrapper.find('button[aria-label="移除 乙基金"]');
+    expect(removeBtn.exists()).toBe(true);
+    await removeBtn.trigger('click');
+    await nextTick();
+    expect(onChange).toHaveBeenCalledWith({ sec: [] });
+    // 清空按钮 → change({ sec: [] })
+    onChange.mockClear();
+    combobox.vm.$emit('clear');
+    await nextTick();
+    expect(onChange).toHaveBeenCalledWith({ sec: [] });
   });
 
   it('场景下拉 → change({ scenario })', async () => {
