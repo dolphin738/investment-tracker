@@ -4,14 +4,17 @@
 #
 # 关键点：前端 API 地址为相对路径 /api，与后端同源，故单进程即可同时
 # 提供 /api 与前端资源，深链刷新由后端 catch-all 路由回退 index.html。
+#
+# 前端：web/ = Vue 3 正式版（Vite + Vue 3 + Tailwind 3 + shadcn-vue）。
+# 2026-08-18 正式切换：React 版已删除，web/ 为唯一前端目录。
 
 # ---- 阶段 1：前端构建 ----
 FROM node:22-alpine AS frontend
 WORKDIR /web
-# 启用 pnpm（与 web/pnpm-lock.yaml 一致）
+# 启用 pnpm（与 web/pnpm-lock.yaml 一致；web 为独立 pnpm workspace）
 RUN corepack enable
 # 仅复制依赖清单以利用层缓存
-COPY web/package.json web/pnpm-lock.yaml ./
+COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 COPY web/ ./
 RUN pnpm build
