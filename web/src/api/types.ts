@@ -515,7 +515,7 @@ export interface OverviewResponse {
   latestDate: string;
   /**
    * 最新总资产快照来源（Q-2 乙 · 后端 overview.service 已透出）：
-   * 'MANUAL' = 手工录入（概览页展示「✋手工」徽标）/ 'DERIVED' = 系统派生 / null = 尚无快照。
+   * 'MANUAL' = 手工录入（概览页展示「手工」徽标）/ 'DERIVED' = 系统派生 / null = 尚无快照。
    *
    * 声明为可选：兼容尚未升级的后端（运行时 undefined），前端一律用 `=== 'MANUAL'` 判定。
    */

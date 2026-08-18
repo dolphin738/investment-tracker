@@ -346,9 +346,9 @@ function handleDeleteDialogOpenChange(o: boolean): void {
           </Table>
         </div>
         <p class="mt-3 space-y-1 text-xs text-muted-foreground">
-          ⓘ 点击组合名称可切换当前组合并跳转概览；右侧操作列可设为默认 / 编辑 / 归档 / 删除
+          点击组合名称可切换当前组合并跳转概览；右侧操作列可设为默认 / 编辑 / 归档 / 删除
           <br />
-          ⓘ ★ 设为默认：登录后自动选中该组合（写入偏好 defaultPortfolioId）；已归档组合不能设为默认
+          <Star class="mr-0.5 inline h-3 w-3 text-amber-500" /> 设为默认：登录后自动选中该组合（写入偏好 defaultPortfolioId）；已归档组合不能设为默认
         </p>
       </template>
       <div v-else class="py-8 text-center text-sm text-muted-foreground">

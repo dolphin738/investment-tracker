@@ -120,9 +120,9 @@ const missingAssetCount = computed(() => {
         </div>
         <div class="mt-4 space-y-1 text-xs text-muted-foreground">
           <p v-if="missingAssetCount > 0">
-            ⓘ {{ missingAssetCount }} 个组合暂无总资产记录，未计入合计
+            {{ missingAssetCount }} 个组合暂无总资产记录，未计入合计
           </p>
-          <p>ⓘ 仅做金额类求和；不做跨组合合计 XIRR / 合计净值（Q-07）</p>
+          <p>仅做金额类求和；不做跨组合合计 XIRR / 合计净值（Q-07）</p>
         </div>
       </div>
       <p v-else class="py-4 text-center text-sm text-muted-foreground">

@@ -145,7 +145,7 @@ const isPending = computed(
         <p v-if="dateError" class="text-xs text-destructive">{{ dateError }}</p>
         <!-- 该日已有自动记录提示（SNAP-P0-06 ①：允许选择已有自动记录的日期，此时即为覆盖） -->
         <p v-if="systemValue !== null" class="text-xs text-amber-700">
-          ⓘ 该日已有自动记录，将被覆盖
+          该日已有自动记录，将被覆盖
         </p>
       </div>
 
@@ -215,7 +215,7 @@ const isPending = computed(
           :rows="2"
         />
         <p class="text-xs text-muted-foreground">
-          ⓘ 建议填写修正原因，便于日后回溯
+          建议填写修正原因，便于日后回溯
         </p>
         <p v-if="noteError" class="text-xs text-destructive">{{ noteError }}</p>
       </div>
