@@ -38,11 +38,29 @@ import {
 import { usePortfolioStore } from '@/stores/portfolio.store';
 import type { SnapshotQuery } from '@/api/types';
 import type { AssetSnapshot } from '@/lib/types';
+import { ExportType } from '@/lib/types';
+import { useExportData } from '@/modules/data-transfer/composables/use-data-transfer';
 
 const portfolioStore = usePortfolioStore();
 const currentPortfolioId = computed(() => portfolioStore.currentPortfolioId);
-// 「全部」快捷项的起点 = 组合首个交易日（问题②）
+/** 「全部」快捷项的起点 = 组合首个交易日（问题②） */
 const baseDate = computed(() => portfolioStore.currentPortfolioBaseDate);
+/** 导出文件名前缀（组合名；无组合名时 sanitizeFilename 兜底 'portfolio'） */
+const currentPortfolioName = computed(
+  () => portfolioStore.currentPortfolio?.name ?? '',
+);
+
+// 导出 CSV（SET-P0-03 同口径：assetSnapshots 类型，后端 export 端点已实现）
+const exportMutation = useExportData();
+
+function handleExport(): void {
+  if (!currentPortfolioId.value) return;
+  exportMutation.mutate({
+    portfolioId: currentPortfolioId.value,
+    portfolioName: currentPortfolioName.value,
+    params: { type: ExportType.ASSET_SNAPSHOTS, format: 'csv' },
+  });
+}
 
 // I-04：默认日期范围 = 偏好（URL 无参数时），非法/空回落 '1y'；
 // computed 保证偏好异步到达后默认范围同步生效（列表内对齐守卫依赖同一链路）
@@ -88,14 +106,15 @@ function handleEdit(item: AssetSnapshot): void {
         </p>
       </div>
       <div class="flex items-center gap-2">
-        <!-- Gap D（SET-P0-03 同口径）：后端导出接口未实现，视觉占位禁用 -->
+        <!-- SET-P0-03 口径：导出当前组合全部资产记录（assetSnapshots 类型，CSV） -->
         <Button
           variant="outline"
           :size="ENTRY_BUTTON_SIZE"
-          disabled
-          title="v1 暂未开放（SET-P0-03）：导出接口待后端实现"
+          :disabled="exportMutation.isPending.value"
+          title="导出当前组合的资产记录为 CSV"
+          @click="handleExport"
         >
-          导出 CSV
+          {{ exportMutation.isPending.value ? '导出中…' : '导出 CSV' }}
         </Button>
         <!--
           INC-05：与概览页「录入买卖」同规格（主色 + sm + Plus 图标）。
