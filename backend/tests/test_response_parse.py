@@ -262,8 +262,8 @@ async def test_infer_cn_exchange() -> None:
     assert f("000001") == "sz"   # 深 A
     assert f("300750") == "sz"   # 创业
     assert f("131800") == "sz"   # 深回购
-    assert f("830799") == "bj"   # 北交
-    assert f("430047") == "bj"   # 北交
+    assert f("830799") == "bj"   # 北交所旧段(精选层平移)，dropped
+    assert f("430047") is None   # 老三板/全国股转(4xxxxx)，无 sh/sz/bj 前缀，dropped
     # 1 开头：沪可转债 11xxxx→sh，深可转债/基金 12/15/16xxxx→sz
     assert f("110000") == "sh"   # 沪可转债
     assert f("113000") == "sh"   # 沪可转债
@@ -281,6 +281,17 @@ async def test_infer_cn_exchange() -> None:
     # 3/4/7 位不补前缀
     assert f("700") is None
     assert f("6005190") is None
+    # 丢弃类别锁定（按 fund-classification-rules.md）：老三板/全国股转 4xxxxx、
+    # 北交所旧段 8xxxxx 不写入主数据表；920xxx（北交所新主板段）保留
+    from app.services.classification import is_dropped as dropped
+    assert dropped("430047") is True     # 老三板/全国股转
+    assert dropped("400001") is True     # 退市A股
+    assert dropped("420001") is True     # 退市B股
+    assert dropped("830799") is True     # 北交所旧段(8xxxxx)
+    assert dropped("920020") is False    # 北交所新主板段，保留
+    assert dropped("600519") is False    # A股，保留
+    assert dropped("510300") is False    # 场内基金，保留
+    assert dropped("404001", "航信退债") is True   # 退市可转债落 4xxxxx 段，同属老三板/全国股转，丢弃不入库
 
 
 async def test_apply_code_prefix_auto() -> None:

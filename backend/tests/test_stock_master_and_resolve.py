@@ -919,15 +919,17 @@ async def test_normalize_and_dedupe_reclassifies_corrupt_masters(session):
     assert by_code["sh110002"].asset_class == SecurityType.CONVERTIBLE_BOND
 
 
-async def test_dedupe_masters_reclassifies_delisted_bonds_to_uncategorized(session):
-    """退市可转债（名称含「退债」）无论代码前缀归到哪个交易所，统一归入未分类。
+async def test_dedupe_masters_drops_old_third_board_and_rejected_cb(session):
+    """老三板/全国股转(4xxxxx) 与北交所旧段(8xxxxx) 在自愈时被物理删除，不写入主数据表。
 
-    覆盖：原被 4xxxxx 数字规则误归北交所（BJ）的「xx退债」应在自愈后落到 UNCATEGORIZED，
-    而普通可转债不受影响。
+    覆盖：
+    - 名称含「退债」的退市可转债（落 4xxxxx 段，如 bj404001 航信退债）同样丢弃，不作例外；
+    - 深交所可转债（123999 X退债）不在丢弃段，按代码前缀正确归为可转债；
+    - 普通可转债（110002 南山转债）不受影响，仍归可转债。
     """
-    # 上交所退市可转债（代码 4xxxxx 旧规则会误归 BJ）
+    # 退市可转债（名称含「退债」，代码 4xxxxx 段）：应被丢弃，不入库
     session.add(Security(asset_class=SecurityType.BOND, code="bj404001", name="航信退债", exchange="BJ"))
-    # 深交所退市可转债
+    # 深交所可转债（123999 不在丢弃段）：应保留为可转债
     session.add(
         Security(asset_class=SecurityType.CONVERTIBLE_BOND, code="sz123999", name="X退债", exchange="SZ")
     )
@@ -941,9 +943,10 @@ async def test_dedupe_masters_reclassifies_delisted_bonds_to_uncategorized(sessi
 
     rows = (await session.execute(select(Security))).scalars().all()
     by_name = {r.name: r for r in rows}
-    assert by_name["航信退债"].asset_class == SecurityType.UNCATEGORIZED
-    assert by_name["X退债"].asset_class == SecurityType.UNCATEGORIZED
-    # 普通可转债不受影响
+    # 退债落 4xxxxx 段 → 丢弃，不在表中
+    assert "航信退债" not in by_name
+    # 可转债（123999/110002）→ 保留且正确归类
+    assert by_name["X退债"].asset_class == SecurityType.CONVERTIBLE_BOND
     assert by_name["南山转债"].asset_class == SecurityType.CONVERTIBLE_BOND
 
 

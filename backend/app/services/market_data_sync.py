@@ -50,6 +50,7 @@ from app.services.classification import (
     EXCHANGE_PREFIX,
     infer_exchange,
     infer_exchange_prefix,
+    is_dropped,
 )
 from app.services.security import infer_security_type
 
@@ -885,19 +886,29 @@ class MarketDataSyncService:
             await self.session.execute(select(Security))
         ).scalars().all()
 
+        # 0) 丢弃类别（按 fund-classification-rules.md）：老三板/全国股转(4xxxxx)、
+        #    北交所旧段(8xxxxx) 不写入 securities 主数据表，自愈时直接物理删除，
+        #    确保这些类别在表中物理不存在（含名称含「退债」的退市可转债，落 4xxxxx
+        #    段一律丢弃，不作例外）。
+        dropped_securities: list[Security] = []
+        normal_rows: list[Security] = []
+        for s in rows:
+            digits = re.sub(r"\D", "", s.code or "")
+            if digits and is_dropped(digits, s.name or ""):
+                dropped_securities.append(s)
+            else:
+                normal_rows.append(s)
+
         # 1) 逐行从数字码重推「交易所 / 资产类别 / 规范码」目标值（忽略已存错的 exchange，
         #    以免错标被继承）。仅计算、暂不改写，避免两行重推断后短暂撞唯一约束。
         targets: dict[Security, tuple[str, Optional[str], Any]] = {}
-        for s in rows:
+        for s in normal_rows:
             digits = re.sub(r"\D", "", s.code or "")
             if not digits:
                 continue
             ex = infer_exchange(digits)
             code = _normalize_master_code(digits, ex)
             ac = infer_security_type(code, ex)
-            # 退市可转债（名称含「退债」）：归入未分类，避免占错类别
-            if s.name and "退债" in s.name:
-                ac = SecurityType.UNCATEGORIZED
             targets[s] = (code, ex, ac)
 
         # 2) 按目标 (asset_class, 规范code) 分组
@@ -943,6 +954,20 @@ class MarketDataSyncService:
                 keep.code, keep.exchange, keep.asset_class = code, ex, ac
                 await self.session.flush()
                 removed += len(items) - 1
+
+        # 3) 物理删除丢弃类别行：先清除其 portfolio_securities 引用，避免悬空外键，
+        #    再删除主数据行，确保老三板/全国股转(4xxxxx)、北交所旧段(8xxxxx) 不在表中。
+        if dropped_securities:
+            for s in dropped_securities:
+                await self.session.execute(
+                    sa_delete(PortfolioSecurity).where(
+                        PortfolioSecurity.master_id == s.id
+                    )
+                )
+                await self.session.delete(s)
+                removed += 1
+            await self.session.flush()
+
         return removed
 
     async def _upsert_masters(self, itf: QuoteInterface, rows: list[Any]) -> int:
@@ -964,6 +989,10 @@ class MarketDataSyncService:
             raw_code = str(code)
             name = _row_get(r, name_field)
             name = str(name) if name is not None else raw_code
+            # 丢弃类别（按 fund-classification-rules.md）：老三板/全国股转(4xxxxx)、
+            # 北交所旧段(8xxxxx) 不写入 securities 主数据表，直接跳过。
+            if is_dropped(raw_code, name):
+                continue
             # 交易所推断须用原始 code（如 bj920021→BJ、sh600000→SH、hk00700→HK），先于归一化
             exchange = _row_get(r, exchange_field) if exchange_field else None
             if not exchange:
@@ -974,9 +1003,6 @@ class MarketDataSyncService:
             pinyin = _compute_pinyin_initials(name)
             # 行级资产类别：逐行按代码前缀 + 交易所推断（与持仓 type 同源）
             asset_class = infer_security_type(code, exchange)
-            # 退市可转债（名称含「退债」）：归入未分类，避免占错类别（如被 4xxxxx 误归北交所）
-            if name and "退债" in name:
-                asset_class = SecurityType.UNCATEGORIZED
 
             existing = (
                 await self.session.execute(
