@@ -98,6 +98,19 @@ function handleConfirmDelete(): void {
   }
 }
 
+/**
+ * 删除确认弹窗关闭处理。
+ *
+ * reka-ui AlertDialogAction（内部 DialogClose）的关闭 handler 与用户 @click 按
+ * [reka, user] 顺序合并执行：reka 先 onOpenChange(false) 再跑用户 handler。
+ * 同步清空 deleteId 会让确认 handler 读不到删除目标（对齐 PortfolioManagementCard 模式）。
+ */
+function handleDeleteDialogOpenChange(open: boolean): void {
+  if (!open) {
+    queueMicrotask(() => (deleteId.value = null));
+  }
+}
+
 function groupLabel(type: string | null): string {
   return type ? (labelMap.value.get(type) ?? type) : '未分类';
 }
@@ -189,7 +202,7 @@ function groupLabel(type: string | null): string {
 
     <AlertDialog
       :open="deleteId !== null"
-      @update:open="(v: boolean) => !v && (deleteId = null)"
+      @update:open="handleDeleteDialogOpenChange"
     >
       <AlertDialogContent>
         <AlertDialogHeader>

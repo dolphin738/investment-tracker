@@ -4,8 +4,8 @@
  *
  * 导航项（顺序固定，PRD §7）：概览 / 持仓 / 出入金 / 资产记录 / 收益分析 / 净值分析 / 账户 / 设置
  *
- * 「系统管理」为可折叠分组（仅管理员可见）：其下唯一子项「金融数据接口」链到
- * 金融数据接口管理页。折叠交互（展开/收起）发生在本主侧边栏，不在系统管理页内部。
+ * 「系统管理」为可折叠分组（仅管理员可见）：其下子项「金融数据接口」「定时任务」。
+ * 折叠交互（展开/收起）发生在本主侧边栏，不在各管理页内部。
  */
 
 import { computed, ref, type Component } from 'vue';
@@ -16,6 +16,7 @@ import {
   Camera,
   ChevronDown,
   ChevronRight,
+  Clock,
   Database,
   LayoutDashboard,
   LineChart,
@@ -57,7 +58,10 @@ const NAV_ITEMS: NavItem[] = [
     label: '系统管理',
     icon: Shield,
     admin: true,
-    children: [{ to: ROUTE_PATH.ADMIN, label: '金融数据接口', icon: Database }],
+    children: [
+      { to: ROUTE_PATH.ADMIN, label: '金融数据接口', icon: Database },
+      { to: ROUTE_PATH.ADMIN_TASKS, label: '定时任务', icon: Clock },
+    ],
   },
 ];
 

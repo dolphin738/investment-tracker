@@ -152,6 +152,8 @@ function invalidateCashflowRelated(
   queryClient.invalidateQueries({ queryKey: ['overview'] });
   // 缺陷2：出入金增删改会改变组合成立日（base_date），失效组合列表以实时刷新成立日
   queryClient.invalidateQueries({ queryKey: PORTFOLIOS_KEY });
+  // 出入金会触发派生总资产记录（快照）重建，失效快照列表使资产页免手动刷新
+  queryClient.invalidateQueries({ queryKey: ['snapshots'] });
 }
 
 /** 创建出入金流水 */

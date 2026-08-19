@@ -142,6 +142,20 @@ const totalFee = computed(() =>
 
 const deleteMutation = useDeleteSecurityTrade();
 const isDeleting = computed(() => deleteMutation.isPending.value);
+/**
+ * 删除确认弹窗关闭处理。
+ *
+ * reka-ui AlertDialogAction（内部 DialogClose）的关闭 handler 与用户 @click 按
+ * [reka, user] 顺序合并执行：reka 先 onOpenChange(false) 再跑用户 handler。
+ * 故「清空 deletingId」必须延迟到微任务，否则用户确认 handler 执行时 id 已被清空，
+ * 删除 mutation 拿不到参数（对齐 PortfolioManagementCard 的删除模式）。
+ */
+function handleDeleteDialogOpenChange(o: boolean): void {
+  if (!o) {
+    queueMicrotask(() => (deletingId.value = null));
+  }
+}
+
 function handleConfirmDelete(): void {
   if (!deletingId.value) return;
   deleteMutation.mutate(
@@ -345,7 +359,7 @@ function amountOf(t: SecurityTradeResponse): number {
     <!-- 删除确认 -->
     <AlertDialog
       :open="Boolean(deletingId)"
-      @update:open="(o) => !o && (deletingId = null)"
+      @update:open="handleDeleteDialogOpenChange"
     >
       <AlertDialogContent>
         <AlertDialogHeader>

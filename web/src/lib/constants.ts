@@ -33,6 +33,7 @@ export const ROUTE_PATH = {
   ACCOUNT: '/account',
   SETTINGS: '/settings',
   ADMIN: '/admin',
+  ADMIN_TASKS: '/admin/tasks',
 } as const;
 
 // ===== 路由持久化键 =====

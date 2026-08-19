@@ -11,7 +11,7 @@
  * - 手工行差异列：系统自动计算值 + 差异金额 +（差异%）
  */
 
-import { computed, ref, watch } from 'vue';
+import { computed, ref, watch, type Ref } from 'vue';
 import {
   AlertTriangle,
   ChevronLeft,
@@ -247,6 +247,26 @@ function handleConfirmReset(): void {
     );
   }
 }
+
+/**
+ * 确认弹窗关闭时延迟清空目标 ref（删除 / 重置共用）。
+ *
+ * reka-ui AlertDialogAction（内部 DialogClose）的关闭 handler 与用户 @click 按
+ * [reka, user] 顺序合并执行：reka 先 onOpenChange(false) 再跑用户 handler。
+ * 若同步清空目标 ref，用户确认 handler 执行时目标已被清空，mutation 拿不到参数
+ * （对齐 PortfolioManagementCard 的删除模式）。
+ */
+function clearOnClose(target: Ref<SnapshotResponse | null>): void {
+  queueMicrotask(() => (target.value = null));
+}
+
+function handleDeleteDialogOpenChange(o: boolean): void {
+  if (!o) clearOnClose(deleting);
+}
+
+function handleResetDialogOpenChange(o: boolean): void {
+  if (!o) clearOnClose(resetting);
+}
 </script>
 
 <template>
@@ -445,7 +465,7 @@ function handleConfirmReset(): void {
     </div>
 
     <!-- 删除确认（SNAP-P0-06 ⑤⑥：删除这条记录，事件日系统会重新生成自动值） -->
-    <AlertDialog :open="Boolean(deleting)" @update:open="(o) => !o && (deleting = null)">
+    <AlertDialog :open="Boolean(deleting)" @update:open="handleDeleteDialogOpenChange">
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>确认删除该条资产记录？</AlertDialogTitle>
@@ -474,7 +494,7 @@ function handleConfirmReset(): void {
     </AlertDialog>
 
     <!-- 重置确认（SNAP-P0-07：撤销手工修改，恢复系统计算值 + 将恢复值展示） -->
-    <AlertDialog :open="Boolean(resetting)" @update:open="(o) => !o && (resetting = null)">
+    <AlertDialog :open="Boolean(resetting)" @update:open="handleResetDialogOpenChange">
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>重置为系统自动计算值？</AlertDialogTitle>

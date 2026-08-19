@@ -156,9 +156,14 @@ function handleConfirmDelete(): void {
 /** 确认删除请求进行中拒绝关闭（保持弹窗与错误展示）；其余关闭路径正常清理 */
 function handleDialogOpenChange(open: boolean): void {
   if (!open) {
-    if (confirmRequested.value) return;
-    deleting.value = null;
-    deleteError.value = '';
+    queueMicrotask(() => {
+      // 延迟判定：reka-ui AlertDialogAction 的关闭 handler 先于用户 @click 执行，
+      // 此刻确认请求尚未发出；待用户确认 handler 置 confirmRequested 后再决定是否清理，
+      // 避免同步清空导致确认 handler 读不到删除目标（对齐 PortfolioManagementCard 模式）。
+      if (confirmRequested.value) return;
+      deleting.value = null;
+      deleteError.value = '';
+    });
   }
 }
 
