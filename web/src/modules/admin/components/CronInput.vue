@@ -21,7 +21,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { previewCron } from '@/lib/cron';
 
 type CronMode = 'interval' | 'visual' | 'cron';
-type IntervalUnit = 'minute' | 'hour' | 'day';
+type IntervalUnit = 'minute' | 'hour' | 'day' | 'week' | 'month';
 
 const model = defineModel<string>({ default: '' });
 
@@ -64,11 +64,26 @@ function initModeFromCron(expr: string): {
     base.every = Math.min(Number(hm[1]), 23);
     return base;
   }
+  // 固定间隔（月）：每月 1 号、每隔 N 月（cron: 0 0 1 */N *）
+  const mo = /^0 0 1 \*\/(\d+) \* \*$/.exec(s);
+  if (mo) {
+    base.mode = 'interval';
+    base.unit = 'month';
+    base.every = Math.min(Number(mo[1]), 12);
+    return base;
+  }
   const dm = /^0 0 \*\/(\d+) \* \*$/.exec(s);
   if (dm) {
+    const d = Number(dm[1]);
     base.mode = 'interval';
-    base.unit = 'day';
-    base.every = Math.min(Number(dm[1]), 31);
+    // 7 天倍数视为「周」间隔（cron 无独立周计数域，以 7N 天近似），其余为「天」
+    if (d % 7 === 0) {
+      base.unit = 'week';
+      base.every = Math.min(d / 7, 52);
+    } else {
+      base.unit = 'day';
+      base.every = Math.min(d, 31);
+    }
     return base;
   }
   // 可视化：每天 / 每周 / 每月
@@ -122,7 +137,7 @@ if (!model.value.trim()) {
 }
 
 /** 单位对应的取值上限（cron 步长域上限） */
-const unitMax: Record<IntervalUnit, number> = { minute: 59, hour: 23, day: 31 };
+const unitMax: Record<IntervalUnit, number> = { minute: 59, hour: 23, day: 31, week: 52, month: 12 };
 
 /** 当前状态下构造的 cron 字符串（提交给后端 / 用于预览） */
 function buildCron(): string {
@@ -130,7 +145,11 @@ function buildCron(): string {
     const n = every.value;
     if (unit.value === 'minute') return `*/${n} * * * *`;
     if (unit.value === 'hour') return `0 */${n} * * *`;
-    return `0 0 */${n} * *`;
+    if (unit.value === 'day') return `0 0 */${n} * *`;
+    // 周：cron 无独立周计数域，以 7N 天近似（每月 1 号为锚，跨月边界有 1-2 天漂移）
+    if (unit.value === 'week') return `0 0 */${7 * n} * *`;
+    // 月：每月 1 号、每隔 N 月
+    return `0 0 1 */${n} *`;
   }
   if (mode.value === 'visual') {
     const [h, mi] = time.value.split(':');
@@ -250,6 +269,8 @@ function p2(n: number): string {
           <SelectItem value="minute">分钟</SelectItem>
           <SelectItem value="hour">小时</SelectItem>
           <SelectItem value="day">天</SelectItem>
+          <SelectItem value="week">周</SelectItem>
+          <SelectItem value="month">月</SelectItem>
         </SelectContent>
       </Select>
     </div>

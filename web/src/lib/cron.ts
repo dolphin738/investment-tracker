@@ -155,19 +155,27 @@ export function describeCron(expr: string): string | null {
   const minStep = /^\*\/(\d+)$/.exec(minS);
   const hourStep = /^\*\/(\d+)$/.exec(hourS);
   const domStep = /^\*\/(\d+)$/.exec(domS);
+  const monStep = /^\*\/(\d+)$/.exec(monS);
   const domWild = domS === '*';
   const dowWild = dowS === '*';
   const monWild = monS === '*';
 
-  // 固定间隔
+  // 固定间隔（月）：每月 1 号、每隔 N 月（cron: 0 0 1 */N *）
+  if (monStep && minS === '0' && hourS === '0' && domS === '1' && dowWild) {
+    return `每隔 ${Number(monStep[1])} 月执行一次`;
+  }
+  // 固定间隔（周）：每隔 7N 天 ≈ 每隔 N 周（cron: 0 0 */7N * *，以每月 1 号为锚）
+  if (domStep && minS === '0' && hourS === '0' && monWild && dowWild) {
+    const d = Number(domStep[1]);
+    if (d % 7 === 0) return `每隔 ${d / 7} 周执行一次`;
+    return `每隔 ${d} 天执行一次`;
+  }
+  // 固定间隔（分钟 / 小时 / 天）
   if (minStep && hourS === '*' && domWild && monWild && dowWild) {
     return `每隔 ${Number(minStep[1])} 分钟执行一次`;
   }
   if (hourStep && minS === '0' && domWild && monWild && dowWild) {
     return `每隔 ${Number(hourStep[1])} 小时执行一次`;
-  }
-  if (domStep && minS === '0' && hourS === '0' && monWild && dowWild) {
-    return `每隔 ${Number(domStep[1])} 天执行一次`;
   }
   if (minS === '*' && hourS === '*' && domWild && monWild && dowWild) {
     return '每分钟执行一次';
