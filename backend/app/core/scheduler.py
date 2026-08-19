@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import asyncio
+import subprocess
 from datetime import datetime, timezone
 from typing import Any, Callable, Optional
 
@@ -63,19 +64,29 @@ async def _accounts_cleanup(cfg: JobConfig) -> str:
 
 
 async def _local_command(cfg: JobConfig) -> str:
-    """定时执行本地脚本/命令（params.command，超时截断）。"""
+    """定时执行本地脚本/命令（params.command，超时截断）。
+
+    使用 ``asyncio.to_thread`` 在独立线程中运行同步 ``subprocess.run``，
+    规避 Windows 下 Selector 事件循环（uvicorn --reload 默认）不支持
+    ``asyncio.create_subprocess_shell`` 的问题（后者会抛 NotImplementedError）。
+    """
     params = cfg.params or {}
     command = (params.get("command") or "").strip()
     if not command:
         raise RuntimeError("LOCAL_COMMAND 任务缺少参数 command")
-    proc = await asyncio.create_subprocess_shell(
+    result = await asyncio.to_thread(
+        subprocess.run,
         command,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.STDOUT,
+        shell=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        timeout=_LOCAL_COMMAND_TIMEOUT,
+        check=False,
+        text=True,
+        errors="replace",
     )
-    out, _ = await asyncio.wait_for(proc.communicate(), timeout=_LOCAL_COMMAND_TIMEOUT)
-    output = out.decode("utf-8", errors="replace").strip()
-    return f"exit={proc.returncode} {output}" if output else f"exit={proc.returncode}"
+    output = (result.stdout or "").strip()
+    return f"exit={result.returncode} {output}" if output else f"exit={result.returncode}"
 
 
 async def _http_callback(cfg: JobConfig) -> str:
