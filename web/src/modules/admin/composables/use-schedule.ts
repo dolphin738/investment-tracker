@@ -67,7 +67,10 @@ export function useTaskLogs(
       params.value.pageSize ?? 20,
     ]),
     queryFn: () => listTaskLogs(taskId.value!, toValue(params)),
-    enabled: isAdmin && Boolean(taskId.value),
+    // enabled 必须为响应式：taskId 初始为 null，打开日志时才被赋值；
+    // 若用静态布尔表达式，useQuery 创建时即求值为 false，之后永不再发起请求，
+    // 表现为「查看执行日志永远为空」。
+    enabled: computed(() => isAdmin && Boolean(taskId.value)),
   });
 }
 

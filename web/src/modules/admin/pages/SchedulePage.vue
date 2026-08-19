@@ -81,6 +81,7 @@ import {
 } from '../composables/use-schedule';
 import { useIsAdmin } from '@/stores/auth.store';
 import CronInput from '../components/CronInput.vue';
+import { describeCron } from '@/lib/cron';
 
 const isAdmin = useIsAdmin();
 
@@ -390,7 +391,9 @@ function statusLabel(status: string | null): string {
                   />
                 </TableCell>
                 <TableCell class="whitespace-nowrap align-middle">
-                  <code class="rounded bg-muted px-1.5 py-0.5 text-xs">{{ task.cron_expr }}</code>
+                  <span class="text-sm" :title="task.cron_expr">
+                    {{ describeCron(task.cron_expr) ?? task.cron_expr }}
+                  </span>
                 </TableCell>
                 <TableCell class="whitespace-nowrap align-middle">
                   <div class="flex flex-col gap-1">
@@ -503,7 +506,7 @@ function statusLabel(status: string | null): string {
 
           <div class="space-y-2">
             <Label>时间设置</Label>
-            <CronInput v-model="form.cronExpr" />
+            <CronInput :key="editing ? editing.id : 'new'" v-model="form.cronExpr" />
           </div>
 
           <template v-for="f in currentHandler?.param_fields ?? []" :key="f.key">
