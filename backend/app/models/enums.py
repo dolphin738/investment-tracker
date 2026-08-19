@@ -96,3 +96,39 @@ class InterfaceDirection(str, enum.Enum):
 
     IN = "in"
     OUT = "out"
+
+
+class JobTaskType(str, enum.Enum):
+    """定时任务类型（统一调度器处理器注册表键 + 数据库任务类型列）。
+
+    系统任务（不可追加/删除，仅可编辑）由迁移种子写入；普通任务（可增删改）在
+    定时任务管理页由管理员新建。两者共用本枚举。
+    """
+
+    MARKET_DATA_SYNC = "MARKET_DATA_SYNC"  # 行情同步（遍历组合拉实时价，普通可建）
+    SECURITY_MASTER_SYNC = "SECURITY_MASTER_SYNC"  # 证券主数据同步（普通可建）
+    LOCAL_COMMAND = "LOCAL_COMMAND"  # 定时执行本地脚本/命令（普通可建）
+    HTTP_CALLBACK = "HTTP_CALLBACK"  # HTTP 回调（普通可建）
+    ACCOUNT_CLEANUP = "ACCOUNT_CLEANUP"  # 账户物理清理（系统任务，迁移种子写入）
+
+
+class JobKind(str, enum.Enum):
+    """任务归类：系统任务仅可编辑不可删除；普通任务可增删改。"""
+
+    SYSTEM = "SYSTEM"
+    NORMAL = "NORMAL"
+
+
+class JobRunStatus(str, enum.Enum):
+    """任务单次执行结果状态（JobRunLog）。"""
+
+    RUNNING = "RUNNING"
+    SUCCESS = "SUCCESS"
+    FAILED = "FAILED"
+
+
+class JobTriggerSource(str, enum.Enum):
+    """任务触发来源：调度器定时触发 / 管理员手动立即执行。"""
+
+    SCHEDULED = "SCHEDULED"
+    MANUAL = "MANUAL"

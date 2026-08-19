@@ -292,6 +292,10 @@ async def test_infer_cn_exchange() -> None:
     assert dropped("600519") is False    # A股，保留
     assert dropped("510300") is False    # 场内基金，保留
     assert dropped("404001", "航信退债") is True   # 退市可转债落 4xxxxx 段，同属老三板/全国股转，丢弃不入库
+    assert dropped("150022", "申万进取") is True   # 深市分级基金(sz150xxx)，丢弃不入库
+    assert dropped("sz150023") is True             # 带 sz 前缀的分级基金同样丢弃
+    assert dropped("150000") is True               # 深市分级基金段
+    assert dropped("160000") is False              # 深市 LOF(160xxx) 仍保留
 
 
 async def test_apply_code_prefix_auto() -> None:

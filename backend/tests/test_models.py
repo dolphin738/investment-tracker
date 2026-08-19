@@ -54,6 +54,11 @@ def test_metadata_tables_and_enums():
         "quote_provider_interface_categories",
         # 增量：站内信通知（ADR-002 §3 Q2 告警落点）
         "notifications",
+        # 增量：统一定时调度器（job_configs 任务配置 + job_run_logs 执行日志）
+        "job_configs",
+        "job_run_logs",
+        # 增量：用户级行情自动同步配置（每用户独立，替代全局 MARKET_DATA_SYNC）
+        "user_quote_sync_configs",
     } == tables
 
     enums = {
@@ -71,6 +76,11 @@ def test_metadata_tables_and_enums():
         "DividendType",
         # 增量：系统管理扩展——接口方向原生枚举
         "interface_direction",
+        # 增量：统一定时调度器（job_configs / job_run_logs）原生枚举
+        "JobKind",
+        "JobTaskType",
+        "JobRunStatus",
+        "JobTriggerSource",
     } == enums
 
     # 精度对齐 PRD 8.1

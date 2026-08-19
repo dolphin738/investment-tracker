@@ -116,6 +116,7 @@ class CashflowService(PortfolioChildService):
     ) -> tuple[CashFlow, RecalculationResult]:
         cf = await self.get_scoped(CashFlow, cf_id, portfolio_id)
         old_date = cf.date
+        date_changed = req.date is not None and req.date != old_date
         if req.date is not None:
             validate_date_not_future(req.date)
             cf.date = req.date
@@ -126,6 +127,14 @@ class CashflowService(PortfolioChildService):
         if req.note is not None:
             cf.note = req.note
         await self.session.commit()
+        # 改日期后旧事件日可能已无任何事件：其 DERIVED 快照成孤儿（0 值/陈旧），
+        # 须先清理再重算——先删后建可同时避免「旧日期孤儿残留」与「新事件日
+        # 0 值快照被误删」两类问题（出入金不参与总资产派生，旧日期不会自动重建）。
+        if date_changed:
+            since = min(cf.date, old_date)
+            await AssetValuationService(self.session).prune_zero_orphans(
+                portfolio_id, since
+            )
         rec = await RecalculationService(self.session).recalculateRange(
             portfolio_id, min(cf.date, old_date)
         )

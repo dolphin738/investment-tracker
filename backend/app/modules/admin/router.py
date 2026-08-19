@@ -687,7 +687,18 @@ async def list_security_masters(
         (Security.asset_class == "UNCATEGORIZED", 9),
         else_=3,
     )
-    stmt = stmt.order_by(category_rank.asc(), Security.code.asc())
+    # 交易所排序：同类别内 沪(SH) < 深(SZ) < 京(BJ) < 港(HK) < 其他 < 无
+    # 使股票分类下沪市先于深市、深市先于京市（替代原先按 code 字符串排序，
+    # 原 'bj' < 'sh' 会让北交所误排沪市之前）。
+    exchange_rank = case(
+        (Security.exchange == "SH", 0),
+        (Security.exchange == "SZ", 1),
+        (Security.exchange == "BJ", 2),
+        (Security.exchange == "HK", 3),
+        (Security.exchange.is_(None), 5),
+        else_=4,
+    )
+    stmt = stmt.order_by(category_rank.asc(), exchange_rank.asc(), Security.code.asc())
     return await paginate(db, stmt, page, pageSize, serialize_security_master)
 
 

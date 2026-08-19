@@ -9,6 +9,10 @@ from app.models.enums import (
     CashFlowType,
     DividendType,
     InterfaceDirection,
+    JobKind,
+    JobRunStatus,
+    JobTaskType,
+    JobTriggerSource,
     QuoteProviderAccessMethod,
     SecuritySide,
     SecurityType,
@@ -16,6 +20,7 @@ from app.models.enums import (
     SnapshotValuation,
 )
 from app.models.interface_category import InterfaceCategory
+from app.models.job import JobConfig, JobRunLog
 from app.models.notification import Notification
 from app.models.portfolio import Portfolio
 from app.models.quote_interface import QuoteInterface
@@ -23,6 +28,7 @@ from app.models.quote_provider import SecuritiesDataProvider
 from app.models.security import PortfolioSecurity, Security, SecurityPrice, SecurityTrade
 from app.models.snapshot import AssetSnapshot
 from app.models.user import User, UserPreference
+from app.models.user_quote_sync import UserQuoteSyncConfig
 
 __all__ = [
     "User",
@@ -50,4 +56,11 @@ __all__ = [
     "SnapshotSource",
     "SnapshotValuation",
     "DividendType",
+    "JobConfig",
+    "JobRunLog",
+    "UserQuoteSyncConfig",
+    "JobTaskType",
+    "JobKind",
+    "JobRunStatus",
+    "JobTriggerSource",
 ]

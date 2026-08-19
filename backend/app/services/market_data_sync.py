@@ -48,6 +48,7 @@ from app.services.notification import NotificationService
 from app.services.recalculation import RecalculationService
 from app.services.classification import (
     EXCHANGE_PREFIX,
+    classify_security,
     infer_exchange,
     infer_exchange_prefix,
     is_dropped,
@@ -873,6 +874,10 @@ class MarketDataSyncService:
            - 可转债 ``11xxxx``/``12xxxx``、深市基金 ``15/16xxxx`` 曾漏交易所前缀
              （``_infer_exchange`` 无对应分支返回 None）→ 补 SH/SZ 前缀
         2) 按 ``(asset_class, 规范code)`` 合并重复行（不同源带/不带交易所字母导致的历史重复）。
+        3) 对保留行按新自然键 ``(asset_class, code)`` 重算派生 id 并迁移
+           ``portfolio_securities`` 引用（见 ``_reassign_master_id``），消除「code 已自愈、
+           id 仍是旧键派生」的历史错位——否则下次同步按新 code 查重未命中、按新 id
+           INSERT 会撞上旧 id 记录，触发 ``securities_pkey`` 唯一约束冲突。
 
         顺序：先在内存完成「重推断 + 分组」，再删除重复行，最后统一 ``flush``——
         避免两行在重推断后短暂撞 ``(asset_class, code)`` 唯一约束。
@@ -910,6 +915,11 @@ class MarketDataSyncService:
             code = _normalize_master_code(digits, ex)
             # 传名称：混合段场内基金需靠 ETF/LOF/REIT/封闭 等名称标记判定场内
             ac = infer_security_type(code, ex, s.name or "")
+            # 指数前缀修正：000xxx 上证指数强制 sh、399xxx 深证指数强制 sz，
+            # 自愈历史误存（如 sz000012 国债指数）为 sh000012
+            if ac == SecurityType.INDEX:
+                ex = classify_security(code, s.name or "").get("exchange") or ex
+                code = f"{EXCHANGE_PREFIX.get(ex or '', '')}{digits}"
             targets[s] = (code, ex, ac)
 
         # 2) 按目标 (asset_class, 规范code) 分组
@@ -925,6 +935,7 @@ class MarketDataSyncService:
                 if len(items) == 1:
                     s = items[0]
                     s.code, s.exchange, s.asset_class = code, ex, ac
+                    await self._reassign_master_id(s)
                     await self.session.flush()  # 单行无撞键风险
                     continue
                 items.sort(key=lambda x: (x.updated_at or datetime.min), reverse=True)
@@ -953,6 +964,7 @@ class MarketDataSyncService:
                 await self.session.flush()  # 先落库删掉 dup
                 # 再对保留行应用重推断结果（此时 dup 已删，无撞键风险）
                 keep.code, keep.exchange, keep.asset_class = code, ex, ac
+                await self._reassign_master_id(keep)
                 await self.session.flush()
                 removed += len(items) - 1
 
@@ -970,6 +982,44 @@ class MarketDataSyncService:
             await self.session.flush()
 
         return removed
+
+    async def _reassign_master_id(self, s: Security) -> None:
+        """重算并迁移 ``securities.id``：当自愈把某行的 code/asset_class 重推后，
+        旧派生 id 不再等于 ``master_id_for(asset_class, code)`` 时，按新自然键重派生 id，
+        并同步迁移 ``portfolio_securities.master_id`` 外键引用，保证 id 与
+        ``(asset_class, code)`` 永远一致（否则下次同步按新 code 查重未命中、按新 id
+        INSERT 会撞上旧 id 记录，触发 ``securities_pkey`` 唯一约束冲突）。
+
+        依赖 ``master_id_for`` 的确定性：同一 ``(asset_class, code)`` 恒得同一 UUID，
+        不同自然键的 id 必不相同，故新 id 正常情况下不会被其他行占用（撞键时跳过，
+        由后续合并去重兜底）。
+        """
+        new_id = master_id_for(s.asset_class, s.code)
+        if new_id == s.id:
+            return
+        clash = (
+            await self.session.execute(
+                select(Security.id).where(
+                    Security.id == new_id,
+                    Security.id != s.id,
+                )
+            )
+        ).scalar_one_or_none()
+        if clash:
+            return
+        # master_id 外键为 DEFERRABLE INITIALLY DEFERRED：先迁移持仓引用、再改 securities.id，
+        # FK 检查推迟到事务提交，彼时两行已一致，不会因「改主键时子表仍引用旧 id」而报违例。
+        # 注：本方法在 no_autoflush 上下文内调用，flush 不提前触发约束检查。
+        await self.session.execute(
+            update(PortfolioSecurity)
+            .where(PortfolioSecurity.master_id == s.id)
+            .values(master_id=new_id)
+        )
+        await self.session.execute(
+            update(Security).where(Security.id == s.id).values(id=new_id)
+        )
+        s.id = new_id  # 保持 ORM 对象状态与库一致
+        await self.session.flush()
 
     async def _upsert_masters(self, itf: QuoteInterface, rows: list[Any]) -> int:
         """把原始行 upsert 进 securities 系统主数据目录表（ADR-003 后仅主数据行）。
@@ -1005,6 +1055,17 @@ class MarketDataSyncService:
             # 行级资产类别：逐行按代码前缀 + 交易所 + 名称推断（与持仓 type 同源；
             # 混合段场内基金需靠名称标记 ETF/LOF/REIT/封闭 判定场内）
             asset_class = infer_security_type(code, exchange, name)
+            # 指数前缀修正：000xxx 上证指数强制 sh、399xxx 深证指数强制 sz，
+            # 防源数据误带前缀（如 sz000012 国债指数）导致跨市场撞码
+            if asset_class == SecurityType.INDEX:
+                exchange = classify_security(code, name).get("exchange") or exchange
+                code = f"{EXCHANGE_PREFIX.get(exchange or '', '')}{re.sub(r'\D', '', code)}"
+            # 北交所 920xxx 段强制 bj 前缀：源数据（如小熊 /stock/all）将 920 段误带 sz 前缀，
+            # 若不强归一，会按 sz920xxx 建新行，撞上历史已自愈为 bj920xxx 记录的派生 id
+            # （securities_pkey 唯一约束冲突）
+            if re.fullmatch(r"920\d{3}", re.sub(r"\D", "", code)):
+                exchange = "BJ"
+                code = f"bj{re.sub(r'\D', '', code)}"
 
             existing = (
                 await self.session.execute(

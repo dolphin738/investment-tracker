@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -56,11 +57,20 @@ class Settings(BaseSettings):
     # 默认空字符串 = 不托管前端（保持 API-only 形态）；部署时设为 dist 绝对路径
     FRONTEND_DIR: str = ""
 
-    # 可选定时调度器（APScheduler，收盘后全量刷新行情，默认关闭）。
-    # 仅当 QUOTE_SYNC_SCHEDULER_ENABLED=True 时应用启动才会注册 job（且懒导入 apscheduler），
-    # 未安装 akshare / 未启用环境启动不报错。
-    QUOTE_SYNC_SCHEDULER_ENABLED: bool = False
-    QUOTE_SYNC_SCHEDULER_CRON: str = "0 16 * * 1-5"  # 工作日 16:00（收盘后）
+    # 可选定时调度器（APScheduler AsyncIOScheduler，数据库驱动，默认开启）。
+    # 任务配置存 job_configs 表：普通任务可增删改、系统任务仅可编辑；调度器在应用
+    # 启动时从库中加载全部 enabled 任务注册为 cron job，运行时写 job_run_logs 日志。
+    SCHEDULER_ENABLED: bool = True
+    # —— 已废弃（统一定时任务管理取代）：行情同步迁为普通任务 MARKET_DATA_SYNC，
+    #    任务配置与开关由 job_configs 表维护，不再由环境变量驱动。保留字段仅为兼容旧 env。
+    QUOTE_SYNC_SCHEDULER_ENABLED: bool = Field(
+        default=False,
+        deprecated="Use job_configs (MARKET_DATA_SYNC) + SCHEDULER_ENABLED instead",
+    )
+    QUOTE_SYNC_SCHEDULER_CRON: str = Field(
+        default="0 16 * * 1-5",
+        deprecated="Use job_configs.cron_expr (MARKET_DATA_SYNC) instead",
+    )
 
 
 @lru_cache

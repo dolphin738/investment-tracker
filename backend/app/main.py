@@ -47,9 +47,9 @@ settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 启动：仅当 QUOTE_SYNC_SCHEDULER_ENABLED=True 时注册收盘后全量同步 job
-    # （内部懒导入 apscheduler，未启用 / 未安装环境直接跳过）。
-    start_scheduler()
+    # 启动：受 SCHEDULER_ENABLED 总开关控制，从 job_configs 加载 enabled 任务注册调度
+    # （懒导入 apscheduler，未安装 / 未启用环境启动直接跳过）。
+    await start_scheduler()
     yield
     shutdown_scheduler()
 
@@ -109,6 +109,7 @@ app.include_router(dividend.router_dividends)
 app.include_router(data_transfer.router_dt_portfolio)
 app.include_router(data_transfer.router_dt_global)
 app.include_router(preference.router)
+app.include_router(preference.router_quote_sync)
 app.include_router(upload.router)
 app.include_router(calculation.router_holdings)
 app.include_router(calculation.router_xirr)
@@ -116,6 +117,7 @@ app.include_router(calculation.router_nav)
 app.include_router(calculation.router_recalculate)
 app.include_router(internal.router)
 app.include_router(admin.router_admin)
+app.include_router(admin.router_admin_schedule)
 
 
 # SPA 前端托管 + 深链回退（部署配置：Docker 单镜像时由后端 serve web/dist）

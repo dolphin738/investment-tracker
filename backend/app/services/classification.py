@@ -51,7 +51,7 @@ SH_PURE = {
     "551",                                               # ETF(沪)
     "561", "562", "563",                                 # ETF(沪, 指数增强/策略)
     "588", "589",                                        # 科创板ETF(沪)
-    "502",                                               # LOF/指数(沪)
+    "501", "502", "505",                                 # LOF/封基(沪)：501=LOF上市段、502=LOF/指数段、505=原封基段，均专属场内
     "508",                                               # 基础设施REITs(沪)
 }
 SZ_PURE = {
@@ -63,7 +63,7 @@ SZ_PURE = {
 # 才是场内 REITs。故不列入 PURE，改由名称标记(REIT/基础设施)或 180+第4位∈1-9 识别。
 
 # —— 混合子段：同段内既有场内也有场外，必须靠名称标记判定 ——
-SH_MIXED = {"500", "501", "510", "519", "530", "550", "560", "570", "580", "590"}
+SH_MIXED = {"500", "510", "519", "530", "550", "560", "570", "580", "590"}
 SZ_MIXED = {"150", "151"}
 
 # 场内标记：名称命中即判场内（覆盖混合段）
@@ -81,7 +81,17 @@ CB_SH_PREFIX = ("110", "113")            # 沪市可转债：110↔600，113↔6
 CB_SZ_PREFIX = ("123", "127", "128")     # 深市可转债：123↔创业板，127↔主板，128↔原中小板
 
 # 丢弃段：老三板/全国股转(4xxxxx) 与 北交所旧段(8xxxxx) 不写入主数据表
+# （B股 900xxx/200xxx 段在 is_dropped 内单独判定，不在此前缀集合中）
 DROP_PREFIX1 = ("4", "8")
+
+# 已退市/终止上市基金（精确代码）：这些代码仍落在正常基金段（501/505/161 等），
+# 前缀段规则无法区分单只已退市基金，故用精确 code 匹配拦截，避免误伤同段在存基金。
+DELISTED_FUND_CODES: frozenset[str] = frozenset({
+    "501003",  # 长信先锐债券（已退市）
+    "501035",  # 创金合信鼎鑫睿选定开混合（已退市）
+    "505888",  # 嘉实元和（已退市）
+    "161907",  # 红利ETF联接（已退市）
+})
 
 
 # ============================================================
@@ -132,7 +142,9 @@ def classify(code: str, name: str = "") -> dict:
     has_marker = any(m in name for m in NAME_MARKET_MARKERS)
     is_otc_name = any(m in name for m in OTC_NAME_MARKERS)
 
-    if is_otc_name:
+    # 特例：名称同时含「联接」与「LOF」（如 160119 500ETF联接LOF）是场内 LOF——
+    # 联接基金以 LOF 份额在交易所上市、可场内交易，不受「联接即场外」规则拦截。
+    if is_otc_name and "LOF" not in name:
         res["note"] = "名称含联接等场外标记，判为场外基金"
         res["exchange"] = None
         return res
@@ -170,9 +182,9 @@ def _asset_type(code: str, name: str, exch: str, seg3: str) -> str:
     if "REIT" in n or "REITs" in n or "基础设施" in n or seg3 == "508" \
        or (seg3 == "180" and code[3] in "123456789"):
         return "REITs"
-    # 封闭式基金
+    # 封闭式基金（500/505 为沪市封基段：500 内 LOF/ETF 名称另判，505 为原封基段）
     if "封闭" in n or "封基" in n \
-       or (exch == SH and seg3 == "500" and "LOF" not in n and "ETF" not in n):
+       or (exch == SH and seg3 in ("500", "505") and "LOF" not in n and "ETF" not in n):
         return "封闭式基金"
     # 货币ETF（沪 511xxx 非债券 / 深 159xxx 货币名 / 519 特例已前置）
     if (seg3 == "511" and "国债" not in n and "转债" not in n) \
@@ -227,12 +239,14 @@ def classify_astock(code: str) -> dict:
         res.update(exchange=SH, board="沪市主板", asset_class="A股"); return res
     if p == "688":
         res.update(exchange=SH, board="科创板", asset_class="A股"); return res
+    if p == "689":
+        res.update(exchange=SH, board="科创板(CDR)", asset_class="A股"); return res
     # 深交所
     if p in ("000", "001"):
         res.update(exchange=SZ, board="深市主板", asset_class="A股"); return res
     if p in ("002", "003"):
         res.update(exchange=SZ, board="深市主板(原中小板)", asset_class="A股"); return res
-    if p in ("300", "301"):
+    if p in ("300", "301", "302"):
         res.update(exchange=SZ, board="创业板", asset_class="A股"); return res
     # 北交所/新三板（920 新段；8xxxxx 精选层平移/挂牌，属北交所体系）
     if p == "920" or p1 == "8":
@@ -283,16 +297,16 @@ def classify_convertible(code: str, name: str = "") -> dict:
 #    这些段与 A股 股票段不重叠，且能解决 000012(南玻A vs 国债指数) 同名碰撞。
 # ============================================================
 def _classify_index(code: str, ex_hint, name: str):
-    if ex_hint == SH and re.fullmatch(r"000\d{3}", code):
-        return {"asset_class": "指数", "exchange": SH, "sub_type": "上交所/中证指数"}
-    if ex_hint == SZ and re.fullmatch(r"399\d{3}", code):
-        return {"asset_class": "指数", "exchange": SZ, "sub_type": "深交所指数"}
-    # 无前缀兜底：名称含指数关键词且落在指数代码段
-    if name and any(k in name for k in INDEX_NAME_KW):
-        if re.fullmatch(r"000\d{3}", code):
-            return {"asset_class": "指数", "exchange": ex_hint or SH, "sub_type": "上交所/中证指数"}
-        if re.fullmatch(r"399\d{3}", code):
-            return {"asset_class": "指数", "exchange": ex_hint or SZ, "sub_type": "深交所指数"}
+    if re.fullmatch(r"000\d{3}", code):
+        # 000xxx 段为上证/中证指数专属段（沪）：带 sh 前缀直接命中；
+        # 源数据误带 sz 前缀（如 sz000012 国债指数）时，仅名称含指数关键词才认指数，
+        # 避免误伤深市 A股（如 sz000001 平安银行）。
+        if ex_hint == SH or (name and any(k in name for k in INDEX_NAME_KW)):
+            return {"asset_class": "指数", "exchange": SH, "sub_type": "上交所/中证指数"}
+    if re.fullmatch(r"399\d{3}", code):
+        # 399xxx 段为深证指数专属段（深），同理防止源误带 sh 前缀
+        if ex_hint == SZ or (name and any(k in name for k in INDEX_NAME_KW)):
+            return {"asset_class": "指数", "exchange": SZ, "sub_type": "深交所指数"}
     return None
 
 
@@ -320,6 +334,10 @@ def classify_security(raw_code: str, name: str = "") -> dict:
         return {"asset_class": "可转债", "exchange": cb["exchange"], "sub_type": cb["asset_class"]}
     # 3) 场内基金段：5xxxxx / 15xxxxx / 16xxxxx / 18xxxxx
     if p1 == "5" or p[:2] in ("15", "16", "18"):
+        # 深市 150xxx = 分级基金份额（结构化基金，噪音/非投资标的），
+        # 由 is_dropped 拦截不入 securities 主数据表；此处先识别为独立类别。
+        if p == "150":
+            return {"asset_class": "分级基金", "exchange": SZ, "sub_type": "分级基金"}
         f = classify(code, name)
         if f["listed"]:
             return {"asset_class": "场内基金", "exchange": f["exchange"], "sub_type": f["asset_type"]}
@@ -414,6 +432,7 @@ _ASSET_CLASS_TO_ENUM: dict[str, SecurityType] = {
     "A股": SecurityType.STOCK,
     "B股": SecurityType.STOCK,
     "港股": SecurityType.HK_STOCK,
+    "分级基金": SecurityType.UNCATEGORIZED,  # 深市 150xxx，由 is_dropped 拦截不入库
     "老三板/全国股转": SecurityType.UNCATEGORIZED,
     "未分类/其他": SecurityType.UNCATEGORIZED,
     "非6位数字代码": SecurityType.UNCATEGORIZED,
@@ -443,10 +462,13 @@ def is_dropped(raw_code: str, name: str = "") -> bool:
     按 ``fund-classification-rules.md`` 规则，以下类别丢弃（噪音/非投资标的）：
 
     - 老三板 / 全国股转系统：``4xxxxx``（含 ``400xxx`` 退市A股、``420xxx`` 退市B股）；
-    - 北交所旧代码段：``8xxxxx``（精选层平移，与 ``920`` 新段区分，一并丢弃）。
+    - 北交所旧代码段：``8xxxxx``（精选层平移，与 ``920`` 新段区分，一并丢弃）；
+    - 深市分级基金：``sz150xxx``（结构化分级基金份额，一律视为噪音，丢弃不入库）；
+    - B股：``900xxx``（沪市B股）、``200xxx``/``201xxx``（深市B股，如 201872 招港B）
+      ——B股整体不入主数据表。
 
     保留：``920xxx``（北交所主板新段）、A股主板/科创板/创业板、场内基金、可转债、
-    指数、B股 等。
+    指数 等。
 
     说明：``4xxxxx`` 段（含 ``400xxx`` 退市A股、``420xxx`` 退市B股、以及名称含
     「退债」的退市可转债）一律按老三板/全国股转处理，**丢弃不入库**——既不归入
@@ -455,6 +477,15 @@ def is_dropped(raw_code: str, name: str = "") -> bool:
     _, code = _parse_raw(raw_code)
     if not re.fullmatch(r"\d{6}", code):
         return False
-    # 4xxxxx=老三板/全国股转、8xxxxx=北交所旧段，一律丢弃不入库
+    # 已退市基金（精确 code，见 DELISTED_FUND_CODES）：不入 securities 主数据表
+    if code in DELISTED_FUND_CODES:
+        return True
+    # 4xxxxx=老三板/全国股转、8xxxxx=北交所旧段、150xxx=深市分级基金、
+    # 900xxx=沪市B股、200xxx/201xxx=深市B股，一律丢弃不入库
     # （名称含「退债」的退市可转债落 4xxxxx 段，同样丢弃，不作例外）
-    return code[0] in DROP_PREFIX1
+    return (
+        code[0] in DROP_PREFIX1
+        or code.startswith("150")
+        or code.startswith("900")
+        or code.startswith(("200", "201"))
+    )

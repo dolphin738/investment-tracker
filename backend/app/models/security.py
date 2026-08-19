@@ -87,7 +87,14 @@ class PortfolioSecurity(Base, TimestampMixin):
     )
     master_id: Mapped[str] = mapped_column(
         String(36),
-        ForeignKey("securities.id", ondelete="CASCADE"),
+        # 延迟到事务提交时检查：master 自愈需「先迁移持仓引用再改 securities.id」，
+        # 非延迟外键会在改主键时立即因子表仍引用旧 id 而报 FK 违例。
+        ForeignKey(
+            "securities.id",
+            ondelete="CASCADE",
+            deferrable=True,
+            initially="DEFERRED",
+        ),
         nullable=False,
     )
     # 资产类型 override：NULL=按代码前缀推断；有值=手动覆盖
