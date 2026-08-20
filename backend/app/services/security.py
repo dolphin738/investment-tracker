@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -193,3 +193,30 @@ class SecurityService(PortfolioChildService):
             await self.session.commit()
             return True
         return False
+
+    async def purge_lone_prices_if_no_trades(
+        self, portfolio_id: str, security_id: str
+    ) -> bool:
+        """删除买卖后组合行已无任何交易时，单独清掉其孤儿行情价。
+
+        估值由交易回放（SecurityTrade）驱动：组合行一旦无任何交易，其 security_prices
+        对任意 as_of 的估值都不再贡献（无持仓即无市值），即与估值无关。此处先行清理，
+        避免组合行因仍挂有分红而保留时长留孤儿价格。返回是否发生了删除。
+        """
+        n_trades = (
+            await self.session.execute(
+                select(func.count())
+                .select_from(SecurityTrade)
+                .where(
+                    SecurityTrade.portfolio_id == portfolio_id,
+                    SecurityTrade.security_id == security_id,
+                )
+            )
+        ).scalar_one()
+        if n_trades != 0:
+            return False
+        res = await self.session.execute(
+            delete(SecurityPrice).where(SecurityPrice.security_id == security_id)
+        )
+        await self.session.commit()
+        return bool(res.rowcount)

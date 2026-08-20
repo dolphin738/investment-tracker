@@ -268,7 +268,8 @@ class TradeService(PortfolioChildService):
         await AssetValuationService(self.session).prune_zero_orphans(portfolio_id, d)
         # prune 已不再内部重算：清理 0 值孤儿后需再重算一次 nav 链
         await RecalculationService(self.session).recalculateNavRange(portfolio_id, d)
-        # 实现B：买卖删光后，若持仓已无买卖/行情/分红则连持仓一起删
+        # 实现B：买卖删光后先清无交易的孤儿行情价，再若持仓已无买卖/行情/分红则连持仓一起删
         from app.services.security import SecurityService
 
+        await SecurityService(self.session).purge_lone_prices_if_no_trades(portfolio_id, sec_id)
         await SecurityService(self.session).prune_if_orphan(portfolio_id, sec_id)
