@@ -21,7 +21,7 @@
 
 import { computed, ref, watch } from 'vue';
 import { useForm } from 'vee-validate';
-import { useMutation } from '@tanstack/vue-query';
+import { useMutation, useQuery } from '@tanstack/vue-query';
 import { z } from 'zod';
 import { Loader2 } from 'lucide-vue-next';
 import { toast } from '@/composables/use-toast';
@@ -42,7 +42,8 @@ import {
   useUpdateSecurityTrade,
 } from '../composables/use-security-trades';
 import { useSecurities } from '@/composables/use-securities';
-import { resolveSecurity, updateSecurity } from '@/api/security.api';
+import { resolveSecurity, updateSecurity, getSecurity } from '@/api/security.api';
+import type { SecurityDetailResponse } from '@/api/security.api';
 import { toIsoDate } from '@/lib/constants';
 import { SecuritySide, SecurityType, sumMoney } from '@/lib/types';
 import { formatCurrency } from '@/lib/utils';
@@ -303,8 +304,43 @@ const selectedSecurityLabel = computed(() => {
   if (resolvedSecurity.value?.id === selectedSecurityId.value) {
     return `${resolvedSecurity.value.name}（${resolvedSecurity.value.code}）`;
   }
-  return secLoading.value ? '当前标的（加载中…）' : '当前标的（已不在可选列表）';
+  return secLoading.value || secDetailLoading.value
+    ? '当前标的（加载中…）'
+    : '当前标的（已不在可选列表）';
 });
+
+/**
+ * 编辑态标的详情兜底拉取：当 trade.securityId 不在组合证券字典（securities 列表）内时
+ * （如录入时 resolve 懒实例化的新标的、列表分页未覆盖、或缓存滞后），按 id 主动拉取该标的
+ * 详情并回填 resolvedSecurity，驱动「标的名称」「资产类型」正确显示，彻底消除
+ * 「已不在可选列表 / 无法推断类型」。列表字典已含该标的时 disabled，不发起多余请求
+ * （交给 selectedSecurityLabel / currentSecurityType 既有的 find 逻辑）。
+ */
+const secDetailQuery = useQuery<SecurityDetailResponse>({
+  queryKey: ['security', 'detail', props.portfolioId, selectedSecurityId],
+  queryFn: () => getSecurity(props.portfolioId, selectedSecurityId.value),
+  enabled: computed(() => {
+    const id = selectedSecurityId.value;
+    if (!id) return false;
+    const inList = (securities.value ?? []).some((s) => s.id === id);
+    return !inList && resolvedSecurity.value?.id !== id;
+  }),
+  retry: false,
+});
+watch(
+  () => secDetailQuery.data.value,
+  (detail) => {
+    if (detail && detail.id === selectedSecurityId.value) {
+      resolvedSecurity.value = {
+        id: detail.id,
+        name: detail.name,
+        code: detail.code,
+        type: detail.type as SecurityType,
+      };
+    }
+  },
+);
+const secDetailLoading = computed(() => secDetailQuery.isLoading.value);
 
 /** 选中系统主数据 → resolve 懒实例化为组合标的,回填 securityId(ADR-003) */
 const resolveSecurityMutation = useMutation({
@@ -532,7 +568,7 @@ const onSubmit = handleSubmit((values) => {
             <SelectValue
               :placeholder="
                 selectedSecurityId
-                  ? secLoading
+                  ? secLoading || secDetailLoading
                     ? '加载中…'
                     : '无法推断类型'
                   : '请先选择标的'

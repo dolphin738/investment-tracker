@@ -28,6 +28,7 @@ const apiMocks = vi.hoisted(() => ({
   listSecurities: vi.fn(),
   resolveSecurity: vi.fn(),
   updateSecurity: vi.fn(),
+  getSecurity: vi.fn(),
   listSecurityMasters: vi.fn(),
 }));
 
@@ -42,6 +43,7 @@ vi.mock('@/api/security.api', () => ({
   listSecurities: apiMocks.listSecurities,
   resolveSecurity: apiMocks.resolveSecurity,
   updateSecurity: apiMocks.updateSecurity,
+  getSecurity: apiMocks.getSecurity,
 }));
 
 vi.mock('@/api/security-master.api', () => ({

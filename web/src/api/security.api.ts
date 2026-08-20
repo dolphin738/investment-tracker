@@ -72,6 +72,34 @@ export function deleteSecurity(
 }
 
 /**
+ * 按 id 获取单个组合持仓标的（portfolio_securities 行）。
+ *
+ * 用途：编辑已有买卖流水时，若 trade.securityId 不在前端「全量字典」securities 列表内
+ * （如录入时 resolve 懒实例化的新标的、列表分页未覆盖、或缓存滞后），按 id 主动拉取详情
+ * 回填展示，不依赖列表完整性。对齐后端 GET /portfolios/:portfolioId/securities/:secId。
+ */
+export interface SecurityDetailResponse {
+  id: string;
+  code: string;
+  name: string;
+  type: SecurityType;
+  exchange: string | null;
+  currency: string | null;
+  masterId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export function getSecurity(
+  portfolioId: string,
+  securityId: string,
+): Promise<SecurityDetailResponse> {
+  return http.get<SecurityDetailResponse>(
+    `/portfolios/${portfolioId}/securities/${securityId}`,
+  );
+}
+
+/**
  * 录入界面证券搜索选中后的懒实例化（§7 ③ / §10，ADR-003）。
  *
  * 用户从系统主数据（portfolio_id IS NULL）选中某标的，但 trade.securityId 必须指向
