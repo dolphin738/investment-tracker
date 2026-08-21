@@ -22,12 +22,17 @@ depends_on: str | None = None
 
 
 def upgrade() -> None:
-    # 1) 扩展原生枚举（事务内 ADD VALUE，IF NOT EXISTS 幂等）
-    op.execute(
-        text("ALTER TYPE \"JobTaskType\" ADD VALUE IF NOT EXISTS 'LOG_CLEANUP'")
-    )
+    # 1) 扩展原生枚举：ALTER TYPE ADD VALUE 必须在独立事务（autocommit）中提交，
+    #    否则同一连接后续语句引用新枚举值会报
+    #    "unsafe use of new value ... must be committed before they can be used"。
+    ctx = op.get_context()
+    with ctx.autocommit_block():
+        op.execute(
+            text("ALTER TYPE \"JobTaskType\" ADD VALUE IF NOT EXISTS 'LOG_CLEANUP'")
+        )
 
-    # 2) 种子：系统任务（名称唯一约束兜底，勿重复执行）
+    # 2) 种子：系统任务（名称唯一约束兜底，勿重复执行）。须在 ADD VALUE 提交后再执行，
+    #    否则 PG 认为新枚举值尚未生效（同一事务内不允许引用）。
     op.execute(
         sa.text(
             """
