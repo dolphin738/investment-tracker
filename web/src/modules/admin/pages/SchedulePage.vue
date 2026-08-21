@@ -103,6 +103,8 @@ interface EditForm {
   name: string;
   cronExpr: string;
   description: string;
+  /** 保留执行日志条数上限（number 输入框写回为 number，空为 ''，均表示不限制） */
+  maxLogs: number | string;
   enabled: boolean;
   /** 按 handler.param_fields 的 key 编辑的参数值（统一以字符串承载，提交时转换） */
   params: Record<string, string>;
@@ -115,6 +117,7 @@ const form = reactive<EditForm>({
   name: '',
   cronExpr: '',
   description: '',
+  maxLogs: '',
   enabled: true,
   params: {},
 });
@@ -141,6 +144,7 @@ function initFormFor(t: ScheduleTask | null): void {
     form.name = t.name;
     form.cronExpr = t.cron_expr;
     form.description = t.description ?? '';
+    form.maxLogs = t.max_logs != null ? t.max_logs : '';
     form.enabled = t.enabled;
     form.params = Object.fromEntries(
       Object.entries(t.params ?? {}).map(([k, v]) => [k, v == null ? '' : String(v)]),
@@ -151,6 +155,7 @@ function initFormFor(t: ScheduleTask | null): void {
     form.name = '';
     form.cronExpr = '';
     form.description = '';
+    form.maxLogs = '';
     form.enabled = true;
     form.params = first ? defaultsOf(first.task_type) : {};
   }
@@ -194,6 +199,11 @@ const formPending = () => createMut.isPending.value || updateMut.isPending.value
 
 function handleSubmit(): void {
   // 名称与 cron 必填由后端校验；失败时 mutation onError 已统一提示
+  // 保留条数：number 输入框写回为 number、空为 ''，统一 Number 化后仅接受正整数
+  const maxLogsNum = Number(form.maxLogs);
+  const maxLogsBody = Number.isInteger(maxLogsNum) && maxLogsNum > 0
+    ? maxLogsNum
+    : 0;
   if (editing.value) {
     const isSystem = editing.value.kind === 'SYSTEM';
     updateMut.mutate(
@@ -207,6 +217,7 @@ function handleSubmit(): void {
           enabled: form.enabled,
           params: parseParams(),
           description: form.description.trim() || undefined,
+          max_logs: maxLogsBody,
         },
       },
       { onSuccess: () => close() },
@@ -220,6 +231,7 @@ function handleSubmit(): void {
         enabled: form.enabled,
         params: parseParams(),
         description: form.description.trim() || undefined,
+        max_logs: maxLogsBody,
       },
       { onSuccess: () => close() },
     );
@@ -550,6 +562,21 @@ function statusLabel(status: string | null): string {
               v-model="form.description"
               placeholder="可选，备注任务用途"
               :rows="3"
+            />
+          </div>
+
+          <div class="space-y-2">
+            <Label for="schedule-maxlogs">
+              保留执行日志条数
+              <span class="text-muted-foreground">（留空不限制）</span>
+            </Label>
+            <Input
+              id="schedule-maxlogs"
+              v-model="form.maxLogs"
+              type="number"
+              min="1"
+              step="1"
+              placeholder="如 100，最多保留最近 100 条执行日志"
             />
           </div>
 

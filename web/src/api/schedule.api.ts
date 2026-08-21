@@ -41,6 +41,8 @@ export interface ScheduleTask {
   cron_expr: string;
   params: Record<string, unknown> | null;
   description: string | null;
+  /** 保留执行日志条数上限（null/<=0 表示不限制） */
+  max_logs: number | null;
   created_at: string;
   updated_at: string;
   /** 最近一次执行时间（无执行记录为 null） */
@@ -72,6 +74,8 @@ export interface ScheduleTaskCreate {
   enabled?: boolean;
   params?: Record<string, unknown>;
   description?: string;
+  /** 保留执行日志条数上限（缺省/<=0 表示不限制） */
+  max_logs?: number | null;
 }
 
 /** 编辑任务请求体（一切字段可选；kind 不可改；普通任务可改 task_type，系统任务不可改） */
@@ -82,6 +86,8 @@ export interface ScheduleTaskUpdate {
   enabled?: boolean;
   params?: Record<string, unknown> | null;
   description?: string;
+  /** 保留执行日志条数上限（null/<=0 表示不限制） */
+  max_logs?: number | null;
 }
 
 /** 单条执行日志行（后端 JobRunLogOut） */
