@@ -108,16 +108,32 @@ async def get_current_user(
     return CurrentUser(user_id=user.id, email=user.email, role=user.role)
 
 
-async def require_admin(current: CurrentUser = Depends(get_current_user)) -> CurrentUser:
-    """管理员权限依赖：当前用户 role 必须为 admin。
+async def require_any_role(
+    *roles: str,
+    current: CurrentUser = Depends(get_current_user),
+) -> CurrentUser:
+    """通用角色依赖：当前用户 role 必须在 ``roles`` 内，否则 403。
+
+    鉴权以数据库实时 role 为准（get_current_user 已查库），不信任 JWT payload 的
+    role 字段——被降权的用户持旧 JWT 无法绕过（陈旧 JWT 不绕过）。
+
+    ``require_admin`` 是其对 ``("admin",)`` 的特例，既有调用方行为不变。
+    """
+    if current.role not in roles:
+        raise BusinessException(
+            code=BusinessErrorCode.FORBIDDEN,
+            message="权限不足",
+            status_code=403,
+        )
+    return current
+
+
+async def require_admin(
+    current: CurrentUser = Depends(require_any_role("admin")),
+) -> CurrentUser:
+    """管理员权限依赖（require_any_role('admin') 的特例，既有调用方行为不变）。
 
     鉴权以数据库实时 role 为准（get_current_user 已查库），不信任 JWT payload 的
     role 字段——被降权的管理员持旧 JWT 无法绕过（陈旧 JWT 不绕过）。
     """
-    if current.role != "admin":
-        raise BusinessException(
-            code=BusinessErrorCode.FORBIDDEN,
-            message="需要管理员权限",
-            status_code=403,
-        )
     return current

@@ -12,13 +12,16 @@ class UserRole(str, Enum):
     """用户角色（RBAC 最小实现）。
 
     - USER：普通用户（默认）；
-    - ADMIN：系统管理员（可访问 /api/admin 系统配置等受限端点）。
+    - ADMIN：系统管理员（可访问 /api/admin 系统配置等受限端点）；
+    - AUDITOR：审计只读角色（可查看日志中心等只读资源，不可写）。
 
-    值以字符串落库（users.role），与 JWT payload 的 role 字段同源。
+    值以字符串落库（users.role 为 VARCHAR，非 PG 原生枚举），与 JWT payload 的
+    role 字段同源。新增角色无需 DB 迁移（方案 §4.4）。
     """
 
     USER = "user"
     ADMIN = "admin"
+    AUDITOR = "auditor"
 
 
 class BusinessErrorCode(IntEnum):

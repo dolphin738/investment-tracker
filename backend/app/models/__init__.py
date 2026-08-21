@@ -21,6 +21,7 @@ from app.models.enums import (
 )
 from app.models.interface_category import InterfaceCategory
 from app.models.job import JobConfig, JobRunLog
+from app.models.log import AppLog
 from app.models.notification import Notification
 from app.models.portfolio import Portfolio
 from app.models.quote_interface import QuoteInterface
@@ -45,6 +46,7 @@ __all__ = [
     "QuoteInterface",
     "InterfaceCategory",
     "Notification",
+    "AppLog",
     "QuoteProviderAccessMethod",
     "InterfaceDirection",
     "DailyNav",

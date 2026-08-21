@@ -8,6 +8,7 @@ data 字段：异常未携带时回落 null（保持既有错误响应形状）�
 """
 from __future__ import annotations
 
+import traceback as _traceback
 from typing import Any
 
 from fastapi import Request
@@ -97,6 +98,22 @@ async def validation_exception_handler(
 async def unhandled_exception_handler(
     _request: Request, exc: Exception
 ) -> EnvelopeJSONResponse:
+    # 仅 5xx / 未捕获异常落库（4xx 业务异常走各自的 handler，不在此落库，避免噪音，
+    # 见方案 §4.2 评审结论）。本处理器只响应 Exception（即非 BusinessException /
+    # HTTPException / validation 的未处理异常），故天然只覆盖 5xx。
+    try:
+        from app.services.log import record
+
+        await record(
+            level="error",
+            scope="error",
+            module="api",
+            message=str(exc),
+            trace=_traceback.format_exc(),
+        )
+    except Exception:
+        # 落库本身失败（如 DB 不可用）绝不影响 500 响应
+        pass
     return EnvelopeJSONResponse(
         {
             "code": BusinessErrorCode.INTERNAL_ERROR,
