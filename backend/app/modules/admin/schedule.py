@@ -88,6 +88,8 @@ class JobCreate(BaseModel):
     enabled: bool = False
     params: Optional[dict[str, Any]] = None
     description: Optional[str] = None
+    # 保留执行日志条数上限（<=0 按 None 处理 = 不限制）
+    max_logs: Optional[int] = None
 
 
 class JobUpdate(BaseModel):
@@ -98,6 +100,7 @@ class JobUpdate(BaseModel):
     enabled: Optional[bool] = None
     params: Optional[dict[str, Any]] = None
     description: Optional[str] = None
+    max_logs: Optional[int] = None
 
 
 class JobOut(BaseModel):
@@ -109,6 +112,7 @@ class JobOut(BaseModel):
     cron_expr: str
     params: Optional[dict[str, Any]]
     description: Optional[str]
+    max_logs: Optional[int]
     created_at: datetime
     updated_at: datetime
     # 最近一次执行摘要（列表端点陪齐）
@@ -219,6 +223,7 @@ async def create_task(
         cron_expr=body.cron_expr,
         params=body.params,
         description=body.description,
+        max_logs=body.max_logs if (body.max_logs or 0) > 0 else None,
     )
     db.add(cfg)
     await db.commit()
@@ -264,6 +269,8 @@ async def update_task(
         cfg.params = body.params
     if body.description is not None:
         cfg.description = body.description
+    if body.max_logs is not None:
+        cfg.max_logs = body.max_logs if body.max_logs > 0 else None
     await db.commit()
     await db.refresh(cfg)
     await reload_schedule()

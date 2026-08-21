@@ -18,6 +18,7 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    Integer,
     String,
     Text,
     false,
@@ -50,6 +51,8 @@ class JobConfig(Base, TimestampMixin):
     # 任务类型相关的可选参数（如 LOCAL_COMMAND.command / HTTP_CALLBACK.url）
     params: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     description: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    # 保留执行日志条数上限：NULL/<=0 表示不限制；有值时删除该任务超出的最旧日志
+    max_logs: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class JobRunLog(Base, CreatedAtMixin):

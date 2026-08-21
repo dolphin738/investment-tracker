@@ -24,7 +24,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Optional
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import delete as sa_delete, select
 
 from app.core.config import get_settings
 from app.db.database import AsyncSessionLocal
@@ -142,6 +142,30 @@ async def _run_job(job_id: str, source: JobTriggerSource) -> None:
             log.error = str(exc)
         log.finished_at = datetime.now(timezone.utc)
         await session.commit()
+        # 保留策略：任务配置了 max_logs 时，删除该任务开始时间最旧、超出上限的日志
+        if cfg.max_logs and cfg.max_logs > 0:
+            await _prune_run_logs(session, job_id, cfg.max_logs)
+
+
+async def _prune_run_logs(session, job_id: str, max_logs: int) -> None:
+    """按保留条数上限裁剪执行日志：保留最新 max_logs 条，删除更旧记录。
+
+    started_at 同秒时用 id 作为次级排序保证确定性（始终保住最新写入的日志）。
+    """
+    stale_ids = (
+        await session.execute(
+            select(JobRunLog.id)
+            .where(JobRunLog.job_id == job_id)
+            .order_by(JobRunLog.started_at.desc(), JobRunLog.id.desc())
+            .offset(max_logs)
+        )
+    ).scalars().all()
+    if not stale_ids:
+        return
+    await session.execute(
+        sa_delete(JobRunLog).where(JobRunLog.id.in_(stale_ids))
+    )
+    await session.commit()
 
 
 # --------------------------------------------------------------------------- #
