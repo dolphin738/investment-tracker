@@ -62,6 +62,33 @@ _HANDLER_META: dict[JobTaskType, dict[str, Any]] = {
         "creatable": False,
         "param_fields": [],
     },
+    JobTaskType.LOG_CLEANUP: {
+        "label": "日志中心清理",
+        "creatable": False,
+        "param_fields": [
+            {
+                "key": "retention_days",
+                "label": "各级别保留天数 {error,warning,info}",
+                "required": False,
+                "type": "json",
+                "default": {"error": 90, "warning": 30, "info": 7},
+            },
+            {
+                "key": "max_rows",
+                "label": "各级别保留条数上限 {error,warning,info}",
+                "required": False,
+                "type": "json",
+                "default": {"error": 20000, "warning": 10000, "info": 5000},
+            },
+            {
+                "key": "notifications_retention_days",
+                "label": "已读通知保留天数",
+                "required": False,
+                "type": "number",
+                "default": 30,
+            },
+        ],
+    },
 }
 
 # 系统任务仅由迁移种子写入，不提供新建入口

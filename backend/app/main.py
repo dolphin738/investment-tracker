@@ -31,6 +31,7 @@ from app.modules import (
     admin,
     aggregation,
     auth,
+    client_log,
     calculation,
     data,
     data_transfer,
@@ -118,6 +119,8 @@ app.include_router(calculation.router_recalculate)
 app.include_router(internal.router)
 app.include_router(admin.router_admin)
 app.include_router(admin.router_admin_schedule)
+app.include_router(admin.router_admin_log_center)
+app.include_router(client_log.router_client_log)
 
 
 # SPA 前端托管 + 深链回退（部署配置：Docker 单镜像时由后端 serve web/dist）

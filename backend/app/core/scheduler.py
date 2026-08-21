@@ -24,11 +24,18 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Optional
 
 import httpx
-from sqlalchemy import delete as sa_delete, select
+from sqlalchemy import delete as sa_delete, func, select
 
 from app.core.config import get_settings
 from app.db.database import AsyncSessionLocal
-from app.models import JobConfig, JobRunLog, Portfolio, UserQuoteSyncConfig
+from app.models import (
+    AppLog,
+    JobConfig,
+    JobRunLog,
+    Notification,
+    Portfolio,
+    UserQuoteSyncConfig,
+)
 from app.models.enums import JobRunStatus, JobTaskType, JobTriggerSource
 from app.services.cleanup import CleanupService
 from app.services.market_data_sync import MarketDataSyncService
@@ -61,6 +68,104 @@ async def _accounts_cleanup(cfg: JobConfig) -> str:
     async with AsyncSessionLocal() as session:
         deleted = await CleanupService(session).physical_purge()
     return f"已物理清理 {deleted} 个过期账户"
+
+
+async def _log_cleanup(cfg: JobConfig) -> str:
+    """按级别分级清理日志中心（方案 §4.6）。
+
+    - app_logs：每 level 执行「过期删除」+「超量删除」两条规则；
+    - notifications：仅删「已读且超期」行，未读永不删；
+    - job_run_logs：仅清理「未配置 max_logs」任务的超期执行日志（默认 30 天）。
+
+    用独立 ``AsyncSessionLocal`` 会话（对齐 log_service.record），整段 try/except 吞掉
+    异常并把失败本身落库，避免清理任务自己炸。参数为空时回退到方案 §4.6 默认值。
+    """
+    from datetime import timedelta
+
+    params = cfg.params or {}
+    retention_days = params.get("retention_days") or {"error": 90, "warning": 30, "info": 7}
+    max_rows = params.get("max_rows") or {"error": 20000, "warning": 10000, "info": 5000}
+    notif_retention = int(params.get("notifications_retention_days") or 30)
+    deleted_app = deleted_notif = deleted_job = 0
+    try:
+        async with AsyncSessionLocal() as session:
+            now = datetime.now(timezone.utc)
+            # 1) app_logs：逐 level 过期 + 超量
+            for level in ("error", "warning", "info"):
+                days = int(retention_days.get(level, 7))
+                res = await session.execute(
+                    sa_delete(AppLog).where(
+                        AppLog.level == level,
+                        AppLog.created_at < now - timedelta(days=days),
+                    )
+                )
+                deleted_app += res.rowcount or 0
+                limit = int(max_rows.get(level, 5000))
+                total = (
+                    await session.execute(
+                        select(func.count())
+                        .select_from(AppLog)
+                        .where(AppLog.level == level)
+                    )
+                ).scalar_one()
+                if total > limit:
+                    excess = total - limit
+                    stale_ids = (
+                        await session.execute(
+                            select(AppLog.id)
+                            .where(AppLog.level == level)
+                            .order_by(AppLog.created_at.asc(), AppLog.id.asc())
+                            .limit(excess)
+                        )
+                    ).scalars().all()
+                    if stale_ids:
+                        await session.execute(
+                            sa_delete(AppLog).where(AppLog.id.in_(stale_ids))
+                        )
+                        deleted_app += len(stale_ids)
+            await session.commit()
+
+            # 2) notifications：仅删「已读且超期」行，未读永不删
+            res = await session.execute(
+                sa_delete(Notification).where(
+                    Notification.read == True,  # noqa: E712
+                    Notification.created_at < now - timedelta(days=notif_retention),
+                )
+            )
+            deleted_notif += res.rowcount or 0
+
+            # 3) job_run_logs：仅清理「未配置 max_logs（NULL）」任务的超期日志（默认 30 天）
+            res = await session.execute(
+                sa_delete(JobRunLog)
+                .where(JobRunLog.started_at < now - timedelta(days=30))
+                .where(
+                    JobRunLog.job_id.in_(
+                        select(JobConfig.id).where(JobConfig.max_logs.is_(None))
+                    )
+                )
+            )
+            deleted_job += res.rowcount or 0
+            await session.commit()
+    except Exception as exc:  # 清理失败本身落库，不让清理任务自己炸
+        try:
+            from app.services.log import record
+
+            await record("error", "system", "scheduler", f"日志清理失败：{exc}")
+        except Exception:
+            pass
+        raise
+
+    summary = (
+        f"日志清理完成：删 app_logs {deleted_app} 条、"
+        f"notifications {deleted_notif} 条、job_logs {deleted_job} 条"
+    )
+    try:
+        from app.services.log import record
+
+        await record("info", "system", "scheduler", summary)
+    except Exception:
+        pass
+    return summary
 
 
 async def _local_command(cfg: JobConfig) -> str:
@@ -107,6 +212,7 @@ async def _http_callback(cfg: JobConfig) -> str:
 _HANDLERS: dict[JobTaskType, Callable[[JobConfig], Any]] = {
     JobTaskType.SECURITY_MASTER_SYNC: _security_master_sync,
     JobTaskType.ACCOUNT_CLEANUP: _accounts_cleanup,
+    JobTaskType.LOG_CLEANUP: _log_cleanup,
     JobTaskType.LOCAL_COMMAND: _local_command,
     JobTaskType.HTTP_CALLBACK: _http_callback,
 }

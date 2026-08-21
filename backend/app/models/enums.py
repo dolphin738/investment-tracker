@@ -110,6 +110,7 @@ class JobTaskType(str, enum.Enum):
     LOCAL_COMMAND = "LOCAL_COMMAND"  # 定时执行本地脚本/命令（普通可建）
     HTTP_CALLBACK = "HTTP_CALLBACK"  # HTTP 回调（普通可建）
     ACCOUNT_CLEANUP = "ACCOUNT_CLEANUP"  # 账户物理清理（系统任务，迁移种子写入）
+    LOG_CLEANUP = "LOG_CLEANUP"  # 日志中心清理（系统任务，迁移种子写入）
 
 
 class JobKind(str, enum.Enum):
