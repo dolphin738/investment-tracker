@@ -64,6 +64,9 @@ const SECURITY_TYPE_OPTIONS: ReadonlyArray<{ value: SecurityType; label: string 
   { value: SecurityType.INDEX, label: '指数' },
   { value: SecurityType.HK_STOCK, label: '港股' },
   { value: SecurityType.OTHER, label: '其他' },
+  // 后端可合法下发 UNCATEGORIZED（代码无法可靠归类时的兜底类型）。必须纳入下拉项，
+  // 否则该标的值命中时 reka-ui Select 无匹配项、回退显示「无法推断类型」占位符（见 BugFix）。
+  { value: SecurityType.UNCATEGORIZED, label: '未分类' },
 ];
 
 /** 费用字段:可选、非负、最多 2 位小数 */

@@ -73,6 +73,7 @@ export const HOLDINGS_TYPE_OPTIONS: ReadonlyArray<{
   { value: SecurityType.ON_EXCHANGE_FUND, label: '场内基金' },
   { value: SecurityType.OFF_EXCHANGE_FUND, label: '场外基金' },
   { value: SecurityType.BOND, label: '债券' },
+  { value: SecurityType.UNCATEGORIZED, label: '未分类' },
   { value: SecurityType.OTHER, label: '其他' },
 ];
 

@@ -193,12 +193,17 @@ export const SecurityType = {
   CONVERTIBLE_BOND: 'CONVERTIBLE_BOND',
   INDEX: 'INDEX',
   OFF_EXCHANGE_FUND: 'OFF_EXCHANGE_FUND',
+  // 后端可合法下发的兜底类型（代码无法可靠归类时落在未分类）。必须纳入 const 镜像，
+  // 否则 UI 手动资产类型下拉等控件无法表示该值、回退显示「无法推断类型」占位符（见 BugFix）。
+  // 主数据同步类别等需排除它的路径应显式过滤，而非依赖其在 const 中缺席。
+  UNCATEGORIZED: 'UNCATEGORIZED',
 } as const;
 export type SecurityType = (typeof SecurityType)[keyof typeof SecurityType];
 
 /** 资产类别中文标签（主数据列表等界面展示用，全项目唯一真源）。
  * 覆盖 SecurityType 全部成员 + 主数据行兜底类别 UNCATEGORIZED（代码无法可靠推断时落在未分类）。
- * 注意：UNCATEGORIZED 不入 SecurityType const（避免成为接口可选同步类别），仅在此映射与后端枚举对齐。 */
+ * UNCATEGORIZED 现已纳入 SecurityType const（与后端枚举对齐），供 UI 控件完整表示；
+ * 主数据同步类别等需排除它的路径应显式过滤，而非依赖其缺席。 */
 export const SECURITY_TYPE_LABELS: Record<string, string> = {
   STOCK: '股票',
   HK_STOCK: '港股',
