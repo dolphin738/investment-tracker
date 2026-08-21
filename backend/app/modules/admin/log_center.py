@@ -16,7 +16,8 @@ from typing import Any, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import select, text
+from sqlalchemy import bindparam, select, text
+from sqlalchemy import DateTime, Integer, String
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.envelope import EnvelopeRoute
@@ -52,7 +53,7 @@ SELECT
     jrl.id, 'job',
     CASE WHEN jrl.error IS NOT NULL THEN 'error' ELSE 'info' END,
     'job', COALESCE(jc.name, 'scheduler'),
-    COALESCE(jrl.message, jrl.status), jrl.error, NULL, NULL,
+    COALESCE(jrl.message, jrl.status::text), jrl.error, NULL, NULL,
     jrl.started_at, NULL
 FROM job_run_logs jrl
 LEFT JOIN job_configs jc ON jc.id = jrl.job_id
@@ -63,10 +64,22 @@ _FILTER_WHERE = """
 WHERE (:level IS NULL OR level = :level)
   AND (:scope IS NULL OR scope = :scope)
   AND (:module IS NULL OR module = :module)
-  AND (:start IS NULL OR created_at >= :start::timestamptz)
-  AND (:end IS NULL OR created_at <= :end::timestamptz)
+  AND (:start IS NULL OR created_at >= :start)
+  AND (:end IS NULL OR created_at <= :end)
   AND (:keyword IS NULL OR message ILIKE :keyword)
 """
+
+# 显式声明过滤参数类型：当所有参数均为 NULL 时，asyncpg 在 prepare 阶段无法从
+# 字面量推断 $N 类型（AmbiguousParameterError → 全请求 500）。用 bindparam 给定
+# 类型后，即使全 NULL 也能正确编译。start/end 声明为 DateTime 以匹配 timestamptz 列。
+_FILTER_BINDPARAMS = [
+    bindparam("level", type_=String),
+    bindparam("scope", type_=String),
+    bindparam("module", type_=String),
+    bindparam("start", type_=DateTime(timezone=True)),
+    bindparam("end", type_=DateTime(timezone=True)),
+    bindparam("keyword", type_=String),
+]
 
 
 # --------------------------------------------------------------------------- #
@@ -140,12 +153,24 @@ async def list_logs(
     level/scope/module 精确匹配；keyword ILIKE 命中 message；start/end 为
     created_at 区间（ISO 字符串）。
     """
+    # start/end 为 ISO 字符串，解析为 datetime 再绑定：created_at 是 timestamptz 列，
+    # 与 datetime 对象比较 PG 自动按 timestamptz 处理。直接用字符串会因类型不匹配
+    # 触发隐式转换失败；且 _FILTER_WHERE 内不得写 `::timestamptz`（与 SQLAlchemy
+    # text() 的 :param 绑定解析冲突，会残留 `:` 导致 asyncpg 语法错误 → 全请求 500）。
+    def _parse_dt(v: Optional[str]) -> Optional[datetime]:
+        if not v:
+            return None
+        try:
+            return datetime.fromisoformat(v)
+        except ValueError:
+            return None
+
     filter_params: dict[str, Any] = {
         "level": level,
         "scope": scope,
         "module": module,
-        "start": start,
-        "end": end,
+        "start": _parse_dt(start),
+        "end": _parse_dt(end),
         "keyword": f"%{keyword}%" if keyword else None,
     }
     list_stmt = text(
@@ -153,10 +178,14 @@ async def list_logs(
         f"SELECT id, source, level, scope, module, message, trace, detail, "
         f"user_id, created_at, read FROM cte {_FILTER_WHERE} "
         f"ORDER BY created_at DESC LIMIT :limit OFFSET :offset"
+    ).bindparams(
+        *_FILTER_BINDPARAMS,
+        bindparam("limit", type_=Integer),
+        bindparam("offset", type_=Integer),
     )
     count_stmt = text(
         f"WITH cte AS ({_CTE_INNER}) SELECT count(*) AS cnt FROM cte {_FILTER_WHERE}"
-    )
+    ).bindparams(*_FILTER_BINDPARAMS)
     list_params = {**filter_params, "limit": pageSize, "offset": (page - 1) * pageSize}
 
     total = (await db.execute(count_stmt, filter_params)).scalar_one()
