@@ -80,6 +80,19 @@ INDEX_NAME_KW = ("指数", "国债", "企债", "公司债", "信用债", "综指
 CB_SH_PREFIX = ("110", "113")            # 沪市可转债：110↔600，113↔601/603
 CB_SZ_PREFIX = ("123", "127", "128")     # 深市可转债：123↔创业板，127↔主板，128↔原中小板
 
+# 债券现券代码段（沪市为主；与 A股/基金/可转债 段不重叠）。
+# 仅在 classify_security 路由链最末、A股 分支判定为「未分类/其他」时兜底改判为债券，
+# 故不与其他分类冲突（零回归风险）。来源：上交所《证券代码段分配指南》第4号（2023/2024/2025 修订）。
+BOND_CODE_SEG3 = (
+    "010", "018", "019", "020",   # 国债 / 政策性银行金融债 / 记账式贴现国债（沪）
+    "100", "101", "112", "122", "124",  # 公司债 / 企业债 / 地方债 / 债券回售 / 资产支持证券（沪）
+)
+# 债券名称关键词（名称通道兜底；须排除可转债与基金关键词，避免误判）
+BOND_NAME_KW = ("国债", "地方债", "地方政府债", "企债", "企业债", "公司债",
+                "金融债", "短融", "中票", "可交债")
+# 排除词：名称含这些则属可转债或基金，不应判为普通债券
+BOND_EXCLUDE_KW = ("转债", "转2", "转3", "ETF", "LOF", "债基", "净值")
+
 # 丢弃段：老三板/全国股转(4xxxxx) 与 北交所旧段(8xxxxx) 不写入主数据表
 # （B股 900xxx/200xxx 段在 is_dropped 内单独判定，不在此前缀集合中）
 DROP_PREFIX1 = ("4", "8")
@@ -311,7 +324,35 @@ def _classify_index(code: str, ex_hint, name: str):
 
 
 # ============================================================
-# 统一入口：解析 sh/sz/bj/hk 前缀 → 港股 → 可转债 → 场内基金 → 指数 → A股/B股/北交所/老三板
+# 三·五、债券兜底识别（仅路由链最末调用，零回归风险）
+# ============================================================
+def _classify_bond(code: str, name: str = "") -> Optional[dict]:
+    """债券兜底识别（classify_security 路由链最末调用）。
+
+    仅当代码段为债券现券段，或名称含债券关键词（且非可转债/基金）时，判定为「债券」。
+    命中返回 ``{asset_class, exchange, sub_type}``，未命中返回 ``None``。
+
+    调用方仅在 A股 分支判定为「未分类/其他」时调用本函数，因此不会与可转债 /
+    场内基金 / 指数 / A股 等既有分类冲突（零回归风险）。
+    """
+    code = (code or "").strip()
+    name = (name or "").strip()
+    if not re.fullmatch(r"\d{6}", code):
+        return None
+    seg3 = code[:3]
+    # 1) 代码段通道：债券现券专属段（沪市，与 A股/基金/可转债 段不重叠）
+    if seg3 in BOND_CODE_SEG3:
+        return {"asset_class": "债券", "exchange": SH, "sub_type": "债券"}
+    # 2) 名称关键词通道：须含债券关键词，且排除可转债/基金关键词
+    if name and any(k in name for k in BOND_NAME_KW):
+        if any(x in name for x in BOND_EXCLUDE_KW):
+            return None
+        return {"asset_class": "债券", "exchange": None, "sub_type": "债券"}
+    return None
+
+
+# ============================================================
+# 统一入口：解析 sh/sz/bj/hk 前缀 → 港股 → 可转债 → 场内基金 → 指数 → A股/B股/北交所/老三板 → 债券兜底
 # ============================================================
 def classify_security(raw_code: str, name: str = "") -> dict:
     """统一判定：资产大类 + 交易所 + 细分类型。raw_code 可带 sh/sz/bj/hk 前缀。"""
@@ -328,10 +369,14 @@ def classify_security(raw_code: str, name: str = "") -> dict:
     # 1) 港股（显式 hk 前缀已由 _parse_raw 提取，或 5 位纯数字兜底）
     if ex_hint == HK or (p1 == "0" and len(code) <= 5):
         return {"asset_class": "港股", "exchange": HK, "sub_type": "港股股票"}
-    # 2) 可转债优先（前缀 110/113/123/127/128 与 A股/基金 不重叠）
+    # 2) 可转债 / 可交债(EB) 优先（前缀 110/113/123/127/128 为可转债；
+    #    118/132(沪)/120(深) 为可交债(EB)，属上市债券但非可转债，
+    #    此前因 is_cb=False 被丢弃，此处补回 → 映射 BOND）
     cb = classify_convertible(code, name)
     if cb["is_cb"]:
         return {"asset_class": "可转债", "exchange": cb["exchange"], "sub_type": cb["asset_class"]}
+    if cb["asset_class"] == "可交债(EB)":
+        return {"asset_class": "可交债(EB)", "exchange": cb["exchange"], "sub_type": cb["asset_class"]}
     # 3) 场内基金段：5xxxxx / 15xxxxx / 16xxxxx / 18xxxxx
     if p1 == "5" or p[:2] in ("15", "16", "18"):
         # 深市 150xxx = 分级基金份额（结构化基金，噪音/非投资标的），
@@ -348,7 +393,14 @@ def classify_security(raw_code: str, name: str = "") -> dict:
         return idx
     # 5) A股 / B股 / 北交所 / 老三板
     a = classify_astock(code)
-    return {"asset_class": a["asset_class"], "exchange": a["exchange"], "sub_type": a["board"]}
+    astock_result = {"asset_class": a["asset_class"], "exchange": a["exchange"], "sub_type": a["board"]}
+    # 6) 债券兜底（最末，零回归风险）：仅当 A股 分支判定为「未分类/其他」时，
+    #    才尝试改判为债券；已明确分类为 A股/B股/北交所/老三板 的不再改判。
+    if a["asset_class"] == "未分类/其他":
+        bond = _classify_bond(code, name)
+        if bond:
+            return bond
+    return astock_result
 
 
 # ============================================================
@@ -390,6 +442,13 @@ def infer_exchange(code: str) -> Optional[str]:
         return "HK"
     if digits.startswith("920"):
         return "BJ"  # 北交所主板（920xxx）
+    # 债券现券段（上交所；与 A股/基金/可转债 段不重叠，实证来源见 docs/fund-classification-rules.md
+    # 第 3·5 节）。历史上 0/1 开头的债券段会被下方 head 规则误归 SZ，此处显式归 SH 修正；
+    # 仅命中债券专属段（010/018/019/020/100/101/112/122/124），不影响任何已分类证券（零回归）：
+    #   600/601/603/605/688/689/000/001/002/003/300/301/302 等 A股段、5/15/16/18 基金段、
+    #   110/113/123/127/128 可转债、000xxx/399xxx 指数段均不在 BOND_CODE_SEG3 内。
+    if digits[:3] in BOND_CODE_SEG3:
+        return "SH"
     head = digits[0]
     if head in ("6", "9"):
         return "SH"  # 上交所
@@ -426,6 +485,8 @@ def infer_exchange_prefix(code: str) -> Optional[str]:
 # 资产大类(中文) → SecurityType 枚举 映射
 _ASSET_CLASS_TO_ENUM: dict[str, SecurityType] = {
     "可转债": SecurityType.CONVERTIBLE_BOND,
+    "可交债(EB)": SecurityType.BOND,        # 118/132(沪)/120(深)，上市债券但非可转债
+    "债券": SecurityType.BOND,              # 国债/地方债/公司债/企业债 等普通债券兜底
     "场内基金": SecurityType.ON_EXCHANGE_FUND,
     "场外基金": SecurityType.OFF_EXCHANGE_FUND,
     "指数": SecurityType.INDEX,
@@ -449,6 +510,7 @@ def infer_asset_class(code: str, exchange: Optional[str] = None, name: str = "")
     - 交易所 HK → HK_STOCK；
     - 场内基金 → ON_EXCHANGE_FUND；场外基金 → OFF_EXCHANGE_FUND；
     - 可转债 → CONVERTIBLE_BOND；指数 → INDEX；
+    - 可交债(EB) / 普通债券（国债/公司债/企业债…）→ BOND（路由链最末兜底，零回归风险）；
     - A股（含主板/科创板/创业板/北交所）→ STOCK；B股 → STOCK；
     - 老三板/全国股转 → UNCATEGORIZED（且由 ``is_dropped`` 丢弃，不写入主数据表）。
     """
