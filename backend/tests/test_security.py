@@ -105,10 +105,21 @@ async def test_get_current_user_reads_role_from_db(client):
 
 
 async def test_require_admin_dependency():
-    """require_admin 作为依赖：user → 抛 403；admin → 透传。"""
+    """require_admin 是依赖工厂（current: CurrentUser = Depends(require_any_role("admin"))）。
+
+    直接 await require_admin(user) 不会触发内部权限判定（Depends 仅在路由解析时生效），
+    故用 require_any_role("admin") 验证实质：user → 抛权限异常；admin → 透传。
+    同时验证 require_admin 对 admin 的薄包装透传。
+    """
+    from app.core.security import require_any_role
+
     with pytest.raises(Exception) as exc_info_user:
-        await require_admin(CurrentUser("u", "e", "user"))
+        await require_any_role("admin")(CurrentUser("u", "e", "user"))
     assert "权限" in str(exc_info_user.value)
 
-    current = await require_admin(CurrentUser("u", "e", "admin"))
+    current = await require_any_role("admin")(CurrentUser("u", "e", "admin"))
     assert current.role == "admin"
+
+    # require_admin 薄包装对 admin 透传
+    admin_current = await require_admin(CurrentUser("u", "e", "admin"))
+    assert admin_current.role == "admin"

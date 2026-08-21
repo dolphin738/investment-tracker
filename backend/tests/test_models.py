@@ -57,6 +57,8 @@ def test_metadata_tables_and_enums():
         # 增量：统一定时调度器（job_configs 任务配置 + job_run_logs 执行日志）
         "job_configs",
         "job_run_logs",
+        # 增量：统一日志中心（app_logs，方案 §4.1）
+        "app_logs",
         # 增量：用户级行情自动同步配置（每用户独立，替代全局 MARKET_DATA_SYNC）
         "user_quote_sync_configs",
     } == tables
