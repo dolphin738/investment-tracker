@@ -146,14 +146,9 @@ apiClient.interceptors.response.use(
     if (!SILENT_CODES.includes(body.code)) {
       toast.error(body.message || '请求失败');
     }
-    // 上报到日志中心（跳过登录失效 / 注销冷静期等预期业务流，避免噪音）
-    if (!UNAUTH_CODES.includes(body.code) && !SILENT_CODES.includes(body.code)) {
-      reportApiFailure({
-        level: 'error',
-        message: `API ${body.code}: ${body.message || '请求失败'}`,
-        detail: { data: body.data ?? null },
-      });
-    }
+    // 注意（方案 §4.2 落库范围限定）：业务错误（HTTP 200 + 信封 code≠0）属预期内
+    // 业务反馈，前端已用 toast/卡片正常呈现，不落 app_logs，避免噪音。
+    // 仅 5xx（HTTP 层）与网络异常（见下方 error 分支）才上报日志中心。
     return Promise.reject(new ApiError(body.code, body.message, body.data));
   },
   (error) => {
@@ -176,15 +171,17 @@ apiClient.interceptors.response.use(
       if (!(body && SILENT_CODES.includes(body.code))) {
         toast.error(message);
       }
-      // 上报到日志中心（5xx → error；其余 → warning）
-      reportApiFailure({
-        level: status >= 500 ? 'error' : 'warning',
-        message: `API ${status}${body?.code ? ':' + body.code : ''}: ${message}`,
-        detail: {
-          url: error.config?.url ?? null,
-          method: error.config?.method ?? null,
-        },
-      });
+      // 上报到日志中心（方案 §4.2：仅 5xx 落库，4xx 业务错误不落）
+      if (status >= 500) {
+        reportApiFailure({
+          level: 'error',
+          message: `API ${status}${body?.code ? ':' + body.code : ''}: ${message}`,
+          detail: {
+            url: error.config?.url ?? null,
+            method: error.config?.method ?? null,
+          },
+        });
+      }
       return Promise.reject(new ApiError(body?.code ?? status, message, body?.data));
     }
     if (error.request) {
