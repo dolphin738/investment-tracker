@@ -270,8 +270,14 @@ async def test_delete_last_trade_prunes_orphan_holding(client):
     assert r.status_code == 404
 
 
-async def test_delete_last_trade_keeps_holding_with_price(client):
-    """实现B：持仓仍有行情时，删光买卖后持仓应保留（GET 200，不被误裁）。"""
+async def test_delete_last_trade_purges_lone_price_and_prunes_holding(client):
+    """孤儿行情价清理（实现B，用户裁决为准）：删光买卖后，无交易支撑的孤儿行情价
+    先被清除（purge_lone_prices_if_no_trades），随后持仓因 trades=0 AND prices=0
+    AND dividends=0 被级联裁剪（prune_if_orphan）→ GET 404。
+
+    说明：估值由交易回放驱动，组合行无交易时其行情价对任意 as_of 不再贡献市值，
+    属孤儿数据，随持仓一起裁剪（而非旧语义的"有行情即保留持仓"）。
+    """
     creds = await register_login(client, "orphan2@example.com", "pw123456")
     h = auth(creds["token"])
     pid = (
@@ -311,6 +317,11 @@ async def test_delete_last_trade_keeps_holding_with_price(client):
     )
     assert env(r)[0] == 200
 
-    # 持仓仍有行情 → 保留
+    # 孤儿行情价（无交易支撑）已被清理
+    r = await client.get(f"/api/portfolios/{pid}/security-prices", headers=h)
+    _, _, prices, _ = env(r)
+    assert prices["total"] == 0
+
+    # 持仓已无买卖/行情/分红 → 被级联裁剪
     r = await client.get(f"/api/portfolios/{pid}/securities/{sec_id}", headers=h)
-    assert r.status_code == 200
+    assert r.status_code == 404
