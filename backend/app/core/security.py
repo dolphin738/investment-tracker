@@ -108,24 +108,25 @@ async def get_current_user(
     return CurrentUser(user_id=user.id, email=user.email, role=user.role)
 
 
-async def require_any_role(
-    *roles: str,
-    current: CurrentUser = Depends(get_current_user),
-) -> CurrentUser:
-    """通用角色依赖：当前用户 role 必须在 ``roles`` 内，否则 403。
+def require_any_role(*roles: str):
+    """通用角色依赖工厂：返回供 ``Depends(...)`` 使用的角色校验依赖。
 
-    鉴权以数据库实时 role 为准（get_current_user 已查库），不信任 JWT payload 的
-    role 字段——被降权的用户持旧 JWT 无法绕过（陈旧 JWT 不绕过）。
+    用法：``Depends(require_any_role("admin", "auditor"))``。返回的是依赖函数本身
+    （非协程），故 ``Depends(require_any_role("admin"))`` 不会在导入期误调用协程。
 
-    ``require_admin`` 是其对 ``("admin",)`` 的特例，既有调用方行为不变。
+    校验当前用户 role 是否在 ``roles`` 内，否则 403。鉴权以数据库实时 role 为准
+    （get_current_user 已查库），不信任 JWT payload 的 role 字段——被降权的用户
+    持旧 JWT 无法绕过（陈旧 JWT 不绕过）。
     """
-    if current.role not in roles:
-        raise BusinessException(
-            code=BusinessErrorCode.FORBIDDEN,
-            message="权限不足",
-            status_code=403,
-        )
-    return current
+    async def _checker(current: CurrentUser = Depends(get_current_user)) -> CurrentUser:
+        if current.role not in roles:
+            raise BusinessException(
+                code=BusinessErrorCode.FORBIDDEN,
+                message="权限不足",
+                status_code=403,
+            )
+        return current
+    return _checker
 
 
 async def require_admin(
