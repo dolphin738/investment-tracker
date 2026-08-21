@@ -11,6 +11,7 @@
 import { computed, ref } from 'vue';
 import { defineStore } from 'pinia';
 import type { UserPublic } from '@/api/types';
+import type { UserRole } from '@/lib/types';
 import { AUTH_TOKEN_KEY, AUTH_USER_KEY } from '@/lib/constants';
 
 /** 判断 token 是否为有效字符串（排除 null / undefined / "undefined"） */
@@ -109,6 +110,12 @@ export const useAuthStore = defineStore('auth', () => {
  * 供侧边栏「系统管理」入口过滤、AdminPage 权限门控等 RBAC 场景复用。
  * 防御性判断：user 缺失或 role 非 'admin' 时均判否。
  */
+/** 当前登录用户是否拥有给定角色之一（多角色 RBAC 判断，方案 §4.4）。 */
+export function useHasRole(...roles: UserRole[]): boolean {
+  const role = useAuthStore().user?.role;
+  return role !== undefined && roles.includes(role);
+}
+
 export function useIsAdmin(): boolean {
-  return useAuthStore().user?.role === 'admin';
+  return useHasRole('admin');
 }

@@ -20,6 +20,7 @@ import {
   Database,
   LayoutDashboard,
   LineChart,
+  ScrollText,
   Settings,
   Shield,
   TrendingUp,
@@ -27,20 +28,23 @@ import {
 } from 'lucide-vue-next';
 import { ROUTE_PATH } from '@/lib/constants';
 import { cn } from '@/lib/utils';
-import { useIsAdmin } from '@/stores/auth.store';
+import { useAuthStore } from '@/stores/auth.store';
+import type { UserRole } from '@/lib/types';
 
 interface NavChild {
   to: string;
   label: string;
   icon: Component;
+  /** 允许可见的角色集合；缺省（undefined）表示所有已登录用户可见 */
+  roles?: UserRole[];
 }
 
 interface NavItem {
   to?: string;
   label: string;
   icon: Component;
-  /** 仅管理员可见的导航项（如「系统管理」） */
-  admin?: boolean;
+  /** 允许可见的角色集合；缺省（undefined）表示所有已登录用户可见 */
+  roles?: UserRole[];
   /** 存在子项时渲染为可折叠分组 */
   children?: NavChild[];
 }
@@ -57,10 +61,11 @@ const NAV_ITEMS: NavItem[] = [
   {
     label: '系统管理',
     icon: Shield,
-    admin: true,
+    roles: ['admin', 'auditor'],
     children: [
-      { to: ROUTE_PATH.ADMIN, label: '金融数据接口', icon: Database },
-      { to: ROUTE_PATH.ADMIN_TASKS, label: '定时任务', icon: Clock },
+      { to: ROUTE_PATH.ADMIN, label: '金融数据接口', icon: Database, roles: ['admin'] },
+      { to: ROUTE_PATH.ADMIN_TASKS, label: '定时任务', icon: Clock, roles: ['admin'] },
+      { to: ROUTE_PATH.ADMIN_LOGS, label: '日志中心', icon: ScrollText, roles: ['admin', 'auditor'] },
     ],
   },
 ];
@@ -71,11 +76,15 @@ const props = defineProps<{
 
 const emit = defineEmits<{ navigate: [] }>();
 
-// 非管理员过滤掉 admin 标记的入口，避免越权可见（后端同样按 require_admin 拦截）
-const isAdmin = useIsAdmin();
-const visibleItems = computed(() =>
-  NAV_ITEMS.filter((item) => !item.admin || isAdmin),
-);
+// 按当前角色过滤可见入口：未声明 roles 的项对所有人可见；声明 roles 的项仅对拥有
+// 其一角色者可见（如「系统管理」分组对 admin/auditor 开放，其下子项按各自 roles 限定）。
+const currentRole = computed(() => useAuthStore().user?.role as UserRole | undefined);
+function canSee(roles?: UserRole[]): boolean {
+  if (!roles || roles.length === 0) return true;
+  const role = currentRole.value;
+  return role !== undefined && roles.includes(role);
+}
+const visibleItems = computed(() => NAV_ITEMS.filter((item) => canSee(item.roles)));
 
 /** 「系统管理」分组折叠状态（默认展开，与 React 版一致） */
 const groupOpen = ref(true);
@@ -117,7 +126,7 @@ function linkClass(active: boolean): string {
         </button>
         <div v-if="groupOpen" class="ml-3 mt-1 space-y-1 border-l pl-3">
           <RouterLink
-            v-for="child in item.children"
+            v-for="child in item.children.filter((c) => canSee(c.roles))"
             :key="child.to"
             v-slot="{ isActive, href, navigate }"
             :to="child.to"

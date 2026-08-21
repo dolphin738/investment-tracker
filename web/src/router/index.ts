@@ -98,6 +98,11 @@ const routes: RouteRecordRaw[] = [
         name: 'admin-tasks',
         component: () => import('@/modules/admin/pages/SchedulePage.vue'),
       },
+      {
+        path: 'admin/logs',
+        name: 'admin-logs',
+        component: () => import('@/modules/admin/pages/LogCenterPage.vue'),
+      },
     ],
   },
 

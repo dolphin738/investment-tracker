@@ -414,7 +414,7 @@ export type CashFlow = components['schemas']['CashflowOut'];
  * 与前端消费一致，无需手写副本。
  */
 /** 用户角色（RBAC）—— 与后端 `UserRole` 枚举值一致 */
-export type UserRole = 'user' | 'admin';
+export type UserRole = 'user' | 'admin' | 'auditor';
 
 /**
  * 用户公开信息（API 响应中传输的安全子集，不含 passwordHash）。

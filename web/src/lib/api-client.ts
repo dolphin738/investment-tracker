@@ -20,6 +20,7 @@ import axios, {
 import { toast } from 'vue-sonner';
 import { API_BASE_URL, AUTH_TOKEN_KEY, ROUTE_PATH } from './constants';
 import { BUSINESS_ERROR_CODE, type ApiResponse } from '@/lib/types';
+import { reportClientError } from '@/lib/log-reporter';
 
 /** 业务错误（响应信封 code !== 0） */
 export class ApiError extends Error {
@@ -50,6 +51,20 @@ const UNAUTH_CODES = [1001, 1002];
  * 1008 / 1009 刻意**不入**静默名单：它们是真正的失败，照常 toast。
  */
 const SILENT_CODES: number[] = [BUSINESS_ERROR_CODE.PENDING_DELETION];
+
+/** 把 API 失败上报到日志中心（best-effort，受 log-reporter 节流/未登录跳过约束）。 */
+function reportApiFailure(payload: {
+  level: 'error' | 'warning';
+  message: string;
+  detail?: unknown;
+}): void {
+  reportClientError({
+    level: payload.level,
+    module: 'api',
+    message: payload.message,
+    detail: payload.detail ?? null,
+  });
+}
 
 /** 创建 Axios 实例 */
 const apiClient: AxiosInstance = axios.create({
@@ -131,6 +146,14 @@ apiClient.interceptors.response.use(
     if (!SILENT_CODES.includes(body.code)) {
       toast.error(body.message || '请求失败');
     }
+    // 上报到日志中心（跳过登录失效 / 注销冷静期等预期业务流，避免噪音）
+    if (!UNAUTH_CODES.includes(body.code) && !SILENT_CODES.includes(body.code)) {
+      reportApiFailure({
+        level: 'error',
+        message: `API ${body.code}: ${body.message || '请求失败'}`,
+        detail: { data: body.data ?? null },
+      });
+    }
     return Promise.reject(new ApiError(body.code, body.message, body.data));
   },
   (error) => {
@@ -153,12 +176,31 @@ apiClient.interceptors.response.use(
       if (!(body && SILENT_CODES.includes(body.code))) {
         toast.error(message);
       }
+      // 上报到日志中心（5xx → error；其余 → warning）
+      reportApiFailure({
+        level: status >= 500 ? 'error' : 'warning',
+        message: `API ${status}${body?.code ? ':' + body.code : ''}: ${message}`,
+        detail: {
+          url: error.config?.url ?? null,
+          method: error.config?.method ?? null,
+        },
+      });
       return Promise.reject(new ApiError(body?.code ?? status, message, body?.data));
     }
     if (error.request) {
       toast.error('网络异常，请检查网络连接');
+      reportApiFailure({
+        level: 'warning',
+        message: '网络异常（无响应）',
+        detail: { url: error.config?.url ?? null },
+      });
     } else {
       toast.error(error.message || '请求失败');
+      reportApiFailure({
+        level: 'warning',
+        message: error.message || '请求失败',
+        detail: { url: error.config?.url ?? null },
+      });
     }
     return Promise.reject(error);
   },
