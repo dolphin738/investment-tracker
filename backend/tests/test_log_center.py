@@ -126,12 +126,6 @@ async def test_list_logs_forbidden_for_normal_user(client):
     assert r.status_code == 403
 
 
-@pytest.mark.xfail(
-    reason="产品 bug：log_center.py _FILTER_WHERE 在 text() 中写死 `::timestamptz` 强转，"
-           "与 SQLAlchemy text() 的 :param 绑定解析冲突，任何 list_logs 请求都 500。"
-           "修复需把 start/end 改为类型化 bindparam 或改用 Core 构造。见交付报告。",
-    strict=False,
-)
 async def test_list_logs_ok_for_admin(client):
     """admin 调 GET /api/admin/logs → 200，返回 list + total 与 seed 条数一致。"""
     await _make_user("admin", "admin-l@example.com")
@@ -172,6 +166,44 @@ async def test_get_log_app_prefix_and_404(client):
 
     r2 = await client.get("/api/admin/logs/app:00000000-0000-0000-0000-000000000000", headers=auth(token))
     assert r2.status_code == 404
+
+
+async def test_list_logs_time_filter(client):
+    """start/end（ISO 字符串）过滤生效：仅返回区间内的条目。
+
+    验证 log_center 修复点：start/end 从 ISO 字符串解析为 datetime 后再绑定，
+    created_at(timestamptz) 区间比较正确；修复前会因 `::timestamptz` 语法冲突或
+    全 NULL 参数类型歧义导致 500。
+    """
+    await _make_user("admin", "admin-tf@example.com")
+    token = await _login(client, "admin-tf@example.com")
+    now = datetime.now(timezone.utc)
+
+    # 先 INSERT 两条（created_at 走默认 now），再把 "old" 回拨到 10 天前，
+    # 避开 CreatedAtMixin 的 default/server_default 对显式 created_at 的歧义。
+    async with dbmod.AsyncSessionLocal() as s:
+        s.add(AppLog(level="info", scope="operation", module="tf", message="recent"))
+        s.add(AppLog(level="info", scope="operation", module="tf", message="old"))
+        await s.commit()
+    async with dbmod.AsyncSessionLocal() as s:
+        await s.execute(
+            select(AppLog).where(AppLog.message == "old").with_for_update()
+        )
+        old_row = (
+            await s.execute(select(AppLog).where(AppLog.message == "old"))
+        ).scalar_one()
+        old_row.created_at = now - timedelta(days=10)
+        await s.commit()
+
+    start = (now - timedelta(days=5)).isoformat()
+    # 用 params= 让 httpx 正确编码 ISO 中的 '+'（否则 '+' 在 query 中被解码为空格，
+    # 导致 _parse_dt 解析失败、过滤被跳过）。真实前端 URLSearchParams/axios 同样会编码。
+    r = await client.get("/api/admin/logs", params={"start": start}, headers=auth(token))
+    assert r.status_code == 200, r.text
+    msgs = {it["message"] for it in r.json()["data"]["items"]}
+    # 10 天前的 "old" 应被过滤掉；"recent" 在区间内
+    assert "recent" in msgs
+    assert "old" not in msgs
 
 
 # --------------------------------------------------------------------------- #
