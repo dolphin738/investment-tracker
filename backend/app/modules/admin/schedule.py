@@ -68,16 +68,18 @@ _HANDLER_META: dict[JobTaskType, dict[str, Any]] = {
         "param_fields": [
             {
                 "key": "retention_days",
-                "label": "各级别保留天数 {error,warning,info}",
+                "label": "各级别保留天数",
                 "required": False,
                 "type": "json",
+                "map_of": ["error", "warning", "info"],
                 "default": {"error": 90, "warning": 30, "info": 7},
             },
             {
                 "key": "max_rows",
-                "label": "各级别保留条数上限 {error,warning,info}",
+                "label": "各级别保留条数上限",
                 "required": False,
                 "type": "json",
+                "map_of": ["error", "warning", "info"],
                 "default": {"error": 20000, "warning": 10000, "info": 5000},
             },
             {

@@ -62,6 +62,7 @@ export interface JobHandler {
     label: string;
     required: boolean;
     type: string;
+    map_of?: string[];
     default?: unknown;
   }[];
 }

@@ -137,6 +137,42 @@ function defaultsOf(taskTypeToken: string): Record<string, string> {
   return out;
 }
 
+/**
+ * JSON 对象参数（type=json 且含 map_of）的辅助读写。
+ * 表单内部以「JSON 字符串」承载（与 number 输入框承载数字字符串的交互一致），
+ * 由以下函数在「JSON 字符串 ↔ 各级别数字」之间转换。
+ */
+/** 把表单里存的 JSON 字符串解析成对象；非法时回退空对象 */
+function jsonObjectOf(raw: unknown): Record<string, number> {
+  if (typeof raw === 'string' && raw.trim()) {
+    try {
+      const o = JSON.parse(raw);
+      if (o && typeof o === 'object' && !Array.isArray(o)) {
+        return o as Record<string, number>;
+      }
+    } catch {
+      /* 忽略非法 JSON，回退空对象 */
+    }
+  }
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    return raw as Record<string, number>;
+  }
+  return {};
+}
+/** 取某级别当前值（数字转字符串，供 input 显示） */
+function jsonFieldValue(raw: unknown, sub: string): string {
+  const o = jsonObjectOf(raw);
+  const v = o[sub];
+  return v == null ? '' : String(v);
+}
+/** 更新某级别的值，写回 JSON 字符串 */
+function setJsonKey(fkey: string, sub: string, val: string): void {
+  const o = jsonObjectOf(form.params[fkey]);
+  if (val.trim() === '') delete o[sub];
+  else o[sub] = Number(val);
+  form.params[fkey] = JSON.stringify(o);
+}
+
 /** 打开时按目标初始化表单（新增取第一个可建类型；编辑取其参数）。同步执行，避免受控时序 */
 function initFormFor(t: ScheduleTask | null): void {
   if (t) {
@@ -147,7 +183,10 @@ function initFormFor(t: ScheduleTask | null): void {
     form.maxLogs = t.max_logs != null ? t.max_logs : '';
     form.enabled = t.enabled;
     form.params = Object.fromEntries(
-      Object.entries(t.params ?? {}).map(([k, v]) => [k, v == null ? '' : String(v)]),
+      Object.entries(t.params ?? {}).map(([k, v]) => [
+        k,
+        v == null ? '' : typeof v === 'object' && !Array.isArray(v) ? JSON.stringify(v) : String(v),
+      ]),
     );
   } else {
     const first = creatableHandlers.value[0];
@@ -186,6 +225,18 @@ function parseParams(): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   currentHandler.value?.param_fields.forEach((f) => {
     const raw = (form.params[f.key] ?? '').trim();
+    if (f.type === 'json' && f.map_of) {
+      // 对象参数：解析回完整 map，空级别回落默认值，确保后端收到完整 {error,warning,info}
+      const parsed = jsonObjectOf(raw);
+      const def = (f.default ?? {}) as Record<string, unknown>;
+      const full: Record<string, unknown> = {};
+      f.map_of.forEach((sub) => {
+        const v = parsed[sub];
+        full[sub] = v != null ? Number(v) : (def[sub] ?? 0);
+      });
+      out[f.key] = full;
+      return;
+    }
     if (!raw && !f.required) return;
     if (f.type === 'number') out[f.key] = Number(raw || f.default);
     else if (f.type === 'integer') out[f.key] = parseInt(raw || String(f.default), 10);
@@ -535,6 +586,25 @@ function statusLabel(status: string | null): string {
                 :model-value="(form.params[f.key] ?? 'false') === 'true'"
                 @update:model-value="(v: boolean) => (form.params[f.key] = String(v))"
               />
+            </div>
+            <!-- JSON 对象参数（map_of）：渲染为各级别独立 number 输入框，与"已读通知保留天数"样式一致 -->
+            <div v-else-if="f.type === 'json' && f.map_of" class="space-y-2">
+              <Label :for="`param-${f.key}`">
+                {{ f.label }}
+                <span v-if="f.required" class="text-destructive"> *</span>
+              </Label>
+              <div class="grid grid-cols-3 gap-3">
+                <div v-for="sub in f.map_of" :key="sub" class="space-y-1">
+                  <span class="text-xs text-muted-foreground">{{ sub }}</span>
+                  <Input
+                    :id="`param-${f.key}-${sub}`"
+                    :model-value="jsonFieldValue(form.params[f.key], sub)"
+                    :type="'number'"
+                    :placeholder="String((f.default as Record<string, unknown>)?.[sub] ?? '')"
+                    @update:model-value="(v: string | number) => setJsonKey(f.key, sub, String(v))"
+                  />
+                </div>
+              </div>
             </div>
             <div v-else class="space-y-2">
               <Label :for="`param-${f.key}`">
