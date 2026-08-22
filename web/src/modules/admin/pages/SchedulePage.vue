@@ -34,6 +34,12 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from '@/components/ui/tabs';
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -94,6 +100,14 @@ const triggerMut = useTriggerTask();
 
 /** 可新建任务类型（系统任务不在可建列表） */
 const creatableHandlers = computed(() => (handlers.value ?? []).filter((h) => h.creatable));
+
+// ---------------------------------------------------------------------------
+// 任务列表：按归类拆分为「普通任务 / 系统任务」两个页签（普通在前）
+// ---------------------------------------------------------------------------
+const activeTab = ref<'normal' | 'system'>('normal');
+
+const normalTasks = computed(() => (tasks.value ?? []).filter((t) => t.kind === 'NORMAL'));
+const systemTasks = computed(() => (tasks.value ?? []).filter((t) => t.kind === 'SYSTEM'));
 
 // ---------------------------------------------------------------------------
 // 新建 / 编辑对话框
@@ -190,7 +204,15 @@ function parseParams(): Record<string, unknown> {
     if (f.type === 'number') out[f.key] = Number(raw || f.default);
     else if (f.type === 'integer') out[f.key] = parseInt(raw || String(f.default), 10);
     else if (f.type === 'boolean') out[f.key] = raw === 'true';
-    else out[f.key] = raw;
+    else if (f.type === 'json') {
+      // 嵌套对象（如 retention_days / max_rows）：文本区写入原始 JSON，提交时解析；
+      // 解析失败则回退默认值，避免把 "[object Object]" 字符串落库。
+      try {
+        out[f.key] = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      } catch {
+        out[f.key] = f.default;
+      }
+    } else out[f.key] = raw;
   });
   return out;
 }
@@ -360,107 +382,216 @@ function statusLabel(status: string | null): string {
       </CardContent>
     </Card>
 
-    <!-- 任务列表 -->
+    <!-- 任务列表：普通任务 / 系统任务 分页（普通在前） -->
     <Card v-else>
       <CardContent>
         <TableSkeleton v-if="isLoading" :rows="6" :cols="7" class="py-2" />
         <EmptyState
-          v-else-if="(tasks ?? []).length === 0"
+          v-else-if="normalTasks.length === 0 && systemTasks.length === 0"
           title="暂无定时任务"
           description="点击右上角「新建任务」创建普通任务；系统任务由系统预置且不可删除"
         />
-        <div v-else>
-          <Table class="table-fixed">
-            <TableHeader>
-              <TableRow>
-                <TableHead class="w-[180px] whitespace-nowrap">名称</TableHead>
-                <TableHead class="w-[130px] whitespace-nowrap">类型</TableHead>
-                <TableHead class="w-[100px] whitespace-nowrap">归类</TableHead>
-                <TableHead class="w-16 whitespace-nowrap">启用</TableHead>
-                <TableHead class="w-[120px] whitespace-nowrap">cron</TableHead>
-                <TableHead class="w-[180px] whitespace-nowrap">最近一次执行</TableHead>
-                <TableHead class="w-[180px] whitespace-nowrap text-right">操作</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              <TableRow v-for="task in tasks ?? []" :key="task.id">
-                <TableCell class="truncate align-middle font-medium" :title="task.name">
-                  {{ task.name }}
-                </TableCell>
-                <TableCell class="truncate align-middle text-muted-foreground">
-                  {{ TASK_TYPE_LABEL[task.task_type] ?? task.task_type }}
-                </TableCell>
-                <TableCell class="align-middle">
-                  <Badge :variant="kindVariant(task.kind)">
-                    {{ TASK_KIND_LABEL[task.kind] ?? task.kind }}
-                  </Badge>
-                </TableCell>
-                <TableCell class="whitespace-nowrap align-middle">
-                  <Switch
-                    :model-value="task.enabled"
-                    :disabled="updateMut.isPending.value"
-                    @update:model-value="(v: boolean) => handleToggleEnabled(task, v)"
-                  />
-                </TableCell>
-                <TableCell class="whitespace-nowrap align-middle">
-                  <span class="text-sm" :title="task.cron_expr">
-                    {{ describeCron(task.cron_expr) ?? task.cron_expr }}
-                  </span>
-                </TableCell>
-                <TableCell class="whitespace-nowrap align-middle">
-                  <div class="flex flex-col gap-1">
-                    <span v-if="task.last_run_at" class="text-xs text-muted-foreground">
-                      {{ formatDateTime(task.last_run_at) }}
-                    </span>
-                    <span v-else class="text-xs text-muted-foreground">从未执行</span>
-                    <Badge
-                      v-if="task.last_run_status"
-                      class="w-fit"
-                      :variant="runVariant(task.last_run_status)"
-                    >
-                      {{ statusLabel(task.last_run_status) }}
+        <Tabs v-else v-model="activeTab" class="space-y-4">
+          <TabsList>
+            <TabsTrigger value="normal">
+              普通任务
+              <span class="ml-1 text-xs text-muted-foreground">{{ normalTasks.length }}</span>
+            </TabsTrigger>
+            <TabsTrigger value="system">
+              系统任务
+              <span class="ml-1 text-xs text-muted-foreground">{{ systemTasks.length }}</span>
+            </TabsTrigger>
+          </TabsList>
+
+          <!-- 普通任务 -->
+          <TabsContent value="normal">
+            <EmptyState
+              v-if="normalTasks.length === 0"
+              title="暂无普通任务"
+              description="点击右上角「新建任务」创建"
+              class="py-8"
+            />
+            <Table v-else class="table-fixed">
+              <TableHeader>
+                <TableRow>
+                  <TableHead class="w-[180px] whitespace-nowrap">名称</TableHead>
+                  <TableHead class="w-[130px] whitespace-nowrap">类型</TableHead>
+                  <TableHead class="w-[100px] whitespace-nowrap">归类</TableHead>
+                  <TableHead class="w-16 whitespace-nowrap">启用</TableHead>
+                  <TableHead class="w-[120px] whitespace-nowrap">cron</TableHead>
+                  <TableHead class="w-[180px] whitespace-nowrap">最近一次执行</TableHead>
+                  <TableHead class="w-[180px] whitespace-nowrap text-right">操作</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                <TableRow v-for="task in normalTasks" :key="task.id">
+                  <TableCell class="truncate align-middle font-medium" :title="task.name">
+                    {{ task.name }}
+                  </TableCell>
+                  <TableCell class="truncate align-middle text-muted-foreground">
+                    {{ TASK_TYPE_LABEL[task.task_type] ?? task.task_type }}
+                  </TableCell>
+                  <TableCell class="align-middle">
+                    <Badge :variant="kindVariant(task.kind)">
+                      {{ TASK_KIND_LABEL[task.kind] ?? task.kind }}
                     </Badge>
-                  </div>
-                </TableCell>
-                <TableCell class="text-right align-middle">
-                  <div class="flex justify-end gap-1">
-                    <Button variant="ghost" size="sm" @click="openEdit(task)">
-                      <Pencil class="mr-1 h-3.5 w-3.5" />
-                      编辑
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      :disabled="triggerMut.isPending.value"
-                      title="立即执行一次"
-                      @click="handleTrigger(task)"
-                    >
-                      <Play class="h-3.5 w-3.5" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      title="查看执行日志"
-                      @click="openLogs(task)"
-                    >
-                      <ScrollText class="h-3.5 w-3.5" />
-                    </Button>
-                    <Button
-                      v-if="task.kind === 'NORMAL'"
-                      variant="ghost"
-                      size="sm"
-                      class="text-red-500 hover:text-red-600"
-                      title="删除任务"
-                      @click="deleteId = task.id"
-                    >
-                      <Trash2 class="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
-                </TableCell>
-              </TableRow>
-            </TableBody>
-          </Table>
-        </div>
+                  </TableCell>
+                  <TableCell class="whitespace-nowrap align-middle">
+                    <Switch
+                      :model-value="task.enabled"
+                      :disabled="updateMut.isPending.value"
+                      @update:model-value="(v: boolean) => handleToggleEnabled(task, v)"
+                    />
+                  </TableCell>
+                  <TableCell class="whitespace-nowrap align-middle">
+                    <span class="text-sm" :title="task.cron_expr">
+                      {{ describeCron(task.cron_expr) ?? task.cron_expr }}
+                    </span>
+                  </TableCell>
+                  <TableCell class="whitespace-nowrap align-middle">
+                    <div class="flex flex-col gap-1">
+                      <span v-if="task.last_run_at" class="text-xs text-muted-foreground">
+                        {{ formatDateTime(task.last_run_at) }}
+                      </span>
+                      <span v-else class="text-xs text-muted-foreground">从未执行</span>
+                      <Badge
+                        v-if="task.last_run_status"
+                        class="w-fit"
+                        :variant="runVariant(task.last_run_status)"
+                      >
+                        {{ statusLabel(task.last_run_status) }}
+                      </Badge>
+                    </div>
+                  </TableCell>
+                  <TableCell class="text-right align-middle">
+                    <div class="flex justify-end gap-1">
+                      <Button variant="ghost" size="sm" @click="openEdit(task)">
+                        <Pencil class="mr-1 h-3.5 w-3.5" />
+                        编辑
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        :disabled="triggerMut.isPending.value"
+                        title="立即执行一次"
+                        @click="handleTrigger(task)"
+                      >
+                        <Play class="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        title="查看执行日志"
+                        @click="openLogs(task)"
+                      >
+                        <ScrollText class="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        class="text-red-500 hover:text-red-600"
+                        title="删除任务"
+                        @click="deleteId = task.id"
+                      >
+                        <Trash2 class="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
+          </TabsContent>
+
+          <!-- 系统任务（仅可编辑不可删除） -->
+          <TabsContent value="system">
+            <EmptyState
+              v-if="systemTasks.length === 0"
+              title="暂无系统任务"
+              description="系统任务由系统预置，此处展示仅可编辑（类型/归类只读）"
+              class="py-8"
+            />
+            <Table v-else class="table-fixed">
+              <TableHeader>
+                <TableRow>
+                  <TableHead class="w-[180px] whitespace-nowrap">名称</TableHead>
+                  <TableHead class="w-[130px] whitespace-nowrap">类型</TableHead>
+                  <TableHead class="w-[100px] whitespace-nowrap">归类</TableHead>
+                  <TableHead class="w-16 whitespace-nowrap">启用</TableHead>
+                  <TableHead class="w-[120px] whitespace-nowrap">cron</TableHead>
+                  <TableHead class="w-[180px] whitespace-nowrap">最近一次执行</TableHead>
+                  <TableHead class="w-[180px] whitespace-nowrap text-right">操作</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                <TableRow v-for="task in systemTasks" :key="task.id">
+                  <TableCell class="truncate align-middle font-medium" :title="task.name">
+                    {{ task.name }}
+                  </TableCell>
+                  <TableCell class="truncate align-middle text-muted-foreground">
+                    {{ TASK_TYPE_LABEL[task.task_type] ?? task.task_type }}
+                  </TableCell>
+                  <TableCell class="align-middle">
+                    <Badge :variant="kindVariant(task.kind)">
+                      {{ TASK_KIND_LABEL[task.kind] ?? task.kind }}
+                    </Badge>
+                  </TableCell>
+                  <TableCell class="whitespace-nowrap align-middle">
+                    <Switch
+                      :model-value="task.enabled"
+                      :disabled="updateMut.isPending.value"
+                      @update:model-value="(v: boolean) => handleToggleEnabled(task, v)"
+                    />
+                  </TableCell>
+                  <TableCell class="whitespace-nowrap align-middle">
+                    <span class="text-sm" :title="task.cron_expr">
+                      {{ describeCron(task.cron_expr) ?? task.cron_expr }}
+                    </span>
+                  </TableCell>
+                  <TableCell class="whitespace-nowrap align-middle">
+                    <div class="flex flex-col gap-1">
+                      <span v-if="task.last_run_at" class="text-xs text-muted-foreground">
+                        {{ formatDateTime(task.last_run_at) }}
+                      </span>
+                      <span v-else class="text-xs text-muted-foreground">从未执行</span>
+                      <Badge
+                        v-if="task.last_run_status"
+                        class="w-fit"
+                        :variant="runVariant(task.last_run_status)"
+                      >
+                        {{ statusLabel(task.last_run_status) }}
+                      </Badge>
+                    </div>
+                  </TableCell>
+                  <TableCell class="text-right align-middle">
+                    <div class="flex justify-end gap-1">
+                      <Button variant="ghost" size="sm" @click="openEdit(task)">
+                        <Pencil class="mr-1 h-3.5 w-3.5" />
+                        编辑
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        :disabled="triggerMut.isPending.value"
+                        title="立即执行一次"
+                        @click="handleTrigger(task)"
+                      >
+                        <Play class="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        title="查看执行日志"
+                        @click="openLogs(task)"
+                      >
+                        <ScrollText class="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
+          </TabsContent>
+        </Tabs>
       </CardContent>
     </Card>
 
@@ -483,107 +614,149 @@ function statusLabel(status: string | null): string {
           </DialogDescription>
         </DialogHeader>
 
-        <div class="space-y-4">
-          <div class="space-y-2">
-            <Label>任务类型</Label>
-            <div class="flex items-center gap-3">
-              <Select
-                v-model="form.taskType"
-                :disabled="editing?.kind === 'SYSTEM'"
-                @update:model-value="onTaskTypeChange"
-              >
-                <SelectTrigger class="flex-1">
-                  <SelectValue placeholder="选择任务类型" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem
-                    v-for="h in creatableHandlers"
-                    :key="h.task_type"
-                    :value="h.task_type"
+        <div class="space-y-5">
+          <!-- 基础信息 -->
+          <section class="space-y-3">
+            <p class="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              基础信息
+            </p>
+            <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div class="space-y-2">
+                <Label>任务类型</Label>
+                <div class="flex items-center gap-3">
+                  <Select
+                    v-model="form.taskType"
+                    :disabled="editing?.kind === 'SYSTEM'"
+                    @update:model-value="onTaskTypeChange"
                   >
-                    {{ h.label }}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-              <Badge v-if="editing" :variant="kindVariant(editing.kind)">
-                {{ TASK_KIND_LABEL[editing.kind] ?? editing.kind }}
-              </Badge>
+                    <SelectTrigger class="flex-1">
+                      <SelectValue placeholder="选择任务类型" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem
+                        v-for="h in creatableHandlers"
+                        :key="h.task_type"
+                        :value="h.task_type"
+                      >
+                        {{ h.label }}
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Badge v-if="editing" :variant="kindVariant(editing.kind)">
+                    {{ TASK_KIND_LABEL[editing.kind] ?? editing.kind }}
+                  </Badge>
+                </div>
+              </div>
+              <div class="space-y-2">
+                <Label for="schedule-name">名称</Label>
+                <Input id="schedule-name" v-model="form.name" placeholder="如 收盘行情同步" />
+              </div>
             </div>
-          </div>
+          </section>
 
-          <div class="space-y-2">
-            <Label for="schedule-name">名称</Label>
-            <Input id="schedule-name" v-model="form.name" placeholder="如 收盘行情同步" />
-          </div>
-
-          <div class="space-y-2">
-            <Label>时间设置</Label>
-            <CronInput :key="editing ? editing.id : 'new'" v-model="form.cronExpr" />
-          </div>
-
-          <template v-for="f in currentHandler?.param_fields ?? []" :key="f.key">
-            <div
-              v-if="f.type === 'boolean'"
-              class="flex items-center justify-between rounded-md border p-3"
-            >
-              <Label :for="`param-${f.key}`" class="text-sm">
-                {{ f.label }}
-                <span v-if="f.required" class="text-destructive"> *</span>
-              </Label>
-              <Switch
-                :id="`param-${f.key}`"
-                :model-value="(form.params[f.key] ?? 'false') === 'true'"
-                @update:model-value="(v: boolean) => (form.params[f.key] = String(v))"
-              />
+          <!-- 执行计划 -->
+          <section class="space-y-3">
+            <p class="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              执行计划
+            </p>
+            <div class="space-y-2">
+              <Label>时间设置（cron）</Label>
+              <CronInput :key="editing ? editing.id : 'new'" v-model="form.cronExpr" />
             </div>
-            <div v-else class="space-y-2">
-              <Label :for="`param-${f.key}`">
-                {{ f.label }}
-                <span v-if="f.required" class="text-destructive"> *</span>
-              </Label>
-              <Input
-                :id="`param-${f.key}`"
-                v-model="form.params[f.key]"
-                :type="f.type === 'number' || f.type === 'integer' ? 'number' : 'text'"
-                :placeholder="f.label"
-              />
-            </div>
-          </template>
+          </section>
 
-          <div class="space-y-2">
+          <!-- 参数配置 -->
+          <section class="space-y-3">
             <div class="flex items-center justify-between">
-              <Label for="schedule-desc" class="text-sm">描述</Label>
+              <p class="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                参数配置
+              </p>
               <Badge variant="outline" class="font-normal">
                 {{ currentHandler?.label ?? '' }}
               </Badge>
             </div>
-            <Textarea
-              id="schedule-desc"
-              v-model="form.description"
-              placeholder="可选，备注任务用途"
-              :rows="3"
-            />
-          </div>
+            <div
+              v-if="(currentHandler?.param_fields ?? []).length === 0"
+              class="text-sm text-muted-foreground"
+            >
+              该任务类型无可配置参数
+            </div>
+            <div v-else class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <template v-for="f in currentHandler?.param_fields ?? []" :key="f.key">
+                <div
+                  v-if="f.type === 'boolean'"
+                  class="flex items-center justify-between rounded-md border p-3"
+                >
+                  <Label :for="`param-${f.key}`" class="text-sm">
+                    {{ f.label }}
+                    <span v-if="f.required" class="text-destructive"> *</span>
+                  </Label>
+                  <Switch
+                    :id="`param-${f.key}`"
+                    :model-value="(form.params[f.key] ?? 'false') === 'true'"
+                    @update:model-value="(v: boolean) => (form.params[f.key] = String(v))"
+                  />
+                </div>
+                <div v-else class="space-y-2">
+                  <Label :for="`param-${f.key}`">
+                    {{ f.label }}
+                    <span v-if="f.required" class="text-destructive"> *</span>
+                  </Label>
+                  <Textarea
+                    v-if="f.type === 'json'"
+                    :id="`param-${f.key}`"
+                    :value="JSON.stringify(form.params[f.key] ?? f.default ?? {}, null, 2)"
+                    :placeholder="f.label"
+                    rows="4"
+                    @input="(e: Event) => (form.params[f.key] = (e.target as HTMLTextAreaElement).value)"
+                  />
+                  <Input
+                    v-else
+                    :id="`param-${f.key}`"
+                    v-model="form.params[f.key]"
+                    :type="f.type === 'number' || f.type === 'integer' ? 'number' : 'text'"
+                    :placeholder="f.label"
+                  />
+                </div>
+              </template>
+            </div>
+          </section>
 
-          <div class="space-y-2">
-            <Label for="schedule-maxlogs">
-              保留执行日志条数
-              <span class="text-muted-foreground">（留空不限制）</span>
-            </Label>
-            <Input
-              id="schedule-maxlogs"
-              v-model="form.maxLogs"
-              type="number"
-              min="1"
-              step="1"
-              placeholder="如 100，最多保留最近 100 条执行日志"
-            />
-          </div>
-
-          <div class="flex items-center justify-between rounded-md border p-3">
-            <Label for="schedule-enabled" class="text-sm">启用</Label>
-            <Switch id="schedule-enabled" v-model="form.enabled" />
-          </div>
+          <!-- 高级选项 -->
+          <section class="space-y-3">
+            <p class="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              高级选项
+            </p>
+            <div class="space-y-2">
+              <Label for="schedule-desc" class="text-sm">描述</Label>
+              <Textarea
+                id="schedule-desc"
+                v-model="form.description"
+                placeholder="可选，备注任务用途"
+                :rows="2"
+              />
+            </div>
+            <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div class="space-y-2">
+                <Label for="schedule-maxlogs">
+                  保留执行日志条数
+                  <span class="text-muted-foreground">（留空不限制）</span>
+                </Label>
+                <Input
+                  id="schedule-maxlogs"
+                  v-model="form.maxLogs"
+                  type="number"
+                  min="1"
+                  step="1"
+                  placeholder="如 100"
+                />
+              </div>
+              <div class="flex items-end justify-between rounded-md border p-3">
+                <Label for="schedule-enabled" class="text-sm">启用</Label>
+                <Switch id="schedule-enabled" v-model="form.enabled" />
+              </div>
+            </div>
+          </section>
         </div>
 
         <DialogFooter>
