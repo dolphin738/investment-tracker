@@ -442,16 +442,15 @@ function handleSubmit(): void {
                 placeholder='v_(\w+)="([^"]*)"'
               />
             </div>
+            <div class="space-y-2">
+              <Label for="qi-rp-code-param">代码参数名</Label>
+              <Input
+                id="qi-rp-code-param"
+                v-model="form.rpCodeParam"
+                placeholder="code（腾讯财经填 q）"
+              />
+            </div>
           </template>
-
-          <div class="space-y-2">
-            <Label for="qi-rp-code-param">代码参数名</Label>
-            <Input
-              id="qi-rp-code-param"
-              v-model="form.rpCodeParam"
-              placeholder="code（腾讯财经填 q）"
-            />
-          </div>
 
           <div class="space-y-2">
             <Label for="qi-rp-code-prefix">代码前缀补全</Label>
