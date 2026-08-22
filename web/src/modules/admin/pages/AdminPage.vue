@@ -10,8 +10,9 @@
  */
 
 import { ref } from 'vue';
-import { ServerCog, Tags, ListChecks, type LucideIcon } from 'lucide-vue-next';
+import { Plus, ServerCog, Tags, ListChecks, type LucideIcon } from 'lucide-vue-next';
 import { Card, CardContent } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useIsAdmin } from '@/stores/auth.store';
 import { usePersistentTab } from '@/composables/use-persistent-tab';
@@ -55,6 +56,9 @@ const MODULE_KEYS = MODULES.map((m) => m.key);
 const isAdmin = useIsAdmin();
 /** 当前激活子模块：持久化到 localStorage，刷新后仍停留当前分页 */
 const active = usePersistentTab(ADMIN_MODULE_KEY, MODULES[0].key, MODULE_KEYS);
+
+/** 数据来源板块 ref：顶层「新增数据来源」按钮调用其 openCreate（对齐定时任务页 Tab 栏右侧操作） */
+const quoteProviderRef = ref<InstanceType<typeof QuoteProviderSection> | null>(null);
 </script>
 
 <template>
@@ -70,15 +74,21 @@ const active = usePersistentTab(ADMIN_MODULE_KEY, MODULES[0].key, MODULE_KEYS);
 
     <template v-else>
       <Tabs v-model="active">
-        <TabsList>
-          <TabsTrigger v-for="m in MODULES" :key="m.key" :value="m.key">
-            <component :is="m.icon" class="mr-2 h-4 w-4" />
-            {{ m.label }}
-          </TabsTrigger>
-        </TabsList>
+        <div class="flex items-center justify-between gap-3">
+          <TabsList>
+            <TabsTrigger v-for="m in MODULES" :key="m.key" :value="m.key">
+              <component :is="m.icon" class="mr-2 h-4 w-4" />
+              {{ m.label }}
+            </TabsTrigger>
+          </TabsList>
+          <Button v-if="active === 'quote-provider'" size="sm" @click="quoteProviderRef?.openCreate()">
+            <Plus class="mr-1 h-4 w-4" />
+            新增数据来源
+          </Button>
+        </div>
       </Tabs>
 
-      <QuoteProviderSection v-if="active === 'quote-provider'" />
+      <QuoteProviderSection v-if="active === 'quote-provider'" ref="quoteProviderRef" />
       <InterfaceCategorySection v-else-if="active === 'interface-category'" />
       <StockListTestSection v-else />
     </template>

@@ -14,9 +14,7 @@
  * 鉴权：composable 内部已用 useIsAdmin 控制发起，页面仅对非管理员给出无权限提示。
  */
 import { computed, reactive, ref, watch } from 'vue';
-import { Loader2, Pencil, Play, Plus, ScrollText, Trash2 } from 'lucide-vue-next';
-import PageHeader from '@/components/common/PageHeader.vue';
-import EmptyState from '@/components/common/EmptyState.vue';
+import { Loader2, Pencil, Play, Plus, ScrollText, Trash2, ListTodo, Settings2 } from 'lucide-vue-next';
 import TableSkeleton from '@/components/common/TableSkeleton.vue';
 import { Button } from '@/components/ui/button';
 import { Badge, type BadgeVariants } from '@/components/ui/badge';
@@ -411,53 +409,52 @@ function statusLabel(status: string | null): string {
 
 <template>
   <div class="space-y-6">
-    <PageHeader
-      title="定时任务"
-      description="系统任务仅可编辑不可删除；普通任务可新增、编辑、删除，并可手动立即执行一次、查看执行日志"
-    >
-      <template #actions>
-        <Button v-if="isAdmin" size="sm" @click="openCreate">
-          <Plus class="mr-1 h-4 w-4" />
-          新建任务
-        </Button>
-      </template>
-    </PageHeader>
+    <div>
+      <h1 class="text-2xl font-bold tracking-tight">定时任务</h1>
+      <p class="text-sm text-muted-foreground">
+        系统任务仅可编辑不可删除；普通任务可新增、编辑、删除，并可手动立即执行一次、查看执行日志
+      </p>
+    </div>
 
-    <!-- 非管理员：无权限 -->
+    <!-- 非管理员：无权限（与金融数据接口页一致：Card 居中提示） -->
     <Card v-if="!isAdmin">
-      <CardContent>
-        <EmptyState
-          title="无权限访问该页面"
-          description="定时任务管理仅对系统管理员开放"
-        />
+      <CardContent class="py-10 text-center text-sm text-muted-foreground">
+        无权限访问该页面
       </CardContent>
     </Card>
 
-    <!-- 任务列表 -->
-    <Card v-else>
-      <CardContent>
-        <TableSkeleton v-if="isLoading" :rows="6" :cols="7" class="py-2" />
-        <EmptyState
-          v-else-if="(tasks ?? []).length === 0"
-          title="暂无定时任务"
-          description="点击右上角「新建任务」创建普通任务；系统任务由系统预置且不可删除"
-        />
-        <div v-else>
-          <!-- 分类分页：普通任务在前、系统任务在后 -->
-          <Tabs v-model="listTab" class="space-y-3">
-            <TabsList class="grid w-full grid-cols-2">
-              <TabsTrigger value="normal">
-                普通任务
-                <Badge variant="secondary" class="ml-1.5">{{ normalTasks.length }}</Badge>
-              </TabsTrigger>
-              <TabsTrigger value="system">
-                系统任务
-                <Badge variant="secondary" class="ml-1.5">{{ systemTasks.length }}</Badge>
-              </TabsTrigger>
-            </TabsList>
+    <!-- 任务列表：分类分页 Tab 在 Card 外（与金融数据接口页一致），框随内容切换 -->
+    <template v-else>
+      <Tabs v-model="listTab" class="space-y-3">
+        <div class="flex items-center justify-between gap-3">
+          <TabsList>
+            <TabsTrigger value="normal">
+              <ListTodo class="mr-2 h-4 w-4" />
+              普通任务
+              <Badge variant="secondary" class="ml-1.5">{{ normalTasks.length }}</Badge>
+            </TabsTrigger>
+            <TabsTrigger value="system">
+              <Settings2 class="mr-2 h-4 w-4" />
+              系统任务
+              <Badge variant="secondary" class="ml-1.5">{{ systemTasks.length }}</Badge>
+            </TabsTrigger>
+          </TabsList>
+          <Button size="sm" @click="openCreate">
+            <Plus class="mr-1 h-4 w-4" />
+            新建任务
+          </Button>
+        </div>
 
-            <TabsContent value="normal" class="space-y-0">
-              <Table class="table-fixed">
+        <TabsContent value="normal">
+          <Card>
+            <CardContent>
+              <TableSkeleton v-if="isLoading" :rows="6" :cols="7" class="py-2" />
+              <EmptyState
+                v-else-if="(tasks ?? []).length === 0"
+                title="暂无定时任务"
+                description="系统任务由系统预置且不可删除；普通任务可点击上方「新建任务」创建"
+              />
+              <Table v-else class="table-fixed">
                 <TableHeader>
                   <TableRow>
                     <TableHead class="w-[180px] whitespace-nowrap">名称</TableHead>
@@ -547,23 +544,33 @@ function statusLabel(status: string | null): string {
               </TableRow>
             </TableBody>
           </Table>
-          </TabsContent>
+            </CardContent>
+          </Card>
+        </TabsContent>
 
-          <TabsContent value="system" class="space-y-0">
-            <Table class="table-fixed">
-              <TableHeader>
-                <TableRow>
-                  <TableHead class="w-[180px] whitespace-nowrap">名称</TableHead>
-                  <TableHead class="w-[130px] whitespace-nowrap">类型</TableHead>
-                  <TableHead class="w-[100px] whitespace-nowrap">归类</TableHead>
-                  <TableHead class="w-16 whitespace-nowrap">启用</TableHead>
-                  <TableHead class="w-[120px] whitespace-nowrap">cron</TableHead>
-                  <TableHead class="w-[180px] whitespace-nowrap">最近一次执行</TableHead>
-                  <TableHead class="w-[180px] whitespace-nowrap text-right">操作</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                <TableRow v-for="task in systemTasks" :key="task.id">
+        <TabsContent value="system">
+          <Card>
+            <CardContent>
+              <TableSkeleton v-if="isLoading" :rows="6" :cols="7" class="py-2" />
+              <EmptyState
+                v-else-if="(tasks ?? []).length === 0"
+                title="暂无系统任务"
+                description="系统任务由系统预置且不可删除"
+              />
+              <Table v-else class="table-fixed">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead class="w-[180px] whitespace-nowrap">名称</TableHead>
+                    <TableHead class="w-[130px] whitespace-nowrap">类型</TableHead>
+                    <TableHead class="w-[100px] whitespace-nowrap">归类</TableHead>
+                    <TableHead class="w-16 whitespace-nowrap">启用</TableHead>
+                    <TableHead class="w-[120px] whitespace-nowrap">cron</TableHead>
+                    <TableHead class="w-[180px] whitespace-nowrap">最近一次执行</TableHead>
+                    <TableHead class="w-[180px] whitespace-nowrap text-right">操作</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  <TableRow v-for="task in systemTasks" :key="task.id">
                   <TableCell class="truncate align-middle font-medium" :title="task.name">
                     {{ task.name }}
                   </TableCell>
@@ -630,11 +637,11 @@ function statusLabel(status: string | null): string {
                 </TableRow>
               </TableBody>
             </Table>
-          </TabsContent>
-          </Tabs>
-        </div>
-      </CardContent>
-    </Card>
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
+    </template>
 
     <!-- 新建 / 编辑对话框 -->
     <!--

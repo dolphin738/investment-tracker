@@ -117,23 +117,20 @@ function handleDeleteDialogOpenChange(open: boolean): void {
     queueMicrotask(() => (deleteId.value = null));
   }
 }
+
+/** 暴露给父页面（AdminPage），使其可在顶层 Tab 栏右侧放置「新增数据来源」按钮 */
+defineExpose({ openCreate });
 </script>
 
 <template>
   <div class="space-y-6">
     <Card>
       <CardHeader>
-        <div class="flex items-start justify-between gap-4">
-          <div>
-            <CardTitle class="text-base">数据来源</CardTitle>
-            <CardDescription>
-              配置多个行情数据来源；运行时按接口分类级优先级链自动选源（详见 ADR-002）
-            </CardDescription>
-          </div>
-          <Button @click="openCreate">
-            <Plus class="mr-2 h-4 w-4" />
-            新增数据来源
-          </Button>
+        <div>
+          <CardTitle class="text-base">数据来源</CardTitle>
+          <CardDescription>
+            配置多个行情数据来源；运行时按接口分类级优先级链自动选源（详见 ADR-002）
+          </CardDescription>
         </div>
       </CardHeader>
       <CardContent>
