@@ -4,7 +4,8 @@
  * - 请求拦截器：自动注入 Authorization: Bearer <token>
  * - 响应拦截器：
  *   - code === 0 → 返回 data 字段
- *   - code === 1001/1002（未认证/Token 过期） → 清除 token，跳转 /login
+ *   - code === 1002（Token 过期）或「非登录页的 1001」 → 清除 token，跳转 /login
+ *   - 登录页的 1001（邮箱/密码错误） → 不视为失效，直接展示后端 message
  *   - code ∈ SILENT_CODES → 不弹 toast，交由调用方 UI 自行渲染
  *   - code !== 0 → Toast 提示 message，抛出错误
  * - 抛出的 ApiError 会携带后端信封里的 data（如 1007 的 { remainingDays }）
@@ -39,9 +40,6 @@ export class ApiError extends Error {
     this.data = data;
   }
 }
-
-/** 未认证错误码（401 / Token 过期） */
-const UNAUTH_CODES = [1001, 1002];
 
 /**
  * 静默业务码：不弹全局 toast，由调用方 UI 自行呈现。
@@ -133,7 +131,14 @@ apiClient.interceptors.response.use(
       return response;
     }
     // 业务错误
-    if (UNAUTH_CODES.includes(body.code)) {
+    // 仅「Token 过期(1002)」或「已登录态下的未认证(1001 且非登录页)」视为会话失效，
+    // 需清理 token 并跳转登录。登录页本身的 1001（邮箱/密码错误）是预期的业务反馈，
+    // 应落到下方「其他业务错误」分支直接展示后端 message，避免误提示「登录已失效」。
+    const isSessionExpired =
+      body.code === BUSINESS_ERROR_CODE.TOKEN_EXPIRED ||
+      (body.code === BUSINESS_ERROR_CODE.UNAUTHORIZED &&
+        window.location.pathname !== ROUTE_PATH.LOGIN);
+    if (isSessionExpired) {
       // Token 失效，清理并跳转登录
       localStorage.removeItem(AUTH_TOKEN_KEY);
       toast.error('登录已失效，请重新登录');
@@ -156,14 +161,23 @@ apiClient.interceptors.response.use(
     if (error.response) {
       const status = error.response.status;
       const body = error.response.data as ApiResponse | undefined;
-      if (status === 401 || (body && UNAUTH_CODES.includes(body.code))) {
+      const isLoginPage = window.location.pathname === ROUTE_PATH.LOGIN;
+      const code = body?.code;
+      // 登录页的 401(1001) 属预期的登录失败（邮箱/密码错），不视为会话失效，
+      // 应落到下方「其他业务错误」分支直接 toast 后端 message；
+      // 其余 401 / 1001(非登录页) / 1002 才清理 token 并提示「登录已失效」。
+      const sessionExpired =
+        code === BUSINESS_ERROR_CODE.TOKEN_EXPIRED ||
+        (status === 401 && !isLoginPage) ||
+        (code === BUSINESS_ERROR_CODE.UNAUTHORIZED && !isLoginPage);
+      if (sessionExpired) {
         localStorage.removeItem(AUTH_TOKEN_KEY);
         toast.error('登录已失效，请重新登录');
-        if (window.location.pathname !== ROUTE_PATH.LOGIN) {
+        if (!isLoginPage) {
           window.location.href = ROUTE_PATH.LOGIN;
         }
         return Promise.reject(
-          new ApiError(body?.code ?? 1001, body?.message ?? '未认证', body?.data),
+          new ApiError(code ?? 1001, body?.message ?? '未认证', body?.data),
         );
       }
       const message = body?.message || `请求失败 (${status})`;

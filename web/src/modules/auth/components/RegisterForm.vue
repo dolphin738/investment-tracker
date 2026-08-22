@@ -12,7 +12,7 @@
 import { computed } from 'vue';
 import { useForm } from 'vee-validate';
 import { z } from 'zod';
-import { Loader2 } from 'lucide-vue-next';
+import { Check, Loader2, X } from 'lucide-vue-next';
 import { RouterLink } from 'vue-router';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -27,6 +27,7 @@ import {
 } from '@/components/ui/card';
 import { useRegister } from '../composables/use-auth';
 import { ROUTE_PATH } from '@/lib/constants';
+import { cn } from '@/lib/utils';
 import { zodToTypedSchema } from '../composables/zod-validation';
 
 const registerSchema = z
@@ -61,6 +62,13 @@ const [confirmPassword, confirmPasswordAttrs] = defineField('confirmPassword', {
 });
 
 const isRegisterPending = computed(() => registerMutation.isPending.value);
+
+/** 密码强度检查项（与修改密码页一致） */
+const rules = computed(() => [
+  { label: '至少 8 位', passed: (password.value ?? '').length >= 8 },
+  { label: '包含字母', passed: /[A-Za-z]/.test(password.value ?? '') },
+  { label: '包含数字', passed: /\d/.test(password.value ?? '') },
+]);
 
 const onSubmit = handleSubmit((values) => {
   registerMutation.mutate({
@@ -102,6 +110,20 @@ const onSubmit = handleSubmit((values) => {
         <div class="space-y-2">
           <Label for="password">密码</Label>
           <Input id="password" v-model="password" v-bind="passwordAttrs" type="password" />
+          <ul class="flex flex-wrap gap-x-4 gap-y-1">
+            <li
+              v-for="rule in rules"
+              :key="rule.label"
+              :class="cn(
+                'flex items-center gap-1 text-xs',
+                rule.passed ? 'text-green-600' : 'text-muted-foreground',
+              )"
+            >
+              <Check v-if="rule.passed" class="h-3 w-3" />
+              <X v-else class="h-3 w-3" />
+              {{ rule.label }}
+            </li>
+          </ul>
           <p v-if="errors.password" class="text-xs text-destructive">
             {{ errors.password }}
           </p>
