@@ -18,7 +18,7 @@
  */
 
 import { computed, ref } from 'vue';
-import { ChevronLeft, ChevronRight, Pencil, Trash2, Loader2 } from 'lucide-vue-next';
+import { Pencil, Trash2, Loader2 } from 'lucide-vue-next';
 import { useQuery } from '@tanstack/vue-query';
 import {
   Table,
@@ -30,6 +30,7 @@ import {
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import Pagination from '@/components/common/Pagination.vue';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import {
   AlertDialog,
@@ -312,34 +313,13 @@ function amountOf(t: SecurityTradeResponse): number {
       </div>
 
       <!-- 分页 -->
-      <div
-        v-if="total > PAGE_SIZE"
-        class="flex items-center justify-between pt-3"
-      >
-        <span class="text-xs text-muted-foreground">
-          共 {{ total }} 条 · 第 {{ page }}/{{ totalPages }} 页
-        </span>
-        <div class="flex gap-1">
-          <Button
-            size="sm"
-            variant="outline"
-            :disabled="page <= 1"
-            @click="page = Math.max(1, page - 1)"
-          >
-            <ChevronLeft class="h-4 w-4" />
-            上一页
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            :disabled="page >= totalPages"
-            @click="page = Math.min(totalPages, page + 1)"
-          >
-            下一页
-            <ChevronRight class="h-4 w-4" />
-          </Button>
-        </div>
-      </div>
+      <Pagination
+        v-if="total > 0"
+        :page="page"
+        :total-pages="totalPages"
+        :total="total"
+        @page-change="(p: number) => (page = p)"
+      />
     </template>
 
     <!-- 编辑弹窗 -->

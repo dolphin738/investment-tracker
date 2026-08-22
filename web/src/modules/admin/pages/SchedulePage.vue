@@ -88,6 +88,11 @@ const isAdmin = useIsAdmin();
 
 const { data: tasks, isLoading } = useTasks();
 const { data: handlers } = useTaskHandlers();
+
+/** 列表分类分页：普通任务（NORMAL）在前、系统任务（SYSTEM）在后 */
+const normalTasks = computed(() => (tasks.value ?? []).filter((t) => t.kind === 'NORMAL'));
+const systemTasks = computed(() => (tasks.value ?? []).filter((t) => t.kind === 'SYSTEM'));
+const listTab = ref<'normal' | 'system'>('normal');
 const createMut = useCreateTask();
 const updateMut = useUpdateTask();
 const deleteMut = useDeleteTask();
@@ -436,20 +441,34 @@ function statusLabel(status: string | null): string {
           description="点击右上角「新建任务」创建普通任务；系统任务由系统预置且不可删除"
         />
         <div v-else>
-          <Table class="table-fixed">
-            <TableHeader>
-              <TableRow>
-                <TableHead class="w-[180px] whitespace-nowrap">名称</TableHead>
-                <TableHead class="w-[130px] whitespace-nowrap">类型</TableHead>
-                <TableHead class="w-[100px] whitespace-nowrap">归类</TableHead>
-                <TableHead class="w-16 whitespace-nowrap">启用</TableHead>
-                <TableHead class="w-[120px] whitespace-nowrap">cron</TableHead>
-                <TableHead class="w-[180px] whitespace-nowrap">最近一次执行</TableHead>
-                <TableHead class="w-[180px] whitespace-nowrap text-right">操作</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              <TableRow v-for="task in tasks ?? []" :key="task.id">
+          <!-- 分类分页：普通任务在前、系统任务在后 -->
+          <Tabs v-model="listTab" class="space-y-3">
+            <TabsList class="grid w-full grid-cols-2">
+              <TabsTrigger value="normal">
+                普通任务
+                <Badge variant="secondary" class="ml-1.5">{{ normalTasks.length }}</Badge>
+              </TabsTrigger>
+              <TabsTrigger value="system">
+                系统任务
+                <Badge variant="secondary" class="ml-1.5">{{ systemTasks.length }}</Badge>
+              </TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="normal" class="space-y-0">
+              <Table class="table-fixed">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead class="w-[180px] whitespace-nowrap">名称</TableHead>
+                    <TableHead class="w-[130px] whitespace-nowrap">类型</TableHead>
+                    <TableHead class="w-[100px] whitespace-nowrap">归类</TableHead>
+                    <TableHead class="w-16 whitespace-nowrap">启用</TableHead>
+                    <TableHead class="w-[120px] whitespace-nowrap">cron</TableHead>
+                    <TableHead class="w-[180px] whitespace-nowrap">最近一次执行</TableHead>
+                    <TableHead class="w-[180px] whitespace-nowrap text-right">操作</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  <TableRow v-for="task in normalTasks" :key="task.id">
                 <TableCell class="truncate align-middle font-medium" :title="task.name">
                   {{ task.name }}
                 </TableCell>
@@ -526,6 +545,91 @@ function statusLabel(status: string | null): string {
               </TableRow>
             </TableBody>
           </Table>
+          </TabsContent>
+
+          <TabsContent value="system" class="space-y-0">
+            <Table class="table-fixed">
+              <TableHeader>
+                <TableRow>
+                  <TableHead class="w-[180px] whitespace-nowrap">名称</TableHead>
+                  <TableHead class="w-[130px] whitespace-nowrap">类型</TableHead>
+                  <TableHead class="w-[100px] whitespace-nowrap">归类</TableHead>
+                  <TableHead class="w-16 whitespace-nowrap">启用</TableHead>
+                  <TableHead class="w-[120px] whitespace-nowrap">cron</TableHead>
+                  <TableHead class="w-[180px] whitespace-nowrap">最近一次执行</TableHead>
+                  <TableHead class="w-[180px] whitespace-nowrap text-right">操作</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                <TableRow v-for="task in systemTasks" :key="task.id">
+                  <TableCell class="truncate align-middle font-medium" :title="task.name">
+                    {{ task.name }}
+                  </TableCell>
+                  <TableCell class="truncate align-middle text-muted-foreground">
+                    {{ TASK_TYPE_LABEL[task.task_type] ?? task.task_type }}
+                  </TableCell>
+                  <TableCell class="align-middle">
+                    <Badge :variant="kindVariant(task.kind)">
+                      {{ TASK_KIND_LABEL[task.kind] ?? task.kind }}
+                    </Badge>
+                  </TableCell>
+                  <TableCell class="whitespace-nowrap align-middle">
+                    <Switch
+                      :model-value="task.enabled"
+                      :disabled="updateMut.isPending.value"
+                      @update:model-value="(v: boolean) => handleToggleEnabled(task, v)"
+                    />
+                  </TableCell>
+                  <TableCell class="whitespace-nowrap align-middle">
+                    <span class="text-sm" :title="task.cron_expr">
+                      {{ describeCron(task.cron_expr) ?? task.cron_expr }}
+                    </span>
+                  </TableCell>
+                  <TableCell class="whitespace-nowrap align-middle">
+                    <div class="flex flex-col gap-1">
+                      <span v-if="task.last_run_at" class="text-xs text-muted-foreground">
+                        {{ formatDateTime(task.last_run_at) }}
+                      </span>
+                      <span v-else class="text-xs text-muted-foreground">从未执行</span>
+                      <Badge
+                        v-if="task.last_run_status"
+                        class="w-fit"
+                        :variant="runVariant(task.last_run_status)"
+                      >
+                        {{ statusLabel(task.last_run_status) }}
+                      </Badge>
+                    </div>
+                  </TableCell>
+                  <TableCell class="text-right align-middle">
+                    <div class="flex justify-end gap-1">
+                      <Button variant="ghost" size="sm" @click="openEdit(task)">
+                        <Pencil class="mr-1 h-3.5 w-3.5" />
+                        编辑
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        :disabled="triggerMut.isPending.value"
+                        title="立即执行一次"
+                        @click="handleTrigger(task)"
+                      >
+                        <Play class="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        title="查看执行日志"
+                        @click="openLogs(task)"
+                      >
+                        <ScrollText class="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
+          </TabsContent>
+          </Tabs>
         </div>
       </CardContent>
     </Card>

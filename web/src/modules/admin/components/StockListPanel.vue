@@ -30,6 +30,7 @@ import {
 } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { SearchInput } from '@/components/ui/search-input';
+import Pagination from '@/components/common/Pagination.vue';
 import {
   Select,
   SelectContent,
@@ -87,7 +88,6 @@ const rawQ = ref('');
 const q = ref('');
 const assetClass = ref<string | null>(null);
 const exchange = ref<string | null>(null);
-const jumpInput = ref('');
 
 // 搜索防抖 300ms (search 通用，见 React 版 rawQ → q)
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -227,14 +227,6 @@ function handleRowSelect(s: SecurityMaster, v: boolean): void {
 }
 
 /** 跳转页码（跳至输入框 Enter / Blur） */
-function jumpToPage(): void {
-  const n = Number(jumpInput.value);
-  if (jumpInput.value !== '' && Number.isFinite(n)) {
-    page.value = Math.min(totalPages.value, Math.max(1, Math.floor(n)));
-  }
-  jumpInput.value = '';
-}
-
 /** 交易所字母大写：仅把代码开头的字母前缀转为大写，数字与后缀不动。
  * 仅作用于展示；填入右侧测试仍使用原始 code。 */
 function formatExchangeCode(code: string): string {
@@ -486,60 +478,14 @@ function formatExchangeCode(code: string): string {
       </AlertDialog>
 
       <!-- 分页器 -->
-      <div
-        class="flex flex-wrap items-center justify-between gap-2 pt-2 text-sm text-muted-foreground"
-      >
-        <span>共 {{ total }} 条</span>
-        <div class="flex flex-wrap items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            :disabled="page <= 1"
-            @click="page = 1"
-          >
-            首页
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            :disabled="page <= 1"
-            @click="page = Math.max(1, page - 1)"
-          >
-            上一页
-          </Button>
-          <span class="px-1">{{ page }} / {{ totalPages }}</span>
-          <Button
-            variant="outline"
-            size="sm"
-            :disabled="page >= totalPages"
-            @click="page = Math.min(totalPages, page + 1)"
-          >
-            下一页
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            :disabled="page >= totalPages"
-            @click="page = totalPages"
-          >
-            末页
-          </Button>
-          <div class="flex items-center gap-1">
-            <span class="text-xs">跳至</span>
-            <Input
-              type="number"
-              min="1"
-              :max="totalPages"
-              v-model="jumpInput"
-              class="h-7 w-16 text-center [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-              placeholder="页"
-              @keydown.enter="jumpToPage"
-              @blur="jumpToPage"
-            />
-            <span class="text-xs">页</span>
-          </div>
-        </div>
-      </div>
+      <Pagination
+        :page="page"
+        :total-pages="totalPages"
+        :total="total"
+        show-first-last
+        show-jumper
+        @page-change="(p: number) => (page = p)"
+      />
     </CardContent>
   </Card>
 </template>

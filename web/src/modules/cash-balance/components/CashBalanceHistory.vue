@@ -27,6 +27,7 @@ import { computed, ref, watch } from 'vue';
 import { AlertCircle, Loader2, Pencil, Trash2 } from 'lucide-vue-next';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
+import Pagination from '@/components/common/Pagination.vue';
 import {
   Table,
   TableBody,
@@ -166,14 +167,6 @@ function handleDialogOpenChange(open: boolean): void {
     });
   }
 }
-
-function prevPage(): void {
-  page.value = Math.max(1, page.value - 1);
-}
-
-function nextPage(): void {
-  page.value = Math.min(totalPages.value, page.value + 1);
-}
 </script>
 
 <template>
@@ -260,32 +253,13 @@ function nextPage(): void {
         </Table>
       </div>
 
-      <div
-        v-if="total > HISTORY_PAGE_SIZE"
-        class="flex items-center justify-between pt-2"
-      >
-        <span class="text-xs text-muted-foreground">
-          共 {{ total }} 条 · 第 {{ page }}/{{ totalPages }} 页
-        </span>
-        <div class="flex gap-1">
-          <Button
-            size="sm"
-            variant="outline"
-            :disabled="page <= 1"
-            @click="prevPage"
-          >
-            上一页
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            :disabled="page >= totalPages"
-            @click="nextPage"
-          >
-            下一页
-          </Button>
-        </div>
-      </div>
+      <Pagination
+        v-if="total > 0"
+        :page="page"
+        :total-pages="totalPages"
+        :total="total"
+        @page-change="(p: number) => (page = p)"
+      />
     </div>
 
     <!-- 删除二次确认（与出入金流水删除同一范式） -->

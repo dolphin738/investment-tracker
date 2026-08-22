@@ -14,8 +14,6 @@
 import { computed, ref, watch, type Ref } from 'vue';
 import {
   AlertTriangle,
-  ChevronLeft,
-  ChevronRight,
   Loader2,
   Pencil,
   RotateCcw,
@@ -32,6 +30,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
+import Pagination from '@/components/common/Pagination.vue';
 import DateRangeQuickPicker from '@/components/date/DateRangeQuickPicker.vue';
 import {
   AlertDialog,
@@ -435,34 +434,13 @@ function handleResetDialogOpenChange(o: boolean): void {
     </div>
 
     <!-- 分页 -->
-    <div
-      v-if="!isLoading && !isError && total > PAGE_SIZE"
-      class="flex items-center justify-between pt-3"
-    >
-      <span class="text-xs text-muted-foreground">
-        共 {{ total }} 条 · 第 {{ page }}/{{ totalPages }} 页
-      </span>
-      <div class="flex gap-1">
-        <Button
-          size="sm"
-          variant="outline"
-          :disabled="page <= 1"
-          @click="page = Math.max(1, page - 1)"
-        >
-          <ChevronLeft class="h-4 w-4" />
-          上一页
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          :disabled="page >= totalPages"
-          @click="page = Math.min(totalPages, page + 1)"
-        >
-          下一页
-          <ChevronRight class="h-4 w-4" />
-        </Button>
-      </div>
-    </div>
+    <Pagination
+      v-if="!isLoading && !isError && total > 0"
+      :page="page"
+      :total-pages="totalPages"
+      :total="total"
+      @page-change="(p: number) => (page = p)"
+    />
 
     <!-- 删除确认（SNAP-P0-06 ⑤⑥：删除这条记录，事件日系统会重新生成自动值） -->
     <AlertDialog :open="Boolean(deleting)" @update:open="handleDeleteDialogOpenChange">

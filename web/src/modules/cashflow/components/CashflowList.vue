@@ -12,8 +12,6 @@
 
 import { computed, ref } from 'vue';
 import {
-  ChevronLeft,
-  ChevronRight,
   Pencil,
   RotateCcw,
   Trash2,
@@ -29,13 +27,6 @@ import {
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import {
   Dialog,
   DialogContent,
@@ -53,6 +44,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { Skeleton } from '@/components/ui/skeleton';
+import Pagination from '@/components/common/Pagination.vue';
 import {
   useTransactions,
   useDeleteTransaction,
@@ -146,10 +138,6 @@ function handleConfirmDelete(): void {
     );
   }
 }
-
-function handlePageSizeChange(v: string): void {
-  props.onPageSizeChange(Number(v));
-}
 </script>
 
 <template>
@@ -242,53 +230,16 @@ function handlePageSizeChange(v: string): void {
     </div>
 
     <!-- 分页：页码 + 每页条数（20/50/100）+ 上/下一页 -->
-    <div
+    <Pagination
       v-if="!isLoading && !isError && total > 0"
-      class="flex flex-wrap items-center justify-between gap-3 pt-3"
-    >
-      <div class="flex items-center gap-2">
-        <span class="text-xs text-muted-foreground">
-          共 {{ total }} 条 · 第 {{ props.page }}/{{ totalPages }} 页
-        </span>
-        <Select
-          :model-value="String(props.pageSize)"
-          @update:model-value="handlePageSizeChange"
-        >
-          <SelectTrigger class="h-8 w-[92px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem
-              v-for="opt in PAGE_SIZE_OPTIONS"
-              :key="opt"
-              :value="String(opt)"
-            >
-              {{ opt }} / 页
-            </SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-      <div class="flex gap-1">
-        <Button
-          size="sm"
-          variant="outline"
-          :disabled="props.page <= 1"
-          @click="props.onPageChange(props.page - 1)"
-        >
-          <ChevronLeft class="h-4 w-4" />
-          上一页
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          :disabled="props.page >= totalPages"
-          @click="props.onPageChange(props.page + 1)"
-        >
-          下一页
-          <ChevronRight class="h-4 w-4" />
-        </Button>
-      </div>
-    </div>
+      :page="props.page"
+      :total-pages="totalPages"
+      :total="total"
+      :page-size="props.pageSize"
+      :page-size-options="PAGE_SIZE_OPTIONS"
+      @page-change="(p: number) => props.onPageChange(p)"
+      @page-size-change="(s: number) => props.onPageSizeChange(s)"
+    />
 
     <!-- 编辑弹窗 -->
     <Dialog

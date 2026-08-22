@@ -13,8 +13,6 @@
  */
 import { computed, reactive, ref } from 'vue';
 import {
-  ChevronLeft,
-  ChevronRight,
   Loader2,
   RotateCcw,
   ScrollText,
@@ -23,6 +21,7 @@ import {
 import PageHeader from '@/components/common/PageHeader.vue';
 import EmptyState from '@/components/common/EmptyState.vue';
 import TableSkeleton from '@/components/common/TableSkeleton.vue';
+import Pagination from '@/components/common/Pagination.vue';
 import { Button } from '@/components/ui/button';
 import { Badge, type BadgeVariants } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
@@ -124,12 +123,6 @@ function resetFilters(): void {
   filters.startDate = '';
   filters.endDate = '';
   page.value = 1;
-}
-function goPrev(): void {
-  page.value = Math.max(1, page.value - 1);
-}
-function goNext(): void {
-  page.value = Math.min(totalPages.value, page.value + 1);
 }
 
 // ---------------------------------------------------------------------------
@@ -291,9 +284,6 @@ function stringifyDetail(detail: unknown): string {
               <RotateCcw class="mr-1 h-4 w-4" />
               重置
             </Button>
-            <span class="ml-auto text-xs text-muted-foreground">
-              共 {{ total }} 条 · 第 {{ page }}/{{ totalPages }} 页
-            </span>
           </div>
         </CardContent>
       </Card>
@@ -367,34 +357,13 @@ function stringifyDetail(detail: unknown): string {
             </Table>
 
             <!-- 分页 -->
-            <div
+            <Pagination
               v-if="total > 0"
-              class="flex items-center justify-between pt-3"
-            >
-              <span class="text-xs text-muted-foreground">
-                共 {{ total }} 条 · 第 {{ page }}/{{ totalPages }} 页
-              </span>
-              <div class="flex gap-1">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  :disabled="page <= 1"
-                  @click="goPrev"
-                >
-                  <ChevronLeft class="h-4 w-4" />
-                  上一页
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  :disabled="page >= totalPages"
-                  @click="goNext"
-                >
-                  下一页
-                  <ChevronRight class="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
+              :page="page"
+              :total-pages="totalPages"
+              :total="total"
+              @page-change="(p: number) => (page = p)"
+            />
           </div>
         </CardContent>
       </Card>
