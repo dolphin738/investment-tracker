@@ -67,6 +67,7 @@ import {
 import { CASH_BALANCE_FOCUS_EVENT } from '../composables/use-transactions';
 import { usePortfolioStore } from '@/stores/portfolio.store';
 import { usePreferenceStore } from '@/stores/preference.store';
+import { usePersistentTab } from '@/composables/use-persistent-tab';
 import { usePortfolios } from '@/composables/use-portfolios';
 import { useLatestCashBalance } from '@/modules/cash-balance/composables/use-cash-balances';
 import { resolveQuickRange } from '@/modules/query/quick-range';
@@ -79,9 +80,6 @@ import {
 } from '@/constants/entry-button-labels';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import type { CashBalanceResponse, TransactionQuery } from '@/api/types';
-
-/** 页签标识（不写 URL，与持仓页 Tabs 同口径） */
-type TransactionTab = 'cashflow' | 'balance';
 
 const route = useRoute();
 const router = useRouter();
@@ -100,8 +98,9 @@ const amountThousands = computed(() =>
 );
 const amountAbbrev = computed(() => preferenceStore.getPreference('amountAbbrev'));
 
-/** 当前页签（受控：软提示需要程序化切到「现金余额」） */
-const tab = ref<TransactionTab>('cashflow');
+/** 当前页签（受控：软提示需要程序化切到「现金余额」）；
+ *  持久化 localStorage，刷新网页后仍停留当前分页（仿金融数据接口页） */
+const tab = usePersistentTab('invest:transactions-tab', 'cashflow', ['cashflow', 'balance'] as const);
 /** 出入金录入弹窗 */
 const open = ref(false);
 /** 现金余额录入/编辑弹窗（editingBalance 为 null 即新增） */

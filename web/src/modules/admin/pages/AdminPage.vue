@@ -12,8 +12,9 @@
 import { ref } from 'vue';
 import { ServerCog, Tags, ListChecks, type LucideIcon } from 'lucide-vue-next';
 import { Card, CardContent } from '@/components/ui/card';
-import { cn } from '@/lib/utils';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useIsAdmin } from '@/stores/auth.store';
+import { usePersistentTab } from '@/composables/use-persistent-tab';
 import QuoteProviderSection from '../components/QuoteProviderSection.vue';
 import InterfaceCategorySection from '../components/InterfaceCategorySection.vue';
 import StockListTestSection from '../components/StockListTestSection.vue';
@@ -49,30 +50,11 @@ const MODULES: AdminModule[] = [
   },
 ];
 
-/** 按 key 检索模块；未命中回退到第一个模块 */
-function findModule(key: string): AdminModule {
-  return MODULES.find((m) => m.key === key) ?? MODULES[0];
-}
-
-function readStoredModule(): string {
-  try {
-    const v = localStorage.getItem(ADMIN_MODULE_KEY);
-    return v && MODULES.some((m) => m.key === v) ? v : MODULES[0].key;
-  } catch {
-    return MODULES[0].key;
-  }
-}
-
-function storeModule(key: string): void {
-  try {
-    localStorage.setItem(ADMIN_MODULE_KEY, key);
-  } catch {
-    /* 隐私模式 / 配额：忽略持久化失败 */
-  }
-}
+const MODULE_KEYS = MODULES.map((m) => m.key);
 
 const isAdmin = useIsAdmin();
-const active = ref<string>(readStoredModule());
+/** 当前激活子模块：持久化到 localStorage，刷新后仍停留当前分页 */
+const active = usePersistentTab(ADMIN_MODULE_KEY, MODULES[0].key, MODULE_KEYS);
 </script>
 
 <template>
@@ -87,28 +69,14 @@ const active = ref<string>(readStoredModule());
     </Card>
 
     <template v-else>
-      <div class="mb-4 flex flex-wrap gap-2">
-        <button
-          v-for="m in MODULES"
-          :key="m.key"
-          type="button"
-          :class="cn(
-            'flex items-center rounded-md border px-3 py-1.5 text-sm transition-colors',
-            active === m.key
-              ? 'border-primary bg-primary/10 font-medium text-primary'
-              : 'text-muted-foreground hover:bg-muted hover:text-foreground',
-          )"
-          @click="
-            () => {
-              active = m.key;
-              storeModule(m.key);
-            }
-          "
-        >
-          <component :is="m.icon" class="mr-2 h-4 w-4" />
-          {{ m.label }}
-        </button>
-      </div>
+      <Tabs v-model="active">
+        <TabsList>
+          <TabsTrigger v-for="m in MODULES" :key="m.key" :value="m.key">
+            <component :is="m.icon" class="mr-2 h-4 w-4" />
+            {{ m.label }}
+          </TabsTrigger>
+        </TabsList>
+      </Tabs>
 
       <QuoteProviderSection v-if="active === 'quote-provider'" />
       <InterfaceCategorySection v-else-if="active === 'interface-category'" />

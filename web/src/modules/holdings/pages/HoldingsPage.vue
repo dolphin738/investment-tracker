@@ -61,6 +61,7 @@ import {
   ENTRY_BUTTON_VARIANT,
 } from '@/constants/entry-button-labels';
 import { usePortfolioStore } from '@/stores/portfolio.store';
+import { usePersistentTab } from '@/composables/use-persistent-tab';
 import { usePreferenceStore } from '@/stores/preference.store';
 import { todayInAppTzIso, toIsoDate } from '@/lib/constants';
 import { useUrlState } from '@/lib/url-query';
@@ -90,7 +91,8 @@ const amountAbbrev = computed(() => preferenceStore.getPreference('amountAbbrev'
 const xirrDecimals = computed(() => preferenceStore.getPreference('xirrDecimals'));
 
 // 当前页签（React 版 defaultValue="holdings"；Tabs 为受控 defineModel 实现）
-const activeTab = ref('holdings');
+// 持久化 localStorage，刷新网页后仍停留当前分页（仿金融数据接口页）
+const activeTab = usePersistentTab('invest:holdings-tab', 'holdings', ['holdings', 'trades', 'income'] as const);
 
 // 录入买卖弹窗（证券买卖录入表单，security-trade 批次）
 const tradeDialogOpen = ref(false);

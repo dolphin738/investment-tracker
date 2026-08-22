@@ -80,6 +80,7 @@ import {
   useTriggerTask,
   useUpdateTask,
 } from '../composables/use-schedule';
+import { usePersistentTab } from '@/composables/use-persistent-tab';
 import { useIsAdmin } from '@/stores/auth.store';
 import CronInput from '../components/CronInput.vue';
 import { describeCron } from '@/lib/cron';
@@ -92,7 +93,8 @@ const { data: handlers } = useTaskHandlers();
 /** 列表分类分页：普通任务（NORMAL）在前、系统任务（SYSTEM）在后 */
 const normalTasks = computed(() => (tasks.value ?? []).filter((t) => t.kind === 'NORMAL'));
 const systemTasks = computed(() => (tasks.value ?? []).filter((t) => t.kind === 'SYSTEM'));
-const listTab = ref<'normal' | 'system'>('normal');
+/** 列表分页当前页签：持久化 localStorage，刷新后仍停留当前分类（仿金融数据接口页） */
+const listTab = usePersistentTab('invest:schedule-list-tab', 'normal', ['normal', 'system'] as const);
 const createMut = useCreateTask();
 const updateMut = useUpdateTask();
 const deleteMut = useDeleteTask();
@@ -118,8 +120,8 @@ interface EditForm {
 
 const dialogOpen = ref(false);
 const editing = ref<ScheduleTask | null>(null);
-/** 编辑对话框分页：basic=基础设置 / rules=清理规则 */
-const editTab = ref<'basic' | 'rules'>('basic');
+/** 编辑对话框分页：basic=基础设置 / rules=清理规则；持久化刷新停留 */
+const editTab = usePersistentTab('invest:schedule-edit-tab', 'basic', ['basic', 'rules'] as const);
 const form = reactive<EditForm>({
   taskType: '',
   name: '',
