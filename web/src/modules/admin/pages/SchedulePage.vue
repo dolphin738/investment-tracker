@@ -24,7 +24,7 @@ import { Switch } from '@/components/ui/switch';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Card, CardContent } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   Table,
   TableBody,
@@ -58,6 +58,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import type {
   JobKind,
   JobRunStatus,
@@ -112,6 +113,8 @@ interface EditForm {
 
 const dialogOpen = ref(false);
 const editing = ref<ScheduleTask | null>(null);
+/** 编辑对话框分页：basic=基础设置 / rules=清理规则 */
+const editTab = ref<'basic' | 'rules'>('basic');
 const form = reactive<EditForm>({
   taskType: '',
   name: '',
@@ -136,6 +139,16 @@ function defaultsOf(taskTypeToken: string): Record<string, string> {
   });
   return out;
 }
+
+/**
+ * 当前任务类型是否含「分级保留」参数（各级别保留天数 / 各级别保留条数上限）。
+ * 仅 LOG_CLEANUP 等含 retention_days / max_rows 的任务为 true；
+ * 证券主数据同步等无分级参数的任务为 false，清理规则页将禁止（不渲染）这些分级项。
+ */
+const hasLeveledParams = computed(() => {
+  const keys = (currentHandler.value?.param_fields ?? []).map((f) => f.key);
+  return keys.includes('retention_days') || keys.includes('max_rows');
+});
 
 /**
  * JSON 对象参数（type=json 且含 map_of）的辅助读写。
@@ -203,11 +216,13 @@ function initFormFor(t: ScheduleTask | null): void {
 function openCreate(): void {
   initFormFor(null);
   editing.value = null;
+  editTab.value = 'basic';
   dialogOpen.value = true;
 }
 function openEdit(task: ScheduleTask): void {
   initFormFor(task);
   editing.value = task;
+  editTab.value = 'basic';
   dialogOpen.value = true;
 }
 function close(): void {
@@ -534,127 +549,133 @@ function statusLabel(status: string | null): string {
           </DialogDescription>
         </DialogHeader>
 
-        <div class="space-y-4">
-          <div class="space-y-2">
-            <Label>任务类型</Label>
-            <div class="flex items-center gap-3">
-              <Select
-                v-model="form.taskType"
-                :disabled="editing?.kind === 'SYSTEM'"
-                @update:model-value="onTaskTypeChange"
-              >
-                <SelectTrigger class="flex-1">
-                  <SelectValue placeholder="选择任务类型" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem
-                    v-for="h in creatableHandlers"
-                    :key="h.task_type"
-                    :value="h.task_type"
-                  >
-                    {{ h.label }}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-              <Badge v-if="editing" :variant="kindVariant(editing.kind)">
-                {{ TASK_KIND_LABEL[editing.kind] ?? editing.kind }}
-              </Badge>
-            </div>
-          </div>
+        <Tabs v-model="editTab" class="space-y-4">
+          <TabsList class="grid w-full grid-cols-2">
+            <TabsTrigger value="basic">基础设置</TabsTrigger>
+            <TabsTrigger value="rules">清理规则</TabsTrigger>
+          </TabsList>
 
-          <div class="space-y-2">
-            <Label for="schedule-name">名称</Label>
-            <Input id="schedule-name" v-model="form.name" placeholder="如 收盘行情同步" />
-          </div>
-
-          <div class="space-y-2">
-            <Label>时间设置</Label>
-            <CronInput :key="editing ? editing.id : 'new'" v-model="form.cronExpr" />
-          </div>
-
-          <template v-for="f in currentHandler?.param_fields ?? []" :key="f.key">
-            <div
-              v-if="f.type === 'boolean'"
-              class="flex items-center justify-between rounded-md border p-3"
-            >
-              <Label :for="`param-${f.key}`" class="text-sm">
-                {{ f.label }}
-                <span v-if="f.required" class="text-destructive"> *</span>
-              </Label>
-              <Switch
-                :id="`param-${f.key}`"
-                :model-value="(form.params[f.key] ?? 'false') === 'true'"
-                @update:model-value="(v: boolean) => (form.params[f.key] = String(v))"
-              />
-            </div>
-            <!-- JSON 对象参数（map_of）：渲染为各级别独立 number 输入框，与"已读通知保留天数"样式一致 -->
-            <div v-else-if="f.type === 'json' && f.map_of" class="space-y-2">
-              <Label :for="`param-${f.key}`">
-                {{ f.label }}
-                <span v-if="f.required" class="text-destructive"> *</span>
-              </Label>
-              <div class="grid grid-cols-3 gap-3">
-                <div v-for="sub in f.map_of" :key="sub" class="space-y-1">
-                  <span class="text-xs text-muted-foreground">{{ sub }}</span>
-                  <Input
-                    :id="`param-${f.key}-${sub}`"
-                    :model-value="jsonFieldValue(form.params[f.key], sub)"
-                    :type="'number'"
-                    :placeholder="String((f.default as Record<string, unknown>)?.[sub] ?? '')"
-                    @update:model-value="(v: string | number) => setJsonKey(f.key, sub, String(v))"
-                  />
-                </div>
+          <!-- 基础设置：任务类型 / 名称 / 描述 / 时间设置 / 启用 / 保留日志 -->
+          <TabsContent value="basic" class="space-y-4">
+            <div class="space-y-2">
+              <Label>任务类型</Label>
+              <div class="flex items-center gap-3">
+                <Select
+                  v-model="form.taskType"
+                  :disabled="editing?.kind === 'SYSTEM'"
+                  @update:model-value="onTaskTypeChange"
+                >
+                  <SelectTrigger class="flex-1">
+                    <SelectValue placeholder="选择任务类型" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem
+                      v-for="h in creatableHandlers"
+                      :key="h.task_type"
+                      :value="h.task_type"
+                    >
+                      {{ h.label }}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+                <Badge v-if="editing" :variant="kindVariant(editing.kind)">
+                  {{ TASK_KIND_LABEL[editing.kind] ?? editing.kind }}
+                </Badge>
               </div>
             </div>
-            <div v-else class="space-y-2">
-              <Label :for="`param-${f.key}`">
-                {{ f.label }}
-                <span v-if="f.required" class="text-destructive"> *</span>
-              </Label>
-              <Input
-                :id="`param-${f.key}`"
-                v-model="form.params[f.key]"
-                :type="f.type === 'number' || f.type === 'integer' ? 'number' : 'text'"
-                :placeholder="f.label"
+
+            <div class="space-y-2">
+              <Label for="schedule-name">名称</Label>
+              <Input id="schedule-name" v-model="form.name" placeholder="如 收盘行情同步" />
+            </div>
+
+            <div class="space-y-2">
+              <Label>时间设置</Label>
+              <CronInput :key="editing ? editing.id : 'new'" v-model="form.cronExpr" />
+            </div>
+
+            <div class="space-y-2">
+              <Label for="schedule-desc">描述 <span class="text-xs text-muted-foreground">（可选）</span></Label>
+              <Textarea
+                id="schedule-desc"
+                v-model="form.description"
+                placeholder="备注任务用途"
+                :rows="3"
               />
             </div>
-          </template>
+          </TabsContent>
 
-          <div class="space-y-2">
-            <div class="flex items-center justify-between">
-              <Label for="schedule-desc" class="text-sm">描述</Label>
-              <Badge variant="outline" class="font-normal">
-                {{ currentHandler?.label ?? '' }}
-              </Badge>
+          <!-- 清理规则：分级保留参数（仅含 retention_days/max_rows 的任务可设）+ 保留日志条数（通用） -->
+          <TabsContent value="rules" class="space-y-4">
+            <template v-if="hasLeveledParams">
+              <template v-for="f in currentHandler?.param_fields ?? []" :key="f.key">
+                <div
+                  v-if="f.type === 'boolean'"
+                  class="flex items-center justify-between rounded-md border p-3"
+                >
+                  <Label :for="`param-${f.key}`" class="text-sm">
+                    {{ f.label }}
+                    <span v-if="f.required" class="text-destructive"> *</span>
+                  </Label>
+                  <Switch
+                    :id="`param-${f.key}`"
+                    :model-value="(form.params[f.key] ?? 'false') === 'true'"
+                    @update:model-value="(v: boolean) => (form.params[f.key] = String(v))"
+                  />
+                </div>
+                <!-- JSON 对象参数（map_of）：渲染为各级别独立 number 输入框，与"已读通知保留天数"样式一致 -->
+                <div v-else-if="f.type === 'json' && f.map_of" class="space-y-2">
+                  <Label :for="`param-${f.key}`">
+                    {{ f.label }}
+                    <span v-if="f.required" class="text-destructive"> *</span>
+                  </Label>
+                  <div class="grid grid-cols-3 gap-3">
+                    <div v-for="sub in f.map_of" :key="sub" class="space-y-1">
+                      <span class="text-xs text-muted-foreground">{{ sub }}</span>
+                      <Input
+                        :id="`param-${f.key}-${sub}`"
+                        :model-value="jsonFieldValue(form.params[f.key], sub)"
+                        :type="'number'"
+                        :placeholder="String((f.default as Record<string, unknown>)?.[sub] ?? '')"
+                        @update:model-value="(v: string | number) => setJsonKey(f.key, sub, String(v))"
+                      />
+                    </div>
+                  </div>
+                </div>
+                <div v-else class="space-y-2">
+                  <Label :for="`param-${f.key}`">
+                    {{ f.label }}
+                    <span v-if="f.required" class="text-destructive"> *</span>
+                  </Label>
+                  <Input
+                    :id="`param-${f.key}`"
+                    v-model="form.params[f.key]"
+                    :type="f.type === 'number' || f.type === 'integer' ? 'number' : 'text'"
+                    :placeholder="f.label"
+                  />
+                </div>
+              </template>
+            </template>
+            <p v-else class="text-sm text-muted-foreground">
+              该任务无分级保留规则，仅可设置下方执行日志保留条数。
+            </p>
+
+            <div class="space-y-2">
+              <Label for="schedule-maxlogs">
+                保留执行日志条数
+                <span class="text-muted-foreground">（留空不限制）</span>
+              </Label>
+              <Input
+                id="schedule-maxlogs"
+                v-model="form.maxLogs"
+                type="number"
+                min="1"
+                step="1"
+                placeholder="如 100，最多保留最近 100 条执行日志"
+              />
             </div>
-            <Textarea
-              id="schedule-desc"
-              v-model="form.description"
-              placeholder="可选，备注任务用途"
-              :rows="3"
-            />
-          </div>
-
-          <div class="space-y-2">
-            <Label for="schedule-maxlogs">
-              保留执行日志条数
-              <span class="text-muted-foreground">（留空不限制）</span>
-            </Label>
-            <Input
-              id="schedule-maxlogs"
-              v-model="form.maxLogs"
-              type="number"
-              min="1"
-              step="1"
-              placeholder="如 100，最多保留最近 100 条执行日志"
-            />
-          </div>
-
-          <div class="flex items-center justify-between rounded-md border p-3">
-            <Label for="schedule-enabled" class="text-sm">启用</Label>
-            <Switch id="schedule-enabled" v-model="form.enabled" />
-          </div>
-        </div>
+          </TabsContent>
+        </Tabs>
 
         <DialogFooter>
           <Button variant="outline" @click="close">取消</Button>
