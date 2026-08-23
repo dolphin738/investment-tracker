@@ -12,7 +12,8 @@ import LoginForm from '../components/LoginForm.vue';
 <template>
   <div class="flex min-h-screen items-center justify-center bg-gradient-to-br from-background to-muted p-4">
     <div class="w-full max-w-md">
-      <h1 class="mb-6 text-center text-2xl font-bold tracking-tight">{{ APP_NAME }}</h1>
+      <p class="mb-2 text-center text-sm font-medium text-muted-foreground">{{ APP_NAME }}</p>
+      <h1 class="mb-6 text-center text-2xl font-bold tracking-tight">登录</h1>
       <LoginForm />
     </div>
   </div>

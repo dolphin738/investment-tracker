@@ -16,6 +16,7 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useIsAdmin } from '@/stores/auth.store';
 import { usePersistentTab } from '@/composables/use-persistent-tab';
+import PageHeader from '@/components/common/PageHeader.vue';
 import QuoteProviderSection from '../components/QuoteProviderSection.vue';
 import InterfaceCategorySection from '../components/InterfaceCategorySection.vue';
 import StockListTestSection from '../components/StockListTestSection.vue';
@@ -63,7 +64,7 @@ const quoteProviderRef = ref<InstanceType<typeof QuoteProviderSection> | null>(n
 
 <template>
   <div class="space-y-6">
-    <h1 class="text-2xl font-bold tracking-tight">金融数据接口</h1>
+    <PageHeader title="金融数据接口" />
 
     <!-- 非管理员：无权限 -->
     <Card v-if="!isAdmin">

@@ -27,6 +27,7 @@ import {
 } from '@/components/ui/dialog';
 import SnapshotForm from '../components/SnapshotForm.vue';
 import SnapshotList from '../components/SnapshotList.vue';
+import PageHeader from '@/components/common/PageHeader.vue';
 import { resolveQuickRange } from '@/modules/query/quick-range';
 import { useDefaultDateRange } from '@/modules/query/use-default-date-range';
 import {
@@ -95,17 +96,11 @@ function handleEdit(item: AssetSnapshot): void {
   </Card>
 
   <div v-else class="space-y-6">
-    <div class="flex flex-wrap items-center justify-between gap-3">
-      <div>
-        <h1 class="text-2xl font-bold tracking-tight">资产记录</h1>
-        <p class="text-sm text-muted-foreground">
-          默认由系统每日自动记录，您也可手工补录或修正某日数值
-        </p>
-        <p class="text-sm text-muted-foreground">
-          每天只保留一条记录：手工记录会取代当天的自动记录
-        </p>
-      </div>
-      <div class="flex items-center gap-2">
+    <PageHeader
+      title="资产记录"
+      description="默认由系统每日自动记录，您也可手工补录或修正某日数值；每天只保留一条记录，手工记录会取代当天的自动记录"
+    >
+      <template #actions>
         <!-- SET-P0-03 口径：导出当前组合全部资产记录（assetSnapshots 类型，CSV） -->
         <Button
           variant="outline"
@@ -129,8 +124,8 @@ function handleEdit(item: AssetSnapshot): void {
           <Plus :class="ENTRY_BUTTON_ICON_CLASS" />
           {{ ENTRY_BUTTON_LABELS.snapshot }}
         </Button>
-      </div>
-    </div>
+      </template>
+    </PageHeader>
 
     <Card>
       <CardHeader>

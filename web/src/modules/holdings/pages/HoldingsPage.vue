@@ -39,6 +39,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import TableSkeleton from '@/components/common/TableSkeleton.vue';
 import EmptyState from '@/components/common/EmptyState.vue';
 import PageHeader from '@/components/common/PageHeader.vue';
+import MetricCard from '@/components/common/MetricCard.vue';
+import ErrorState from '@/components/common/ErrorState.vue';
 import HoldingsToolbar from '../components/HoldingsToolbar.vue';
 import InlinePriceEditor from '../components/InlinePriceEditor.vue';
 import PriceFreshnessBadge from '../components/PriceFreshnessBadge.vue';
@@ -340,70 +342,44 @@ function refetchHoldings(): void {
       <!-- ============ 持仓 Tab ============ -->
       <TabsContent value="holdings" class="mt-4 space-y-6">
         <!-- 【A】汇总（HOLD-B-P0-06：含总盈亏率共 5 项；随筛选动态变化） -->
-        <div v-if="aggregate" class="grid grid-cols-2 gap-3 lg:grid-cols-5">
-          <Card>
-            <CardContent class="py-3">
-              <p class="text-xs text-muted-foreground">总市值</p>
-              <p class="text-lg font-bold tabular-nums">
-                {{ formatCurrency(aggregate.totalMarketValue, 2, { thousands: amountThousands, abbreviate: amountAbbrev }) }}
-              </p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent class="py-3">
-              <p class="text-xs text-muted-foreground">总成本</p>
-              <p class="text-lg font-bold tabular-nums">
-                {{ formatCurrency(aggregate.totalCost, 2, { thousands: amountThousands, abbreviate: amountAbbrev }) }}
-              </p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent class="py-3">
-              <p class="text-xs text-muted-foreground">浮盈</p>
-              <p
-                :class="cn(
-                  'text-lg font-bold tabular-nums',
-                  aggregate.totalProfit >= 0 ? 'text-up' : 'text-down',
-                )"
-              >
-                {{ aggregate.totalProfit >= 0 ? '+' : '' }}{{ formatCurrency(aggregate.totalProfit, 2, { thousands: amountThousands, abbreviate: amountAbbrev }) }}
-              </p>
-            </CardContent>
-          </Card>
+        <div v-if="aggregate" class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+          <MetricCard
+            label="总市值"
+            :value="formatCurrency(aggregate.totalMarketValue, 2, { thousands: amountThousands, abbreviate: amountAbbrev })"
+          />
+          <MetricCard
+            label="总成本"
+            :value="formatCurrency(aggregate.totalCost, 2, { thousands: amountThousands, abbreviate: amountAbbrev })"
+          />
+          <MetricCard
+            label="浮盈"
+            :value="(aggregate.totalProfit >= 0 ? '+' : '') + formatCurrency(aggregate.totalProfit, 2, { thousands: amountThousands, abbreviate: amountAbbrev })"
+            :value-class-name="aggregate.totalProfit >= 0 ? 'text-up' : 'text-down'"
+          />
           <!-- 【A3】总盈亏率（HOLD-B-P0-06）：红涨绿跌（§9.5） -->
-          <Card>
-            <CardContent class="py-3">
-              <p class="text-xs text-muted-foreground">总盈亏率</p>
-              <p
-                :class="cn(
-                  'text-lg font-bold tabular-nums',
-                  aggregate.totalProfitRate >= 0 ? 'text-up' : 'text-down',
-                )"
-              >
-                {{ formatPercent(aggregate.totalProfitRate, 2, { decimals: xirrDecimals }) }}
-              </p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent class="py-3">
-              <p class="text-xs text-muted-foreground">标的数</p>
-              <p class="text-lg font-bold tabular-nums">
-                {{ aggregate.securityCount }}
-              </p>
-            </CardContent>
-          </Card>
+          <MetricCard
+            label="总盈亏率"
+            :value="formatPercent(aggregate.totalProfitRate, 2, { decimals: xirrDecimals })"
+            :value-class-name="aggregate.totalProfitRate >= 0 ? 'text-up' : 'text-down'"
+          />
+          <MetricCard
+            label="标的数"
+            :value="String(aggregate.securityCount)"
+          />
         </div>
 
         <!-- 【B】持仓列表：加载失败 -->
-        <Card v-if="holdingsError" class="border-destructive/50">
-          <CardContent class="flex flex-col items-center gap-4 py-8">
-            <AlertTriangle class="h-8 w-8 text-destructive" />
-            <p class="text-sm text-destructive">数据加载失败</p>
+        <ErrorState
+          v-if="holdingsError"
+          title="数据加载失败"
+          description="持仓数据加载出错，请重试"
+        >
+          <template #action>
             <Button variant="outline" size="sm" @click="refetchHoldings">
               重新加载
             </Button>
-          </CardContent>
-        </Card>
+          </template>
+        </ErrorState>
 
         <TableSkeleton v-if="holdingsLoading" :rows="5" :cols="11" />
 

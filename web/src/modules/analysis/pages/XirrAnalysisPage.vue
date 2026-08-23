@@ -39,6 +39,8 @@ import {
 } from '../composables/use-query-data';
 import XirrTrendChart from '@/components/charts/XirrTrendChart.vue';
 import YearlyBarChart from '@/components/charts/YearlyBarChart.vue';
+import PageHeader from '@/components/common/PageHeader.vue';
+import MetricCard from '@/components/common/MetricCard.vue';
 import { usePortfolioStore } from '@/stores/portfolio.store';
 import { usePreferenceStore } from '@/stores/preference.store';
 import { formatChange, formatPercent, formatDate } from '@/lib/utils';
@@ -185,12 +187,10 @@ function aggregateByYear(data: XirrSeriesPoint[]): XirrSeriesPoint[] {
   </Card>
 
   <div v-else class="space-y-6">
-    <div>
-      <h1 class="text-2xl font-bold tracking-tight">收益分析（XIRR）</h1>
-      <p class="text-sm text-muted-foreground">
-        查看累计 XIRR 在不同时间维度下的趋势与年度对比
-      </p>
-    </div>
+    <PageHeader
+      title="收益分析（XIRR）"
+      description="查看累计 XIRR 在不同时间维度下的趋势与年度对比"
+    />
 
     <!--
       问题③：与净值分析页保持同一外层结构。
@@ -210,34 +210,23 @@ function aggregateByYear(data: XirrSeriesPoint[]): XirrSeriesPoint[] {
 
     <!-- 当前累计 XIRR + 较年初 -->
     <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-      <Card>
-        <CardHeader class="pb-2">
-          <CardDescription>当前累计 XIRR</CardDescription>
-          <CardTitle class="text-3xl tabular-nums">
-            {{ formatPercent(currentValue, 2, { decimals: xirrDecimals }) }}
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p class="text-xs text-muted-foreground">
-            {{
-              latest.data.value
-                ? `最新日期 ${formatDate(latest.data.value.date)}`
-                : '暂无数据'
-            }}
-          </p>
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader class="pb-2">
-          <CardDescription>较年初变化</CardDescription>
-          <CardTitle class="text-3xl tabular-nums">
-            {{ changeFromYearStart }}
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p class="text-xs text-muted-foreground">单位：百分点（pp）</p>
-        </CardContent>
-      </Card>
+      <MetricCard
+        size="hero"
+        label="当前累计 XIRR"
+        :value="formatPercent(currentValue, 2, { decimals: xirrDecimals })"
+        :description="
+          latest.data.value
+            ? `最新日期 ${formatDate(latest.data.value.date)}`
+            : '暂无数据'
+        "
+      />
+      <MetricCard
+        size="hero"
+        label="较年初变化"
+        :value="changeFromYearStart"
+        :trend="changeFromYearStart.startsWith('-') ? 'down' : 'up'"
+        description="单位：百分点（pp）"
+      />
     </div>
 
     <!-- XIRR 折线图（null 断线） -->

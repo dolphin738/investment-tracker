@@ -38,6 +38,8 @@ import { useRangePreferenceSync } from '../composables/use-range-preference-sync
 import { useLatestNav, useNavSeries } from '../composables/use-query-data';
 import NavTrendChart from '@/components/charts/NavTrendChart.vue';
 import MonthlyHeatmap from '@/components/charts/MonthlyHeatmap.vue';
+import PageHeader from '@/components/common/PageHeader.vue';
+import MetricCard from '@/components/common/MetricCard.vue';
 import { usePortfolioStore } from '@/stores/portfolio.store';
 import { usePreferenceStore } from '@/stores/preference.store';
 import { formatDecimal, formatPercent, formatCurrency, formatDate } from '@/lib/utils';
@@ -173,12 +175,10 @@ const trendTitle = computed(() =>
   </Card>
 
   <div v-else class="space-y-6">
-    <div>
-      <h1 class="text-2xl font-bold tracking-tight">净值分析</h1>
-      <p class="text-sm text-muted-foreground">
-        查看累计净值、当年净值趋势及月度收益分布
-      </p>
-    </div>
+    <PageHeader
+      title="净值分析"
+      description="查看累计净值、当年净值趋势及月度收益分布"
+    />
 
     <div class="flex flex-wrap items-end gap-4">
       <!-- 受控绑定：变更统一走 handleDimensionChange（先判交互守卫再写入），勿改回 v-model -->
@@ -206,56 +206,32 @@ const trendTitle = computed(() =>
 
     <!-- 当前净值摘要（4 卡） -->
     <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-      <Card>
-        <CardHeader class="pb-2">
-          <CardDescription>当前累计净值</CardDescription>
-          <CardTitle class="text-2xl tabular-nums">
-            {{ formatDecimal(latestCumulativeNav, navDecimals) }}
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p class="text-xs text-muted-foreground">
-            {{
-              latest.data.value
-                ? `截至 ${formatDate(latest.data.value.date)}`
-                : '暂无数据'
-            }}
-          </p>
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader class="pb-2">
-          <CardDescription>当年净值</CardDescription>
-          <CardTitle class="text-2xl tabular-nums">
-            {{ formatDecimal(latestYearNav, navDecimals) }}
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p class="text-xs text-muted-foreground">单位净值口径</p>
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader class="pb-2">
-          <CardDescription>累计收益</CardDescription>
-          <CardTitle class="text-2xl tabular-nums">
-            {{ formatPercent(totalReturn, 2, { decimals: xirrDecimals }) }}
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p class="text-xs text-muted-foreground">自成立以来</p>
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader class="pb-2">
-          <CardDescription>当年收益</CardDescription>
-          <CardTitle class="text-2xl tabular-nums">
-            {{ formatPercent(yearReturn, 2, { decimals: xirrDecimals }) }}
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p class="text-xs text-muted-foreground">今年以来</p>
-        </CardContent>
-      </Card>
+      <MetricCard
+        label="当前累计净值"
+        :value="formatDecimal(latestCumulativeNav, navDecimals)"
+        :description="
+          latest.data.value
+            ? `截至 ${formatDate(latest.data.value.date)}`
+            : '暂无数据'
+        "
+      />
+      <MetricCard
+        label="当年净值"
+        :value="formatDecimal(latestYearNav, navDecimals)"
+        description="单位净值口径"
+      />
+      <MetricCard
+        label="累计收益"
+        :value="formatPercent(totalReturn, 2, { decimals: xirrDecimals })"
+        :trend="(totalReturn ?? 0) < 0 ? 'down' : 'up'"
+        description="自成立以来"
+      />
+      <MetricCard
+        label="当年收益"
+        :value="formatPercent(yearReturn, 2, { decimals: xirrDecimals })"
+        :trend="(yearReturn ?? 0) < 0 ? 'down' : 'up'"
+        description="今年以来"
+      />
     </div>
 
     <!-- 净值趋势双线图（按指标） -->

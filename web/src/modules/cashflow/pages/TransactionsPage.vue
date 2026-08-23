@@ -52,6 +52,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Skeleton } from '@/components/ui/skeleton';
 import EmptyState from '@/components/common/EmptyState.vue';
+import PageHeader from '@/components/common/PageHeader.vue';
 import DateRangeQuickPicker from '@/components/date/DateRangeQuickPicker.vue';
 import CashflowForm from '../components/CashflowForm.vue';
 import CashflowList from '../components/CashflowList.vue';
@@ -282,16 +283,13 @@ onBeforeUnmount(() => {
 
   <div v-else class="space-y-6">
     <!-- 页头 -->
-    <div class="flex flex-wrap items-center justify-between gap-3">
-      <div>
-        <h1 class="text-2xl font-bold tracking-tight">出入金管理</h1>
-        <p class="text-sm text-muted-foreground">
-          管理存入/取出现金流与现金余额，系统据此计算净值与 XIRR
-        </p>
-      </div>
-      <!-- INC-05：与概览页「录入买卖」同规格（主色 + sm + Plus），文案取统一字典；
-          录入现金余额置于录入出入金左侧，两者水平并排、规格一致便于操作 -->
-      <div class="flex items-center gap-2">
+    <PageHeader
+      title="出入金管理"
+      description="管理存入/取出现金流与现金余额，系统据此计算净值与 XIRR"
+    >
+      <template #actions>
+        <!-- INC-05：与概览页「录入买卖」同规格（主色 + sm + Plus），文案取统一字典；
+            录入现金余额置于录入出入金左侧，两者水平并排、规格一致便于操作 -->
         <Button
           :variant="ENTRY_BUTTON_VARIANT"
           :size="ENTRY_BUTTON_SIZE"
@@ -308,8 +306,8 @@ onBeforeUnmount(() => {
           <Plus :class="ENTRY_BUTTON_ICON_CLASS" />
           {{ ENTRY_BUTTON_LABELS.cashFlow }}
         </Button>
-      </div>
-    </div>
+      </template>
+    </PageHeader>
 
     <!-- ============ 统一筛选器（两个页签共享，变更即写入 URL query） ============ -->
     <Card>

@@ -16,6 +16,7 @@
 import { computed, reactive, ref, watch } from 'vue';
 import { Loader2, Pencil, Play, Plus, ScrollText, Trash2, ListTodo, Settings2 } from 'lucide-vue-next';
 import TableSkeleton from '@/components/common/TableSkeleton.vue';
+import PageHeader from '@/components/common/PageHeader.vue';
 import { Button } from '@/components/ui/button';
 import { Badge, type BadgeVariants } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
@@ -409,12 +410,10 @@ function statusLabel(status: string | null): string {
 
 <template>
   <div class="space-y-6">
-    <div>
-      <h1 class="text-2xl font-bold tracking-tight">定时任务</h1>
-      <p class="text-sm text-muted-foreground">
-        系统任务仅可编辑不可删除；普通任务可新增、编辑、删除，并可手动立即执行一次、查看执行日志
-      </p>
-    </div>
+    <PageHeader
+      title="定时任务"
+      description="系统任务仅可编辑不可删除；普通任务可新增、编辑、删除，并可手动立即执行一次、查看执行日志"
+    />
 
     <!-- 非管理员：无权限（与金融数据接口页一致：Card 居中提示） -->
     <Card v-if="!isAdmin">
