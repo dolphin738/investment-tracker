@@ -223,7 +223,7 @@ function amountOf(t: SecurityTradeResponse): number {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead class="w-[100px]">日期</TableHead>
+              <TableHead class="sticky left-0 z-10 w-[100px] bg-background">日期</TableHead>
               <TableHead class="w-[60px]">方向</TableHead>
               <TableHead>标的</TableHead>
               <TableHead class="text-right">数量</TableHead>
@@ -239,7 +239,7 @@ function amountOf(t: SecurityTradeResponse): number {
           </TableHeader>
           <TableBody>
             <TableRow v-for="t in items" :key="t.id">
-              <TableCell class="font-mono text-sm whitespace-nowrap">
+              <TableCell class="sticky left-0 z-10 font-mono text-sm whitespace-nowrap bg-background">
                 {{ formatDate(t.date) }}
               </TableCell>
               <TableCell>

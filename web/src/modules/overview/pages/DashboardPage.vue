@@ -36,7 +36,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Section, SectionTitle } from '@/components/ui/section';
-import StatCard from '../components/StatCard.vue';
+import MetricCard from '@/components/common/MetricCard.vue';
 import XirrTrendChart from '../components/XirrTrendChart.vue';
 import NavTrendChart from '../components/NavTrendChart.vue';
 import TotalAssetTrendChart from '../components/TotalAssetTrendChart.vue';
@@ -467,10 +467,10 @@ const summaryList = computed(() => portfolioSummary.data.value ?? []);
         <div class="space-y-3">
           <SectionTitle>资产构成</SectionTitle>
           <div :class="METRIC_GRID_CLASS">
-            <StatCard
+            <MetricCard
               v-for="m in assetMetrics"
               :key="m.key"
-              :title="m.title"
+              :label="m.title"
               :value="m.value"
               :description="m.description"
               :trend="m.trend"
@@ -483,10 +483,10 @@ const summaryList = computed(() => portfolioSummary.data.value ?? []);
         <div class="space-y-3">
           <SectionTitle>收益表现</SectionTitle>
           <div :class="METRIC_GRID_CLASS">
-            <StatCard
+            <MetricCard
               v-for="m in returnMetrics"
               :key="m.key"
-              :title="m.title"
+              :label="m.title"
               :value="m.value"
               :description="m.description"
               :trend="m.trend"

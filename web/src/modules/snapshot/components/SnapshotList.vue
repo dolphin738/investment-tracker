@@ -340,7 +340,7 @@ function handleResetDialogOpenChange(o: boolean): void {
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead class="w-[100px]">日期</TableHead>
+            <TableHead class="sticky left-0 z-10 w-[100px] bg-background">日期</TableHead>
             <TableHead class="text-right">总资产</TableHead>
             <TableHead class="text-right">持仓</TableHead>
             <TableHead class="text-right">现金</TableHead>
@@ -352,7 +352,7 @@ function handleResetDialogOpenChange(o: boolean): void {
         </TableHeader>
         <TableBody>
           <TableRow v-for="s in items" :key="s.id">
-            <TableCell class="whitespace-nowrap font-mono text-sm tabular-nums">
+            <TableCell class="sticky left-0 z-10 whitespace-nowrap bg-background font-mono text-sm tabular-nums">
               {{ formatDate(s.date) }}
             </TableCell>
             <TableCell class="whitespace-nowrap text-right font-mono tabular-nums">

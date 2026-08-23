@@ -284,14 +284,14 @@ function handleRetry(): void {
           <Table data-testid="income-summary-table">
             <TableHeader>
               <TableRow>
-                <TableHead>标的</TableHead>
+                <TableHead class="sticky left-0 z-10 bg-background">标的</TableHead>
                 <TableHead>代码</TableHead>
                 <TableHead class="text-right">累计分红（净额）</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               <TableRow v-for="row in rows" :key="row.securityId">
-                <TableCell class="font-medium">{{ row.securityName }}</TableCell>
+                <TableCell class="sticky left-0 z-10 bg-background font-medium">{{ row.securityName }}</TableCell>
                 <TableCell class="text-muted-foreground">{{ row.securityCode }}</TableCell>
                 <TableCell
                   class="text-right tabular-nums"
@@ -329,8 +329,8 @@ function handleRetry(): void {
             <Table v-else data-testid="dividend-detail-table">
               <TableHeader>
                 <TableRow>
-                  <TableHead>日期</TableHead>
-                  <TableHead>标的</TableHead>
+                  <TableHead class="sticky left-0 z-10 bg-background">日期</TableHead>
+                  <TableHead class="sticky left-0 z-10 bg-background">标的</TableHead>
                   <TableHead>类型</TableHead>
                   <TableHead class="text-right">金额</TableHead>
                   <TableHead class="text-right">所得税</TableHead>
@@ -341,7 +341,7 @@ function handleRetry(): void {
               </TableHeader>
               <TableBody>
                 <TableRow v-for="item in dividendList" :key="item.id">
-                  <TableCell class="tabular-nums">{{ formatDate(item.date) }}</TableCell>
+                  <TableCell class="sticky left-0 z-10 bg-background tabular-nums">{{ formatDate(item.date) }}</TableCell>
                   <TableCell>
                     {{ item.securityName }}
                     <span class="ml-1 text-xs text-muted-foreground">{{ item.securityCode }}</span>

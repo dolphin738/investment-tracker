@@ -106,7 +106,7 @@
 
 - **内联 `<Table>` 的密集表**（持仓 11 列 / NAV 每日明细 6 列 / 日志中心列表）：容器 `overflow-x-auto`，**首列 `sticky left-0 z-10 bg-background` 冻结**，移动端横滑不丢失锚点（批次 6，已落地）。
 - 冻结列须带 `bg-background`，否则横滑时透出后方内容。
-- 子组件列表（SnapshotList / CashflowList / CashBalanceHistory / SecurityTradeList / DividendList）保持各自结构，移动降级以首列冻结为准，不重写为卡片以避免破坏排序/编辑交互。
+- 子组件列表（SnapshotList / CashflowList / CashBalanceHistory / SecurityTradeList / DividendList）首列已落地 `sticky left-0 z-10 bg-background` 冻结（日期/生效日/标的锚点列），移动降级以首列冻结为准，不重写为卡片以避免破坏排序/编辑交互。
 - 表格数字列统一 `tabular-nums font-mono`；涨跌列用 `text-up`/`text-down` 双通道。
 
 ---
@@ -120,7 +120,7 @@
 | 3 | `MetricCard` 收敛 + `ErrorState` 统一 | ✅ |
 | 4 | `HelpTip` 收长说明 | ✅ |
 | 5 | 品牌 mark + `--space-section` 标尺 | ✅ |
-| 6 | 表格首列冻结（Holdings/NAV/LogCenter） | ✅ |
+| 6 | 表格首列冻结（Holdings/NAV/LogCenter + 5 子组件列表） | ✅ |
 | 7 | Login/Register 标题纠正（品牌→动作） | ✅（并入批次 2） |
 | 8 | 图表 a11y + 本文档 | ✅ |
 

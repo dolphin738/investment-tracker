@@ -200,7 +200,7 @@ function handleDialogOpenChange(open: boolean): void {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead class="w-[120px]">生效日</TableHead>
+              <TableHead class="sticky left-0 z-10 w-[120px] bg-background">生效日</TableHead>
               <TableHead class="text-right">金额</TableHead>
               <TableHead>备注</TableHead>
               <TableHead class="w-[110px]">更新时间</TableHead>
@@ -209,7 +209,7 @@ function handleDialogOpenChange(open: boolean): void {
           </TableHeader>
           <TableBody>
             <TableRow v-for="row in items" :key="row.id">
-              <TableCell class="whitespace-nowrap font-mono text-sm">
+              <TableCell class="sticky left-0 z-10 whitespace-nowrap bg-background font-mono text-sm">
                 {{ formatDate(row.asOf) }}
               </TableCell>
               <TableCell class="whitespace-nowrap text-right font-mono tabular-nums">
