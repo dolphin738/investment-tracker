@@ -85,6 +85,13 @@ function handleLogout(): void {
           <Menu v-else class="h-5 w-5" />
         </Button>
         <div class="flex items-center gap-2">
+          <!-- 品牌 mark：渐变方块 + 圆点（批次5：强化产品识别，复用现有 token，不引新品牌色） -->
+          <span
+            class="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-chart-line to-primary shadow-sm"
+            aria-hidden="true"
+          >
+            <span class="h-2.5 w-2.5 rounded-full bg-background/90" />
+          </span>
           <span class="text-lg font-bold tracking-tight">{{ APP_NAME }}</span>
         </div>
       </div>

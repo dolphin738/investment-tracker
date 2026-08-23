@@ -53,6 +53,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Skeleton } from '@/components/ui/skeleton';
 import EmptyState from '@/components/common/EmptyState.vue';
 import PageHeader from '@/components/common/PageHeader.vue';
+import HelpTip from '@/components/common/HelpTip.vue';
 import DateRangeQuickPicker from '@/components/date/DateRangeQuickPicker.vue';
 import CashflowForm from '../components/CashflowForm.vue';
 import CashflowList from '../components/CashflowList.vue';
@@ -313,9 +314,15 @@ onBeforeUnmount(() => {
     <Card>
       <CardHeader class="pb-3">
         <CardTitle class="text-base">筛选</CardTitle>
-        <CardDescription>
-          日期范围对「出入金流水」与「现金余额」同时生效；类型与排序仅作用于出入金流水
-        </CardDescription>
+        <div class="flex items-center gap-1.5 text-sm text-muted-foreground">
+          <span>统一筛选器</span>
+          <HelpTip text="日期范围对「出入金流水」与「现金余额」同时生效；类型与排序仅作用于出入金流水。">
+            <template #content>
+              <p>日期范围对「出入金流水」与「现金余额」同时生效。</p>
+              <p class="mt-1">类型与排序仅作用于出入金流水。</p>
+            </template>
+          </HelpTip>
+        </div>
       </CardHeader>
       <CardContent>
         <div class="flex flex-wrap items-end gap-3">

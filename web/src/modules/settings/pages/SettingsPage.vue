@@ -607,36 +607,24 @@ function confirmClearData(): void {
             </div>
           </div>
 
-          <!-- 货币 / 语言（待后端集成） -->
+          <!-- 货币 / 语言（待后端集成：降级为 1 行 muted 文本 + HelpTip，删除无交互 disabled 控件） -->
           <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div class="space-y-2">
-              <Label for="pref-currency">货币</Label>
-              <Select disabled :model-value="'CNY'">
-                <SelectTrigger id="pref-currency" class="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="CNY">人民币 (CNY)</SelectItem>
-                </SelectContent>
-              </Select>
-              <p class="text-xs text-muted-foreground">
-                待后端集成（当前仅支持 CNY）
-              </p>
+              <Label class="text-xs text-muted-foreground">货币</Label>
+              <p class="text-sm">人民币（CNY，暂不可改）</p>
             </div>
 
             <div class="space-y-2">
-              <Label for="pref-lang">语言</Label>
-              <Select disabled :model-value="'zh-CN'">
-                <SelectTrigger id="pref-lang" class="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="zh-CN">中文（简体）</SelectItem>
-                </SelectContent>
-              </Select>
-              <p class="text-xs text-muted-foreground">
-                待后端集成（当前仅支持中文）
-              </p>
+              <Label class="text-xs text-muted-foreground">语言</Label>
+              <div class="flex items-center gap-1.5 text-sm">
+                <span>中文（简体，暂不可改）</span>
+                <HelpTip text="货币与语言当前跟随服务端默认，待后端集成多币种 / 多语言后开放修改。">
+                  <template #content>
+                    <p>货币与语言当前跟随服务端默认。</p>
+                    <p class="mt-1">待后端集成多币种 / 多语言后开放修改。</p>
+                  </template>
+                </HelpTip>
+              </div>
             </div>
           </div>
 

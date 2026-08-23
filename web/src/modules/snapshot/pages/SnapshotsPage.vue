@@ -28,6 +28,7 @@ import {
 import SnapshotForm from '../components/SnapshotForm.vue';
 import SnapshotList from '../components/SnapshotList.vue';
 import PageHeader from '@/components/common/PageHeader.vue';
+import HelpTip from '@/components/common/HelpTip.vue';
 import { resolveQuickRange } from '@/modules/query/quick-range';
 import { useDefaultDateRange } from '@/modules/query/use-default-date-range';
 import {
@@ -143,16 +144,19 @@ function handleEdit(item: AssetSnapshot): void {
       </CardContent>
     </Card>
 
-    <!-- 底部图例（§7.3） -->
-    <div
-      class="space-y-1 rounded-md border border-border bg-card px-4 py-3 text-xs text-muted-foreground"
-    >
-      <p>「沿用」= 当日无价格/现金更新，按前值沿用</p>
-      <p>「按成本」= 存在无价格记录的标的，按成本价估值</p>
-      <p>每天唯一一条记录；手工录入会取代该日自动记录</p>
-      <p>「编辑」= 修改该日记录（保存后该日变为手工记录）</p>
-      <p>「删除」= 删除该日记录（事件日会被系统重新生成自动值）</p>
-      <p>「撤销」= 撤销手工修改、恢复系统计算值（仅手工记录可用）</p>
+    <!-- 底部图例（§7.3）：默认收起，点击 ? 展开（批次4 HelpTip 收长说明） -->
+    <div class="flex items-center gap-2 text-xs text-muted-foreground">
+      <span>每天仅保留一条记录；手工录入会取代当天自动记录</span>
+      <HelpTip text="「沿用」= 当日无价格/现金更新，按前值沿用；「按成本」= 存在无价格记录的标的，按成本价估值。编辑=修改为手工记录；删除=删除该日记录（事件日会重新生成自动值）；撤销=恢复系统计算值（仅手工记录可用）。">
+        <template #content>
+          <p>「沿用」= 当日无价格/现金更新，按前值沿用</p>
+          <p class="mt-1">「按成本」= 存在无价格记录的标的，按成本价估值</p>
+          <p class="mt-1">每天唯一一条记录；手工录入会取代该日自动记录</p>
+          <p class="mt-1">「编辑」= 修改该日记录（保存后该日变为手工记录）</p>
+          <p class="mt-1">「删除」= 删除该日记录（事件日会被系统重新生成自动值）</p>
+          <p class="mt-1">「撤销」= 撤销手工修改、恢复系统计算值（仅手工记录可用）</p>
+        </template>
+      </HelpTip>
     </div>
 
     <!-- 新建弹窗 -->
