@@ -24,7 +24,7 @@ const YEARLY_DATA: XirrSeriesPoint[] = [
   { date: '2024-12-31', label: '2024', xirrValue: -0.0567 },
 ] as XirrSeriesPoint[];
 
-// 与组件内常量保持一致（PRD §9.5: 正红负绿）。getThemeColors 在 jsdom 下回退硬编码值。
+// 与组件内常量保持一致（PRD §9.5: 正红负绿）。getChartTheme 在 jsdom 下回退 FALLBACK 硬编码值。
 const POSITIVE_COLOR = 'hsl(0, 84%, 48%)';
 const NEGATIVE_COLOR = 'hsl(142, 71%, 38%)';
 const MUTED_COLOR = '#94a3b8';

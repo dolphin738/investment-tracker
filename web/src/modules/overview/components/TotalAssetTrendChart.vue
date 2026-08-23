@@ -12,6 +12,8 @@
  *   走服务端 source=MANUAL 筛选。
  *
  * 图表高度 300px（概览页 hero 图，比四宫格的 260px 更高，确立主次层次）。
+ *
+ * 图表配色经 useChartTheme() 读取（跟随明暗主题），不再硬编码 hex / hsl 字符串。
  */
 
 import { computed } from 'vue';
@@ -30,6 +32,7 @@ import type { EChartsOption } from 'echarts';
 import { useSnapshots } from '../composables/use-snapshots';
 import { ROUTE_PATH } from '@/lib/constants';
 import { formatCurrency } from '@/lib/utils';
+import { useChartTheme } from '@/lib/chart-theme';
 import { SnapshotSource } from '@/lib/types';
 import type { NavSeriesPoint } from '@/lib/types';
 import {
@@ -67,13 +70,7 @@ const props = withDefaults(
   },
 );
 
-/** 主线色（与「净值趋势」累计线同色系） */
-const COLOR_LINE = 'hsl(217, 91%, 60%)';
-/** 手工记录散点色 */
-const COLOR_MANUAL = 'hsl(0, 84%, 48%)';
-/** 网格线 / 轴标签色（与其它图表一致） */
-const GRID_COLOR = '#ccc';
-const AXIS_COLOR = '#666';
+const chartTheme = useChartTheme();
 
 const trendPoints = computed(() => buildTrendPoints(props.data));
 
@@ -104,6 +101,7 @@ const manualTruncated = computed(
 );
 
 const option = computed((): EChartsOption => {
+  const theme = chartTheme.value;
   const labels = trendPoints.value.map((p) => p.label);
   const values = trendPoints.value.map((p) => p.totalAsset);
   const manualPoints = buildManualScatter(trendPoints.value, manualDates.value);
@@ -129,16 +127,16 @@ const option = computed((): EChartsOption => {
       type: 'category',
       boundaryGap: false,
       data: labels,
-      axisLabel: { fontSize: 11, color: AXIS_COLOR },
+      axisLabel: { fontSize: 11, color: theme.axis },
     },
     yAxis: {
       type: 'value',
       axisLabel: {
         fontSize: 11,
-        color: AXIS_COLOR,
+        color: theme.axis,
         formatter: (v: number): string => `${(v / 10000).toFixed(1)}万`,
       },
-      splitLine: { show: true, lineStyle: { type: [3, 3], color: GRID_COLOR } },
+      splitLine: { show: true, lineStyle: { type: [3, 3], color: theme.grid } },
     },
     series: [
       {
@@ -147,15 +145,15 @@ const option = computed((): EChartsOption => {
         smooth: true,
         connectNulls: true,
         showSymbol: false,
-        lineStyle: { width: 2, color: COLOR_LINE },
-        itemStyle: { color: COLOR_LINE },
+        lineStyle: { width: 2, color: theme.line },
+        itemStyle: { color: theme.line },
         data: values,
       },
       {
         name: '手工记录',
         type: 'scatter',
         symbolSize: 8,
-        itemStyle: { color: COLOR_MANUAL },
+        itemStyle: { color: theme.manual },
         data: manualPoints,
         tooltip: {
           formatter: (p: { value?: unknown }): string => {

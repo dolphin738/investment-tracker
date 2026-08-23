@@ -13,19 +13,8 @@ import { formatDecimal } from '@/lib/utils';
 // NavMetric 是运行时值对象（as const 常量），值比较须用值导入；
 // import type 会被擦除，运行时 NavMetric 未定义（NavTrendChart.vue 同理用值导入）
 import { NavMetric } from '@/lib/types';
+import { getChartTheme, type ChartTheme } from '@/lib/chart-theme';
 import type { NavSeriesPoint } from '@/lib/types';
-
-/**
- * 颜色常量。
- * 注意：必须使用「逗号分隔」的 hsl 语法 —— ECharts/zrender 的颜色解析器不支持
- * CSS Color Level 4 的空格语法 `hsl(217 91% 60%)`（静默解析失败返回 null）。
- */
-const COLOR_CUMULATIVE = 'hsl(217, 91%, 60%)'; // ≈ #3b82f6，与迁移前数值一致
-const COLOR_YEAR = 'hsl(142, 71%, 45%)'; // ≈ #22c55e，与迁移前数值一致
-/** 网格线色：与迁移前实际渲染色一致（class 未生效，实渲染为 #ccc） */
-const GRID_COLOR = '#ccc';
-/** 轴标签色：与迁移前实际渲染色一致（tick 自带 fill="#666"） */
-const AXIS_COLOR = '#666';
 
 /** ECharts `trigger: 'axis'` tooltip 回调入参（仅声明本组件用到的字段） */
 interface AxisTooltipParam {
@@ -55,6 +44,8 @@ export interface NavTrendOptionInput {
    * legend 会多出一个永远无数据的图例项、tooltip 也会多一行「数据不足」。
    */
   metric?: NavMetric;
+  /** 图表主题配色；不传则由 getChartTheme() 读取当前 CSS 变量（暗色跟随） */
+  theme?: ChartTheme;
 }
 
 /** 构建净值趋势双线图 option（与 React 版 useMemo 内构造逐字一致） */
@@ -66,6 +57,7 @@ export function buildNavTrendOption(input: NavTrendOptionInput): EChartsOption {
   const cumulativeSeries: (number | null)[] = points.map((d) => d.cumulativeNav);
   const yearSeries: (number | null)[] = points.map((d) => d.yearNav);
   const connect = connectNulls;
+  const theme = input.theme ?? getChartTheme();
 
   // 问题④：只注册所选指标的 series，未选中的整条不进 option
   const showCumulative = metric === NavMetric.CUMULATIVE || metric === NavMetric.BOTH;
@@ -79,8 +71,8 @@ export function buildNavTrendOption(input: NavTrendOptionInput): EChartsOption {
     showSymbol: false,
     symbolSize: 8, // 直径 8 = 半径 4，对应迁移前 activeDot={{ r: 4 }}
     emphasis: { scale: false }, // 关闭 hover 额外放大，锁死 r=4
-    lineStyle: { width: 2, color: COLOR_CUMULATIVE },
-    itemStyle: { color: COLOR_CUMULATIVE },
+    lineStyle: { width: 2, color: theme.line },
+    itemStyle: { color: theme.line },
     data: cumulativeSeries,
   };
 
@@ -92,8 +84,8 @@ export function buildNavTrendOption(input: NavTrendOptionInput): EChartsOption {
     showSymbol: false,
     symbolSize: 8,
     emphasis: { scale: false },
-    lineStyle: { width: 2, color: COLOR_YEAR },
-    itemStyle: { color: COLOR_YEAR },
+    lineStyle: { width: 2, color: theme.lineSecondary },
+    itemStyle: { color: theme.lineSecondary },
     data: yearSeries,
   };
 
@@ -141,22 +133,22 @@ export function buildNavTrendOption(input: NavTrendOptionInput): EChartsOption {
       // 「左侧日期显示不完整 / 日期轴不随筛选器变动」的观感），并隐藏重叠标签。
       axisLabel: {
         fontSize: 12,
-        color: AXIS_COLOR,
+        color: theme.axis,
         showMinLabel: true,
         showMaxLabel: true,
         hideOverlap: true,
       },
       // ECharts category 轴默认无 splitLine，需显式开启才等价于迁移前的双向网格
-      splitLine: { show: true, lineStyle: { type: [3, 3], color: GRID_COLOR } },
+      splitLine: { show: true, lineStyle: { type: [3, 3], color: theme.grid } },
     },
     yAxis: {
       type: 'value',
       axisLabel: {
         fontSize: 12,
-        color: AXIS_COLOR,
+        color: theme.axis,
         formatter: (v: number): string => v.toFixed(2),
       },
-      splitLine: { show: true, lineStyle: { type: [3, 3], color: GRID_COLOR } },
+      splitLine: { show: true, lineStyle: { type: [3, 3], color: theme.grid } },
     },
     series: [
       ...(showCumulative ? [cumulativeSeriesOption] : []),

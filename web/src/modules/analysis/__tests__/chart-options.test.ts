@@ -153,7 +153,7 @@ describe('buildYearlyBarOption — 年度柱状图 option', () => {
       }),
     );
     const color = option.series![0]!.itemStyle!.color!;
-    // jsdom 无 CSS 变量，getThemeColors 兜底 '0 84% 48%' / '142 71% 38%'
+    // jsdom 无 CSS 变量，getChartTheme 兜底 FALLBACK '0 84% 48%' / '142 71% 38%'
     expect(color({ dataIndex: 0 })).toBe('hsl(142, 71%, 38%)'); // 负值 → down 绿
     expect(color({ dataIndex: 1 })).toBe('hsl(0, 72%, 35%)'); // 当年正柱 → 高亮深红
   });

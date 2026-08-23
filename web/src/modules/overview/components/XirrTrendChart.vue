@@ -4,6 +4,8 @@
  *
  * 平移自 React 版 web/src/components/charts/xirr-trend-chart.tsx。
  * 对外契约（Props / 默认 title）与 React 版一致；ECharts 经 BaseChart 挂载。
+ *
+ * 图表配色经 useChartTheme() 读取（跟随明暗主题），不再硬编码 hex / hsl 字符串。
  */
 
 import { computed } from 'vue';
@@ -13,6 +15,7 @@ import BaseChart from '@/components/charts/BaseChart.vue';
 import { chartGrid } from '@/components/charts/chart-grid';
 import type { EChartsOption } from 'echarts';
 import { formatPercent } from '@/lib/utils';
+import { useChartTheme } from '@/lib/chart-theme';
 import type { XirrSeriesPoint } from '@/lib/types';
 
 const props = withDefaults(
@@ -34,18 +37,10 @@ const props = withDefaults(
   },
 );
 
-/**
- * 颜色常量。
- * 注意：必须使用「逗号分隔」的 hsl 语法 —— ECharts/zrender 的颜色解析器不支持
- * CSS Color Level 4 的空格语法 `hsl(217 91% 60%)`（静默解析失败返回 null）。
- */
-const COLOR_XIRR = 'hsl(217, 91%, 60%)';
-/** 网格线色：与迁移前实际渲染色一致 */
-const GRID_COLOR = '#ccc';
-/** 轴标签色：与迁移前实际渲染色一致 */
-const AXIS_COLOR = '#666';
+const chartTheme = useChartTheme();
 
 const option = computed((): EChartsOption => {
+  const theme = chartTheme.value;
   const points: XirrSeriesPoint[] = props.data ?? [];
   const labels: string[] = points.map((d) => d.label);
   const values: (number | null)[] = points.map((d) => d.xirrValue);
@@ -86,17 +81,17 @@ const option = computed((): EChartsOption => {
       type: 'category',
       boundaryGap: false,
       data: labels,
-      axisLabel: { fontSize: 12, color: AXIS_COLOR },
-      splitLine: { show: true, lineStyle: { type: [3, 3], color: GRID_COLOR } },
+      axisLabel: { fontSize: 12, color: theme.axis },
+      splitLine: { show: true, lineStyle: { type: [3, 3], color: theme.grid } },
     },
     yAxis: {
       type: 'value',
       axisLabel: {
         fontSize: 12,
-        color: AXIS_COLOR,
+        color: theme.axis,
         formatter: (v: number): string => `${(v * 100).toFixed(0)}%`,
       },
-      splitLine: { show: true, lineStyle: { type: [3, 3], color: GRID_COLOR } },
+      splitLine: { show: true, lineStyle: { type: [3, 3], color: theme.grid } },
     },
     series: [
       {
@@ -107,8 +102,8 @@ const option = computed((): EChartsOption => {
         showSymbol: false,
         symbolSize: 8,
         emphasis: { scale: false },
-        lineStyle: { width: 2, color: COLOR_XIRR },
-        itemStyle: { color: COLOR_XIRR },
+        lineStyle: { width: 2, color: theme.line },
+        itemStyle: { color: theme.line },
         data: values,
       },
     ],

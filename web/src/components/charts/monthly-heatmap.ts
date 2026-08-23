@@ -15,6 +15,7 @@
 
 import type { EChartsOption } from 'echarts';
 import { chartGrid } from '@/components/charts/chart-grid';
+import { getChartTheme, type ChartTheme } from '@/lib/chart-theme';
 import type { NavSeriesPoint } from '@/lib/types';
 
 /** 热力图单元格（年 / 月 / 月度收益率） */
@@ -91,27 +92,16 @@ export function computeMonthlyReturns(data: NavSeriesPoint[]): {
 }
 
 /**
- * 从 CSS 变量读取主题色（PRD §9.5: 正红负绿）。
- *
- * ECharts canvas 不支持 CSS 变量，须在运行时从 computedStyle 读取。
- * 注意：CSS 变量中 HSL 分量以空格分隔（如 `0 84% 48%`），而 ECharts/zrender
- * 的颜色解析器不支持 CSS Color Level 4 的空格语法，须转为逗号分隔。
+ * 主题色（PRD §9.5: 正红负绿）经 getChartTheme() 在 buildMonthlyHeatmapOption
+ * 内读取，含 jsdom 兜底，避免无 CSS 变量环境柱色丢失。
  */
-function getThemeColors() {
-  const root = document.documentElement;
-  const style = getComputedStyle(root);
-  const upHsl = style.getPropertyValue('--color-up').trim();
-  const downHsl = style.getPropertyValue('--color-down').trim();
-  return {
-    up: `hsl(${upHsl.replace(/\s+/g, ', ')})`,
-    down: `hsl(${downHsl.replace(/\s+/g, ', ')})`,
-  };
-}
 
 /** option 构造入参（computeMonthlyReturns 的输出） */
 export interface MonthlyHeatmapOptionInput {
   years: number[];
   cells: HeatCell[];
+  /** 图表主题配色；不传则由 getChartTheme() 读取当前 CSS 变量（暗色跟随） */
+  theme?: ChartTheme;
 }
 
 /** 构建月度热力图 option（与 React 版 useMemo 内构造逐字一致） */
@@ -137,7 +127,7 @@ export function buildMonthlyHeatmapOption(
     }
   });
 
-  const themeColors = getThemeColors();
+  const theme = input.theme ?? getChartTheme();
 
   return {
     tooltip: {
@@ -181,7 +171,7 @@ export function buildMonthlyHeatmapOption(
       inRange: {
         // PRD §9.5: 正红负绿 — min(最负) → 绿色, max(最正) → 红色
         // 两端使用主题变量色，中间保留渐变色形成平滑过渡
-        color: [themeColors.down, '#22c55e', '#86efac', '#fde68a', '#fca5a5', '#f87171', themeColors.up],
+        color: [theme.down, '#22c55e', '#86efac', '#fde68a', '#fca5a5', '#f87171', theme.up],
       },
     },
     series: [

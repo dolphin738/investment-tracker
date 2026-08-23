@@ -12,6 +12,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import BaseChart from '@/components/charts/BaseChart.vue';
 import { buildYearlyBarOption } from './yearly-bar-chart';
+import { useChartTheme } from '@/lib/chart-theme';
 import type { XirrSeriesPoint } from '@/lib/types';
 
 const props = withDefaults(
@@ -28,11 +29,13 @@ const props = withDefaults(
   { title: '年度 XIRR 对比', highlightCurrentYear: false },
 );
 
+const chartTheme = useChartTheme();
 const option = computed(() =>
   buildYearlyBarOption({
     data: props.data,
     highlightCurrentYear: props.highlightCurrentYear,
     currentYear: props.currentYear,
+    theme: chartTheme.value,
   }),
 );
 </script>

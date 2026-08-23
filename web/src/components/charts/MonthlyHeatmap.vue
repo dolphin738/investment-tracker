@@ -11,6 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import BaseChart from '@/components/charts/BaseChart.vue';
 import { buildMonthlyHeatmapOption, computeMonthlyReturns } from './monthly-heatmap';
+import { useChartTheme } from '@/lib/chart-theme';
 import type { NavSeriesPoint } from '@/lib/types';
 
 const props = withDefaults(
@@ -26,7 +27,10 @@ const props = withDefaults(
 
 const monthly = computed(() => computeMonthlyReturns(props.data ?? []));
 
-const option = computed(() => buildMonthlyHeatmapOption(monthly.value));
+const chartTheme = useChartTheme();
+const option = computed(() =>
+  buildMonthlyHeatmapOption({ ...monthly.value, theme: chartTheme.value }),
+);
 </script>
 
 <template>

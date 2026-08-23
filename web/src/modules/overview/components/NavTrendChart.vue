@@ -5,6 +5,8 @@
  * 平移自 React 版 web/src/components/charts/nav-trend-chart.tsx。
  * 对外契约（Props / 默认 title）与 React 版一致；ECharts 经 BaseChart 挂载
  * （notMerge 默认开启，切换 metric 时整体替换 option，旧 series 不残留）。
+ *
+ * 图表配色经 useChartTheme() 读取（跟随明暗主题），不再硬编码 hex / hsl 字符串。
  */
 
 import { computed } from 'vue';
@@ -15,7 +17,8 @@ import { chartGrid } from '@/components/charts/chart-grid';
 import type { EChartsOption } from 'echarts';
 import { formatDecimal } from '@/lib/utils';
 import { NavMetric } from '@/lib/types';
-import type { NavSeriesPoint } from '@/lib/types';
+import { useChartTheme } from '@/lib/chart-theme';
+import type { NavMetric as NavMetricType, NavSeriesPoint } from '@/lib/types';
 
 const props = withDefaults(
   defineProps<{
@@ -33,7 +36,7 @@ const props = withDefaults(
      * - 'cumulative' / 'year'：只注册所选的那一条 series
      * - 'both'（缺省）：双线对比，保持历史行为
      */
-    metric?: NavMetric;
+    metric?: NavMetricType;
   }>(),
   {
     loading: false,
@@ -43,21 +46,12 @@ const props = withDefaults(
   },
 );
 
-/**
- * 颜色常量。
- * 注意：必须使用「逗号分隔」的 hsl 语法 —— ECharts/zrender 的颜色解析器不支持
- * CSS Color Level 4 的空格语法 `hsl(217 91% 60%)`（静默解析失败返回 null）。
- */
-const COLOR_CUMULATIVE = 'hsl(217, 91%, 60%)';
-const COLOR_YEAR = 'hsl(142, 71%, 45%)';
-/** 网格线色：与迁移前实际渲染色一致 */
-const GRID_COLOR = '#ccc';
-/** 轴标签色：与迁移前实际渲染色一致 */
-const AXIS_COLOR = '#666';
+const chartTheme = useChartTheme();
 
 // 返回值注解 EChartsOption 提供上下文类型：字面量 type/trigger 等按目标类型收窄
 // （等价 React 版 useMemo<EChartsOption> 的类型契约）
 const option = computed((): EChartsOption => {
+  const theme = chartTheme.value;
   const points: NavSeriesPoint[] = props.data ?? [];
   const labels: string[] = points.map((d) => d.label);
   const cumulativeSeries: (number | null)[] = points.map((d) => d.cumulativeNav);
@@ -79,8 +73,8 @@ const option = computed((): EChartsOption => {
     showSymbol: false,
     symbolSize: 8,
     emphasis: { scale: false },
-    lineStyle: { width: 2, color: COLOR_CUMULATIVE },
-    itemStyle: { color: COLOR_CUMULATIVE },
+    lineStyle: { width: 2, color: theme.line },
+    itemStyle: { color: theme.line },
     data: cumulativeSeries,
   };
 
@@ -92,8 +86,8 @@ const option = computed((): EChartsOption => {
     showSymbol: false,
     symbolSize: 8,
     emphasis: { scale: false },
-    lineStyle: { width: 2, color: COLOR_YEAR },
-    itemStyle: { color: COLOR_YEAR },
+    lineStyle: { width: 2, color: theme.lineSecondary },
+    itemStyle: { color: theme.lineSecondary },
     data: yearSeries,
   };
 
@@ -144,22 +138,22 @@ const option = computed((): EChartsOption => {
       // 强制显示首/尾日期标签，并隐藏重叠标签
       axisLabel: {
         fontSize: 12,
-        color: AXIS_COLOR,
+        color: theme.axis,
         showMinLabel: true,
         showMaxLabel: true,
         hideOverlap: true,
       },
       // ECharts category 轴默认无 splitLine，需显式开启才等价于迁移前的双向网格
-      splitLine: { show: true, lineStyle: { type: [3, 3], color: GRID_COLOR } },
+      splitLine: { show: true, lineStyle: { type: [3, 3], color: theme.grid } },
     },
     yAxis: {
       type: 'value',
       axisLabel: {
         fontSize: 12,
-        color: AXIS_COLOR,
+        color: theme.axis,
         formatter: (v: number): string => v.toFixed(2),
       },
-      splitLine: { show: true, lineStyle: { type: [3, 3], color: GRID_COLOR } },
+      splitLine: { show: true, lineStyle: { type: [3, 3], color: theme.grid } },
     },
     series: [
       ...(showCumulative ? [cumulativeSeriesOption] : []),

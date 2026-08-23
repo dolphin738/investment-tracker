@@ -12,6 +12,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import BaseChart from '@/components/charts/BaseChart.vue';
 import { buildXirrTrendOption } from './xirr-trend-chart';
+import { useChartTheme } from '@/lib/chart-theme';
 import type { XirrSeriesPoint } from '@/lib/types';
 
 const props = withDefaults(
@@ -30,10 +31,12 @@ const props = withDefaults(
   { title: 'XIRR 趋势', connectNulls: true },
 );
 
+const chartTheme = useChartTheme();
 const option = computed(() =>
   buildXirrTrendOption({
     data: props.data,
     connectNulls: props.connectNulls,
+    theme: chartTheme.value,
   }),
 );
 </script>

@@ -10,37 +10,14 @@
 import type { EChartsOption } from 'echarts';
 import { chartGrid } from '@/components/charts/chart-grid';
 import { formatPercent } from '@/lib/utils';
+import { getChartTheme, type ChartTheme } from '@/lib/chart-theme';
 import type { XirrSeriesPoint } from '@/lib/types';
-
-/**
- * 从 CSS 变量读取主题色（PRD §9.5: 正红负绿）。
- *
- * ECharts canvas 不支持 CSS 变量，须在运行时从 computedStyle 读取。
- * 注意：CSS 变量中 HSL 分量以空格分隔（如 `0 84% 48%`），而 ECharts/zrender
- * 的颜色解析器不支持 CSS Color Level 4 的空格语法，须转为逗号分隔。
- */
-function getThemeColors() {
-  const root = document.documentElement;
-  const style = getComputedStyle(root);
-  // 兜底默认值：jsdom 等无 CSS 变量环境 getComputedStyle 取不到自定义属性，
-  // 须回退到与 index.css 一致的硬编码值，否则 hsl() 拼接出空串、柱色丢失。
-  const upHsl = style.getPropertyValue('--color-up').trim() || '0 84% 48%';
-  const downHsl = style.getPropertyValue('--color-down').trim() || '142 71% 38%';
-  return {
-    up: `hsl(${upHsl.replace(/\s+/g, ', ')})`,
-    down: `hsl(${downHsl.replace(/\s+/g, ', ')})`,
-  };
-}
 
 /** 当年柱高亮色（比基准色更深，红色系 / 绿色系保持不变） */
 const HIGHLIGHT_POSITIVE_COLOR = 'hsl(0, 72%, 35%)';
 const HIGHLIGHT_NEGATIVE_COLOR = 'hsl(142, 60%, 26%)';
-/** 空值柱颜色：ECharts canvas 不解析 CSS 变量，故用硬编码值替代原 hsl(var(--muted-foreground)) */
+/** 空值柱颜色：中性灰，与单测契约锁定的 #94a3b8 保持一致（非语义主题色，保留 hex） */
 const MUTED_COLOR = '#94a3b8';
-/** 网格线色：与迁移前实际渲染色一致（class 未生效，实渲染为 #ccc） */
-const GRID_COLOR = '#ccc';
-/** 轴标签色：与迁移前实际渲染色一致（tick 自带 fill="#666"） */
-const AXIS_COLOR = '#666';
 
 /** ECharts `trigger: 'axis'` tooltip 回调入参（仅声明本组件用到的字段） */
 interface AxisTooltipParam {
@@ -69,6 +46,8 @@ export interface YearlyBarOptionInput {
   highlightCurrentYear?: boolean;
   /** 高亮目标年份（默认系统当前年） */
   currentYear?: number;
+  /** 图表主题配色；不传则由 getChartTheme() 读取当前 CSS 变量（暗色跟随） */
+  theme?: ChartTheme;
 }
 
 /** 构建年度柱状图 option（与 React 版 useMemo 内构造逐字一致） */
@@ -79,7 +58,7 @@ export function buildYearlyBarOption(input: YearlyBarOptionInput): EChartsOption
   const labels: string[] = points.map((d) => d.label);
   const values: (number | null)[] = points.map((d) => d.xirrValue);
   const highlightYear = currentYear ?? new Date().getFullYear();
-  const themeColors = getThemeColors();
+  const theme = input.theme ?? getChartTheme();
 
   return {
     tooltip: {
@@ -114,18 +93,18 @@ export function buildYearlyBarOption(input: YearlyBarOptionInput): EChartsOption
       type: 'category',
       boundaryGap: true,
       data: labels,
-      axisLabel: { fontSize: 12, color: AXIS_COLOR },
+      axisLabel: { fontSize: 12, color: theme.axis },
       // ECharts category 轴默认无 splitLine，需显式开启才等价于迁移前的双向网格
-      splitLine: { show: true, lineStyle: { type: [3, 3], color: GRID_COLOR } },
+      splitLine: { show: true, lineStyle: { type: [3, 3], color: theme.grid } },
     },
     yAxis: {
       type: 'value',
       axisLabel: {
         fontSize: 12,
-        color: AXIS_COLOR,
+        color: theme.axis,
         formatter: (v: number): string => `${(v * 100).toFixed(0)}%`,
       },
-      splitLine: { show: true, lineStyle: { type: [3, 3], color: GRID_COLOR } },
+      splitLine: { show: true, lineStyle: { type: [3, 3], color: theme.grid } },
     },
     series: [
       {
@@ -146,7 +125,7 @@ export function buildYearlyBarOption(input: YearlyBarOptionInput): EChartsOption
             if (isCurrentYear) {
               return positive ? HIGHLIGHT_POSITIVE_COLOR : HIGHLIGHT_NEGATIVE_COLOR;
             }
-            return positive ? themeColors.up : themeColors.down;
+            return positive ? theme.up : theme.down;
           },
         },
       },

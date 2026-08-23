@@ -15,6 +15,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import BaseChart from '@/components/charts/BaseChart.vue';
 import { buildNavTrendOption } from './nav-trend-chart';
+import { useChartTheme } from '@/lib/chart-theme';
 import { NavMetric } from '@/lib/types';
 import type { NavMetric as NavMetricType, NavSeriesPoint } from '@/lib/types';
 
@@ -35,11 +36,13 @@ const props = withDefaults(
   { title: '净值趋势', connectNulls: true, metric: NavMetric.BOTH },
 );
 
+const chartTheme = useChartTheme();
 const option = computed(() =>
   buildNavTrendOption({
     data: props.data,
     connectNulls: props.connectNulls,
     metric: props.metric,
+    theme: chartTheme.value,
   }),
 );
 </script>

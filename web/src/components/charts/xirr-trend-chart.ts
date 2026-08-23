@@ -10,18 +10,8 @@
 import type { EChartsOption } from 'echarts';
 import { chartGrid } from '@/components/charts/chart-grid';
 import { formatPercent } from '@/lib/utils';
+import { getChartTheme, type ChartTheme } from '@/lib/chart-theme';
 import type { XirrSeriesPoint } from '@/lib/types';
-
-/**
- * 颜色常量。
- * 注意：必须使用「逗号分隔」的 hsl 语法 —— ECharts/zrender 的颜色解析器不支持
- * CSS Color Level 4 的空格语法 `hsl(217 91% 60%)`（静默解析失败返回 null）。
- */
-const COLOR_XIRR = 'hsl(217, 91%, 60%)'; // ≈ #3b82f6，与迁移前数值一致
-/** 网格线色：与迁移前实际渲染色一致（class 未生效，实渲染为 #ccc） */
-const GRID_COLOR = '#ccc';
-/** 轴标签色：与迁移前实际渲染色一致（tick 自带 fill="#666"） */
-const AXIS_COLOR = '#666';
 
 /** ECharts `trigger: 'axis'` tooltip 回调入参（仅声明本组件用到的字段） */
 interface AxisTooltipParam {
@@ -42,6 +32,8 @@ export interface XirrTrendOptionInput {
    * PRD §7.5 要求「null 断线不画 0」时传 false。
    */
   connectNulls?: boolean;
+  /** 图表主题配色；不传则由 getChartTheme() 读取当前 CSS 变量（暗色跟随） */
+  theme?: ChartTheme;
 }
 
 /** 构建 XIRR 趋势折线图 option（与 React 版 useMemo 内构造逐字一致） */
@@ -54,6 +46,7 @@ export function buildXirrTrendOption(
   const labels: string[] = points.map((d) => d.label);
   const values: (number | null)[] = points.map((d) => d.xirrValue);
   const connect = connectNulls;
+  const theme = input.theme ?? getChartTheme();
 
   return {
     tooltip: {
@@ -88,18 +81,18 @@ export function buildXirrTrendOption(
       type: 'category',
       boundaryGap: false,
       data: labels,
-      axisLabel: { fontSize: 12, color: AXIS_COLOR },
+      axisLabel: { fontSize: 12, color: theme.axis },
       // ECharts category 轴默认无 splitLine，需显式开启才等价于迁移前的双向网格
-      splitLine: { show: true, lineStyle: { type: [3, 3], color: GRID_COLOR } },
+      splitLine: { show: true, lineStyle: { type: [3, 3], color: theme.grid } },
     },
     yAxis: {
       type: 'value',
       axisLabel: {
         fontSize: 12,
-        color: AXIS_COLOR,
+        color: theme.axis,
         formatter: (v: number): string => `${(v * 100).toFixed(0)}%`,
       },
-      splitLine: { show: true, lineStyle: { type: [3, 3], color: GRID_COLOR } },
+      splitLine: { show: true, lineStyle: { type: [3, 3], color: theme.grid } },
     },
     series: [
       {
@@ -110,8 +103,8 @@ export function buildXirrTrendOption(
         showSymbol: false,
         symbolSize: 8, // 直径 8 = 半径 4，对应迁移前 activeDot={{ r: 4 }}
         emphasis: { scale: false }, // 关闭 hover 额外放大，锁死 r=4
-        lineStyle: { width: 2, color: COLOR_XIRR },
-        itemStyle: { color: COLOR_XIRR },
+        lineStyle: { width: 2, color: theme.line },
+        itemStyle: { color: theme.line },
         data: values,
       },
     ],
