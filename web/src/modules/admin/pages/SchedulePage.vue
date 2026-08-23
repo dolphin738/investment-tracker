@@ -439,7 +439,7 @@ function statusLabel(status: string | null): string {
               <Badge variant="secondary" class="ml-1.5">{{ systemTasks.length }}</Badge>
             </TabsTrigger>
           </TabsList>
-          <Button size="sm" @click="openCreate">
+          <Button size="sm" v-if="listTab === 'normal'" @click="openCreate">
             <Plus class="mr-1 h-4 w-4" />
             新建任务
           </Button>
