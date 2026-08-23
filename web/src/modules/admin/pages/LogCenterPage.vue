@@ -6,18 +6,20 @@
  * 数据来源：后端 GET /api/admin/logs（聚合 app_logs + notifications + job_run_logs）。
  *
  * 功能：时间范围 + 级别 + 作用域 + 模块 + 关键字筛选；列表（级别/来源/作用域色标徽标、
- * 消息摘要，未读通知带圆点）+ 分页 + 详情弹窗（堆栈/附加信息可展开）。无写操作
- * （自动清理由后端 LOG_CLEANUP 系统任务负责，非页面动作）。
+ * 消息摘要，未读通知带圆点）+ 分页 + 详情弹窗（堆栈/附加信息可展开）。
+ * 删除：批量/单行删除（仅 admin），支持当前页全选与跨页全选；未读通知由后端跳过并计入 skipped。
  *
  * 鉴权：useHasRole('admin','auditor') 双重门控（菜单已过滤，此处防直达深链 403 兜底）。
  */
-import { computed, reactive, ref } from 'vue';
+import { computed, reactive, ref, type ComponentPublicInstance } from 'vue';
 import {
   Loader2,
   RotateCcw,
   ScrollText,
   Search,
+  Trash2,
 } from 'lucide-vue-next';
+import { toast } from '@/composables/use-toast';
 import PageHeader from '@/components/common/PageHeader.vue';
 import EmptyState from '@/components/common/EmptyState.vue';
 import TableSkeleton from '@/components/common/TableSkeleton.vue';
@@ -36,6 +38,16 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -50,9 +62,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import type { LogItem, LogLevel, LogScope, LogListQuery } from '@/api/log-center.api';
-import { useHasRole } from '@/stores/auth.store';
-import { useLogCenter, useLogDetail } from '../composables/use-log-center';
+import type {
+  LogItem,
+  LogLevel,
+  LogScope,
+  LogDeleteParams,
+  LogListQuery,
+} from '@/api/log-center.api';
+import { useHasRole, useIsAdmin } from '@/stores/auth.store';
+import { useLogCenter, useLogDetail, useDeleteLogs } from '../composables/use-log-center';
 
 const PAGE_SIZE = 20;
 
@@ -123,6 +141,130 @@ function resetFilters(): void {
   filters.startDate = '';
   filters.endDate = '';
   page.value = 1;
+  // 重置筛选的同时清空选择（跨页全选 / 当页勾选一并取消）
+  resetSelection();
+}
+
+// ---------------------------------------------------------------------------
+// 删除（批量/单行）：仅管理员可用；删除权限与读取守卫不同（require_admin）
+// ---------------------------------------------------------------------------
+const isAdmin = useIsAdmin();
+const deleteMut = useDeleteLogs();
+const selectedIds = ref<Set<string>>(new Set());
+const confirmOpen = ref(false);
+const confirmPayload = ref<LogDeleteParams | null>(null);
+const selectAll = ref(false);
+/** 跨页选择：记录哪些页存在已选行（用于「已选 X 条（跨 Y 页）」提示） */
+const selectedPages = ref<Set<number>>(new Set());
+
+// 当前页已选行数（用于表头 checkbox 三态：全选 / 半选 / 未选）
+const pageSelectedCount = computed(
+  () => items.value.filter((l) => selectedIds.value.has(l.id)).length,
+);
+const allPageSelected = computed(
+  () => items.value.length > 0 && pageSelectedCount.value === items.value.length,
+);
+const somePageSelected = computed(
+  () => pageSelectedCount.value > 0 && pageSelectedCount.value < items.value.length,
+);
+/** 表头 checkbox 的 DOM 半选态（indeterminate 非受控，须直设 DOM） */
+function setHeaderIndeterminate(
+  el: Element | ComponentPublicInstance | null,
+): void {
+  if (el instanceof HTMLInputElement) {
+    el.indeterminate = !selectAll.value && somePageSelected.value;
+  }
+}
+/** 行 checkbox 的 DOM 半选态（行恒无半选，仅保证 ref 集合触发） */
+function noopRef(el: Element | ComponentPublicInstance | null): void {
+  void el; /* 空实现：仅占位，避免 :ref 数组重复触发 */
+}
+
+function resetSelection(): void {
+  selectedIds.value = new Set();
+  selectAll.value = false;
+  selectedPages.value = new Set();
+}
+
+/** 表头全选（合并模式）：仅在当前页范围内增删，不影响其它页已选 */
+function handleHeaderSelect(v: boolean): void {
+  if (selectAll.value) {
+    selectAll.value = false;
+    return;
+  }
+  const n = new Set(selectedIds.value);
+  if (v) items.value.forEach((l) => n.add(l.id));
+  else items.value.forEach((l) => n.delete(l.id));
+  selectedIds.value = n;
+  const pn = new Set(selectedPages.value);
+  if (v) pn.add(page.value);
+  else pn.delete(page.value);
+  selectedPages.value = pn;
+}
+
+/** 单行勾选：登记所属页；取消时仅当本页无其它已选才移除页面标记 */
+function handleRowSelect(l: LogItem, v: boolean): void {
+  const n = new Set(selectedIds.value);
+  if (v) n.add(l.id);
+  else n.delete(l.id);
+  selectedIds.value = n;
+  const pn = new Set(selectedPages.value);
+  if (v) {
+    pn.add(page.value);
+  } else {
+    const stillOnPage = items.value.some((it) => it.id !== l.id && n.has(it.id));
+    if (!stillOnPage) pn.delete(page.value);
+  }
+  selectedPages.value = pn;
+}
+
+/** 由筛选状态推导删除过滤条件（跨页全选时传回，与 query 保持一致） */
+function buildDeleteFilters(): LogDeleteParams {
+  const p: LogDeleteParams = {};
+  if (filters.level !== 'all') p.level = filters.level as LogLevel;
+  if (filters.scope !== 'all') p.scope = filters.scope as LogScope;
+  const moduleKw = filters.module.trim();
+  if (moduleKw) p.module = moduleKw;
+  const keyword = filters.keyword.trim();
+  if (keyword) p.keyword = keyword;
+  if (filters.startDate) p.start = `${filters.startDate}T00:00:00`;
+  if (filters.endDate) p.end = `${filters.endDate}T23:59:59`;
+  return p;
+}
+
+function openBatchDelete(): void {
+  if (selectAll.value) {
+    // 跨页全选：按当前筛选条件删除全部日志
+    confirmPayload.value = { all: true, ...buildDeleteFilters() };
+  } else if (selectedIds.value.size > 0) {
+    confirmPayload.value = { ids: Array.from(selectedIds.value) };
+  } else {
+    return;
+  }
+  confirmOpen.value = true;
+}
+
+function openSingleDelete(item: LogItem): void {
+  confirmPayload.value = { ids: [item.id] };
+  confirmOpen.value = true;
+}
+
+function handleConfirmDelete(): void {
+  if (!confirmPayload.value) return;
+  deleteMut.mutate(confirmPayload.value, {
+    onSuccess: (data) => {
+      toast.success(`已删除 ${data.deleted} 条`);
+      if (data.skipped.length > 0) {
+        // 逐个列出跳过原因（未读通知 / 不存在），便于用户知情
+        toast.warning(`已跳过 ${data.skipped.length} 条：${data.skipped.map((s) => s.reason).join('；')}`);
+      }
+      resetSelection();
+      confirmOpen.value = false;
+    },
+    onError: () => {
+      confirmOpen.value = false;
+    },
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -275,14 +417,60 @@ function stringifyDetail(detail: unknown): string {
             </div>
           </div>
 
-          <div class="flex flex-wrap items-center gap-2">
-            <Button size="sm" @click="onSearch">
-              <Search class="mr-1 h-4 w-4" />
-              查询
-            </Button>
-            <Button size="sm" variant="outline" @click="resetFilters">
-              <RotateCcw class="mr-1 h-4 w-4" />
-              重置
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div class="flex flex-wrap items-center gap-2">
+              <Button size="sm" @click="onSearch">
+                <Search class="mr-1 h-4 w-4" />
+                查询
+              </Button>
+              <Button size="sm" variant="outline" @click="resetFilters">
+                <RotateCcw class="mr-1 h-4 w-4" />
+                重置
+              </Button>
+              <!-- 跨页全选：紧挨「重置」（仅管理员可见，选中态不显示当页全选入口） -->
+              <Button
+                v-if="isAdmin && !selectAll"
+                variant="link"
+                size="sm"
+                class="px-0 text-muted-foreground"
+                @click="selectAll = true"
+              >
+                全选全部 {{ total }} 条（跨页）
+              </Button>
+              <span
+                v-if="!selectAll && selectedIds.size > 0"
+                class="shrink-0 text-xs text-muted-foreground"
+              >
+                已选 {{ selectedIds.size }} 条
+                <template v-if="selectedPages.size > 1">（跨 {{ selectedPages.size }} 页）</template>
+              </span>
+              <!-- 跨页全选提示条：紧跟「全选全部」（仅管理员下全选后显示） -->
+              <div
+                v-if="isAdmin && selectAll"
+                class="flex shrink-0 items-center gap-2 rounded-md border border-dashed bg-muted/40 px-2 py-1 text-sm"
+              >
+                <span>已全选全部 {{ total }} 条日志（跨所有页，应用当前筛选条件）</span>
+                <Button
+                  variant="link"
+                  size="sm"
+                  class="px-0"
+                  @click="selectAll = false"
+                >
+                  取消全选
+                </Button>
+              </div>
+            </div>
+            <!-- 删除：置顶一行最右侧（仅管理员显示） -->
+            <Button
+              v-if="isAdmin"
+              variant="outline"
+              size="sm"
+              :disabled="!selectAll && selectedIds.size === 0"
+              class="shrink-0 text-red-600 hover:text-red-700"
+              @click="openBatchDelete"
+            >
+              <Trash2 class="mr-1 h-3.5 w-3.5" />
+              删除({{ selectAll ? total : selectedIds.size }})
             </Button>
           </div>
         </CardContent>
@@ -291,7 +479,7 @@ function stringifyDetail(detail: unknown): string {
       <!-- 列表 -->
       <Card>
         <CardContent>
-          <TableSkeleton v-if="isLoading" :rows="8" :cols="6" class="py-2" />
+          <TableSkeleton v-if="isLoading" :rows="8" :cols="7" class="py-2" />
           <EmptyState
             v-else-if="isError"
             title="日志加载失败"
@@ -306,6 +494,18 @@ function stringifyDetail(detail: unknown): string {
             <Table class="table-fixed">
               <TableHeader>
                 <TableRow>
+                  <TableHead class="w-12">
+                    <input
+                      type="checkbox"
+                      class="h-4 w-4 rounded border-input accent-primary"
+                      :checked="selectAll || allPageSelected"
+                      :ref="setHeaderIndeterminate"
+                      @change="
+                        ($event) =>
+                          handleHeaderSelect(($event.target as HTMLInputElement).checked)
+                      "
+                    />
+                  </TableHead>
                   <TableHead class="w-[170px] whitespace-nowrap">时间</TableHead>
                   <TableHead class="w-[90px] whitespace-nowrap">级别</TableHead>
                   <TableHead class="w-[90px] whitespace-nowrap">来源</TableHead>
@@ -316,7 +516,24 @@ function stringifyDetail(detail: unknown): string {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                <TableRow v-for="item in items" :key="item.id">
+                <TableRow
+                  v-for="item in items"
+                  :key="item.id"
+                  :class="selectAll || selectedIds.has(item.id) ? 'bg-muted/40' : ''"
+                >
+                  <TableCell class="align-middle">
+                    <input
+                      type="checkbox"
+                      class="h-4 w-4 rounded border-input accent-primary"
+                      :checked="selectAll || selectedIds.has(item.id)"
+                      :disabled="selectAll"
+                      :ref="noopRef"
+                      @change="
+                        ($event) =>
+                          handleRowSelect(item, ($event.target as HTMLInputElement).checked)
+                      "
+                    />
+                  </TableCell>
                   <TableCell class="whitespace-nowrap align-middle text-xs">
                     {{ formatDateTime(item.created_at) }}
                   </TableCell>
@@ -347,10 +564,22 @@ function stringifyDetail(detail: unknown): string {
                     {{ item.message ?? '-' }}
                   </TableCell>
                   <TableCell class="text-right align-middle">
-                    <Button variant="ghost" size="sm" @click="openDetail(item)">
-                      <ScrollText class="mr-1 h-3.5 w-3.5" />
-                      详情
-                    </Button>
+                    <div class="flex items-center justify-end gap-1">
+                      <Button variant="ghost" size="sm" @click="openDetail(item)">
+                        <ScrollText class="mr-1 h-3.5 w-3.5" />
+                        详情
+                      </Button>
+                      <Button
+                        v-if="isAdmin"
+                        variant="ghost"
+                        size="icon"
+                        title="删除"
+                        class="text-red-600 hover:text-red-700"
+                        @click="openSingleDelete(item)"
+                      >
+                        <Trash2 class="h-4 w-4" />
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               </TableBody>
@@ -362,12 +591,41 @@ function stringifyDetail(detail: unknown): string {
               :page="page"
               :total-pages="totalPages"
               :total="total"
+              show-first-last
+              show-jumper
               @page-change="(p: number) => (page = p)"
             />
           </div>
         </CardContent>
       </Card>
     </template>
+
+    <!-- 删除确认弹窗（仅管理员调用；批量/单行共用） -->
+    <AlertDialog v-if="isAdmin" :open="confirmOpen" @update:open="confirmOpen = !!$event">
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>删除日志</AlertDialogTitle>
+          <AlertDialogDescription>
+            <template v-if="confirmPayload?.all">
+              将删除当前筛选条件下全部 {{ total }} 条日志（跨所有页）；其中未读通知会被跳过。
+            </template>
+            <template v-else>
+              将删除 {{ confirmPayload?.ids?.length ?? 0 }} 条日志；其中未读通知会被跳过。
+            </template>
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel :disabled="deleteMut.isPending.value">取消</AlertDialogCancel>
+          <AlertDialogAction
+            class="bg-red-600 hover:bg-red-700"
+            :disabled="deleteMut.isPending.value"
+            @click="handleConfirmDelete"
+          >
+            {{ deleteMut.isPending.value ? '删除中…' : '删除' }}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
 
     <!-- 详情弹窗 -->
     <Dialog :open="detailId !== null" @update:open="(v: boolean) => !v && closeDetail()">

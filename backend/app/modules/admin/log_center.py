@@ -16,12 +16,12 @@ from typing import Any, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import bindparam, select, text
+from sqlalchemy import bindparam, delete, select, text
 from sqlalchemy import DateTime, Integer, String
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.envelope import EnvelopeRoute
-from app.core.security import CurrentUser, require_any_role
+from app.core.security import CurrentUser, require_admin, require_any_role
 from app.db.database import get_db
 from app.models.job import JobConfig, JobRunLog
 from app.models.log import AppLog
@@ -108,6 +108,23 @@ class LogListOut(BaseModel):
     total: int
     page: int
     pageSize: int
+
+
+class LogDeleteBody(BaseModel):
+    """删除日志请求体。
+    - ids：待删除日志 id 列表（带来源前缀 app:/notif:/job:）；all=False 时必填，可含重复，后端去重。
+    - all=True：删除「当前筛选条件下全部日志」（跨所有页），忽略 ids；
+      level/scope/module/start/end/keyword 与列表端点一致，用于定位目标集合。
+    """
+
+    ids: list[str] = []
+    all: bool = False
+    level: Optional[str] = None
+    scope: Optional[str] = None
+    module: Optional[str] = None
+    start: Optional[str] = None
+    end: Optional[str] = None
+    keyword: Optional[str] = None
 
 
 def _build_items(rows: list[dict]) -> list[LogItem]:
@@ -274,3 +291,146 @@ async def get_log(
         )
 
     raise HTTPException(status_code=404, detail="日志不存在")
+
+
+def _parse_dt(v: Optional[str]) -> Optional[datetime]:
+    """把 ISO 字符串解析为 datetime，非法输入返回 None（与 list_logs 内解析逻辑一致）。"""
+    if not v:
+        return None
+    try:
+        return datetime.fromisoformat(v)
+    except ValueError:
+        return None
+
+
+@router_admin_log_center.delete("")
+async def delete_logs(
+    body: LogDeleteBody,
+    current: CurrentUser = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """删除日志（三源归一，按来源分桶）。
+
+    删除权限仅限 admin（``require_admin``）：非管理员 → 403，未登录 → 401。
+
+    单事务（结尾仅一处 ``await db.commit()``）：
+    - 默认（``all=False``）：按请求体传入的 ``ids`` 删除（带来源前缀，去重后逐个校验）；
+      来源非法 / 不存在 / 未读通知 → 计入 skipped。
+    - ``all=True``：用 ``_CTE_INNER``/``_FILTER_WHERE``/``_FILTER_BINDPARAMS`` 并复用列表
+      筛选逻辑取「当前筛选条件下全部匹配 id」（跨所有页），忽略 ``ids``；该模式候选 id
+      全部来自数据库，天然存在，skipped 仅含未读通知。
+    - 硬规则：未读通知（source=notification 且 read IS FALSE）一律跳过，仅删已读通知，
+      绝不波及用户未读消息。
+
+    返回 ``{deleted, skipped}``；skipped 每项 ``{id, reason}``。
+    """
+    # 1) 定位候选 id 并按来源分桶
+    app_ids: list[str] = []
+    notif_ids: list[str] = []
+    job_ids: list[str] = []
+    skipped: list[dict[str, str]] = []
+
+    if body.all:
+        filter_params: dict[str, Any] = {
+            "level": body.level,
+            "scope": body.scope,
+            "module": body.module,
+            "start": _parse_dt(body.start),
+            "end": _parse_dt(body.end),
+            "keyword": f"%{body.keyword}%" if body.keyword else None,
+        }
+        # 仅取 source + id（不带 read）：未读通知统一在 notification 分桶时判定
+        rows = (
+            await db.execute(
+                text(
+                    f"WITH cte AS ({_CTE_INNER}) "
+                    f"SELECT source, id FROM cte {_FILTER_WHERE}"
+                ).bindparams(*_FILTER_BINDPARAMS),
+                filter_params,
+            )
+        ).mappings().all()
+        for r in rows:
+            if r["source"] == "app":
+                app_ids.append(r["id"])
+            elif r["source"] == "notification":
+                notif_ids.append(r["id"])
+            else:
+                job_ids.append(r["id"])
+    else:
+        if not body.ids:
+            raise HTTPException(status_code=400, detail="ids 不能为空或格式非法")
+        for i in list(dict.fromkeys(body.ids)):
+            # id 带来源前缀，无冒号时按 get_log 语义视为 app；前缀非三源之一 → 来源非法
+            if ":" in i:
+                source, raw_id = i.split(":", 1)
+            else:
+                source, raw_id = "app", i
+            if source not in ("app", "notif", "job"):
+                skipped.append({"id": i, "reason": "来源非法"})
+                continue
+            if source == "app":
+                app_ids.append(raw_id)
+            elif source == "notif":
+                notif_ids.append(raw_id)
+            else:
+                job_ids.append(raw_id)
+
+    deleted = 0
+
+    # 2) app 源：存在即删
+    if app_ids:
+        existing_app = set(
+            (await db.execute(select(AppLog.id).where(AppLog.id.in_(app_ids))))
+            .scalars()
+            .all()
+        )
+        for i in app_ids:
+            if i not in existing_app:
+                skipped.append({"id": f"app:{i}", "reason": "日志不存在"})
+        deletable_app = [i for i in app_ids if i in existing_app]
+        if deletable_app:
+            await db.execute(delete(AppLog).where(AppLog.id.in_(deletable_app)))
+        deleted += len(deletable_app)
+
+    # 3) job 源：存在即删
+    if job_ids:
+        existing_job = set(
+            (await db.execute(select(JobRunLog.id).where(JobRunLog.id.in_(job_ids))))
+            .scalars()
+            .all()
+        )
+        for i in job_ids:
+            if i not in existing_job:
+                skipped.append({"id": f"job:{i}", "reason": "日志不存在"})
+        deletable_job = [i for i in job_ids if i in existing_job]
+        if deletable_job:
+            await db.execute(delete(JobRunLog).where(JobRunLog.id.in_(deletable_job)))
+        deleted += len(deletable_job)
+
+    # 4) notification 源：仅删已读通知；不存在 / 未读一律跳过（硬规则）
+    if notif_ids:
+        notif_rows = dict(
+            (
+                await db.execute(
+                    select(Notification.id, Notification.read).where(
+                        Notification.id.in_(notif_ids)
+                    )
+                )
+            ).all()
+        )
+        deletable_notif: list[str] = []
+        for i in notif_ids:
+            if i not in notif_rows:
+                skipped.append({"id": f"notif:{i}", "reason": "日志不存在"})
+            elif notif_rows[i] is False:
+                skipped.append({"id": f"notif:{i}", "reason": "未读通知不可删除"})
+            else:
+                deletable_notif.append(i)
+        if deletable_notif:
+            await db.execute(
+                delete(Notification).where(Notification.id.in_(deletable_notif))
+            )
+        deleted += len(deletable_notif)
+
+    await db.commit()
+    return {"deleted": deleted, "skipped": skipped}

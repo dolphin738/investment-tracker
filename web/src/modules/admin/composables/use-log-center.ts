@@ -4,17 +4,21 @@
  * 对应后端 /api/admin/logs：
  * - useLogCenter：聚合列表（受 useHasRole('admin','auditor') 门控 enabled）
  * - useLogDetail：单条详情（详情弹窗用，logId 非空时发起）
+ * - useDeleteLogs：批量/单行删除（仅 admin，mutationFn 传参；toast 交给调用组件区分提示）
  */
 
 import { computed, type Ref } from 'vue';
-import { useQuery } from '@tanstack/vue-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query';
 import {
+  deleteLogs,
   getLog,
   listLogs,
+  type LogDeleteParams,
   type LogItem,
   type LogListOut,
   type LogListQuery,
 } from '@/api/log-center.api';
+import { toast } from '@/composables/use-toast';
 import { useHasRole } from '@/stores/auth.store';
 
 /** 查询 key（与 useLogCenter / useLogDetail 共享） */
@@ -49,4 +53,20 @@ export function useLogDetail(logId: Ref<string | null>) {
   });
 }
 
-export type { LogItem, LogListOut, LogListQuery };
+/**
+ * 批量/单行删除聚合日志（仅 admin）。成功后失效 useLogCenter 的列表缓存（含详情）。
+ * 注意：本 hook 不弹 toast（toast 交给调用组件，按 skipped 情况区分提示）。
+ */
+export function useDeleteLogs() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (params: LogDeleteParams) => deleteLogs(params),
+    onSuccess: () => {
+      // 删除后列表与详情分区均可能变化，统一失效
+      queryClient.invalidateQueries({ queryKey: [...LOG_CENTER_KEY] });
+    },
+    onError: () => toast.error('删除失败，请检查权限或网络'),
+  });
+}
+
+export type { LogItem, LogListOut, LogListQuery, LogDeleteParams };

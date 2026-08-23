@@ -4,8 +4,10 @@
  * 对应后端 /api/admin/logs（聚合 app_logs + notifications + job_run_logs）：
  * - GET    /api/admin/logs           ：聚合分页列表（按 created_at 倒序）
  * - GET    /api/admin/logs/{log_id}  ：单条详情（含 trace，id 带来源前缀）
+ * - DELETE /api/admin/logs           ：批量/单行删除（仅 admin）
  *
- * 读守卫 require_any_role('admin','auditor')，前端菜单仅 admin/auditor 可见。
+ * 读守卫 require_any_role('admin','auditor')；删除守卫 require_admin。
+ * 前端菜单仅 admin/auditor 可见。
  */
 
 import { http } from '@/lib/api-client';
@@ -71,4 +73,31 @@ export function listLogs(query: LogListQuery = {}): Promise<LogListOut> {
 /** 单条日志详情 */
 export function getLog(logId: string): Promise<LogItem> {
   return http.get<LogItem>(`/admin/logs/${encodeURIComponent(logId)}`);
+}
+
+/** 批量/单行删除日志请求参数：
+ *  - ids：指定 id 删除（与 all 互斥；all=true 时忽略）；
+ *  - all=true：删除「当前筛选条件下全部日志」（跨所有页），并传回列表同款筛选条件。 */
+export interface LogDeleteParams {
+  ids?: string[];
+  all?: boolean;
+  level?: LogLevel;
+  scope?: LogScope;
+  module?: string;
+  start?: string;
+  end?: string;
+  keyword?: string;
+}
+
+/** 批量/单行删除日志结果（DELETE /admin/logs） */
+export interface LogDeleteResult {
+  /** 实际删除的日志条数 */
+  deleted: number;
+  /** 被跳过的 id 及原因（不存在 / 未读通知） */
+  skipped: { id: string; reason: string }[];
+}
+
+/** 批量/单行删除聚合日志（仅 admin；未读通知由后端跳过并计入 skipped） */
+export function deleteLogs(params: LogDeleteParams = {}): Promise<LogDeleteResult> {
+  return http.delete<LogDeleteResult>('/admin/logs', { data: params });
 }
