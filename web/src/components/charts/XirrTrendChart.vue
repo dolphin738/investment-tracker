@@ -39,6 +39,16 @@ const option = computed(() =>
     theme: chartTheme.value,
   }),
 );
+
+/** P3-1：读屏数据摘要（sr-only），用首末有效 XIRR 点 */
+const chartSummary = computed(() => {
+  const valid = props.data.filter((d) => d.xirrValue !== null && d.xirrValue !== undefined);
+  if (valid.length === 0) return `${props.title}：暂无数据`;
+  const first = valid[0];
+  const last = valid[valid.length - 1];
+  const fmt = (v: number) => `${v >= 0 ? '+' : ''}${(v * 100).toFixed(2)}%`;
+  return `${props.title}：自 ${first.date} 的 ${fmt(first.xirrValue as number)} 至 ${last.date} 的 ${fmt(last.xirrValue as number)}`;
+});
 </script>
 
 <template>
@@ -54,7 +64,13 @@ const option = computed(() =>
       >
         暂无数据
       </div>
-      <BaseChart v-else :option="option" :height="260" />
+      <BaseChart
+        v-else
+        :option="option"
+        :height="260"
+        :aria-label="props.title"
+        :summary="chartSummary"
+      />
     </CardContent>
   </Card>
 </template>

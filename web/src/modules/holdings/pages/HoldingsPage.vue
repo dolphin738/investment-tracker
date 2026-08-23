@@ -414,7 +414,7 @@ function refetchHoldings(): void {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>标的</TableHead>
+                  <TableHead class="sticky left-0 z-10 bg-background">标的</TableHead>
                   <TableHead>代码</TableHead>
                   <TableHead>类型</TableHead>
                   <TableHead class="text-right">数量</TableHead>
@@ -429,7 +429,7 @@ function refetchHoldings(): void {
               </TableHeader>
               <TableBody>
                 <TableRow v-for="h in sortedItems" :key="h.securityId">
-                  <TableCell class="font-medium">
+                  <TableCell class="sticky left-0 z-10 bg-background font-medium">
                     <div class="flex items-center gap-2">
                       {{ h.securityName }}
                       <Badge

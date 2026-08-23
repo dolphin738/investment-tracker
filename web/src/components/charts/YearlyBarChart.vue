@@ -38,6 +38,18 @@ const option = computed(() =>
     theme: chartTheme.value,
   }),
 );
+
+/** P3-1：读屏数据摘要（sr-only），用最新 XIRR 值 */
+const chartSummary = computed(() => {
+  const latest = props.data[props.data.length - 1];
+  if (!latest) return `${props.title}：暂无数据`;
+  const v = latest.xirrValue;
+  const fmt = v == null ? '-' : `${v >= 0 ? '+' : ''}${(v * 100).toFixed(2)}%`;
+  const yearHint = props.highlightCurrentYear && props.currentYear
+    ? `（当前年 ${props.currentYear} 已高亮）`
+    : '';
+  return `${props.title}：最新 XIRR ${fmt}${yearHint}`;
+});
 </script>
 
 <template>
@@ -53,7 +65,13 @@ const option = computed(() =>
       >
         暂无数据
       </div>
-      <BaseChart v-else :option="option" :height="260" />
+      <BaseChart
+        v-else
+        :option="option"
+        :height="260"
+        :aria-label="props.title"
+        :summary="chartSummary"
+      />
     </CardContent>
   </Card>
 </template>

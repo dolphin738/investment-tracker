@@ -494,7 +494,7 @@ function stringifyDetail(detail: unknown): string {
             <Table class="table-fixed">
               <TableHeader>
                 <TableRow>
-                  <TableHead class="w-12">
+                  <TableHead class="sticky left-0 z-10 w-12 bg-background">
                     <input
                       type="checkbox"
                       class="h-4 w-4 rounded border-input accent-primary"
@@ -521,7 +521,7 @@ function stringifyDetail(detail: unknown): string {
                   :key="item.id"
                   :class="selectAll || selectedIds.has(item.id) ? 'bg-muted/40' : ''"
                 >
-                  <TableCell class="align-middle">
+                  <TableCell class="sticky left-0 z-10 bg-background align-middle">
                     <input
                       type="checkbox"
                       class="h-4 w-4 rounded border-input accent-primary"

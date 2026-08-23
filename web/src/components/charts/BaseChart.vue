@@ -48,16 +48,36 @@ const props = withDefaults(
     height?: number;
     /** 是否整体替换 option（默认 true，避免旧 series 残留） */
     notMerge?: boolean;
+    /**
+     * 无障碍：图表的简短文本描述（读屏替代文本）。
+     * ECharts canvas 对读屏不可见，必须提供 aria-label。
+     */
+    ariaLabel?: string;
+    /**
+     * 无障碍：图表的详细数据摘要（sr-only 视觉隐藏，供读屏朗读）。
+     * 例如「2026 年 XIRR 累计 +12.3%，较年初 +5.1%」。
+     */
+    summary?: string;
   }>(),
   { height: 260, notMerge: true },
 );
 </script>
 
 <template>
-  <VChart
-    :option="props.option"
-    :not-merge="props.notMerge"
-    autoresize
-    :style="{ height: `${props.height}px`, width: '100%' }"
-  />
+  <!-- P3-1：canvas 不可读，包 figure + role=img + aria-label + sr-only 摘要 -->
+  <figure
+    class="m-0"
+    role="img"
+    :aria-label="props.ariaLabel ?? '图表'"
+  >
+    <VChart
+      :option="props.option"
+      :not-merge="props.notMerge"
+      autoresize
+      :style="{ height: `${props.height}px`, width: '100%' }"
+    />
+    <figcaption v-if="props.summary" class="sr-only">
+      {{ props.summary }}
+    </figcaption>
+  </figure>
 </template>

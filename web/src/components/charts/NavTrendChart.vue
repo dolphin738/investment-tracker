@@ -45,6 +45,13 @@ const option = computed(() =>
     theme: chartTheme.value,
   }),
 );
+
+/** P3-1：读屏数据摘要（sr-only），用最新累计/当年净值 */
+const chartSummary = computed(() => {
+  const latest = props.data[props.data.length - 1];
+  if (!latest) return `${props.title}：暂无数据`;
+  return `${props.title}：截至 ${latest.date}，累计净值 ${latest.cumulativeNav?.toFixed(4) ?? '-'}，当年净值 ${latest.yearNav?.toFixed(4) ?? '-'}`;
+});
 </script>
 
 <template>
@@ -60,7 +67,13 @@ const option = computed(() =>
       >
         暂无数据
       </div>
-      <BaseChart v-else :option="option" :height="260" />
+      <BaseChart
+        v-else
+        :option="option"
+        :height="260"
+        :aria-label="props.title"
+        :summary="chartSummary"
+      />
     </CardContent>
   </Card>
 </template>

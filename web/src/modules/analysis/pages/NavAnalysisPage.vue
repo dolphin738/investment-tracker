@@ -269,7 +269,7 @@ const trendTitle = computed(() =>
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>日期</TableHead>
+                <TableHead class="sticky left-0 z-10 bg-background">日期</TableHead>
                 <TableHead class="text-right">累计净值</TableHead>
                 <TableHead class="text-right">当年净值</TableHead>
                 <TableHead class="text-right">每日收益</TableHead>
@@ -278,13 +278,13 @@ const trendTitle = computed(() =>
               </TableRow>
             </TableHeader>
             <TableBody>
-              <TableRow
-                v-for="(row, idx) in dailyDetails"
-                :key="`${row.date}-${idx}`"
-              >
-                <TableCell class="whitespace-nowrap font-mono text-sm tabular-nums">
-                  {{ row.label }}
-                </TableCell>
+                <TableRow
+                  v-for="(row, idx) in dailyDetails"
+                  :key="`${row.date}-${idx}`"
+                >
+                  <TableCell class="sticky left-0 z-10 whitespace-nowrap bg-background font-mono text-sm tabular-nums">
+                    {{ row.label }}
+                  </TableCell>
                 <TableCell class="text-right font-mono tabular-nums">
                   {{ formatDecimal(row.cumulativeNav, navDecimals) }}
                 </TableCell>

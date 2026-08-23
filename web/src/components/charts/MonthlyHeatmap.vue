@@ -31,6 +31,17 @@ const chartTheme = useChartTheme();
 const option = computed(() =>
   buildMonthlyHeatmapOption({ ...monthly.value, theme: chartTheme.value }),
 );
+
+/** P3-1：读屏数据摘要（sr-only），用最佳/最差月收益 */
+const chartSummary = computed(() => {
+  const cells = monthly.value.cells.filter((c) => c.rate != null);
+  if (cells.length === 0) return `${props.title}：暂无数据`;
+  const best = cells.reduce((a, b) => ((b.rate as number) > (a.rate as number) ? b : a));
+  const worst = cells.reduce((a, b) => ((b.rate as number) < (a.rate as number) ? b : a));
+  const fmt = (v: number) => `${v >= 0 ? '+' : ''}${(v * 100).toFixed(2)}%`;
+  const mLabel = (c: { year: number; month: number }) => `${c.year}-${c.month}`;
+  return `${props.title}：最佳 ${mLabel(best)} ${fmt(best.rate as number)}，最差 ${mLabel(worst)} ${fmt(worst.rate as number)}，共 ${cells.length} 个月有数据`;
+});
 </script>
 
 <template>
@@ -46,7 +57,13 @@ const option = computed(() =>
       >
         暂无数据
       </div>
-      <BaseChart v-else :option="option" :height="320" />
+      <BaseChart
+        v-else
+        :option="option"
+        :height="320"
+        :aria-label="props.title"
+        :summary="chartSummary"
+      />
     </CardContent>
   </Card>
 </template>
