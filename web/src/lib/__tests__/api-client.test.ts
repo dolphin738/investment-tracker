@@ -146,6 +146,10 @@ describe('api-client 请求拦截器（M2）', () => {
     // 只有这样浏览器才会自己补 multipart/form-data; boundary=...
     expect(captured).toBeDefined();
     expect(findContentType(captured!.headers)).toBeUndefined();
+
+    // 遗留 #1：本用例为文件中首个执行，首次装载 api-client（axios 模块图）在全量并发
+    // + 本机 jsdom 环境初始化慢的情况下可能超过默认 5s 超时。已在 vitest.config.ts
+    // 将全局 testTimeout 提升至 30s，此处不再逐用例设置显式阈值。
   });
 
   it('FormData 请求体不得被 transformRequest 序列化成 JSON 字符串', async () => {

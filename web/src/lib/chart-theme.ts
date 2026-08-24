@@ -47,9 +47,12 @@ function readVar(name: string, fallback: string): string {
   return value || fallback;
 }
 
-/** CSS Color 4 空格 HSL 分量 → 逗号分隔 hsl()（zrender 仅认逗号语法） */
+/** CSS Color 4 空格 HSL 分量 → 逗号分隔 hsl()（zrender 仅认逗号语法）。
+ *  兜底值已是完整 hsl() 时原样返回，避免二次包裹。 */
 function toHsl(hslComponents: string): string {
-  return `hsl(${hslComponents.replace(/\s+/g, ', ')})`;
+  const trimmed = hslComponents.trim();
+  if (trimmed.toLowerCase().startsWith('hsl(')) return trimmed;
+  return `hsl(${trimmed.replace(/\s+/g, ', ')})`;
 }
 
 /**

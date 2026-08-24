@@ -299,8 +299,10 @@ describe('AdminPage — 多提供方管理 RBAC 与表单', () => {
 
     expect(wrapper.find('.interface-category-stub').exists()).toBe(false);
 
-    await findButton(wrapper, '接口分类管理').trigger('click');
+    // reka-ui TabsTrigger 以 onMousedown 切换激活页签，jsdom 下触发 mousedown 以驱动切换
+    await findButton(wrapper, '接口分类管理').trigger('mousedown');
     await nextTick();
+    await flushPromises();
 
     expect(wrapper.find('.interface-category-stub').exists()).toBe(true);
     expect(localStorage.getItem('invest:admin-active-module')).toBe(
