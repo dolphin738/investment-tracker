@@ -35,6 +35,7 @@ async def register(req: RegisterReq, db: AsyncSession = Depends(get_db)) -> dict
         "phone": user.phone,
         "bio": user.bio,
         "role": user.role,
+        "createdAt": user.created_at.isoformat() if user.created_at else None,
     }
 
 
@@ -52,6 +53,7 @@ async def login(req: LoginReq, db: AsyncSession = Depends(get_db)) -> dict:
             "phone": user.phone,
             "bio": user.bio,
             "role": user.role,
+            "createdAt": user.created_at.isoformat() if user.created_at else None,
         },
     }
 
@@ -70,6 +72,7 @@ async def restore(req: RestoreReq, db: AsyncSession = Depends(get_db)) -> dict:
             "phone": user.phone,
             "bio": user.bio,
             "role": user.role,
+            "createdAt": user.created_at.isoformat() if user.created_at else None,
         },
     }
 
@@ -88,6 +91,7 @@ async def me(
         "phone": u.phone,
         "bio": u.bio,
         "role": u.role,
+        "createdAt": u.created_at.isoformat() if u.created_at else None,
     }
 
 
@@ -131,6 +135,7 @@ async def profile(
         "phone": u.phone,
         "bio": u.bio,
         "role": u.role,
+        "createdAt": u.created_at.isoformat() if u.created_at else None,
     }
 
 
@@ -153,6 +158,7 @@ async def change_password(
             "phone": u.phone,
             "bio": u.bio,
             "role": u.role,
+            "createdAt": u.created_at.isoformat() if u.created_at else None,
         },
     }
 
@@ -176,6 +182,7 @@ async def change_email(
             "phone": u.phone,
             "bio": u.bio,
             "role": u.role,
+            "createdAt": u.created_at.isoformat() if u.created_at else None,
         },
     }
 
