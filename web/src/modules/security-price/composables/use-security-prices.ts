@@ -36,9 +36,6 @@ const AFFECTED_QUERY_KEYS = [
   ['overview'],
 ] as const;
 
-/** 统一导出 B5 批次的现价 upsert（避免重复实现，见文件头注释） */
-export { useUpsertSecurityPrice } from '@/modules/holdings/composables/use-security-prices';
-
 /**
  * 标的最新价列表。
  * portfolioId 可为 ref/computed，随组合切换自动重新查询（对齐 React 版 queryKey 表达式行为）。

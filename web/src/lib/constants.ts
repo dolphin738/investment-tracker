@@ -13,7 +13,6 @@ import { ExportType } from '@/lib/types';
 export const APP_NAME = '投资收益统计系统';
 
 // ===== API 路径前缀 =====
-export const API_PREFIX = '/api';
 export const API_BASE_URL = '/api';
 
 // ===== 认证相关 =====
@@ -39,7 +38,6 @@ export const ROUTE_PATH = {
 
 // ===== 路由持久化键 =====
 // 命名风格与 invest:admin-active-module 一致（invest: 前缀 + 短横线语义）。
-export const LAST_ROUTE_KEY = 'invest:last-route';
 export const AUTH_RETURN_KEY = 'invest:auth-return';
 
 // ===== 查询维度选项（用于 UI 下拉/Tab） =====
@@ -56,19 +54,6 @@ export const AGGREGATION_OPTIONS = [
   { value: 'avg', label: '平均值' },
 ] as const;
 
-// ===== 持仓页 URL 状态白名单 key（对齐后端 HoldingQueryDto）=====
-// 供 useUrlState(schema) 的 key 集合使用，确保只持久化白名单内的查询参数。
-export const HOLDINGS_QUERY_KEYS = [
-  'date',
-  'securityId',
-  'includeClosed',
-  'types',
-] as const;
-
-// ===== 概览页 URL 状态白名单 key =====
-// 当前仅含新鲜度提示条的「已忽略」状态（前端本地持久化，不影响后端口径）。
-export const OVERVIEW_QUERY_KEYS = ['freshnessDismissed'] as const;
-
 // ===== CSV 导出类别选项（对齐 shared ExportType，供导出下拉渲染）=====
 export const EXPORT_TYPE_OPTIONS = [
   { value: ExportType.SECURITIES, label: '标的主数据' },
@@ -82,17 +67,6 @@ export const EXPORT_TYPE_OPTIONS = [
 
 // ===== 默认分页参数 =====
 export const DEFAULT_PAGE_SIZE = 20;
-
-// ===== 默认日期范围（近 1 年） =====
-export function getDefaultDateRange(): { startDate: string; endDate: string } {
-  const end = new Date();
-  const start = new Date();
-  start.setFullYear(start.getFullYear() - 1);
-  return {
-    startDate: toIsoDate(start),
-    endDate: toIsoDate(end),
-  };
-}
 
 /** 将 Date 转为 YYYY-MM-DD（本地时区） */
 export function toIsoDate(date: Date): string {

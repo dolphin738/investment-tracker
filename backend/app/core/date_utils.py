@@ -9,7 +9,3 @@ _APP_TZ = timezone(timedelta(hours=8))
 def today_app_tz() -> date:
     """应用当下日期（UTC+8）。重算区间终点默认取它，而非仅当日。"""
     return datetime.now(_APP_TZ).date()
-
-
-def now_app_tz() -> datetime:
-    return datetime.now(_APP_TZ)

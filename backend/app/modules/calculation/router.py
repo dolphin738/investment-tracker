@@ -304,11 +304,6 @@ async def get_nav_series(
     return out
 
 
-def _shares_at(rows, d: date) -> Decimal | None:
-    match = [r for r in rows if r.date == d]
-    return match[-1].shares if match else None
-
-
 @router_nav.get("/{portfolio_id}/nav/latest", response_model=NavPointOut)
 async def get_nav_latest(p=Depends(get_portfolio), db: AsyncSession = Depends(get_db)):
     row = (

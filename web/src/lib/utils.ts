@@ -136,23 +136,6 @@ export function formatCurrency(
 }
 
 /**
- * 判断数据是否陈旧（距今超过 staleDays 天）。
- * @param dateStr ISO 日期字符串或 Date 对象
- * @param staleDays 阈值天数（默认 3）
- */
-export function isStale(
-  dateStr: string | Date | null | undefined,
-  staleDays = 3,
-): boolean {
-  if (!dateStr) return false;
-  const date = typeof dateStr === 'string' ? new Date(dateStr) : dateStr;
-  if (Number.isNaN(date.getTime())) return false;
-  const diffMs = Date.now() - date.getTime();
-  const diffDays = diffMs / (1000 * 60 * 60 * 24);
-  return diffDays > staleDays;
-}
-
-/**
  * 计算 XIRR 环比变化（单位：百分点），返回带正负号字符串。
  */
 export function formatChange(

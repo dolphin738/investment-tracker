@@ -223,19 +223,13 @@ export function securityTypeLabel(value: string | null | undefined): string {
 }
 
 /** 交易所中文标签（主数据列表交易所筛选 / 展示用，全项目唯一真源）。
- * 覆盖主数据 exchange 列全部大写取值；其余（如 NULL / 未知）由 exchangeLabel 兜底。 */
+ * 覆盖主数据 exchange 列全部大写取值；未命中键由调用方回退原值。 */
 export const EXCHANGE_LABELS: Record<string, string> = {
   SH: '沪市',
   SZ: '深市',
   BJ: '北交所',
   HK: '港股',
 };
-
-/** 取交易所中文标签；空值或未知值回退原字符串，避免界面露出裸枚举。 */
-export function exchangeLabel(value: string | null | undefined): string {
-  if (!value) return value ?? '';
-  return EXCHANGE_LABELS[value] ?? value;
-}
 
 // ============================================================================
 // 概览数据新鲜度（DASH-P1-03 / AL-015）
@@ -280,30 +274,12 @@ export interface ApiResponse<T = unknown> {
   message: string;
 }
 
-/** 分页请求参数 */
-export interface PaginationQuery {
-  page?: number;
-  pageSize?: number;
-}
-
 // 分页响应统一使用 @/api/types 的 `PaginatedResponse<T>`（OpenAPI 生成），本文件不再定义 `Paginated`。
-
-/** 日期范围查询参数 */
-export interface DateRangeQuery {
-  startDate?: string;
-  endDate?: string;
-}
 
 // ============================================================================
 // 业务错误码 / 账户保留期常量（前后端同源，SYS-P1-02）
 // 来源：app/packages/shared/src/types/api.ts
 // ============================================================================
-
-/** 成功响应的默认 message */
-export const SUCCESS_MESSAGE = 'success';
-
-/** API 成功状态码 */
-export const SUCCESS_CODE = 0;
 
 // BUSINESS_ERROR_CODE 与 BusinessErrorCode 现由 types/api.ts 生成层自
 // backend/app/core/enums.py 解析产出，本文件仅 re-export 转发（单一事实来源在后端 enums.py）。
@@ -312,8 +288,6 @@ export type { BusinessErrorCode } from '@/types/api';
 
 /** 账户注销后的软删除保留期（冷静期）天数 */
 export const ACCOUNT_RETENTION_DAYS = 30;
-/** 账户注销后的软删除保留期（冷静期）毫秒数 */
-export const ACCOUNT_RETENTION_MS = ACCOUNT_RETENTION_DAYS * 24 * 60 * 60 * 1000;
 
 /** 业务码 1007（账户处于注销冷静期）随响应 data 一并返回的结构 */
 export interface AccountPendingDeletionData {
@@ -336,7 +310,6 @@ export const ExportType = {
   NAV_SERIES: 'navSeries',
 } as const;
 export type ExportType = (typeof ExportType)[keyof typeof ExportType];
-export const EXPORT_TYPES: readonly ExportType[] = Object.values(ExportType);
 
 /** 可导入的数据类别（3 类） */
 export const ImportType = {
@@ -345,7 +318,6 @@ export const ImportType = {
   ASSET_SNAPSHOTS: 'assetSnapshots',
 } as const;
 export type ImportType = (typeof ImportType)[keyof typeof ImportType];
-export const IMPORT_TYPES: readonly ImportType[] = Object.values(ImportType);
 
 /** 导入错误码 */
 export const ImportErrorCode = {
