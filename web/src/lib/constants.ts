@@ -8,6 +8,7 @@
  */
 
 import { ExportType } from '@/lib/types';
+import { formatDate } from '@/lib/utils';
 
 // ===== 系统名称（全站统一，维护此处即可）=====
 export const APP_NAME = '投资收益统计系统';
@@ -68,12 +69,9 @@ export const EXPORT_TYPE_OPTIONS = [
 // ===== 默认分页参数 =====
 export const DEFAULT_PAGE_SIZE = 20;
 
-/** 将 Date 转为 YYYY-MM-DD（本地时区） */
+/** 将 Date 转为 YYYY-MM-DD（本地时区）。委托 formatDate 复用同一日期渲染口径（REP-035）。 */
 export function toIsoDate(date: Date): string {
-  const yyyy = date.getFullYear().toString();
-  const MM = (date.getMonth() + 1).toString().padStart(2, '0');
-  const dd = date.getDate().toString().padStart(2, '0');
-  return `${yyyy}-${MM}-${dd}`;
+  return formatDate(date, 'yyyy-MM-dd');
 }
 
 /**

@@ -14,6 +14,7 @@
  * 鉴权：composable 内部已用 useIsAdmin 控制发起，页面仅对非管理员给出无权限提示。
  */
 import { computed, reactive, ref, watch } from 'vue';
+import { formatDateTime } from '@/lib/utils';
 import { Loader2, Pencil, Play, Plus, ScrollText, Trash2, ListTodo, Settings2 } from 'lucide-vue-next';
 import TableSkeleton from '@/components/common/TableSkeleton.vue';
 import PageHeader from '@/components/common/PageHeader.vue';
@@ -389,15 +390,6 @@ function kindVariant(kind: JobKind): BadgeVariant {
 /** 最近执行状态徽标变体 */
 function runVariant(status: JobRunStatus): BadgeVariant {
   return RUN_STATUS_VARIANT[status] as BadgeVariant;
-}
-
-/** 本地时间格式化：YYYY-MM-DD HH:mm:ss（项目 utils 仅有 dates，无 datetime） */
-function formatDateTime(value: string | null): string {
-  if (!value) return '-';
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return '-';
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
 function statusLabel(status: string | null): string {

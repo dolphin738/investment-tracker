@@ -49,6 +49,19 @@ export function formatDate(
   }
 }
 
+/**
+ * 格式化日期时间为 YYYY-MM-DD HH:mm:ss（本地时区）。
+ * 输入支持 ISO 字符串或 null；非法/空值返回 '-'。
+ * 收敛自 SchedulePage / LogCenterPage 的逐字重复本地实现（REP-034）。
+ */
+export function formatDateTime(value: string | null): string {
+  if (!value) return '-';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '-';
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
 /** 格式化选项（供 formatCurrency / formatPercent / formatDecimal 使用） */
 export interface FormatOptions {
   /** 小数位数，覆盖位置参数 digits */
