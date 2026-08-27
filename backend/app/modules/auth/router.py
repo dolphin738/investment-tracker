@@ -18,6 +18,7 @@ from app.schemas import (
     RegisterReq,
     RestoreReq,
 )
+from app.serializers import serialize_user
 from app.services.user import UserService
 from app.schemas_resp import AuthTokenOut, UserPublicOut
 
@@ -27,16 +28,7 @@ router = APIRouter(prefix="/api/auth", tags=["auth"], route_class=EnvelopeRoute)
 @router.post("/register", response_model=UserPublicOut)
 async def register(req: RegisterReq, db: AsyncSession = Depends(get_db)) -> dict:
     user = await UserService(db).register(req.email, req.password, req.name)
-    return {
-        "id": user.id,
-        "email": user.email,
-        "name": user.name,
-        "avatar": user.avatar,
-        "phone": user.phone,
-        "bio": user.bio,
-        "role": user.role,
-        "createdAt": user.created_at.isoformat() if user.created_at else None,
-    }
+    return serialize_user(user)
 
 
 @router.post("/login", response_model=AuthTokenOut)
@@ -45,16 +37,7 @@ async def login(req: LoginReq, db: AsyncSession = Depends(get_db)) -> dict:
     token = UserService.issue_token(user)
     return {
         "accessToken": token,
-        "user": {
-            "id": user.id,
-            "email": user.email,
-            "name": user.name,
-            "avatar": user.avatar,
-            "phone": user.phone,
-            "bio": user.bio,
-            "role": user.role,
-            "createdAt": user.created_at.isoformat() if user.created_at else None,
-        },
+        "user": serialize_user(user),
     }
 
 
@@ -64,16 +47,7 @@ async def restore(req: RestoreReq, db: AsyncSession = Depends(get_db)) -> dict:
     token = UserService.issue_token(user)
     return {
         "accessToken": token,
-        "user": {
-            "id": user.id,
-            "email": user.email,
-            "name": user.name,
-            "avatar": user.avatar,
-            "phone": user.phone,
-            "bio": user.bio,
-            "role": user.role,
-            "createdAt": user.created_at.isoformat() if user.created_at else None,
-        },
+        "user": serialize_user(user),
     }
 
 
@@ -83,16 +57,7 @@ async def me(
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     u = await UserService(db).get_profile(user.user_id)
-    return {
-        "id": u.id,
-        "email": u.email,
-        "name": u.name,
-        "avatar": u.avatar,
-        "phone": u.phone,
-        "bio": u.bio,
-        "role": u.role,
-        "createdAt": u.created_at.isoformat() if u.created_at else None,
-    }
+    return serialize_user(u)
 
 
 @router.get("/profile", response_model=UserPublicOut)
@@ -106,16 +71,7 @@ async def get_profile(
     读操作收口到 UserService.get_profile，router 仅做序列化。
     """
     u = await UserService(db).get_profile(user.user_id)
-    return {
-        "id": u.id,
-        "email": u.email,
-        "name": u.name,
-        "avatar": u.avatar,
-        "phone": u.phone,
-        "bio": u.bio,
-        "role": u.role,
-        "createdAt": u.created_at.isoformat() if u.created_at else None,
-    }
+    return serialize_user(u)
 
 
 @router.patch("/profile", response_model=UserPublicOut)
@@ -127,16 +83,7 @@ async def profile(
     u = await UserService(db).update_profile(
         user.user_id, req.name, req.avatar, req.phone, req.bio
     )
-    return {
-        "id": u.id,
-        "email": u.email,
-        "name": u.name,
-        "avatar": u.avatar,
-        "phone": u.phone,
-        "bio": u.bio,
-        "role": u.role,
-        "createdAt": u.created_at.isoformat() if u.created_at else None,
-    }
+    return serialize_user(u)
 
 
 @router.patch("/password", response_model=AuthTokenOut)
@@ -150,16 +97,7 @@ async def change_password(
     )
     return {
         "accessToken": UserService.issue_token(u),
-        "user": {
-            "id": u.id,
-            "email": u.email,
-            "name": u.name,
-            "avatar": u.avatar,
-            "phone": u.phone,
-            "bio": u.bio,
-            "role": u.role,
-            "createdAt": u.created_at.isoformat() if u.created_at else None,
-        },
+        "user": serialize_user(u),
     }
 
 
@@ -174,16 +112,7 @@ async def change_email(
     )
     return {
         "accessToken": UserService.issue_token(u),
-        "user": {
-            "id": u.id,
-            "email": u.email,
-            "name": u.name,
-            "avatar": u.avatar,
-            "phone": u.phone,
-            "bio": u.bio,
-            "role": u.role,
-            "createdAt": u.created_at.isoformat() if u.created_at else None,
-        },
+        "user": serialize_user(u),
     }
 
 

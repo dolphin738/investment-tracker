@@ -23,6 +23,7 @@ import {
   updatePortfolio,
 } from '@/api/portfolio.api';
 import type { Portfolio } from '@/lib/types';
+import { installJsdomPolyfills } from '@/test-utils/jsdom-polyfills';
 
 // ---------------------------------------------------------------------------
 // mock：组合 API + toast（隔离网络与 sonner 全局提示副作用）
@@ -47,30 +48,6 @@ vi.mock('@/composables/use-toast', () => ({
 }));
 
 /** jsdom 缺失的浏览器 API 兜底（reka-ui Dialog 需要） */
-function installJsdomPolyfills(): void {
-  if (!('ResizeObserver' in globalThis)) {
-    (globalThis as { ResizeObserver?: unknown }).ResizeObserver = class {
-      observe(): void {}
-      unobserve(): void {}
-      disconnect(): void {}
-    };
-  }
-  if (!window.matchMedia) {
-    window.matchMedia = ((query: string) => ({
-      matches: false,
-      media: query,
-      onchange: null,
-      addListener: () => {},
-      removeListener: () => {},
-      addEventListener: () => {},
-      removeEventListener: () => {},
-      dispatchEvent: () => false,
-    })) as unknown as typeof window.matchMedia;
-  }
-  if (!Element.prototype.scrollIntoView) {
-    Element.prototype.scrollIntoView = function scrollIntoView(): void {};
-  }
-}
 
 // ---------------------------------------------------------------------------
 // 测试夹具

@@ -18,6 +18,7 @@ import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query';
 import SnapshotForm from '../components/SnapshotForm.vue';
 import { toIsoDate } from '@/lib/constants';
 import type { PaginatedResponse, SnapshotResponse } from '@/api/types';
+import { installJsdomPolyfills } from '@/test-utils/jsdom-polyfills';
 
 // ---------------------------------------------------------------------------
 // mock：数据层 api + toast
@@ -42,30 +43,6 @@ vi.mock('@/api/snapshot.api', () => apiMocks);
 // ---------------------------------------------------------------------------
 
 /** jsdom 缺失的浏览器 API 兜底（reka-ui 组件挂载需要） */
-function installJsdomPolyfills(): void {
-  if (!('ResizeObserver' in globalThis)) {
-    (globalThis as { ResizeObserver?: unknown }).ResizeObserver = class {
-      observe(): void {}
-      unobserve(): void {}
-      disconnect(): void {}
-    };
-  }
-  if (!window.matchMedia) {
-    window.matchMedia = ((query: string) => ({
-      matches: false,
-      media: query,
-      onchange: null,
-      addListener: () => {},
-      removeListener: () => {},
-      addEventListener: () => {},
-      removeEventListener: () => {},
-      dispatchEvent: () => false,
-    })) as unknown as typeof window.matchMedia;
-  }
-  if (!Element.prototype.scrollIntoView) {
-    Element.prototype.scrollIntoView = function scrollIntoView(): void {};
-  }
-}
 
 const today = toIsoDate(new Date());
 

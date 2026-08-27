@@ -157,35 +157,12 @@ vi.mock('../components/StockListTestSection.vue', () => ({
 
 import AdminPage from '../pages/AdminPage.vue';
 import { createQuoteProvider, listQuoteProviders } from '@/api/quote-provider.api';
+import { installJsdomPolyfills } from '@/test-utils/jsdom-polyfills';
 
 let queryClient: QueryClient;
 let pinia: Pinia;
 
 /** jsdom 缺失的浏览器 API 兜底（reka-ui Dialog Portal 需要，同 portfolio-dialog.test） */
-function installJsdomPolyfills(): void {
-  if (!('ResizeObserver' in globalThis)) {
-    (globalThis as { ResizeObserver?: unknown }).ResizeObserver = class {
-      observe(): void {}
-      unobserve(): void {}
-      disconnect(): void {}
-    };
-  }
-  if (!window.matchMedia) {
-    window.matchMedia = ((query: string) => ({
-      matches: false,
-      media: query,
-      onchange: null,
-      addListener: () => {},
-      removeListener: () => {},
-      addEventListener: () => {},
-      removeEventListener: () => {},
-      dispatchEvent: () => false,
-    })) as unknown as typeof window.matchMedia;
-  }
-  if (!Element.prototype.scrollIntoView) {
-    Element.prototype.scrollIntoView = function scrollIntoView(): void {};
-  }
-}
 
 async function mountPage(): Promise<VueWrapper> {
   const wrapper = mount(AdminPage, {

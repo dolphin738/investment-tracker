@@ -17,6 +17,7 @@ from app.models import (
     Security,
     SecurityPrice,
     SecurityTrade,
+    User,
 )
 from app.models.enums import DividendType
 
@@ -191,4 +192,22 @@ def serialize_preference(p) -> dict:
         "amountThousands": p.amount_thousands,
         "amountAbbrev": p.amount_abbrev,
         "dashboardLayout": p.dashboard_layout,
+    }
+
+
+def serialize_user(user: User) -> dict:
+    """当前用户响应 dict（对齐 serializers.py 风格：纯函数，输入 User ORM 实例）。
+
+    与 auth/router.py 各路由曾逐份内联的 user dict 键集、表达式逐字一致；
+    收敛到此单一来源，消除重复构造。
+    """
+    return {
+        "id": user.id,
+        "email": user.email,
+        "name": user.name,
+        "avatar": user.avatar,
+        "phone": user.phone,
+        "bio": user.bio,
+        "role": user.role,
+        "createdAt": user.created_at.isoformat() if user.created_at else None,
     }

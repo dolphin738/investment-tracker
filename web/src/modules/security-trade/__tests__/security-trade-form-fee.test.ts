@@ -14,6 +14,7 @@ import { createPinia } from 'pinia';
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query';
 import SecurityTradeForm from '../components/SecurityTradeForm.vue';
 import type { SecurityTradeResponse } from '@/api/types';
+import { installJsdomPolyfills } from '@/test-utils/jsdom-polyfills';
 
 vi.mock('vue-sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() },
@@ -46,40 +47,6 @@ vi.mock('@/api/security.api', () => ({
 vi.mock('@/api/security-master.api', () => ({
   listSecurityMasters: apiMocks.listSecurityMasters,
 }));
-
-function installJsdomPolyfills(): void {
-  if (!('ResizeObserver' in globalThis)) {
-    (globalThis as { ResizeObserver?: unknown }).ResizeObserver = class {
-      observe(): void {}
-      unobserve(): void {}
-      disconnect(): void {}
-    };
-  }
-  if (!window.matchMedia) {
-    window.matchMedia = ((query: string) => ({
-      matches: false,
-      media: query,
-      onchange: null,
-      addListener: () => {},
-      removeListener: () => {},
-      addEventListener: () => {},
-      removeEventListener: () => {},
-      dispatchEvent: () => false,
-    })) as unknown as typeof window.matchMedia;
-  }
-  if (!Element.prototype.scrollIntoView) {
-    Element.prototype.scrollIntoView = function scrollIntoView(): void {};
-  }
-  if (!Element.prototype.hasPointerCapture) {
-    Element.prototype.hasPointerCapture = function hasPointerCapture(): boolean {
-      return false;
-    };
-  }
-  if (!Element.prototype.releasePointerCapture) {
-    Element.prototype.releasePointerCapture =
-      function releasePointerCapture(): void {};
-  }
-}
 
 const securities = [
   { id: 'sec-1', name: '贵州茅台', code: '600519', type: 'STOCK', exchange: 'SH' },

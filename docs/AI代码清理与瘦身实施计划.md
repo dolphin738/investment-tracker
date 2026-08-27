@@ -9,7 +9,7 @@ aliases:
   - AI代码清理实施计划
   - 代码瘦身计划
 parent: "[[AI代码清理与瘦身指南]]"
-status: 执行中（阶段3·第5轮完成，待第6轮）
+status: 执行中（阶段3·第6轮完成，待第7轮）
 ---
 
 # AI 代码清理与瘦身实施计划
@@ -531,6 +531,42 @@ C. 人工验收步骤：对照功能验收表，列出需要人工在界面上�
 1. **git ref 未再现**：本轮提交前后 `packed-refs` 与 loose ref 始终一致指向同一 sha，无 gremlin 回退（相较 R2/R3/R4 收敛）。
 2. **隔离纪律**：本回合仅 `git add` 5 个 round-5 后端文件 + 本计划文档；`backend/uv.lock`、`.codebase-memory/*`、`docs/adr/*`、`docs/analysis-interface-entry-scheme-2026-08-15.md`、`docs/代码体检报告-终版.md` 等为**预先存在的无关改动**，刻意排除、未纳入提交。
 3. **环境缺口延续**：本沙箱 `vitest` 损坏、离线无法 `pnpm install`；后端 `pytest` 须 owner 联网后回归（REP-036/037 属行为变更，须测试兜底）。
+
+### 第6轮 · 重复模块合并（三）：测试辅助与 auth user dict 收敛（REP-052/053）
+
+- 范畴：纯测试侧重复函数抽取（REP-052）+ 后端 auth 用户响应 dict 消重（REP-053）。
+- 门禁：`vue-tsc --noEmit -p tsconfig.app.json` 全 src 零错误（test 文件已纳入 tsconfig.app.json 的 `src/**/*.ts`）；后端 `py_compile` 两文件全过、无循环导入。
+- 提交：`44df3e1`（27 文件：2 新建 + 23 测试改 + 2 后端改；+1 计划文档）
+
+#### A. 决策与方案
+
+- **REP-052（测试辅助抽取）**：`installJsdomPolyfills` 在 21 个 `web/src/modules/**/__tests__/*.test.ts` 逐份复制；`buildRouter` 在 auth 两测试文件重复。
+  - 报告声称 21 份"实现完全一致"——**信任但验证发现不实**：21 份 polyfill **非逐字一致**（全集 = `ResizeObserver`(19) + `matchMedia`(19) + `scrollIntoView`(21) + `hasPointerCapture`(12) + `releasePointerCapture`(12)，且 `releasePointerCapture` 有两种实现形态）。
+  - 安全做法：抽取**超集** `web/src/test-utils/jsdom-polyfills.ts`，含全部 5 类 polyfill 且均带 `if (!X)` 幂等守卫 → 调用处行为无损（额外 polyfill 仅补未安装的，重复安装无副作用）。
+  - `buildRouter` 两副本**亦非一致**（login 版 4 路由含 `/holdings`，register 版 3 路由）→ 抽取超集（4 路由）到 `web/src/modules/auth/__tests__/build-router.ts`，额外 `/holdings` 永不被测试导航，行为无损。
+  - 21 个测试文件：删除本地 `installJsdomPolyfills` 定义、改 `import { installJsdomPolyfills } from '@/test-utils/jsdom-polyfills'`；2 个 auth 测试：删除本地 `buildRouter`、改 `import { buildRouter } from './build-router'`，并清理孤儿 `createRouter`/`createMemoryHistory` 导入（保留 `type Router`）。
+  - 净减 ~250 行（21×~12 + 2×~8）。
+- **REP-053（auth user dict 消重）**：`backend/app/modules/auth/router.py` 8 处内联 user dict（register/login/restore + me/get_profile/PATCH profile + PATCH password/email）键集与表达式**逐字一致**（仅变量名 `user`/`u` 不同，含 `createdAt`）= 单一 `serialize_user(x)` 逐字节等价替换。
+  - 报告标注"采纳-条件"：`createdAt` 缺陷疑已关闭，需与验收表 owner 确认。本轮按用户授权作**纯重构**处理：新增 `serialize_user` 到 `backend/app/serializers.py`（对齐 `serialize_*` 同族，输入 User ORM 实例输出 camelCase dict），`auth/router.py` 8 处改调 `serialize_user`；`serializers.py` 补 `User` 导入，无循环依赖（`serializers` 仅依赖 `app.models`）。
+  - 行为零差异：返回 dict 键序/值与原内联完全等价，`UserPublicOut`/`AuthTokenOut` 响应契约不变。
+
+#### B. 验证（信任但验证）
+
+- **REP-052**：grep 复核 21 个测试文件零残留 `function installJsdomPolyfills`、21 处 `@/test-utils/jsdom-polyfills` import、21 处 `installJsdomPolyfills()` 调用；2 处 `buildRouter` import + 2 处调用；`@` 别名在 `vite.config.ts` 配置（测试已用 `@/`），共享模块可解析。
+- **REP-053**：grep 复核 `auth/router.py` 零残留 `"createdAt"` 内联 dict，8 处 `serialize_user` 调用；`serializers.py` 定义 + `User` 导入就位；`serializers` 不反向 import `app.modules`（无循环）。
+- **门禁**：`vue-tsc --noEmit -p tsconfig.app.json` EXIT=0（含 23 测试文件 + 2 新建模块）；`py_compile serializers.py / auth/router.py` 全过。
+
+#### C. 回归与待办
+
+- **前端**：`vitest` 沙箱损坏、离线无法 `pnpm install`，本轮未跑测试运行时；建议 owner 联网 `pnpm store prune` + `pnpm install` 后补 `vitest` 回归（重点：21 个消费 `installJsdomPolyfills` 的测试、auth 两 `buildRouter` 测试仍可挂载 reka-ui 组件）。
+- **后端**：`pytest` 沙箱离线无法跑；建议 owner 联网回归 `auth` 路由（register/login/restore/me/profile/change_password/change_email 响应结构等价，重点 `createdAt` 字段）。
+
+#### ⚠️ 异常记录（本轮关键插曲）
+
+1. **D:\sync gremlin（EBUSY）**：`serializers.py` 首个 import 编辑因云同步瞬时锁占用报 `EBUSY` 失败；重读后重试成功。其余编辑均一次性成功。
+2. **git ref gremlin 待核验**：提交后须复核 `packed-refs` 第 1 行是否被改回旧 tip；若回退按既定流程备份后 `sed` 还原。
+3. **隔离纪律**：本回合仅 `git add` 27 个 round-6 文件 + 本计划文档；`backend/uv.lock`、`.codebase-memory/*`、`docs/adr/*`、`docs/analysis-interface-entry-scheme-2026-08-15.md`、`docs/代码体检报告-终版.md` 等为**预先存在的无关改动**，刻意排除、未纳入提交。
+4. **环境缺口延续**：`vitest` 损坏、离线无法 `pnpm install`/`pytest`；前后端测试运行时须 owner 联网后回归。
 
 ## 相关文档
 

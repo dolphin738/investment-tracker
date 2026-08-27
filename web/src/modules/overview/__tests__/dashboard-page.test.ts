@@ -27,6 +27,7 @@ import type {
   TransactionResponse,
 } from '@/api/types';
 import type { Portfolio } from '@/lib/types';
+import { installJsdomPolyfills } from '@/test-utils/jsdom-polyfills';
 
 // ---------------------------------------------------------------------------
 // mock：数据层 API（可变夹具：各用例按需覆写）
@@ -210,30 +211,6 @@ function makeTx(p: Partial<TransactionResponse>): TransactionResponse {
 }
 
 /** jsdom 缺失的浏览器 API 兜底（reka-ui Tabs / Dialog 需要） */
-function installJsdomPolyfills(): void {
-  if (!('ResizeObserver' in globalThis)) {
-    (globalThis as { ResizeObserver?: unknown }).ResizeObserver = class {
-      observe(): void {}
-      unobserve(): void {}
-      disconnect(): void {}
-    };
-  }
-  if (!window.matchMedia) {
-    window.matchMedia = ((query: string) => ({
-      matches: false,
-      media: query,
-      onchange: null,
-      addListener: () => {},
-      removeListener: () => {},
-      addEventListener: () => {},
-      removeEventListener: () => {},
-      dispatchEvent: () => false,
-    })) as unknown as typeof window.matchMedia;
-  }
-  if (!Element.prototype.scrollIntoView) {
-    Element.prototype.scrollIntoView = function scrollIntoView(): void {};
-  }
-}
 
 let pinia: Pinia;
 let queryClient: QueryClient;

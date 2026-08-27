@@ -14,6 +14,7 @@ import { createPinia } from 'pinia';
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query';
 import ExportPanel from '../components/ExportPanel.vue';
 import ImportDialog from '../components/ImportDialog.vue';
+import { installJsdomPolyfills } from '@/test-utils/jsdom-polyfills';
 
 // ---------------------------------------------------------------------------
 // mock：数据层 api + toast + 下载触发
@@ -45,39 +46,6 @@ vi.mock('@/lib/csv-download', async (importOriginal) => ({
 }));
 
 /** jsdom 缺失的浏览器 API 兜底（reka-ui Dialog / Select 需要） */
-function installJsdomPolyfills(): void {
-  if (!('ResizeObserver' in globalThis)) {
-    (globalThis as { ResizeObserver?: unknown }).ResizeObserver = class {
-      observe(): void {}
-      unobserve(): void {}
-      disconnect(): void {}
-    };
-  }
-  if (!window.matchMedia) {
-    window.matchMedia = ((query: string) => ({
-      matches: false,
-      media: query,
-      onchange: null,
-      addListener: () => {},
-      removeListener: () => {},
-      addEventListener: () => {},
-      removeEventListener: () => {},
-      dispatchEvent: () => false,
-    })) as unknown as typeof window.matchMedia;
-  }
-  if (!Element.prototype.scrollIntoView) {
-    Element.prototype.scrollIntoView = function scrollIntoView(): void {};
-  }
-  if (!Element.prototype.hasPointerCapture) {
-    Element.prototype.hasPointerCapture = function hasPointerCapture(): boolean {
-      return false;
-    };
-  }
-  if (!Element.prototype.releasePointerCapture) {
-    Element.prototype.releasePointerCapture =
-      function releasePointerCapture(): void {};
-  }
-}
 
 let wrapper: VueWrapper | null = null;
 

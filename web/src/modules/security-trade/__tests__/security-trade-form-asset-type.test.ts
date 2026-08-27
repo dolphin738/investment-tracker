@@ -29,6 +29,7 @@ import { createPinia } from 'pinia';
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query';
 import SecurityTradeForm from '../components/SecurityTradeForm.vue';
 import type { SecurityTradeResponse } from '@/api/types';
+import { installJsdomPolyfills } from '@/test-utils/jsdom-polyfills';
 
 vi.mock('vue-sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() },
@@ -65,39 +66,6 @@ vi.mock('@/api/security-master.api', () => ({
 }));
 
 /** jsdom 缺失的浏览器 API 兜底（reka-ui Select / 下拉需要） */
-function installJsdomPolyfills(): void {
-  if (!('ResizeObserver' in globalThis)) {
-    (globalThis as { ResizeObserver?: unknown }).ResizeObserver = class {
-      observe(): void {}
-      unobserve(): void {}
-      disconnect(): void {}
-    };
-  }
-  if (!window.matchMedia) {
-    window.matchMedia = ((query: string) => ({
-      matches: false,
-      media: query,
-      onchange: null,
-      addListener: () => {},
-      removeListener: () => {},
-      addEventListener: () => {},
-      removeEventListener: () => {},
-      dispatchEvent: () => false,
-    })) as unknown as typeof window.matchMedia;
-  }
-  if (!Element.prototype.scrollIntoView) {
-    Element.prototype.scrollIntoView = function scrollIntoView(): void {};
-  }
-  if (!Element.prototype.hasPointerCapture) {
-    Element.prototype.hasPointerCapture = function hasPointerCapture(): boolean {
-      return false;
-    };
-  }
-  if (!Element.prototype.releasePointerCapture) {
-    Element.prototype.releasePointerCapture =
-      function releasePointerCapture(): void {};
-  }
-}
 
 /** 编辑态交易记录：securityId = 's-a'（不在证券字典 / 或命中字典两种场景由用例控制） */
 const TRADE: SecurityTradeResponse = {
