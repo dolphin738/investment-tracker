@@ -19,10 +19,8 @@
     "axios": "^1.6.7",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.0",
-    "date-fns": "^3.3.0",
     "echarts": "^5.5.0",
     "lucide-vue-next": "^0.460.0",
-    "papaparse": "^5.4.1",
     "pinia": "^2.2.0",
     "reka-ui": "^2.0.0",
     "tailwind-merge": "^2.2.0",
@@ -37,7 +35,6 @@
   "devDependencies": {
     "@playwright/test": "^1.62.1",
     "@types/node": "^20.11.0",
-    "@types/papaparse": "^5.3.14",
     "@vitejs/plugin-vue": "^5.0.0",
     "@vue/test-utils": "^2.4.0",
     "autoprefixer": "^10.4.18",

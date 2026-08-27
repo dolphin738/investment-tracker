@@ -23,13 +23,14 @@ dependencies = [
     "pypinyin>=0.53",
     # 可选定时调度器（收盘后全量同步行情），默认关闭、懒导入
     "apscheduler>=3.10",
+    # 行情同步 / 调度器运行时 HTTP 客户端（非仅测试用，REP-004：scheduler.py / market_data_sync.py 顶层 import）
+    "httpx==0.28.1",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.4,<9",
     "pytest-asyncio==1.4.0",
-    "httpx==0.28.1",
     # starlette 1.4 testclient 首选 httpx2（httpx 官方延续版，pydantic 团队维护）；
     # 装上即消除 StarletteDeprecationWarning
     "httpx2==2.9.1",
