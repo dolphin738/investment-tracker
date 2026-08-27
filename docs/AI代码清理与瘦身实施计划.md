@@ -9,7 +9,7 @@ aliases:
   - AI代码清理实施计划
   - 代码瘦身计划
 parent: "[[AI代码清理与瘦身指南]]"
-status: 执行中（阶段3·第2轮完成，待第3轮）
+status: 执行中（阶段3·第3轮完成，待第4轮）
 ---
 
 # AI 代码清理与瘦身实施计划
@@ -422,6 +422,44 @@ C. 人工验收步骤：对照功能验收表，列出需要人工在界面上�
 2. **REP-049 / REP-050 暂缓**：REP-049（12 个过度导出去 `export` 关键字）为 [待人工确认]·最低优先级，且移除 `export` 可能触发 `noUnusedLocals` TS 报错（如 `EntryButtonKey` 连内部都未使用）；REP-050（`stringCodec`）仅测试引用，属测试基建。两者均暂缓，待 owner 决策后单独排期。
 3. **D:\sync 同步误删 87 文件**：本回合 `git rm` 10 个目标文件后，工作树突现 87 个核心文件（Card.vue、DynamicIcon.vue、SelectGroup.vue 等）被外部进程（疑似 D:\sync 云同步）从磁盘删除、但 git 仍跟踪。已**全部从 git 索引恢复**，仅保留 10 个目标删除，避免误删真实文件与误提交。提交已隔离，不含这 87 个文件。
 4. **git ref gremlin**：提交后按上轮经验立即核验分支引用；如出现松散引用被删/packed-refs 被改，按 packed-refs sed 法恢复。
+
+### 第 3 轮 · 前端 overview 重复模块清理（2026-08-28，已提交）
+
+- 分支：`cleanup/phase-0`（脱离 main，未 push）
+- 提交：本回合 squash 提交（3 文件删除 + 9 文件修改 + 1 新建，净 −480 行左右）
+- 范围：REP-029/030（删 overview 旧图表副本改用 `@/components/charts` 版）、REP-031/032/033（抽共享 `AxisTooltipParam`/`extraCssText`/`formatter`/`splitLine` 到 `chart-tooltip.ts`）、REP-044（删 overview `use-snapshots` 副本）、REP-045（`use-query-data` 五件套收敛到 analysis 版为单一真相源）
+
+#### A. 删除 / 新增 / 收敛清单
+
+| REP | 文件 | 动作 | 行数 |
+| --- | --- | --- | --- |
+| REP-029 | web/src/modules/overview/components/XirrTrendChart.vue | 删除（图表已迁至 `@/components/charts/XirrTrendChart.vue`，props 契约一致） | −130 |
+| REP-030 | web/src/modules/overview/components/NavTrendChart.vue | 删除（图表已迁至 `@/components/charts/NavTrendChart.vue`） | −182 |
+| REP-044 | web/src/modules/overview/composables/use-snapshots.ts | 删除（唯一消费者 `TotalAssetTrendChart.vue` 改用 `@/modules/snapshot/composables/use-snapshots`，`useSnapshots` 签名/行为逐字一致） | −36 |
+| REP-031/032/033 | web/src/components/charts/chart-tooltip.ts | **新建**（共享 `AxisTooltipParam` / `TOOLTIP_EXTRA_CSS_TEXT` / `formatPercentAxisLabel` / `axisSplitLine` / `formatPercentAxisTooltip`，归并 nav/xirr/yearly 三图逐字复制） | +51 |
+| REP-045 | web/src/modules/overview/composables/use-query-data.ts | 收敛为再导出（五件套从 `@/modules/analysis/composables/use-query-data` 再导出；删除死副本 `useNavTotalAssetMap`） | −134→+13 |
+| REP-029/030/044 | DashboardPage.vue / TotalAssetTrendChart.vue / dashboard-page*.test.ts | import 路径改走 `@/components/charts` 与 `@/modules/snapshot`；test mock 路径同步 | 改 |
+| REP-031/032/033 | nav/xirr/yearly-bar-chart.ts + total-asset-trend-chart.ts | 改用共享符号，移除各自复制的 `AxisTooltipParam` / `extraCssText` / `splitLine` / `formatter` | 改 |
+
+#### B. 测试对比（基线 vs 删后）
+
+- 前端 `vue-tsc --noEmit -p tsconfig.app.json` **exit 0、零错误** ✅（全 `src` 类型门禁；确认无重复 import、无悬空 import 到已删文件、overview `use-query-data` 再导出解析正常）
+- **REP-045 行为差异核验**：overview 原 disabled 态 `queryKey` 为 `['xirr','series', null, params]`（null portfolioId），analysis 版为 `['xirr','series','disabled']` 哨兵；收敛后 overview 采用 `'disabled'`。**enabled 态 key 两版完全一致**；disabled 态 `enabled:false` 永不触发，无缓存 / 数据影响 → **零行为差异**。
+- **消费者核验**：仅 `DashboardPage.vue` 从 `overview/use-query-data` 取 4 个共享 hook（`useXirrSeries`/`useNavSeries`/`useLatestXirr`/`useLatestNav`），import 路径不变经再导出解析；测试仅 mock `@/api/query.api` 层（非 composable），不受再导出影响。
+- **关键纠正（信任但验证）**：体检报告 REP-045 建议 overview "仅保留独有 hook `useNavTotalAssetMap`"——实际 `useNavTotalAssetMap` 在 overview 版为**死副本**（定义 + 注释，无任何消费者从 overview 引用；真身已在 `snapshot/use-snapshots.ts` 被 `SnapshotForm` 消费），故直接删除而非保留。
+- ⚠️ 环境缺口（非本轮问题，同前）：本沙箱 `vitest` 损坏（`node_modules/vitest` 被 D:\sync 污染为二进制），无法跑单测；建议 owner 联网 `pnpm store prune` + `pnpm install` 后补 `vitest` 回归。`vue-tsc` 门禁已零错误通过。
+
+#### C. 人工验收步骤
+
+1. 前端 `pnpm dev`：应用正常启动，控制台无「找不到模块 XirrTrendChart / NavTrendChart / use-snapshots」类报错。
+2. 打开投资组合概览 `DashboardPage`：XIRR 趋势、净值趋势、总资产走势三图正常渲染，tooltip 样式与迁移前一致（共享 `extraCssText` / `splitLine`）。
+3. 资产记录录入表单（`SnapshotForm`）：覆盖提示仍正常（`useNavTotalAssetMap` 走 snapshot 真身）。
+4. 打开 XIRR / 净值分析页：五件套 hook 行为不变（`queryKey` `'disabled'` 哨兵仅影响 disabled 缓存标签，无数据影响）。
+
+#### ⚠️ 异常记录（本轮关键插曲）
+
+1. **编辑期 gremlin 高频干扰**：本轮编辑过程中 D:\sync 云同步多次从磁盘删/改被跟踪文件，导致 `Edit` 报 "File has been modified since read"——典型表现为某文件首个 Edit 失败、其余 Edit 成功（共享符号已写入但 import 未写入 → 临时悬空引用）。处置：每次失败即重新 Read 该文件再补 import，最终以 `vue-tsc --noEmit` 全量零错误闭环验证；commit 前再 `git status`/`git diff` 复核工作树与 HEAD 一致。
+2. **git ref gremlin 待核验**：提交后立即 `git rev-parse HEAD` / `git log --oneline -3` 核验；若松散引用被删 / `packed-refs` 被改，按 packed-refs sed 法恢复（备份 → 原地改写 sha → 复核）。
 
 ## 相关文档
 

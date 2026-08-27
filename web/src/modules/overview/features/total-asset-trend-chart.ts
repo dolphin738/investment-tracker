@@ -10,6 +10,7 @@
 
 import { SnapshotSource } from '@/lib/types';
 import type { NavSeriesPoint } from '@/lib/types';
+import { type AxisTooltipParam } from '@/components/charts/chart-tooltip';
 
 /** 手工记录标记的单页上限（后端 SnapshotQueryDto @Max(200)） */
 export const MANUAL_MARK_PAGE_SIZE = 200;
@@ -22,16 +23,6 @@ export interface TotalAssetTrendPoint {
   label: string;
   /** 总资产 = cumulativeNav × shares */
   totalAsset: number;
-}
-
-/** ECharts trigger: 'axis' tooltip 回调入参（仅声明用到的字段） */
-export interface AxisTooltipParam {
-  axisValueLabel?: string;
-  seriesName?: string;
-  marker?: string;
-  /** 折线 series 是 number；散点 series 是 [走势点下标, 总资产] 数组 */
-  value?: number | [number, number] | null;
-  dataIndex: number;
 }
 
 /** tooltip 行渲染依赖的金额格式器（组件内用 formatCurrency 闭包注入） */
@@ -49,8 +40,10 @@ export function formatAxisTooltipLine(
   money: TooltipMoneyFormatter,
 ): string {
   const raw = p.value;
-  const v = Array.isArray(raw) ? raw[1] : raw;
-  const text = v === null || v === undefined ? '数据不足' : money(v);
+  // 共享 AxisTooltipParam.value 含 string 分支（本图不产生），收窄为 number 再交给 money
+  const arrVal = Array.isArray(raw) ? raw[1] : raw;
+  const v = typeof arrVal === 'number' ? arrVal : null;
+  const text = v === null ? '数据不足' : money(v);
   return `${p.marker ?? ''}${p.seriesName ?? ''}: ${text}`;
 }
 

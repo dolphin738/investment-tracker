@@ -29,7 +29,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import BaseChart from '@/components/charts/BaseChart.vue';
 import { chartGrid } from '@/components/charts/chart-grid';
 import type { EChartsOption } from 'echarts';
-import { useSnapshots } from '../composables/use-snapshots';
+import { useSnapshots } from '@/modules/snapshot/composables/use-snapshots';
 import { ROUTE_PATH } from '@/lib/constants';
 import { formatCurrency } from '@/lib/utils';
 import { useChartTheme } from '@/lib/chart-theme';

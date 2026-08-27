@@ -93,10 +93,10 @@ vi.mock('@/composables/use-toast', () => ({
 // mock：重型子组件 stub（ECharts / 弹窗表单 / 轮询徽标 / 日期范围选择器）
 // ---------------------------------------------------------------------------
 
-vi.mock('@/modules/overview/components/NavTrendChart.vue', () => ({
+vi.mock('@/components/charts/NavTrendChart.vue', () => ({
   default: { name: 'NavTrendChart', template: '<div data-testid="nav-chart" />' },
 }));
-vi.mock('@/modules/overview/components/XirrTrendChart.vue', () => ({
+vi.mock('@/components/charts/XirrTrendChart.vue', () => ({
   default: {
     name: 'XirrTrendChart',
     template: '<div data-testid="xirr-chart" />',

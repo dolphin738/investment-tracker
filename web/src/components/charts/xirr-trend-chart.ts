@@ -9,18 +9,14 @@
 
 import type { EChartsOption } from 'echarts';
 import { chartGrid } from '@/components/charts/chart-grid';
-import { formatPercent } from '@/lib/utils';
 import { getChartTheme, type ChartTheme } from '@/lib/chart-theme';
 import type { XirrSeriesPoint } from '@/lib/types';
-
-/** ECharts `trigger: 'axis'` tooltip 回调入参（仅声明本组件用到的字段） */
-interface AxisTooltipParam {
-  axisValueLabel?: string;
-  seriesName?: string;
-  marker?: string;
-  value?: number | string | null;
-  dataIndex: number;
-}
+import {
+  type AxisTooltipParam,
+  TOOLTIP_EXTRA_CSS_TEXT,
+  axisSplitLine,
+  formatPercentAxisTooltip,
+} from '@/components/charts/chart-tooltip';
 
 /** option 构造入参 */
 export interface XirrTrendOptionInput {
@@ -56,24 +52,8 @@ export function buildXirrTrendOption(
       borderWidth: 0,
       padding: 0,
       textStyle: { fontSize: 12 },
-      extraCssText:
-        'background: hsl(var(--popover));' +
-        'border: 1px solid hsl(var(--border));' +
-        'border-radius: 6px;' +
-        'color: hsl(var(--popover-foreground));' +
-        'padding: 8px 12px;' +
-        'box-shadow: none;',
-      formatter: (params: unknown): string => {
-        // echarts 的 TopLevelFormatterParams 派生自 CallbackDataParams，
-        // 此处用 unknown 承接后收窄为本组件只关心的字段（避免 marker 联合类型冲突）
-        const arr = (Array.isArray(params) ? params : [params]) as AxisTooltipParam[];
-        const p = arr[0];
-        if (!p) return '';
-        const v = p.value;
-        // null / undefined 必须在调用 formatPercent 前拦截（其空值兜底返回 '-'，非「数据不足」）
-        const text = v === null || v === undefined ? '数据不足' : formatPercent(Number(v));
-        return `${p.axisValueLabel ?? ''}<br/>${p.marker ?? ''}XIRR: ${text}`;
-      },
+      extraCssText: TOOLTIP_EXTRA_CSS_TEXT,
+      formatter: formatPercentAxisTooltip,
     },
     // 右侧留白由 chart-grid 统一给足，避免末位日期被裁切（问题①）
     grid: chartGrid({ bottom: 5 }),
@@ -83,7 +63,7 @@ export function buildXirrTrendOption(
       data: labels,
       axisLabel: { fontSize: 12, color: theme.axis },
       // ECharts category 轴默认无 splitLine，需显式开启才等价于迁移前的双向网格
-      splitLine: { show: true, lineStyle: { type: [3, 3], color: theme.grid } },
+      splitLine: axisSplitLine(theme.grid),
     },
     yAxis: {
       type: 'value',
@@ -92,7 +72,7 @@ export function buildXirrTrendOption(
         color: theme.axis,
         formatter: (v: number): string => `${(v * 100).toFixed(0)}%`,
       },
-      splitLine: { show: true, lineStyle: { type: [3, 3], color: theme.grid } },
+      splitLine: axisSplitLine(theme.grid),
     },
     series: [
       {

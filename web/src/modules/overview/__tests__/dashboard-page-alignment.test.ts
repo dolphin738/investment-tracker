@@ -76,10 +76,10 @@ vi.mock('@/composables/use-toast', () => ({
 }));
 
 // 重型子组件 stub（同 dashboard-page.test.ts）
-vi.mock('@/modules/overview/components/NavTrendChart.vue', () => ({
+vi.mock('@/components/charts/NavTrendChart.vue', () => ({
   default: { name: 'NavTrendChart', template: '<div data-testid="nav-chart" />' },
 }));
-vi.mock('@/modules/overview/components/XirrTrendChart.vue', () => ({
+vi.mock('@/components/charts/XirrTrendChart.vue', () => ({
   default: { name: 'XirrTrendChart', template: '<div data-testid="xirr-chart" />' },
 }));
 vi.mock('@/modules/overview/components/TotalAssetTrendChart.vue', () => ({

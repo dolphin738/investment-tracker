@@ -37,8 +37,8 @@ import {
 } from '@/components/ui/dialog';
 import { Section, SectionTitle } from '@/components/ui/section';
 import MetricCard from '@/components/common/MetricCard.vue';
-import XirrTrendChart from '../components/XirrTrendChart.vue';
-import NavTrendChart from '../components/NavTrendChart.vue';
+import XirrTrendChart from '@/components/charts/XirrTrendChart.vue';
+import NavTrendChart from '@/components/charts/NavTrendChart.vue';
 import TotalAssetTrendChart from '../components/TotalAssetTrendChart.vue';
 import FreshnessBanner from '../components/FreshnessBanner.vue';
 import PriceFreshnessBadge from '@/modules/holdings/components/PriceFreshnessBadge.vue';
