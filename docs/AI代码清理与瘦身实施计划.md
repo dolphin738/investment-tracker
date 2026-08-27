@@ -9,7 +9,7 @@ aliases:
   - AI代码清理实施计划
   - 代码瘦身计划
 parent: "[[AI代码清理与瘦身指南]]"
-status: 执行中（阶段3·第3轮完成，待第4轮）
+status: 执行中（阶段3·第5轮完成，待第6轮）
 ---
 
 # AI 代码清理与瘦身实施计划
@@ -460,6 +460,77 @@ C. 人工验收步骤：对照功能验收表，列出需要人工在界面上�
 
 1. **编辑期 gremlin 高频干扰**：本轮编辑过程中 D:\sync 云同步多次从磁盘删/改被跟踪文件，导致 `Edit` 报 "File has been modified since read"——典型表现为某文件首个 Edit 失败、其余 Edit 成功（共享符号已写入但 import 未写入 → 临时悬空引用）。处置：每次失败即重新 Read 该文件再补 import，最终以 `vue-tsc --noEmit` 全量零错误闭环验证；commit 前再 `git status`/`git diff` 复核工作树与 HEAD 一致。
 2. **git ref gremlin 待核验**：提交后立即 `git rev-parse HEAD` / `git log --oneline -3` 核验；若松散引用被删 / `packed-refs` 被改，按 packed-refs sed 法恢复（备份 → 原地改写 sha → 复核）。
+
+### 第 4 轮 · 前端日期工具冗余调用链拍平（2026-08-28，已提交）
+
+- 分支：`cleanup/phase-0`（脱离 main，未 push）
+- 提交：`fee950c`（4 文件，+18 / −22，净 −4 行）
+- 范围：REP-034（formatDateTime 抽共享）、REP-035（toIsoDate 委托 formatDate）
+
+#### A. 删除 / 收敛清单
+
+| REP | 文件 | 动作 | 行数 |
+| --- | --- | --- | --- |
+| REP-034 | web/src/lib/utils.ts | **新增** `formatDateTime`（从两 .vue 抽共享，单一真相源） | +13 |
+| REP-034 | web/src/modules/admin/pages/SchedulePage.vue | 删除本地 8 行副本，改 import 共享版 | −8（净 −7，含 +1 import） |
+| REP-034 | web/src/modules/admin/pages/LogCenterPage.vue | 删除本地 8 行副本，改 import 共享版 | −8（净 −7，含 +1 import） |
+| REP-035 | web/src/lib/constants.ts | `toIsoDate` 委托 `formatDate(date, 'yyyy-MM-dd')`，保留导出名与 `yyyy-MM-dd`/本地时区契约 | −4（净 −3，含 +1 import） |
+
+#### B. 测试对比（基线 vs 删后）
+
+- 前端 `vue-tsc --noEmit -p tsconfig.app.json` **exit 0、零错误** ✅（全 `src` 类型门禁；确认无悬空本地 `formatDateTime`、无 `toIsoDate` 自实现残留、constants→utils 导入无循环依赖：`utils.ts` 仅依赖 clsx/tailwind-merge）
+- **行为核验**：`formatDateTime` 语义逐字一致（本地时区 `YYYY-MM-DD HH:mm:ss`，空/非法 → `'-'`）；`toIsoDate` 合法 `Date` 产出与 `formatDate` 本地渲染口径**完全一致**，唯一变化是非法 `Date` 从 `NaN-NaN-NaN` 串改进为 `'-'`（报告计为可接受改进，且无人依赖 NaN 行为）。
+- **消费者核验**：`toIsoDate` 12+ 处消费方（snapshot/cashflow/security-trade/dividend/holdings/query·quick-range + 多个 test）经委托后行为不变；两 `.vue` 仅文件内消费 `formatDateTime`，无外部引用（grep 仅命中两处本地定义，已删除）。
+
+#### C. 人工验收步骤
+
+1. 前端 `pnpm dev`：管理后台 **定时任务页（SchedulePage）** 与 **日志中心页（LogCenterPage）** 时间列（`last_run_at`/`started_at`/`finished_at`/`created_at`）渲染格式不变（`YYYY-MM-DD HH:mm:ss`）。
+2. 各录入表单日期（SnapshotForm / CashflowForm / DividendForm / SecurityTradeForm / CashBalanceForm 等）「日期不能为未来」校验与 `today` 默认值不变（`toIsoDate(new Date())` 委托等价）。
+3. 资产记录 / 流水列表日期列正常显示。
+
+#### ⚠️ 异常记录（本轮关键插曲）
+
+1. **D:\sync 编辑期 EBUSY 锁**：SchedulePage / LogCenterPage 的本地函数删除首击因文件被云同步瞬时占用报 `EBUSY: resource busy or locked`；重试成功。LogCenterPage 一度因笔误（秒字段误写为 `getSeconds():getSeconds()`）匹配失败，重读真实文本后修正。
+2. **git ref gremlin 再现**：提交后 2 秒睡眠期间 `packed-refs` 第 1 行被改回 `ccf7622`（但 loose ref `.git/refs/heads/cleanup/phase-0` 仍指 `fee950c`，git 经 loose 解析故 `rev-parse HEAD` 仍正确）；备份后 `sed` 改写 `packed-refs` 第 1 行为 `fee950c`，复核 `HEAD = loose = packed` 三者一致、稳定（3 秒未回退）。
+3. **隔离纪律**：本回合仅 `git add` 4 个 round-4 路径；`backend/uv.lock`、`.codebase-memory/*`、`docs/adr/*`、`docs/analysis-interface-entry-scheme-2026-08-15.md`、`docs/代码体检报告-终版.md` 等为**预先存在的无关改动**，刻意排除、未纳入提交。
+
+### 第 5 轮 · 后端冗余调用链拍平（2026-08-28，已提交）
+
+- 分支：`cleanup/phase-0`（脱离 main，未 push）
+- 提交：`3025413`（5 文件，+86 / −74）
+- 范围：REP-036（asset_valuation.py 抽 `_upsert_snapshot`）、REP-037（分页原语 `paged()` 下沉 `services/base.py`，dividend/snapshot/common 复用）
+
+#### A. 删除 / 收敛清单
+
+| REP | 文件 | 动作 | 行数 |
+| --- | --- | --- | --- |
+| REP-036 | backend/app/services/asset_valuation.py | 抽私有 `_upsert_snapshot` 辅助，收敛 `upsertManual`/`resetToDerived` 同构骨架（existing 改 8 字段 / 否则新建）；两方法改为薄包装委托 | 净 −16（94 行块重排） |
+| REP-037 | backend/app/services/base.py | **新增** `paged(session, stmt, page, page_size)` 通用分页原语（count subquery + limit/offset），返回 `(rows, total)` | +23 |
+| REP-037 | backend/app/services/dividend.py | `list()` 内联 count+limit/offset 改为 `await paged(...)`；去 `func` import | −11（净） |
+| REP-037 | backend/app/services/snapshot.py | `list()` 内联分页改为 `await paged(...)`（`order_by` 前移保序）；去 `func` import | −12（净） |
+| REP-037 | backend/app/common.py | `paginate()` 复用 `paged()` 为底层（dict 信封契约不变）；去 `func/select` import，改 import `paged` | −6（净） |
+
+#### B. 测试对比（基线 vs 删后）
+
+- 后端语法门禁：`python -m py_compile` 5 文件全过 ✅（base / asset_valuation / dividend / snapshot / common）。
+- **零悬挂引用**：三处内联 `select(func.count())` 已无残留；`grep func\.` / `select(func` 在 dividend/snapshot/common 下为空。
+- **无循环导入**：`base.py` 仅依赖 `app.core.*`（不反向 import `app.common`）；`common → base` 为干净 DAG；`app.common.paginate` 调用 `paged` 后 dict 信封形状（`items/total/page/pageSize`）逐字一致。
+- **行为等价核验**：
+  - REP-036：`_upsert_snapshot` 与原两方法逐字段一致（existing 分支改 8 字段含 `recorded_at=now(utc)`、新分支 `session.add`）；返回 existing 或新建 snap，调用方语义不变。`snapshot.py` 中的 `upsertManual/resetToDerived` 仅为**调用方**（L118/153/183/210 调 `av.xxx`），非重复定义——报告仅列 asset_valuation 为收敛点，证据成立。
+  - REP-037：`paged` 与原内联逻辑逐字一致（`count subquery` + `stmt.limit(page_size).offset((page-1)*page_size)`）；`snapshot.list` 将 `order_by(date.desc())` 前移，确保 `paged` 内 limit/offset 应用顺序与原 `base.order_by(...).limit().offset()` 完全一致；`dividend.list` 的 `stmt` 已在调用前 `order_by`，paged 复用保序。返回 `(rows, total)` / dict 信封不变。
+
+#### C. 人工验收步骤
+
+（后端，需 owner 联网补 pytest；本沙箱离线无法跑）
+
+1. `pytest backend/tests -k "snapshot or dividend or asset_valuation or paginate"` 全绿；重点回归 `upsertManual`/`resetToDerived` 写入、dividend/snapshot 列表分页（total 计数、limit/offset 边界）、common.paginate dict 信封。
+2. 接口层：分红列表 / 资产快照列表分页响应结构不变（`items/total/page/pageSize`）。
+
+#### ⚠️ 异常记录（本轮关键插曲）
+
+1. **git ref 未再现**：本轮提交前后 `packed-refs` 与 loose ref 始终一致指向同一 sha，无 gremlin 回退（相较 R2/R3/R4 收敛）。
+2. **隔离纪律**：本回合仅 `git add` 5 个 round-5 后端文件 + 本计划文档；`backend/uv.lock`、`.codebase-memory/*`、`docs/adr/*`、`docs/analysis-interface-entry-scheme-2026-08-15.md`、`docs/代码体检报告-终版.md` 等为**预先存在的无关改动**，刻意排除、未纳入提交。
+3. **环境缺口延续**：本沙箱 `vitest` 损坏、离线无法 `pnpm install`；后端 `pytest` 须 owner 联网后回归（REP-036/037 属行为变更，须测试兜底）。
 
 ## 相关文档
 

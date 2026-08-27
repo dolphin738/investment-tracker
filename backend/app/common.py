@@ -7,7 +7,6 @@ from __future__ import annotations
 from typing import Callable
 
 from fastapi import Depends
-from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums import BusinessErrorCode
@@ -15,6 +14,7 @@ from app.core.exceptions import BusinessException
 from app.core.security import CurrentUser, get_current_user
 from app.db.database import get_db
 from app.models import Portfolio
+from app.services.base import paged
 
 
 async def get_portfolio(
@@ -38,12 +38,7 @@ async def paginate(
     page_size: int,
     serializer: Callable,
 ) -> dict:
-    total = (
-        await session.execute(select(func.count()).select_from(stmt.subquery()))
-    ).scalar_one()
-    rows = (
-        await session.execute(stmt.limit(page_size).offset((page - 1) * page_size))
-    ).scalars().all()
+    rows, total = await paged(session, stmt, page, page_size)
     return {
         "items": [serializer(r) for r in rows],
         "total": total,

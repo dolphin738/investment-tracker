@@ -13,7 +13,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Optional
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums import BusinessErrorCode
@@ -22,7 +22,7 @@ from app.models import AssetSnapshot
 from app.models.enums import SnapshotSource
 from app.schemas import SnapshotCreateReq, SnapshotPatchReq
 from app.services.asset_valuation import AssetValuationService
-from app.services.base import PortfolioChildService, validate_date_not_future
+from app.services.base import PortfolioChildService, validate_date_not_future, paged
 from app.services.recalculation import RecalculationService
 
 
@@ -48,18 +48,9 @@ class SnapshotService(PortfolioChildService):
         # 缺陷7：来源筛选（DERIVED=自动 / MANUAL=手工），服务端过滤而非前端过滤
         if source:
             base = base.where(AssetSnapshot.source == source)
-        total = (
-            await self.session.execute(
-                select(func.count()).select_from(base.subquery())
-            )
-        ).scalar_one()
-        rows = (
-            await self.session.execute(
-                base.order_by(AssetSnapshot.date.desc())
-                .limit(pageSize)
-                .offset((page - 1) * pageSize)
-            )
-        ).scalars().all()
+        # order_by 前移，保证 paged 内 limit/offset 的应用顺序与原内联一致
+        base = base.order_by(AssetSnapshot.date.desc())
+        rows, total = await paged(self.session, base, page, pageSize)
         # N+1 规避：仅对 MANUAL 行批量计算 derivedTotalAsset
         manual_dates = [r.date for r in rows if r.source is SnapshotSource.MANUAL]
         derived_map: dict[date, object] = {}

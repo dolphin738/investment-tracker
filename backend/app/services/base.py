@@ -12,6 +12,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Optional, Type, TypeVar
 
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.date_utils import today_app_tz
@@ -81,3 +82,25 @@ def validate_date_not_future(d: date) -> None:
             "日期不能为未来日期",
             status_code=400,
         )
+
+
+async def paged(
+    session: AsyncSession,
+    stmt,
+    page: int,
+    page_size: int,
+) -> tuple[list, int]:
+    """通用分页原语：返回 (当前页 ORM 对象, 总数)。
+
+    收敛 dividend.py / snapshot.py 内联的 count(subquery) + limit/offset 重复样板，
+    并作为 app/common.paginate 的底层实现（REP-037）。
+    """
+    total = (
+        await session.execute(select(func.count()).select_from(stmt.subquery()))
+    ).scalar_one()
+    rows = (
+        await session.execute(
+            stmt.limit(page_size).offset((page - 1) * page_size)
+        )
+    ).scalars().all()
+    return list(rows), total
