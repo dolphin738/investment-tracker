@@ -9,7 +9,7 @@ aliases:
   - AI代码清理实施计划
   - 代码瘦身计划
 parent: "[[AI代码清理与瘦身指南]]"
-status: 执行中（阶段3·第6轮完成，待第7轮）
+status: 执行中（阶段3·第7轮完成，待第8轮）
 ---
 
 # AI 代码清理与瘦身实施计划
@@ -567,6 +567,39 @@ C. 人工验收步骤：对照功能验收表，列出需要人工在界面上�
 2. **git ref gremlin 待核验**：提交后须复核 `packed-refs` 第 1 行是否被改回旧 tip；若回退按既定流程备份后 `sed` 还原。
 3. **隔离纪律**：本回合仅 `git add` 27 个 round-6 文件 + 本计划文档；`backend/uv.lock`、`.codebase-memory/*`、`docs/adr/*`、`docs/analysis-interface-entry-scheme-2026-08-15.md`、`docs/代码体检报告-终版.md` 等为**预先存在的无关改动**，刻意排除、未纳入提交。
 4. **环境缺口延续**：`vitest` 损坏、离线无法 `pnpm install`/`pytest`；前后端测试运行时须 owner 联网后回归。
+
+### 第 7 轮 · REP-038 防漂移护栏（serializers.py ↔ schemas_resp.py）
+
+- 分支：`cleanup/phase-0`（脱离 main，未 push）
+- 提交：本回合 squash 提交（1 测试文件 + 本计划文档）
+- 范畴：重复模块双维护的「护栏」治理（报告裁决「不建议合并实现」，改加防漂移断言）
+- 门禁：`python -m py_compile` 编译 `tests/test_contract.py` + `app/serializers.py` + `app/schemas_resp.py` 全过；护栏断言逻辑已用后端 `.venv` 独立脚本逐配对验证通过（9 严格相等 + cashflow 已知子集特例）
+
+#### A. 决策与方案
+
+- **REP-038（serializers.py vs schemas_resp.py 双维护）**：报告裁决"不建议合并"（强行合并会破坏 wire 契约，风险高），建议在 `test_contract.py` 增加"serialize_x 输出键集合 == XxxOut.model_fields.keys()"断言护栏。
+  - **信任但验证纠正**：报告建议的"严格相等"对 cashflow 会 **假阳性**——核验发现 `serialize_cashflow` 有意不输出 `recalculation`，该字段由 `app/modules/data/router.py:103` 路由层在序列化后追加（`result["recalculation"] = {...}`）。故护栏设计为两档：
+    1. **子集守卫（全部 10 配对）**：`set(serialize_x(sample).keys()) ⊆ set(XxxOut.model_fields.keys())`——禁止序列化器输出 schema 未声明的键（wire 出现 OpenAPI 未记录字段即契约破坏）。10 配对全过。
+    2. **严格相等守卫（9 配对）**：对无"路由层追加字段"的实体额外要求键集严格相等（新增字段必须同步到响应模型，否则 CI 失败）。cashflow 列入 `subset_only` 已知特例，仅校验子集。
+  - **配对覆盖**：portfolio/cashflow/security↔SecurityOut/trade/price/cashbalance/snapshot/dividend/preference/user 共 10 个 `serialize_x` ↔ `XxxOut`；`serialize_security_master` 无对应 `XxxOut`（主数据仅左栏只读展示，不入响应信封）故正确排除。
+  - **样例构造（无需 DB）**：`compute_type` 为纯函数（不触 DB），测试用 `types.SimpleNamespace` + 合法枚举成员 + `Decimal` 金额构造内存样例对象直接调用 `serialize_x`，断言键集合。不依赖 conftest 的 DB 引导 fixture，可在无库环境运行。
+
+#### B. 验证（信任但验证）
+
+- 独立校验脚本（`.venv` + `PYTHONPATH=.`）逐配对输出：`serialize_portfolio/security/trade/price/cashbalance/snapshot/dividend/preference/user` = EQUAL OK；`serialize_cashflow` = subset OK（缺 `recalculation`，符合预期）。
+- `py_compile` 三文件全过；`test_contract.py` 新增导入均为标准库（types/datetime/decimal），不引入新依赖、不影响既有测试收集。
+- **零行为差异**：仅新增测试，未改动任何运行时代码；serializers.py / schemas_resp.py 原样不动（REP-038 明确"不合并"）。
+
+#### C. 回归与待办
+
+- 后端：`pytest backend/tests -k contract` 在 owner 联网 + 测试库环境运行（本沙箱无 test DB、离线无法跑 pytest）；重点确认新测试 `test_serializers_keys_match_schemas_resp` 绿，且未来任一 `serialize_x` 增删键或 `XxxOut` 增删字段会即时失败。
+
+#### ⚠️ 异常记录（本轮关键插曲）
+
+1. **报告证据不实（再次印证）**：REP-038 报告建议"严格相等"断言——实际 cashflow 序列化器与 Out 模型字段**不等**（缺 recalculation）。若机械照做会在 CI 假阳性。已据实改为"子集 + 严格相等两档"护栏。
+2. **样例类型陷阱（已捕获）**：`serialize_dividend` 内部做 `net = d.amount - d.tax` 金额算术，样例须用 `Decimal` 而非 `str`，否则 `TypeError`。独立脚本首跑即暴露并修正，避免提交挂掉的测试。
+3. **隔离纪律**：本回合仅 `git add` 2 个 round-7 文件（test_contract.py + 本计划文档）；`backend/uv.lock`、`.codebase-memory/*`、`docs/adr/*`、`docs/analysis-interface-entry-scheme-2026-08-15.md`、`docs/代码体检报告-终版.md` 等为**预先存在的无关改动**，刻意排除、未纳入提交。
+4. **环境缺口延续**：`pytest` 沙箱离线无法跑（无 test DB）；护栏断言逻辑已用 `.venv` 独立脚本验证，建议 owner 联网补 pytest 回归。
 
 ## 相关文档
 
