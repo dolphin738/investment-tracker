@@ -9,7 +9,7 @@ aliases:
   - AI代码清理实施计划
   - 代码瘦身计划
 parent: "[[AI代码清理与瘦身指南]]"
-status: 执行中（阶段3·第7轮护栏+做法1合并已落地，第8轮真实测试库回归完成，待第9轮）
+status: 执行中（阶段3·第7轮护栏+做法1合并已落地，第8轮真实测试库回归完成，R1 flaky 修复完成，待第9轮）
 ---
 
 # AI 代码清理与瘦身实施计划
@@ -635,6 +635,16 @@ C. 人工验收步骤：对照功能验收表，列出需要人工在界面上�
 - **第8轮抓到真 bug（离线脚本假绿）**：首次跑 `pytest tests/test_contract.py` 暴露 `test_serialize_cashflow_folds_recalculation` 红——测试样例误用驼峰 `skippedManualDays`，而真实 `RecalculationResult`（`recalculation.py:32-37`）与 `serialize_cashflow` 一致取蛇形 `skipped_manual_days` → `AttributeError`。**序列化器正确、样例误写**，已改为蛇形。这正是此前坚持"应跑真实测试"的原因：第7轮做法1 我只在 `.venv` 离线脚本用逐字一致的蛇形样例验证过（假绿），真实 pytest 一跑即暴露差异。修正提交 `5526e23`（父 74a1305，未 push）。
 - **1 个失败为预存 flaky、非我引入的回归**：`test_l5_cash_balance_deterministic_latest` —— 单跑隔离环境 **1 passed（4.85s）**，全量套件里失败（偶发取首条 `90000` 而非最新 `80000`）。核验我的 5 文件改动（serializers/router/aggregation/test_contract/计划文档）**完全不触碰 CashBalance 服务逻辑**（`_latest_cash_balance`/`computeDerivedBatch` 未改），cashflow 序列化路径与此测试无关。判定为**测试时序/状态污染型 flaky**：两条同 `as_of` 的 `CashBalance` 在负载下 `created_at` 毫秒级碰撞，`order_by(created_at.desc())` 取"最新创建"变非确定性。超出 REP-038 范畴，按隔离纪律**不修**，留 owner 决策（疑似 `_latest_cash_balance` 排序键缺稳定 tie-breaker，如加 `id` 降序）。
 - **git ref gremlin 再现**：第8轮提交 `5526e23` 对象已建，但 loose ref + packed-refs 首行被实时回退到旧 tip `74a1305`（新提交一度悬空）；cp 备份 `packed-refs.bak` 后 `update-ref` + `sed` 改写首行 sha 修复，复核 HEAD=loose=packed=`5526e23` 稳定（4 秒）。
+
+#### ⚠️ 异常记录（第8轮补·R1 修复 flaky——owner 裁决"执行R1"）
+
+- **根因精修（推翻上轮"疑似缺 id 降序 tie-breaker"猜测）**：经读真实代码，`_latest_cash_balance`（`asset_valuation.py:340-343`）与 `computeDerivedBatch`（`asset_valuation.py:101`）排序**已含 `id.desc()`**，但 `CashBalance.id` 是随机 UUID v4（`base.py:25` `gen_random_uuid()`），`id.desc()` 按 UUID 字符串字典序排、与插入顺序无关→**伪确定性 tie-breaker 无效**。真正问题在于 `created_at` 是 Python 端 `default=datetime.now`（`base.py:40`），同一 `commit()` 把两行在一次 flush 中求值，微秒级高度重合→`created_at` 打平后排序退化到随机 UUID，谁当"最新"随机。单跑靠运气差 1µs 取 80000 过；全量负载下撞车取 90000 败。这是"单跑过、全量偶败"的标准 flaky 签名。
+- **R1 修复（仅改测试、零产品风险）**：`test_l5_cash_balance_deterministic_latest`（`test_defect_fixes.py:309-317`）给两行显式 `created_at` 拉开 1 秒间隔（`t_a=...:01`、`t_b=...:02`，均带 `tzinfo=timezone.utc`），使"最新创建"判定确定性落在代码真正排序依据的 `created_at` 上。`CashBalance` 的 `created_at` 为常规 `DateTime(timezone=True)` 列、可显式赋值。产品代码（模型/`order_by`/序列化器）一行不动。
+- **验证**：隔离单跑该测试 5/5 稳定绿（3.6~5.9s）；全量 `pytest tests` **289 passed / 0 failed**（154s）——此前偶败的 flaky 已消失、无其它回归。
+- **诊断结论闭环**：该失败确属预存 flaky、非 REP-038 合并引入的回归（我的 5 文件改动不碰 CashBalance 服务逻辑，且生产 `create_cashbalance` 按 `as_of` upsert 同 `as_of` 仅留一行，测试直插"同 as_of 两行"为不可能状态）。因此 R1 改测试是正确且最小代价的修复。
+- **提交**：`9ef359e`（父 8599d36，未 push；仅 `backend/tests/test_defect_fixes.py` +8/−3）。
+- **git ref gremlin 再现**：提交对象 `9ef359e` 已建，但 loose ref + packed-refs 首行被实时回退到旧 tip `8599d36`（新提交一度悬空）；cp 备份 `packed-refs.bak` 后 `update-ref` + `sed` 改写首行 sha 修复，复核 HEAD=loose=packed=`9ef359e` 稳定（4 秒）。
+- **隔离**：第8轮补 R1 提交仅含 `test_defect_fixes.py`；`.codebase-memory/*`、`backend/uv.lock`、`docs/adr/*`、`docs/analysis-interface-*`、`docs/代码体检报告-*` 等预存无关改动刻意排除。
 
 ## 相关文档
 
