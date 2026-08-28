@@ -69,12 +69,42 @@ def test_protected_requires_auth():
 
 
 def test_protected_with_valid_token():
-    tok = client.get("/api/token").json()["data"]["token"]
-    r = client.get("/api/protected", headers={"Authorization": f"Bearer {tok}"})
+    """受保护路由：真实注册 + 登录签发的 token 可访问 /api/protected。
+
+    原冒烟依赖 `GET /api/token`（未鉴权签发 JWT 且自动创建 demo 账户，REP-001
+    安全面 P0 隐患）。该端点删除后，改走真实鉴权链路（验收表 BE-HLTH-07：
+    冒烟改走 /api/auth/login）。
+
+    注意：不能仅改为内联 `create_access_token` —— `get_current_user`
+    （app/core/security.py:99-107）会查库校验「用户存在且未软删除」，
+    DB 无对应用户时 /api/protected 直接返回 401。故必须先确保用户真实存在。
+    """
+    email = "contract-protected@example.com"
+    pwd = "contract-smoke-pwd"
+
+    reg = client.post(
+        "/api/auth/register",
+        json={"email": email, "password": pwd, "name": "Contract"},
+    )
+    if reg.status_code == 409:
+        # 测试库未重建、该邮箱已注册 → 复用既有账户，直接登录
+        login = client.post("/api/auth/login", json={"email": email, "password": pwd})
+        assert login.status_code == 200, login.text
+        data = login.json()["data"]
+        user_id, token = data["user"]["id"], data["accessToken"]
+    else:
+        assert reg.status_code == 200, reg.text
+        user_id = reg.json()["data"]["id"]
+        login = client.post("/api/auth/login", json={"email": email, "password": pwd})
+        assert login.status_code == 200, login.text
+        token = login.json()["data"]["accessToken"]
+
+    r = client.get("/api/protected", headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 200
     body = r.json()
     assert body["code"] == 0
-    assert body["data"]["user_id"] == "demo-user-id"
+    assert body["data"]["user_id"] == user_id
+    assert body["data"]["email"] == email
 
 
 def test_jwt_roundtrip():
