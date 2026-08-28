@@ -36,17 +36,34 @@ def serialize_portfolio(p: Portfolio) -> dict:
     }
 
 
-def serialize_cashflow(c: CashFlow) -> dict:
-    return {
-        "id": c.id,
-        "portfolioId": c.portfolio_id,
-        "date": c.date,
-        "type": c.type.value,
-        "amount": c.amount,
-        "note": c.note,
-        "createdAt": c.created_at,
-        "updatedAt": c.updated_at,
-    }
+def serialize_cashflow(c: CashFlow, rec=None) -> "CashflowOut":
+    """组合出入金序列化：返回 CashflowOut 契约对象（REP-038 做法1）。
+
+    将路由层手写的 recalculation 补丁收编进序列化器：调用方传入 rec
+    （重算反馈源，含 from_date / affected_days / skipped_manual_days）即装填，
+    否则 recalculation 为 None。出口仍由 response_model=CashflowOut 强制类型，
+    wire JSON 与「序列化 dict + 路由补丁」逐字节一致。
+    """
+    from app.schemas_resp import CashflowOut, RecalculationMeta
+
+    recalculation = None
+    if rec is not None:
+        recalculation = RecalculationMeta(
+            fromDate=rec.from_date,
+            affectedDays=rec.affected_days,
+            skippedManualDays=rec.skipped_manual_days,
+        )
+    return CashflowOut(
+        id=c.id,
+        portfolioId=c.portfolio_id,
+        date=c.date,
+        type=c.type,
+        amount=str(c.amount),
+        note=c.note,
+        createdAt=c.created_at,
+        updatedAt=c.updated_at,
+        recalculation=recalculation,
+    )
 
 
 def serialize_security(s: PortfolioSecurity) -> dict:

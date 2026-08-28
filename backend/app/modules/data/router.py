@@ -98,14 +98,7 @@ async def create_cashflow(
     req: CashflowCreateReq, p=Depends(get_portfolio), db: AsyncSession = Depends(get_db)
 ):
     cf, rec = await CashflowService(db).create(p.id, req)
-    result = serialize_cashflow(cf)
-    # D3：完整对齐 app/ 的 recalculation 反馈字段
-    result["recalculation"] = {
-        "fromDate": rec.from_date,
-        "affectedDays": rec.affected_days,
-        "skippedManualDays": rec.skipped_manual_days,
-    }
-    return result
+    return serialize_cashflow(cf, rec)
 
 
 @router_cashflows.patch("/{portfolio_id}/cashflows/{cf_id}", response_model=CashflowOut)
@@ -116,13 +109,7 @@ async def patch_cashflow(
     cf_id: str = "",
 ):
     cf, rec = await CashflowService(db).patch(p.id, cf_id, req)
-    result = serialize_cashflow(cf)
-    result["recalculation"] = {
-        "fromDate": rec.from_date,
-        "affectedDays": rec.affected_days,
-        "skippedManualDays": rec.skipped_manual_days,
-    }
-    return result
+    return serialize_cashflow(cf, rec)
 
 
 @router_cashflows.delete("/{portfolio_id}/cashflows/{cf_id}")

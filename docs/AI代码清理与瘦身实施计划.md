@@ -9,7 +9,7 @@ aliases:
   - AI代码清理实施计划
   - 代码瘦身计划
 parent: "[[AI代码清理与瘦身指南]]"
-status: 执行中（阶段3·第7轮完成，待第8轮）
+status: 执行中（阶段3·REP-038 护栏+做法1合并已落地，待第8轮）
 ---
 
 # AI 代码清理与瘦身实施计划
@@ -600,6 +600,31 @@ C. 人工验收步骤：对照功能验收表，列出需要人工在界面上�
 2. **样例类型陷阱（已捕获）**：`serialize_dividend` 内部做 `net = d.amount - d.tax` 金额算术，样例须用 `Decimal` 而非 `str`，否则 `TypeError`。独立脚本首跑即暴露并修正，避免提交挂掉的测试。
 3. **隔离纪律**：本回合仅 `git add` 2 个 round-7 文件（test_contract.py + 本计划文档）；`backend/uv.lock`、`.codebase-memory/*`、`docs/adr/*`、`docs/analysis-interface-entry-scheme-2026-08-15.md`、`docs/代码体检报告-终版.md` 等为**预先存在的无关改动**，刻意排除、未纳入提交。
 4. **环境缺口延续**：`pytest` 沙箱离线无法跑（无 test DB）；护栏断言逻辑已用 `.venv` 独立脚本验证，建议 owner 联网补 pytest 回归。
+
+### REP-038 合并（做法1）—— 用户裁决后执行
+
+- 分支：`cleanup/phase-0`（脱离 main，未 push）
+- 提交：本回合 squash 提交（`backend/app/serializers.py` + `backend/app/modules/data/router.py` + `backend/app/services/aggregation.py` + `backend/tests/test_contract.py` + 本计划文档）
+- 范畴：REP-038 原裁决"不合并"，改为加护栏（第7轮）。用户经多轮论证后裁决**按做法1执行**：序列化函数直接返回 `XxxOut`，并把路由层手写的 `recalculation` 补丁收编进 `serialize_cashflow`。
+- 门禁：`python -m py_compile` 编译 4 个改动文件全过；`.venv` 离线脚本验证 `serialize_cashflow(cf, rec)` 返回 `CashflowOut` 且 `recalculation` 正确收编、键集与 `CashflowOut.model_fields` 严格相等；`pytest` 沙箱离线（无 test DB）未跑，建议 owner 联网补 `pytest backend/tests -k contract`。
+
+#### A. 方案与改动
+
+- **`serializers.py::serialize_cashflow`**：签名改为 `serialize_cashflow(c: CashFlow, rec=None) -> "CashflowOut"`；内部惰性 `from app.schemas_resp import CashflowOut, RecalculationMeta`（单向依赖，无环形）；`rec` 非空时构造 `RecalculationMeta` 收编 `recalculation`，否则为 `None`。**契约细节修正**：`CashflowOut.amount` 是 `str`、Pydantic v2 不会把 `Decimal` 强转 `str`（旧流程靠 `EnvelopeJSONResponse` 出口字符串化），故显式 `amount=str(c.amount)` 保证 wire 仍为 `"100.00"`。
+- **`router.py` create/patch**：删去 `result = serialize_cashflow(cf)` + 手写 `result["recalculation"] = {...}` 补丁，改为 `return serialize_cashflow(cf, rec)`。`response_model=CashflowOut` 不变，wire JSON 与旧（9 键 + 路由补丁）逐字节一致。删除接口（仅回 `recalculation`）不受影响。
+- **`aggregation.py::_recent_cashflows`**：`serialize_cashflow(c).model_dump()` 维持 `list[dict]` 注解准确；overview 的 `recentCashflows` 现多一个 `recalculation: null` 键（良性、向后兼容，前端忽略）。
+- **`test_contract.py`**：① 护栏归一化（`isinstance(out, BaseModel)` 则取 `model_dump().keys()`），兼容序列化器返回 Out；② cashflow 从 `subset_only` 特例中**升级为严格相等**（收编后键已完整，护栏更强）；③ 新增 `test_serialize_cashflow_folds_recalculation` 验证「传 rec 即装填 / 不传为 None」。
+
+#### B. 验证（信任但验证）
+
+- 离线脚本（`PYTHONPATH=.` + `.venv`）断言：返回 `CashflowOut` 实例；`recalculation.fromDate/affectedDays/skippedManualDays` 正确；`amount` 为 `str=="100.00"`；`model_dump().keys()` == `CashflowOut.model_fields.keys()`（9 键全一致）；无 rec 时 `recalculation is None`。全部通过。
+- `py_compile` 4 文件全过。
+- **scope 决策**：仅对 cashflow 落地做法1。其余 9 个 `serialize_x` 原本就与 `XxxOut` 1:1 对齐、且无"路由层追加字段"可收编，转换它们为返回 Out 是中性 churn 且会牵动 `paginate`/`aggregation` 多个返回点（爆破风险），用户未要求全量转换，故保持 dict 不动。
+
+#### C. 回归与待办
+
+- 后端：owner 联网 + test DB 跑 `pytest backend/tests -k contract`（重点 `test_serializers_keys_match_schemas_resp` 与新增 `test_serialize_cashflow_folds_recalculation` 绿）；前端联调确认现金流 create/patch 响应仍含 `recalculation`、list/overview 行为不变。
+- 后续候选（待 owner/PM 裁决）：安全类 REP-001~011、废弃接口 REP-012/013/042/051、缺失测试 REP-005/006/007；以及是否将做法1 推广到其余 9 个序列化器（需单独排轮、带 wire-JSON 快照对比）。
 
 ## 相关文档
 

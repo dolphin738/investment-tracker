@@ -7,6 +7,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from decimal import Decimal
 import types
+from pydantic import BaseModel
 from fastapi.testclient import TestClient
 
 from app.core.security import create_access_token, decode_access_token
@@ -142,7 +143,8 @@ def test_serializers_keys_match_schemas_resp():
     字段清单（双维护）。强行合并会破坏 wire 契约（风险高），故只加护栏：
     - 序列化器输出的每个键都必须在对应 Out 模型中有声明（禁止 wire 出现 schema 未记录的键）。
     - 对无「路由层追加字段」的实体，额外要求键集严格相等（新增字段必须同步到响应模型）。
-    - cashflow 为已知特例：recalculation 由 data/router 在序列化后追加，序列化器有意缺该键 → 仅校验子集。
+    - cashflow：recalculation 已由序列化器（REP-038 做法1）统一收编，序列化输出现已含该键
+      → 与其余实体一致，按严格相等校验（不再是子集特例）。
     """
     from app import serializers, schemas_resp as S
     from app.models.enums import (
@@ -214,10 +216,11 @@ def test_serializers_keys_match_schemas_resp():
         (serializers.serialize_user, S.UserPublicOut, user),
     ]
     # 已知「序列化器有意缺字段」（由路由层追加）的实体 → 仅校验子集关系
-    subset_only = {S.CashflowOut}
+    subset_only = set()
 
     for serialize, out_model, sample in cases:
-        keys = set(serialize(sample).keys())
+        out = serialize(sample)
+        keys = set(out.model_dump().keys()) if isinstance(out, BaseModel) else set(out.keys())
         fields = set(out_model.model_fields.keys())
         extra = keys - fields
         assert not extra, (
@@ -231,3 +234,27 @@ def test_serializers_keys_match_schemas_resp():
             f"{serialize.__name__} 缺失字段 {sorted(missing)} "
             f"（schemas_resp.{out_model.__name__} 已声明但未出现在序列化输出）"
         )
+
+
+def test_serialize_cashflow_folds_recalculation():
+    """REP-038 做法1：recalculation 由序列化器收编，调用方传 rec 即装填，否则为 None。"""
+    from app import serializers
+    from app.models.enums import CashFlowType
+    from app.schemas_resp import CashflowOut
+
+    cf = _ns(
+        id="c1", portfolio_id="p1", date=date(2024, 1, 1), type=CashFlowType.BUY,
+        amount="100.00", note=None, created_at=datetime(2024, 1, 1), updated_at=datetime(2024, 1, 2),
+    )
+    rec = _ns(from_date=date(2024, 1, 1), affected_days=3, skippedManualDays=0)
+
+    out = serializers.serialize_cashflow(cf, rec)
+    assert isinstance(out, CashflowOut)
+    assert out.recalculation is not None
+    assert out.recalculation.fromDate == date(2024, 1, 1)
+    assert out.recalculation.affectedDays == 3
+    assert out.recalculation.skippedManualDays == 0
+
+    # 无 rec：recalculation 为 None，但契约键完整（仍含 recalculation 键）
+    none_out = serializers.serialize_cashflow(cf)
+    assert none_out.recalculation is None
