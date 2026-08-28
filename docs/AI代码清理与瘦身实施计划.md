@@ -671,6 +671,7 @@ C. 人工验收步骤：对照功能验收表，列出需要人工在界面上�
 
 - 删 `ROUTE_HANDLERS` 中 `/^\/api\/portfolios\/[^/]+\/transactions/` 规则（原 :251）。
 - 删随之成为孤儿的 `MOCK_TRANSACTIONS` 常量定义（原 :162-178）：全仓仅 2 处引用（定义 + 该规则）；定向扫描 `web-vue` / `web/src` / `backend` / `docs` / `dev-scripts` / `docker` **全部零命中**，删除安全。
+- **删除安全性四重交叉验证**：① 删除前 ripgrep 扫 `web/` → 仅 2 处；② 删除前 `grep -r` 定向扫 6 个目录 → 零命中；③ 删除后 `e2e`+`src` grep → 零命中；④ 后台全仓扫描 `dEve9F` → 零命中。四者一致、无矛盾。（注：`dEve9F` 耗时 26 分钟、扫描跨越删除时点，故其"零命中"仅作一致性佐证，**主要安全证据为删除前的 ①②**。）
 
 **D. 验证**
 
@@ -686,6 +687,8 @@ C. 人工验收步骤：对照功能验收表，列出需要人工在界面上�
 
 `web/tsconfig.app.json` 的 `include` 仅为 `["src/**/*.ts", "src/**/*.vue", "src/vite-env.d.ts"]`，**不含 `e2e/`**。这意味着：前几轮（R4/R6 等）宣称的「vue-tsc 门禁通过」实际**从未覆盖 `web/e2e/**`**，e2e 代码处于无类型门禁区。
 → 建议补一个 `tsconfig.e2e.json`（或将 e2e 纳入 lint/类型门禁），否则 e2e 代码的破损无法在 CI 被发现。本轮因此额外用 TS 编译器 API + 单文件 `tsc` 做了针对性验证以弥补盲区。
+
+**补充证据（第9轮后台全仓扫描 `dEve9F`）**：仓库根**无 `.github/workflows` 目录**，且根 `package.json` **无 `playwright`/`e2e` script**（`playwright` 仅作为 devDependency 存在于 `web/package.json`：`@playwright/test: ^1.62.1`）→ e2e 既**不在类型门禁内**、又**无 CI 工作流驱动执行**，属**双重无守护**代码区：类型破损无人发现、用例也从未在 CI 跑过。故修复建议应将"补 `tsconfig.e2e.json`"与"补 e2e CI job"作为**一组**方案一并决策——只补前者仍无法保证 e2e 用例真被执行。
 
 **E-2. e2e mock 漏配 `/cashflows`（潜在缺陷，非本轮范畴）**
 
