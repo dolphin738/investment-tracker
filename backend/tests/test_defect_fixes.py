@@ -17,7 +17,7 @@
 """
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal
 
 import pytest
@@ -303,12 +303,17 @@ async def test_l5_cash_balance_deterministic_latest(client):
     h = auth(creds["token"])
     pid = await _create_portfolio(client, h, "L5组合")
     # 直接插入两条同 as_of 现金余额（第二条更晚创建、金额更小）
+    # R1 修 flaky：必须显式 created_at 拉开间隔。否则同一次 commit flush 下两行
+    # created_at 易撞车（Python 端 datetime.now 微秒级重合），排序退化为随机 UUID
+    # 的 id.desc()，使“最新创建”判定非确定（单跑偶过、全量偶败）。
     from app.db.database import AsyncSessionLocal
     from app.models import CashBalance
 
+    t_a = datetime(2024, 1, 1, 0, 0, 1, tzinfo=timezone.utc)
+    t_b = datetime(2024, 1, 1, 0, 0, 2, tzinfo=timezone.utc)
     async with AsyncSessionLocal() as s:
-        s.add(CashBalance(portfolio_id=pid, as_of=D1, amount=Decimal("90000")))
-        s.add(CashBalance(portfolio_id=pid, as_of=D1, amount=Decimal("80000")))
+        s.add(CashBalance(portfolio_id=pid, as_of=D1, amount=Decimal("90000"), created_at=t_a))
+        s.add(CashBalance(portfolio_id=pid, as_of=D1, amount=Decimal("80000"), created_at=t_b))
         await s.commit()
     # 手工快照触发派生计算，读取 derivedTotalAsset（无持仓 → 仅现金）
     r = await client.post(
