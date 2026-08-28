@@ -9,7 +9,7 @@ aliases:
   - AI代码清理实施计划
   - 代码瘦身计划
 parent: "[[AI代码清理与瘦身指南]]"
-status: 执行中（阶段3·REP-038 护栏+做法1合并已落地，待第8轮）
+status: 执行中（阶段3·第7轮护栏+做法1合并已落地，第8轮真实测试库回归完成，待第9轮）
 ---
 
 # AI 代码清理与瘦身实施计划
@@ -625,6 +625,16 @@ C. 人工验收步骤：对照功能验收表，列出需要人工在界面上�
 
 - 后端：owner 联网 + test DB 跑 `pytest backend/tests -k contract`（重点 `test_serializers_keys_match_schemas_resp` 与新增 `test_serialize_cashflow_folds_recalculation` 绿）；前端联调确认现金流 create/patch 响应仍含 `recalculation`、list/overview 行为不变。
 - 后续候选（待 owner/PM 裁决）：安全类 REP-001~011、废弃接口 REP-012/013/042/051、缺失测试 REP-005/006/007；以及是否将做法1 推广到其余 9 个序列化器（需单独排轮、带 wire-JSON 快照对比）。
+
+#### ⚠️ 异常记录（第8轮·真实测试库回归——纠正"沙箱无 test DB"误判）
+
+- **事实纠正**：用户指出 `.env` 第5行确有 `TEST_DATABASE_URL=postgresql+asyncpg://investment_app:***@127.0.0.1:5432/investment_return_tracker_test`。实测 Postgres 16.14 在 `127.0.0.1:5432` **可达**、测试库已存在。前几轮"沙箱离线无 test DB 无法跑 pytest"为**错误假设**——本环境是常驻本地 Postgres。安全边界：`conftest._test_db_bootstrap` 连开发库仅做测试库 `investment_return_tracker_test` 的 DROP/CREATE 管理操作，**绝不碰开发库数据**，符合"禁止改动开发库"硬约束。
+- **回归范围**：`pytest tests`（全量，conftest 自动 DROP/CREATE 测试库 + `alembic upgrade head` 建表）。
+- **结果**：**288 passed / 1 failed**（`tests/test_defect_fixes.py::test_l5_cash_balance_deterministic_latest`）。
+- **护栏 + 做法1 合并结论**：第7轮护栏（`test_serializers_keys_match_schemas_resp`）+ 第8轮做法1 新增（`test_serialize_cashflow_folds_recalculation`）+ 现金流相关（`test_api_crud_recalculation.py` / `test_cashflow_type_filter.py`）**全部绿**，证明收编 `recalculation` 的 wire JSON 与旧逐字节一致、无契约回归。
+- **第8轮抓到真 bug（离线脚本假绿）**：首次跑 `pytest tests/test_contract.py` 暴露 `test_serialize_cashflow_folds_recalculation` 红——测试样例误用驼峰 `skippedManualDays`，而真实 `RecalculationResult`（`recalculation.py:32-37`）与 `serialize_cashflow` 一致取蛇形 `skipped_manual_days` → `AttributeError`。**序列化器正确、样例误写**，已改为蛇形。这正是此前坚持"应跑真实测试"的原因：第7轮做法1 我只在 `.venv` 离线脚本用逐字一致的蛇形样例验证过（假绿），真实 pytest 一跑即暴露差异。修正提交 `5526e23`（父 74a1305，未 push）。
+- **1 个失败为预存 flaky、非我引入的回归**：`test_l5_cash_balance_deterministic_latest` —— 单跑隔离环境 **1 passed（4.85s）**，全量套件里失败（偶发取首条 `90000` 而非最新 `80000`）。核验我的 5 文件改动（serializers/router/aggregation/test_contract/计划文档）**完全不触碰 CashBalance 服务逻辑**（`_latest_cash_balance`/`computeDerivedBatch` 未改），cashflow 序列化路径与此测试无关。判定为**测试时序/状态污染型 flaky**：两条同 `as_of` 的 `CashBalance` 在负载下 `created_at` 毫秒级碰撞，`order_by(created_at.desc())` 取"最新创建"变非确定性。超出 REP-038 范畴，按隔离纪律**不修**，留 owner 决策（疑似 `_latest_cash_balance` 排序键缺稳定 tie-breaker，如加 `id` 降序）。
+- **git ref gremlin 再现**：第8轮提交 `5526e23` 对象已建，但 loose ref + packed-refs 首行被实时回退到旧 tip `74a1305`（新提交一度悬空）；cp 备份 `packed-refs.bak` 后 `update-ref` + `sed` 改写首行 sha 修复，复核 HEAD=loose=packed=`5526e23` 稳定（4 秒）。
 
 ## 相关文档
 
