@@ -9,7 +9,7 @@ aliases:
   - AI代码清理实施计划
   - 代码瘦身计划
 parent: "[[AI代码清理与瘦身指南]]"
-status: 执行中（阶段3·第10轮 REP-014 废弃配置项移除已落地，待第11轮）
+status: 执行中（阶段3·第11轮 REP-001 安全面 P0 端点删除已落地，待第12轮）
 ---
 
 # AI 代码清理与瘦身实施计划
@@ -745,6 +745,49 @@ C. 人工验收步骤：对照功能验收表，列出需要人工在界面上�
 **F. 提交与隔离**
 
 - 提交 `5bf0f75`（父 `91855d1`，未 push；author `senior-dev`；仅 `backend/app/core/config.py`）。
+- **隔离**：`.codebase-memory/*`、`backend/uv.lock`、`docs/adr/*`、`docs/analysis-interface-*`、`docs/代码体检报告-*`、`web/vitest.config.ts.timestamp-*.mjs`（vitest 残留临时文件）等预存无关改动刻意排除，未入本轮提交。
+
+#### 第11轮 · REP-001（删除未鉴权 `/api/token` 端点）—— 安全隐患类（安全面 P0）
+
+**A. 范畴与裁决依据**
+
+- 报告裁决：REP-001 **采纳**（高风险）；裁决项 2 明确方向 —— 删端点，并同步解除 `test_contract.py` 的硬前置依赖。
+- 本轮是清理项目的**首个安全修复轮**。入选理由：漏洞形态明确（公开签发 JWT）、删除动作与其它模块无耦合、可用真实测试库完整验证。
+
+**B. 漏洞形态（已核实）**
+
+`GET /api/token`（原 `health/router.py:75-92` → `issue_demo_token`）**无任何鉴权**：自动创建 `demo-user-id` 账户并签发合法 JWT。该路由随 `health.router` 无条件挂载（`main.py:97`），**生产 Docker 镜像同样生效** → 任何可访问 3000 端口者无需凭据即可获得登录态，进而调用全部普通用户接口。
+
+**C. ⚠️ 关键纠正：报告的硬前置建议不充分**
+
+报告（裁决表 :535 / 裁决项 2 :424-426）称：删除前「把 `test_contract.py:68` 改为 `create_access_token` 内联签发」即可。**实测该建议不足**：
+
+1. `get_current_user`（`app/core/security.py:99-107`）验签成功后会**查库**校验 `select(User).where(User.id == sub)`，若 `user is None or user.deleted_at is not None` → **401**。
+2. 原端点自陈注释（`health/router.py:78`）：它「确保 demo 用户存在，使受保护路由 DB 校验通过」—— 即该端点**不只签发 token，还承担播种用户的职责**。
+3. 故仅内联签发、而 DB 无对应用户 → `/api/protected` 直接 401 → 测试挂。
+
+→ **实际采用的方案**：改走**真实鉴权链路** `POST /api/auth/register` + `POST /api/auth/login`（与验收表 BE-HLTH-07「冒烟改走 `/api/auth/login`」一致）。该方案额外消解两个风险：① `test_contract.py` 使用**同步 TestClient**，若改为在同步测试里 `asyncio.run()` 播种用户，会引入事件循环 / asyncpg 连接池冲突；② 断言不再绑定魔数 `demo-user-id`，改为「返回的 `user_id` == 注册得到的 id」并新增 `email` 断言，**语义更强**。
+
+**D. 改动**
+
+| 文件 | 改动 |
+| --- | --- |
+| `backend/app/modules/health/router.py`（**−31**） | 删 `/api/token` 端点（原 :75-92）；清孤儿 import `create_access_token` / `hash_password` / `select` / `User` / `get_db` / `AsyncSession`（`CurrentUser`、`get_current_user` 仍被 `/protected` 使用，**保留**） |
+| `backend/tests/test_contract.py`（**+36/−3**） | `test_protected_with_valid_token` 改为 register + login 取 token；邮箱已注册（409）时降级直接登录，保证重复运行幂等 |
+
+**E. 验证**
+
+- `py_compile` OK；源码零悬挂 —— `api/token` / `demo-user-id` / `issue_demo_token` 在 `app/` 下（排除 `__pycache__`）**零命中**。
+- 全量 `pytest tests`：**289 passed / 0 failed**（236s），与基线一致、测试数不变 → 删除端点零回归，且无其它用例依赖被删端点。
+
+**F. 残留事项（不属本轮，记录备查）**
+
+- `docs/openapi.json:5190` 仍含 `/api/token` 定义。该文件**已知严重过时**（REP-051 决策门），按隔离纪律本轮不动，待决策门一并处置。
+- 前端 / e2e **零调用**该端点（全仓 grep 仅命中后端源码与文档），删除对前端无影响。
+
+**G. 提交与隔离**
+
+- 提交 `46798ca`（父 `8fa9f39`，未 push；author `senior-dev`；仅上述 2 文件）。
 - **隔离**：`.codebase-memory/*`、`backend/uv.lock`、`docs/adr/*`、`docs/analysis-interface-*`、`docs/代码体检报告-*`、`web/vitest.config.ts.timestamp-*.mjs`（vitest 残留临时文件）等预存无关改动刻意排除，未入本轮提交。
 
 ## 相关文档
