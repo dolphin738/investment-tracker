@@ -246,7 +246,7 @@ def test_serialize_cashflow_folds_recalculation():
         id="c1", portfolio_id="p1", date=date(2024, 1, 1), type=CashFlowType.BUY,
         amount="100.00", note=None, created_at=datetime(2024, 1, 1), updated_at=datetime(2024, 1, 2),
     )
-    rec = _ns(from_date=date(2024, 1, 1), affected_days=3, skippedManualDays=0)
+    rec = _ns(from_date=date(2024, 1, 1), affected_days=3, skipped_manual_days=0)
 
     out = serializers.serialize_cashflow(cf, rec)
     assert isinstance(out, CashflowOut)
