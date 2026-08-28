@@ -9,7 +9,7 @@ aliases:
   - AI代码清理实施计划
   - 代码瘦身计划
 parent: "[[AI代码清理与瘦身指南]]"
-status: 执行中（阶段3·第7轮护栏+做法1合并已落地，第8轮真实测试库回归完成，R1 flaky 修复完成，待第9轮）
+status: 执行中（阶段3·第9轮 REP-042 死规则删除已落地，待第10轮）
 ---
 
 # AI 代码清理与瘦身实施计划
@@ -645,6 +645,58 @@ C. 人工验收步骤：对照功能验收表，列出需要人工在界面上�
 - **提交**：`9ef359e`（父 8599d36，未 push；仅 `backend/tests/test_defect_fixes.py` +8/−3）。
 - **git ref gremlin 再现**：提交对象 `9ef359e` 已建，但 loose ref + packed-refs 首行被实时回退到旧 tip `8599d36`（新提交一度悬空）；cp 备份 `packed-refs.bak` 后 `update-ref` + `sed` 改写首行 sha 修复，复核 HEAD=loose=packed=`9ef359e` 稳定（4 秒）。
 - **隔离**：第8轮补 R1 提交仅含 `test_defect_fixes.py`；`.codebase-memory/*`、`backend/uv.lock`、`docs/adr/*`、`docs/analysis-interface-*`、`docs/代码体检报告-*` 等预存无关改动刻意排除。
+
+#### 第9轮 · REP-042（e2e mock 死路由规则删除）—— 废弃接口类
+
+**A. 范畴与裁决依据**
+
+- 报告裁决：REP-042 **采纳**（删 e2e mock `transactions` 死规则）。
+- 一轮一类：本轮仅做「废弃/死代码删除」这一类。REP-012（**采纳-条件**·默认"补测试保留"，仅当产品砍 path B 才删端点）、REP-013（**采纳-观察**·7 个预留端点非死代码，暂不删）**均不纳入**；REP-051 属决策门（推荐 B 但需 PM 裁决），本轮不动。
+
+**B. 取证（信任但验证——报告结论不可全信）**
+
+证据链（逐条实测，非转述报告）：
+
+1. 后端 `backend/app` 全量 grep `transactions` → **零命中**（根本无此端点）。
+2. 前端真实 HTTP 路径：`web/src/api/transaction.api.ts:40,51,63,74` 全部为 `/portfolios/${id}/cashflows`，**非** `/transactions`。
+3. 前端其余 `transactions` 字样均为 vue-query 的 queryKey（`use-transactions.ts:49,62,149`）与路由别名（`router/index.ts:62-63`，`/transactions → /cashflows` 重定向，**前端 301 语义**），**不是 HTTP 路径** → 不会请求到该 mock 规则。
+4. 兜底行为（`mock-api.ts:284`）：GET 未匹配 → 404 信封 `{ message: 'e2e mock fallback: GET ...' }` → 该规则本来就不会被任何请求命中。
+5. 无 e2e spec 断言依赖：`holdings.spec.ts` 的"流水行"属**买卖明细**（走 `security-trades` 规则 :249），与 transactions 无关；4 个 spec（admin/auth/dashboard/holdings）无一处断言现金流数据。
+
+→ **删除零行为改变**（该规则从不命中，删前删后请求都走 404 兜底）。
+
+**C. 改动**
+
+`web/e2e/fixtures/mock-api.ts`（303 → 283 行，**净 −19**）：
+
+- 删 `ROUTE_HANDLERS` 中 `/^\/api\/portfolios\/[^/]+\/transactions/` 规则（原 :251）。
+- 删随之成为孤儿的 `MOCK_TRANSACTIONS` 常量定义（原 :162-178）：全仓仅 2 处引用（定义 + 该规则）；定向扫描 `web-vue` / `web/src` / `backend` / `docs` / `dev-scripts` / `docker` **全部零命中**，删除安全。
+
+**D. 验证**
+
+- **零悬挂**：`grep -rn "MOCK_TRANSACTIONS" e2e src` → 零命中；`grep -rn "transactions" e2e` → 零命中。
+- **TS 编译器 API 语法/结构解析**：`PARSE_DIAGNOSTICS: 0`；`ROUTE_HANDLERS` 由 13 → **12** 条；`MOCK_*` 导出保留 12 个（`MOCK_TOKEN/USER/PORTFOLIOS/SUMMARY/OVERVIEW/HOLDINGS/SECURITIES/TRADES/PREFERENCES/PROVIDERS/INTERFACES/CATEGORIES`），`MOCK_TRANSACTIONS` 已消失。
+- **引用 ⊆ 定义 悬挂校验**：12 条规则全部解析成功；唯一"未解析"为对象字面量**属性名**（`accessToken`/`user`）误报，非真悬挂。
+- **`tsc --noEmit --skipLibCheck`** 单文件类型检查 → **exit 0、零诊断**。
+- **`vue-tsc -p tsconfig.app.json`** 全量门禁 → 见 E-1（该门禁不覆盖 e2e，仅作基线确认）。
+
+**E. ⚠️ 本轮两个新发现（报告未覆盖）**
+
+**E-1. 门禁盲区（流程性风险，建议 PM 决策）**
+
+`web/tsconfig.app.json` 的 `include` 仅为 `["src/**/*.ts", "src/**/*.vue", "src/vite-env.d.ts"]`，**不含 `e2e/`**。这意味着：前几轮（R4/R6 等）宣称的「vue-tsc 门禁通过」实际**从未覆盖 `web/e2e/**`**，e2e 代码处于无类型门禁区。
+→ 建议补一个 `tsconfig.e2e.json`（或将 e2e 纳入 lint/类型门禁），否则 e2e 代码的破损无法在 CI 被发现。本轮因此额外用 TS 编译器 API + 单文件 `tsc` 做了针对性验证以弥补盲区。
+
+**E-2. e2e mock 漏配 `/cashflows`（潜在缺陷，非本轮范畴）**
+
+前端真实调用 `/api/portfolios/{id}/cashflows`（`transaction.api.ts:40` 等），而 mock 只注册过 `/transactions` → **e2e 中现金流请求一直走 404 兜底**。
+实测佐证：`DashboardPage.vue:75,281` 真实调用 `listTransactions(currentPortfolioId, { page:1, pageSize:5 })` 渲染"最近流水"，而 `MOCK_OVERVIEW` **不含** `recentCashflows` 字段 → dashboard 的最近流水区块在 e2e 中恒为空/降级，**e2e 覆盖失真**。
+→ 这属于「补 mock 规则」的**修复**而非死代码删除，与第9轮不同类，按隔离纪律**不混入本轮提交**，记为第10轮候选（需 PM 确认 e2e 是否应覆盖现金流场景）。
+
+**F. 提交与隔离**
+
+- 提交 `902ae17`（父 `ef2f73e`，未 push；author `senior-dev`；仅 `web/e2e/fixtures/mock-api.ts`）。
+- **隔离**：`.codebase-memory/*`、`backend/uv.lock`、`docs/adr/*`、`docs/analysis-interface-*`、`docs/代码体检报告-*`、`web/vitest.config.ts.timestamp-*.mjs`（vitest 残留临时文件）等预存无关改动刻意排除，未入本轮提交。
 
 ## 相关文档
 
