@@ -9,7 +9,7 @@ aliases:
   - AI代码清理实施计划
   - 代码瘦身计划
 parent: "[[AI代码清理与瘦身指南]]"
-status: 执行中（阶段3·第9轮 REP-042 死规则删除已落地，待第10轮）
+status: 执行中（阶段3·第10轮 REP-014 废弃配置项移除已落地，待第11轮）
 ---
 
 # AI 代码清理与瘦身实施计划
@@ -699,6 +699,52 @@ C. 人工验收步骤：对照功能验收表，列出需要人工在界面上�
 **F. 提交与隔离**
 
 - 提交 `902ae17`（父 `ef2f73e`，未 push；author `senior-dev`；仅 `web/e2e/fixtures/mock-api.ts`）。
+- **隔离**：`.codebase-memory/*`、`backend/uv.lock`、`docs/adr/*`、`docs/analysis-interface-*`、`docs/代码体检报告-*`、`web/vitest.config.ts.timestamp-*.mjs`（vitest 残留临时文件）等预存无关改动刻意排除，未入本轮提交。
+
+#### 第10轮 · REP-014（移除两个已废弃配置项）—— 废弃依赖类
+
+**A. 范畴与裁决依据**
+
+- 报告裁决：REP-014 **采纳** —— `config.py` 两个配置项已自我标注 deprecated，功能由 `job_configs` 表（`MARKET_DATA_SYNC`）+ `SCHEDULER_ENABLED` 取代；建议动作含前置条件「确认 .env 生产实例均已迁移后移除字段」。
+- 一轮一类：本轮仅做「废弃配置项移除」这一类。候选 REP-004（httpx 升格）经核实**已在第 1 轮依赖瘦身完成** —— `backend/pyproject.toml:27` 的 `httpx==0.28.1` 位于 `dependencies` 块（L6-28）内，且注释已标注「REP-004：scheduler.py / market_data_sync.py 顶层 import」，故不再重复处理。
+
+**B. 取证（前置条件逐条核实，非转述报告）**
+
+| 检查项 | 结果 |
+| --- | --- |
+| 代码消费 | **零**（除 `config.py:66,70` 定义处外，全仓无任何读取） |
+| `.env` / `.env.example` | 均**不含** `QUOTE_SYNC_*` |
+| `docker/` / `dev-scripts/` | **无注入** |
+| 其余全仓命中 | 仅 ADR（`ADR-002-incremental-tasks.md:193,194,199`）、体检报告（:256,:502）、归档核对报告（:78）、alembic 迁移注释（`r6e5f4a3b2c1d_scheduled_jobs.py:4`）——**均为历史文字，删除字段不影响** |
+
+**C. 关键安全阀：`extra="ignore"`（本次删除不构成破坏性变更）**
+
+`Settings.model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")` → **旧 `.env` 或旧部署环境若残留 `QUOTE_SYNC_SCHEDULER_*`，会被静默忽略，不会因未知字段导致启动失败**。这一点已实测（见 D-3），是本轮删除能够低风险执行的决定依据。
+
+**D. 改动与验证**
+
+改动：`backend/app/core/config.py`（**净 −11**）
+
+- 删 `QUOTE_SYNC_SCHEDULER_ENABLED` / `QUOTE_SYNC_SCHEDULER_CRON` 两个 deprecated 字段及其注释块（原 :64-73）。
+- 删随之成为孤儿的 `from pydantic import Field`（原 :9）—— 经 grep 确认该文件 `Field` **仅**用于这两个字段，删除后无残留引用。
+
+验证（实测 4/4 + 全量回归）：
+
+1. `Settings()` 实例化 OK，`SCHEDULER_ENABLED=True` 正常；
+2. 旧字段确实消失（两个 `hasattr` 均为 `False`）；
+3. **旧 env 残留容忍（安全阀）**：注入 `QUOTE_SYNC_SCHEDULER_ENABLED=true`、`QUOTE_SYNC_SCHEDULER_CRON=0 9 * * 1-5` 后 `Settings()` **仍正常实例化、不报错**；
+4. `get_settings()` 缓存入口正常（同一实例）。
+
+- `py_compile` OK；源码零悬挂 —— 唯一 grep 命中为 `__pycache__` 下的 `.pyc`（旧编译产物），已由 `.gitignore:2` 忽略，非源码引用；
+- 全量 `pytest tests`：**289 passed / 0 failed**（270s），与 R1 修复后基线**完全一致** → 零回归。
+
+**E. ⚠️ 残留限制（需 owner 知晓）**
+
+报告前置条件要求「确认 .env **生产实例**均已迁移」。本轮仅能核实**仓库内**的 `.env` / `.env.example` / `docker` / `dev-scripts`，**生产部署实例的 env 无法从仓库核实**。得益于 `extra="ignore"` 安全阀，即使生产环境残留该变量也只会被引擎忽略、不会启动失败，风险已可控；但该前置条件在**生产侧的最终确认仍留 owner**。
+
+**F. 提交与隔离**
+
+- 提交 `5bf0f75`（父 `91855d1`，未 push；author `senior-dev`；仅 `backend/app/core/config.py`）。
 - **隔离**：`.codebase-memory/*`、`backend/uv.lock`、`docs/adr/*`、`docs/analysis-interface-*`、`docs/代码体检报告-*`、`web/vitest.config.ts.timestamp-*.mjs`（vitest 残留临时文件）等预存无关改动刻意排除，未入本轮提交。
 
 ## 相关文档
