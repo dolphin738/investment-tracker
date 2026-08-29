@@ -1,0 +1,103 @@
+# =====================================================================
+# 阶段4 防反弹工程闸门（AI代码清理与瘦身实施计划 §4.3）
+#
+# 平台：CNB 云原生构建（权威 remote = cnb.cool；github 仅镜像）。
+# 语法参考：https://docs.cnb.cool/zh/build/configuration.html
+#
+# 结构：main 分支的 push / pull_request 事件共用同一组流水线（YAML 锚点复用）：
+#   - backend-lint   ruff(F) + import-linter 架构边界 + 行数预算
+#   - frontend-lint  vue-tsc(app+e2e) + knip 依赖/文件闸门
+#   - backend-test   真实 Postgres（docker 起容器）+ 全量 pytest
+#   - frontend-test  全量 vitest
+# 任一失败即打回，不通过禁止合并。
+#
+# 已落地（本轮）：Lint / 依赖 / 行数 / 测试 四类闸门。
+# 列为后续（§4.3-3/5 未落，见 docs/架构治理规范.md「后续闸门」）：
+#   - 体积闸门（构建产物对比 main 增长 >5% 告警）
+#   - 覆盖率闸门（核心链路 <80% fail；先补覆盖率基线测量）
+#   - 「缺测试」标签（改动文件无对应测试变更时打标）
+# =====================================================================
+main:
+  push:
+    - &backend_lint
+      name: backend-lint
+      docker:
+        image: python:3.12-slim
+        volumes:
+          - /root/.cache/uv:copy-on-write
+      stages:
+        - name: install
+          script: |
+            pip install uv
+            cd backend && uv sync --extra dev
+        - name: ruff-gate-pyflakes
+          script: cd backend && uvx ruff check app tests conftest.py
+        - name: import-linter-gate-架构边界
+          script: cd backend && uv run lint-imports
+        - name: line-budget-gate-行数预算
+          script: python scripts/check_line_budget.py
+    - &frontend_lint
+      name: frontend-lint
+      docker:
+        image: node:22-slim
+        volumes:
+          - /root/.local/share/pnpm/store:copy-on-write
+      stages:
+        - name: install
+          script: |
+            npm i -g pnpm@9
+            cd web && pnpm install --frozen-lockfile
+        - name: typecheck-gate-app
+          script: cd web && pnpm run lint
+        - name: typecheck-gate-e2e
+          script: cd web && pnpm run typecheck:e2e
+        - name: knip-dependency-gate
+          script: cd web && npx -y knip@5 --include dependencies,unlisted,files
+    - &backend_test
+      name: backend-test
+      docker:
+        image: python:3.12-slim
+        volumes:
+          - /root/.cache/uv:copy-on-write
+      services:
+        - docker
+      stages:
+        - name: start-postgres
+          script: |
+            docker run -d --name pg \
+              -e POSTGRES_USER=pgtest -e POSTGRES_PASSWORD=pgtest \
+              -e POSTGRES_DB=investment_tracker \
+              postgres:16-alpine
+            for i in $(seq 1 30); do
+              docker exec pg pg_isready -U pgtest && break
+              sleep 1
+            done
+            docker exec pg pg_isready -U pgtest
+            # 容器网络拓扑不确定性兜底：优先取容器 IP，取不到回退 localhost
+            PG_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' pg)
+            echo "export PG_HOST=${PG_IP:-127.0.0.1}" >> /tmp/env.sh
+        - name: run-pytest
+          script: |
+            pip install uv
+            . /tmp/env.sh
+            export DATABASE_URL="postgresql+asyncpg://pgtest:pgtest@${PG_HOST}:5432/investment_tracker"
+            export TEST_DATABASE_URL="postgresql+asyncpg://pgtest:pgtest@${PG_HOST}:5432/investment_tracker_test"
+            cd backend && uv sync --extra dev && uv run pytest
+    - &frontend_test
+      name: frontend-test
+      docker:
+        image: node:22-slim
+        volumes:
+          - /root/.local/share/pnpm/store:copy-on-write
+      stages:
+        - name: install
+          script: |
+            npm i -g pnpm@9
+            cd web && pnpm install --frozen-lockfile
+        - name: run-vitest
+          script: cd web && pnpm test
+  pull_request:
+    - *backend_lint
+    - *frontend_lint
+    - *backend_test
+    - *frontend_test
