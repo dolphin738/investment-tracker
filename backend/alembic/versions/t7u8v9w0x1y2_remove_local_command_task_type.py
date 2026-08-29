@@ -23,7 +23,7 @@ DROP VALUE**。本迁移初版曾尝试 ``ALTER TYPE "JobTaskType" DROP VALUE 'L
 不触碰任何业务数据。若某环境实际存在 ``LOCAL_COMMAND`` 存量行，列改回新枚举时
 残留值无法 CAST 而失败；此时需先手动清理存量行（见 git 历史中本迁移的初版 ``DELETE`` 实现）。
 
-接在 ``w3x4y5z6a7b8`` 之后（``down_revision='w3x4y5z6a7b8'``），
+接在 ``t0u1v2w3x4y5`` 之后（``down_revision='t0u1v2w3x4y5'``），
 严禁改动 revision / down_revision 指针，否则断链。
 """
 from __future__ import annotations
@@ -34,7 +34,7 @@ from sqlalchemy import text
 
 # revision identifiers, used by Alembic.
 revision: str = "t7u8v9w0x1y2"
-down_revision: str | None = "w3x4y5z6a7b8"
+down_revision: str | None = "t0u1v2w3x4y5"
 branch_labels: str | None = None
 depends_on: str | None = None
 

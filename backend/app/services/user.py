@@ -99,6 +99,7 @@ class UserService:
                 status_code=410,
             )
         user.deleted_at = None
+        user.token_version = (user.token_version or 0) + 1  # 恢复后吊销注销前旧 token（REP-011）
         await self.session.commit()
         await self.session.refresh(user)
         return user
@@ -129,6 +130,7 @@ class UserService:
                 status_code=400,
             )
         user.password_hash = hash_password(new_password)
+        user.token_version = (user.token_version or 0) + 1  # 吊销旧 token（REP-011）
         await self.session.commit()
         await self.session.refresh(user)
         return user
@@ -168,6 +170,7 @@ class UserService:
                 status_code=409,
             )
         user.email = new_email
+        user.token_version = (user.token_version or 0) + 1  # 吊销旧 token（REP-011）
         await self.session.commit()
         await self.session.refresh(user)
         return user
@@ -255,4 +258,6 @@ class UserService:
 
     @staticmethod
     def issue_token(user: User) -> str:
-        return create_access_token(user.id, user.email or "", user.role)
+        return create_access_token(
+            user.id, user.email or "", user.role, token_version=user.token_version or 0
+        )

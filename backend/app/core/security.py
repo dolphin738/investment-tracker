@@ -28,12 +28,15 @@ settings = get_settings()
 _bearer = HTTPBearer(auto_error=False)
 
 
-def create_access_token(sub: str, email: str, role: str = "user") -> str:
+def create_access_token(
+    sub: str, email: str, role: str = "user", token_version: int = 0
+) -> str:
     now = datetime.now(timezone.utc)
     payload = {
         "sub": sub,
         "email": email,
         "role": role,
+        "tv": token_version,  # JWT 吊销版本（REP-011）
         "iat": now,
         "exp": now + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
     }
@@ -104,6 +107,15 @@ async def get_current_user(
             code=BusinessErrorCode.UNAUTHORIZED,
             message="无效 Token 或账户不可用",
             status_code=401,
+        )
+    # JWT 吊销校验（REP-011）：token 携带的版本号与库内不一致 → 已改密/改邮箱，须重登。
+    # 旧 token 无 tv 声明时按 0 处理，与用户默认版本号对齐（不强制存量用户下线）。
+    token_version = payload.get("tv", 0)
+    if (user.token_version or 0) != token_version:
+        raise BusinessException(
+            code=BusinessErrorCode.TOKEN_EXPIRED,
+            message="登录状态已失效，请重新登录",
+            status_code=403,
         )
     return CurrentUser(user_id=user.id, email=user.email, role=user.role)
 
