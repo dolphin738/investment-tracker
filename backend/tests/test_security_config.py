@@ -13,6 +13,7 @@ from app.core.config import Settings, get_settings, validate_security_config
 
 _DB_DEFAULT = Settings.model_fields["DATABASE_URL"].default
 _STRONG_SECRET = "a" * 32  # 32 字节强随机占位
+_STRONG_INTERNAL_TOKEN = "b" * 32  # 32 字节强随机占位
 
 
 @pytest.fixture(autouse=True)
@@ -63,9 +64,28 @@ def test_strict_db_default_rejects(monkeypatch):
 
 def test_strong_config_ok(monkeypatch):
     monkeypatch.setenv("JWT_SECRET", _STRONG_SECRET)
+    monkeypatch.setenv("INTERNAL_CLEANUP_TOKEN", _STRONG_INTERNAL_TOKEN)
     monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://u:p@127.0.0.1:5432/db")
     monkeypatch.delenv("STRICT_SECURITY", raising=False)
     # 强配置：默认与严格模式都不应抛异常
     validate_security_config()
     monkeypatch.setenv("STRICT_SECURITY", "1")
     validate_security_config()
+
+
+def test_internal_token_default_warns_not_raises(monkeypatch):
+    monkeypatch.setenv("JWT_SECRET", _STRONG_SECRET)
+    monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://u:p@127.0.0.1:5432/db")
+    monkeypatch.setenv("INTERNAL_CLEANUP_TOKEN", "change-me-internal")
+    monkeypatch.delenv("STRICT_SECURITY", raising=False)
+    # 默认模式：弱内部令牌仅告警，不抛异常
+    validate_security_config()
+
+
+def test_strict_internal_token_default_rejects(monkeypatch):
+    monkeypatch.setenv("JWT_SECRET", _STRONG_SECRET)
+    monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://u:p@127.0.0.1:5432/db")
+    monkeypatch.setenv("INTERNAL_CLEANUP_TOKEN", "change-me-internal")
+    monkeypatch.setenv("STRICT_SECURITY", "1")
+    with pytest.raises(RuntimeError):
+        validate_security_config()

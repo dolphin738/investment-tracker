@@ -81,16 +81,19 @@ def get_settings() -> Settings:
 # ---------------------------------------------------------------------------
 _KNOWN_WEAK_JWT_SECRETS = {"change-me-in-prod"}
 _MIN_JWT_SECRET_BYTES = 32
+_KNOWN_WEAK_INTERNAL_TOKENS = {"change-me-internal"}
 
 
 def validate_security_config() -> None:
-    """启动期安全配置校验（REP-002）。
+    """启动期安全配置校验（REP-002 / REP-008）。
 
     检测到以下任一情况时：默认仅输出 CRITICAL 日志（不破坏本地开发流）；
     当环境变量 ``STRICT_SECURITY`` 为真时改为拒绝启动（抛出 RuntimeError）。
 
     - ``JWT_SECRET`` 仍为默认占位值 ``change-me-in-prod``（任何人可离线伪造任意用户 JWT）；
     - ``JWT_SECRET`` 长度不足 32 字节（存在被暴力破解风险）；
+    - ``INTERNAL_CLEANUP_TOKEN`` 仍为默认占位值 ``change-me-internal``
+      （任何人可触发不可逆物理清理）；
     - ``DATABASE_URL`` 仍为代码内硬编码弱默认（postgres:postgres@localhost，数据库未配置）。
     """
     s = get_settings()
@@ -103,6 +106,12 @@ def validate_security_config() -> None:
     elif len(s.JWT_SECRET.encode("utf-8")) < _MIN_JWT_SECRET_BYTES:
         problems.append(
             f"JWT_SECRET 长度不足 {_MIN_JWT_SECRET_BYTES} 字节，存在被暴力破解风险"
+        )
+
+    if s.INTERNAL_CLEANUP_TOKEN in _KNOWN_WEAK_INTERNAL_TOKENS:
+        problems.append(
+            "INTERNAL_CLEANUP_TOKEN 仍是默认占位值 'change-me-internal'，"
+            "任何人可携带默认令牌触发不可逆物理清理"
         )
 
     if s.DATABASE_URL == Settings.model_fields["DATABASE_URL"].default:

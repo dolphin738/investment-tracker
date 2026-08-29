@@ -15,6 +15,8 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import secrets
+
 from app.core.config import get_settings
 from app.core.envelope import EnvelopeRoute
 from app.db.database import get_db
@@ -26,7 +28,11 @@ router = APIRouter(prefix="/api/internal", tags=["internal"], route_class=Envelo
 
 
 def _assert_internal_token(x_internal_token: str | None) -> None:
-    if not settings.INTERNAL_CLEANUP_TOKEN or x_internal_token != settings.INTERNAL_CLEANUP_TOKEN:
+    expected = settings.INTERNAL_CLEANUP_TOKEN
+    # 空令牌或未携带 → 直接拒绝；再用恒定时间比较防时序侧信道。
+    if not expected or x_internal_token is None:
+        raise HTTPException(status_code=403, detail="Forbidden: invalid internal token")
+    if not secrets.compare_digest(x_internal_token, expected):
         raise HTTPException(status_code=403, detail="Forbidden: invalid internal token")
 
 
