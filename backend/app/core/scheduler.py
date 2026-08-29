@@ -167,13 +167,17 @@ async def _log_cleanup(cfg: JobConfig) -> str:
 
 async def _http_callback(cfg: JobConfig) -> str:
     """执行 HTTP 回调（params.url / method / body）。"""
+    from app.core.url_guard import assert_safe_url, clamp_timeout
+
     params = cfg.params or {}
     url = (params.get("url") or "").strip()
     if not url:
         raise RuntimeError("HTTP_CALLBACK 任务缺少参数 url")
+    # SSRF 防护：仅允许 http/https，且默认禁止环回/链路本地（防云元数据探测）
+    assert_safe_url(url)
     method = (params.get("method") or "POST").upper()
     body = params.get("body")
-    async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
+    async with httpx.AsyncClient(timeout=clamp_timeout(_HTTP_TIMEOUT)) as client:
         resp = await client.request(method, url, json=body if isinstance(body, dict) else None)
     if resp.status_code >= 400:
         raise RuntimeError(f"HTTP 回调失败：{resp.status_code}")
