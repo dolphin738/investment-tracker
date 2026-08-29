@@ -41,13 +41,6 @@ _HANDLER_META: dict[JobTaskType, dict[str, Any]] = {
         "creatable": True,
         "param_fields": [],
     },
-    JobTaskType.LOCAL_COMMAND: {
-        "label": "定时执行脚本",
-        "creatable": True,
-        "param_fields": [
-            {"key": "command", "label": "命令", "required": True, "type": "text"},
-        ],
-    },
     JobTaskType.HTTP_CALLBACK: {
         "label": "HTTP 回调",
         "creatable": True,

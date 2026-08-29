@@ -134,7 +134,6 @@ export function useTriggerTask() {
 export const TASK_TYPE_LABEL: Record<JobTaskType, string> = {
   MARKET_DATA_SYNC: '行情同步',
   SECURITY_MASTER_SYNC: '证券主数据同步',
-  LOCAL_COMMAND: '定时执行脚本',
   HTTP_CALLBACK: 'HTTP 回调',
   ACCOUNT_CLEANUP: '账户清理',
 };

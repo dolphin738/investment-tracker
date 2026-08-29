@@ -19,7 +19,6 @@
 from __future__ import annotations
 
 import asyncio
-import subprocess
 from datetime import datetime, timezone
 from typing import Any, Callable, Optional
 
@@ -43,8 +42,6 @@ from app.services.market_data_sync import MarketDataSyncService
 # 模块级唯一调度器引用，便于 shutdown 安全停止
 _scheduler: Optional[object] = None
 
-# 本地命令默认超时（秒）
-_LOCAL_COMMAND_TIMEOUT = 600
 # HTTP 回调默认超时（秒）
 _HTTP_TIMEOUT = 30
 
@@ -168,32 +165,6 @@ async def _log_cleanup(cfg: JobConfig) -> str:
     return summary
 
 
-async def _local_command(cfg: JobConfig) -> str:
-    """定时执行本地脚本/命令（params.command，超时截断）。
-
-    使用 ``asyncio.to_thread`` 在独立线程中运行同步 ``subprocess.run``，
-    规避 Windows 下 Selector 事件循环（uvicorn --reload 默认）不支持
-    ``asyncio.create_subprocess_shell`` 的问题（后者会抛 NotImplementedError）。
-    """
-    params = cfg.params or {}
-    command = (params.get("command") or "").strip()
-    if not command:
-        raise RuntimeError("LOCAL_COMMAND 任务缺少参数 command")
-    result = await asyncio.to_thread(
-        subprocess.run,
-        command,
-        shell=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        timeout=_LOCAL_COMMAND_TIMEOUT,
-        check=False,
-        text=True,
-        errors="replace",
-    )
-    output = (result.stdout or "").strip()
-    return f"exit={result.returncode} {output}" if output else f"exit={result.returncode}"
-
-
 async def _http_callback(cfg: JobConfig) -> str:
     """执行 HTTP 回调（params.url / method / body）。"""
     params = cfg.params or {}
@@ -213,7 +184,6 @@ _HANDLERS: dict[JobTaskType, Callable[[JobConfig], Any]] = {
     JobTaskType.SECURITY_MASTER_SYNC: _security_master_sync,
     JobTaskType.ACCOUNT_CLEANUP: _accounts_cleanup,
     JobTaskType.LOG_CLEANUP: _log_cleanup,
-    JobTaskType.LOCAL_COMMAND: _local_command,
     JobTaskType.HTTP_CALLBACK: _http_callback,
 }
 

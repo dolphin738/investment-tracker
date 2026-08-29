@@ -18,7 +18,6 @@ import type { PaginatedResponse } from './types';
 export type JobTaskType =
   | 'MARKET_DATA_SYNC'
   | 'SECURITY_MASTER_SYNC'
-  | 'LOCAL_COMMAND'
   | 'HTTP_CALLBACK'
   | 'ACCOUNT_CLEANUP';
 
