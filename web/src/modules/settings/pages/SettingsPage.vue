@@ -551,7 +551,7 @@ function confirmClearData(): void {
                 </label>
               </div>
               <p class="text-xs text-muted-foreground">
-                录入后提示同步更新现金余额（SET-P0-07，即将上线）
+                录入后提示同步更新现金余额（SET-P0-07）
               </p>
             </div>
 
