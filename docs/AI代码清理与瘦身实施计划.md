@@ -1026,6 +1026,7 @@ REP-003 报告裁决为**采纳**，建议「环境开关 / 命令白名单 / BF
 | --- | --- |
 | `48346b7` | **fix(be)** 补 `timezone` 导入：`JobRunLog.started_at` 的 default lambda 引用未导入名，调度器每次写运行日志（`scheduler.py:205`）必 `NameError`；附回归测试 `test_job_run_log_default.py`（真实 INSERT 触发 default 求值） |
 | `dab6ca9` | **chore(be)** ruff F 闸门接入（`[tool.ruff.lint] select=["F"]` + models 层 F821 豁免）+ 基线归零：F401×38 自动修、F841×7 手修、F821×2（serializers `CashflowOut` TYPE_CHECKING、cashbalance `date` import）、**f-string 反斜杠 3.11 语法兼容修复**（`market_data_sync.py` 两处 f-string 内 `re.sub(r'\D',…)` 在 requires-python>=3.11 下属 SyntaxError，3.11 环境导入即崩） |
+| `c5bffc9` | **chore(be)** 基线清理余量补登：ruff `--fix` 的 F401 修复横跨 30 文件，`dab6ca9` 仅收 7 文件，本提交补齐其余（纯未使用 import 删除 +6/−34）；HEAD 复验 ruff 全绿 |
 | `d7f62fe` | **ci** `.cnb.yml`（CNB main push/PR × backend-lint/backend-test/frontend-lint/frontend-test 四流水线，YAML 锚点复用）+ `scripts/check_line_budget.py`（行数闸门，>800 需 `LARGE_PR_APPROVED=1` 人工豁免，docs/锁文件/生成物排除）+ `scripts/pre_commit_gate.py`（§4.4 可自动化部分）+ `web/knip.json`（依赖闸门）+ `.gitignore` 补 vitest 临时产物 |
 | `0c86f91` | **docs** `docs/架构治理规范.md`：目录职责与禁止事项、依赖方向图、新增依赖准入、文件 400 行上限（存量超限禁止增长）、函数单一职责、任务微型化纪律、提交检测流程 |
 | 本提交 | 计划文档勾选阶段4清单 + 本记录 |
