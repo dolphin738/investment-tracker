@@ -25,7 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.common import paginate
 from app.core.envelope import EnvelopeRoute
 from app.core.scheduler import reload_schedule, run_task_now
-from app.core.security import CurrentUser, get_current_user, require_admin
+from app.core.security import CurrentUser, require_admin
 from app.db.database import get_db
 from app.models import JobConfig, JobRunLog
 from app.models.enums import JobKind, JobTaskType
@@ -343,10 +343,15 @@ async def list_task_logs(
     task_id: str,
     page: int = Query(1, ge=1),
     pageSize: int = Query(20, ge=1, le=200),
-    current: CurrentUser = Depends(get_current_user),
+    current: CurrentUser = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """分页查询任务执行日志（按开始时间倒序）。"""
+    """分页查询任务执行日志（按开始时间倒序）。
+
+    权限：BF-01 修复 —— 原为 `get_current_user`（任意登录用户可读任意任务日志，
+    含 LOCAL_COMMAND 的完整 stdout/stderr）。现与其它 admin 端点一致收口为
+    `require_admin`（基于数据库实时 role 校验，不信任 JWT payload 的 role）。
+    """
     cfg = await db.get(JobConfig, task_id)
     if cfg is None:
         raise HTTPException(status_code=404, detail="任务不存在")
