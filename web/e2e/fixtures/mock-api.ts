@@ -159,6 +159,35 @@ export const MOCK_TRADES = {
   pageSize: 20,
 };
 
+/** 现金流（GET /api/portfolios/{id}/cashflows，Paginated[CashflowOut]） */
+export const MOCK_CASHFLOWS = {
+  items: [
+    {
+      id: 'cf-1',
+      portfolioId: 'pf-1',
+      date: '2026-08-05',
+      type: 'BUY',
+      amount: '5000.00',
+      note: '工资入账',
+      createdAt: '2026-08-05T10:00:00Z',
+      updatedAt: '2026-08-05T10:00:00Z',
+    },
+    {
+      id: 'cf-2',
+      portfolioId: 'pf-1',
+      date: '2026-08-20',
+      type: 'SELL',
+      amount: '2000.00',
+      note: null,
+      createdAt: '2026-08-20T10:00:00Z',
+      updatedAt: '2026-08-20T10:00:00Z',
+    },
+  ],
+  total: 2,
+  page: 1,
+  pageSize: 20,
+};
+
 /** 用户偏好（defaultPortfolioId 指向 pf-1，驱动组合选择器自动选中） */
 export const MOCK_PREFERENCES = {
   id: 'pref-1',
@@ -230,6 +259,7 @@ const ROUTE_HANDLERS: Array<[RegExp, Handler]> = [
   [/^\/api\/portfolios\/[^/]+\/holdings/, (r) => json(r, MOCK_HOLDINGS)],
   [/^\/api\/portfolios\/[^/]+\/security-trades/, (r) => json(r, MOCK_TRADES)],
   [/^\/api\/portfolios\/[^/]+\/securities/, (r) => json(r, MOCK_SECURITIES)],
+  [/^\/api\/portfolios\/[^/]+\/cashflows/, (r) => json(r, MOCK_CASHFLOWS)],
   // ---- 管理端（仅管理员可见） ----
   [/^\/api\/admin\/quote-providers$/, (r) => json(r, MOCK_PROVIDERS)],
   [/^\/api\/admin\/quote-providers\/interfaces$/, (r) => json(r, MOCK_INTERFACES)],

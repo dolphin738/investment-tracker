@@ -195,6 +195,7 @@ class CashBalanceCreateReq(BaseModel):
 
 class CashBalancePatchReq(BaseModel):
     amount: Optional[DecimalStr] = None
+    asOf: Optional[date] = None
     note: Optional[str] = None
 
 

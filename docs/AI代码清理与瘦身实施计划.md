@@ -9,7 +9,7 @@ aliases:
   - AI代码清理实施计划
   - 代码瘦身计划
 parent: "[[AI代码清理与瘦身指南]]"
-status: 执行中（阶段3·第13轮 REP-002 启动期安全配置校验已落地，待 owner 验收 / 第14轮）
+status: 执行中（阶段3·第14轮 安全加固 REP-008/009/010/011 + 缺失测试 REP-005/016 + 废弃接口/门禁 REP-051/E-1/E-2 已落地，待 owner 验收）
 ---
 
 # AI 代码清理与瘦身实施计划
@@ -853,7 +853,7 @@ REP-003 报告裁决为**采纳**，建议「环境开关 / 命令白名单 / BF
 
 **F. 前后端类型差异裁决（owner 2026-08-29）**
 
-前端 `JobTaskType`（`schedule.api.ts:18-23`）**不含 `LOG_CLEANUP`** —— 后端枚举有该值（`w3x4y5z6a7b8` 迁移加入）。owner 裁决：**无需在前端补 `LOG_CLEANUP`**——`LOG_CLEANUP` 是**系统级定时任务**（归入「系统任务」Tab，普通任务新建下拉不出现该类型），与 LOCAL_COMMAND 移除无关，按隔离纪律**未混入本轮**。渲染走 `TASK_TYPE_LABEL[x] ?? x` 兜底，缺值不会崩。
+前端 `JobTaskType`（`schedule.api.ts:18-23`）**不含 `LOG_CLEANUP`** —— 后端枚举有该值（`w3x4y5z6a7b8` 迁移加入）。owner 裁决（2026-08-29，**最终决定，不再作为待办**）：**无需在前端补 `LOG_CLEANUP`**。`LOG_CLEANUP` 是**系统级定时任务**，归入「系统任务」Tab，普通任务新建下拉**本就不出现该类型**，因此前端联合类型与 `TASK_TYPE_LABEL` 均无需同步；渲染走 `TASK_TYPE_LABEL[x] ?? x` 兜底，缺值不会崩。此为非阻断性前后端类型滞后，按 owner 决策保持现状，**不纳入任何后续清理轮次**。
 
 ### 第13轮 · REP-002（启动期安全配置校验）—— 安全隐患类（安全面 P0）
 
@@ -894,6 +894,64 @@ REP-003 报告裁决为**采纳**，建议「环境开关 / 命令白名单 / BF
 
 - 提交（父 `8f926a9`，未 push；author `senior-dev`；仅 config.py / main.py / test_security_config.py + 本计划文档）。
 - **隔离**：`.codebase-memory/*`、`backend/uv.lock`、`docs/adr/*`、`docs/analysis-interface-*`、`docs/代码体检报告-*`、`web/vitest.config.ts.timestamp-*.mjs` 等预存无关改动刻意排除，未入本轮提交。
+
+### 第14轮 · 安全加固 + 缺失测试补齐 + 废弃接口/门禁清理（REP-008/009/010/011/005/016/051/E-1/E-2）
+
+> 本轮回合并执行多项候选（用户指令「第14轮执行全部候选」）：安全加固 4 项（REP-008/009/010/011，提交 45e7958/50cfdcc/0bcddc2/6fed1ce/9ceca7f）+ 缺失测试补齐（REP-005/016）+ 废弃接口与门禁清理（REP-051/E-1/E-2，本提交）。
+
+**A. 删除/改动清单**
+
+| 文件 | 改动 |
+| --- | --- |
+| `backend/app/modules/internal/router.py` | REP-008：`_assert_internal_token` 改用 `secrets.compare_digest` 恒定时间比较，空/缺失令牌先守卫。 |
+| `backend/app/core/config.py` | REP-008/010/002：新增 `REGISTRATION_ENABLED`/`LOGIN_RATE_LIMIT_*`/`MIN_PASSWORD_LENGTH`；`validate_security_config()` 增 INTERNAL_CLEANUP_TOKEN 默认弱值检测。 |
+| `backend/app/core/url_guard.py` | REP-009 新建：出站 URL scheme 白名单（http/https）+ 默认封锁环回/链路本地（169.254.*），`clamp_timeout` 钳制到 [0,30]。 |
+| `backend/app/core/scheduler.py` `services/market_data_sync.py` `modules/admin/router.py` | REP-009：HTTP 回调用 `assert_safe_url` + `clamp_timeout`；provider 内网 `allow_private=True`。 |
+| `backend/app/core/rate_limit.py` | REP-010 新建：进程内滑动窗口登录限速（按 IP+邮箱）。 |
+| `backend/app/core/enums.py` | REP-010 新增 `RATE_LIMITED=1029` 映射 429。 |
+| `backend/app/schemas.py` | REP-010：`RegisterReq` 轻量正则邮箱校验 + 密码 `min_length=8`；REP-051 关联：`CashBalancePatchReq` 补 `asOf`（修 PATCH 500 缺陷，见 E）。 |
+| `backend/app/modules/auth/router.py` | REP-010：注册开关（关则 403）、登录限速（达上限 429）、认证失败记失败计数、成功清计数。 |
+| `backend/app/models/user.py` `core/security.py` `services/user.py` | REP-011：用户表加 `token_version`；token 写 `tv` 声明；改密/改邮箱/恢复自增版本，旧 token 无 `tv` 按 0 向后兼容。 |
+| `backend/alembic/versions/x4y5z6a7b8c9_add_user_token_version.py` | REP-011 新建迁移：users 加 `token_version`（server_default=0）。 |
+| `backend/alembic/versions/t7u8v9w0x1y2_*` `u1v2w3x4y5z6_*` | REP-011 修复：第12轮遗留迁移链分叉（`t7`/`u1` 误指旧 down_revision）→ 收敛为单 head `x4y5z6a7b8c9`。 |
+| `backend/tests/test_security_config.py` `test_ssrf_guard.py` `test_auth_hardening.py` `test_token_revocation.py` `test_missing_p0_coverage.py` `test_quote_sync_config.py` | 新增/补齐测试（详见 D）。 |
+| `docker/.env.production.example` `Dockerfile` | 生产模板启用 `STRICT_SECURITY=1`；新增 `LOGIN_RATE_LIMIT_PER_MINUTE`/`REGISTRATION_ENABLED`。 |
+| `web/src/types/api.ts` | REP-051：删 `paths`/`operations` 死壳，仅保留 `components`；删除 `docs/openapi.json`（过时）并移除 package.json `generate:api` 死脚本。 |
+| `web/e2e/fixtures/mock-api.ts` | E-2：补 `MOCK_CASHFLOWS` + `/cashflows` mock 规则（前端真实调用，原走 404 兜底）；REP-042 的 `/transactions` 死规则此前已删。 |
+| `web/tsconfig.e2e.json` `web/package.json` | E-1：新增 e2e 类型门禁配置 + `typecheck:e2e` 脚本（弥补 `tsconfig.app.json` 不覆盖 `e2e/` 的盲区）。 |
+
+**B. 测试对比**
+
+- 新增测试：REP-008 `test_security_config.py`（+2 → 8）、REP-009 `test_ssrf_guard.py`（21）、REP-010 `test_auth_hardening.py`（5）、REP-011 `test_token_revocation.py`（3）、REP-005 `test_missing_p0_coverage.py`（10）、REP-016 `test_quote_sync_config.py`（4）。
+- 现金余额专项回归（PATCH 缺陷修复后）：**37 passed / 0 failed**，零回归。
+- 新测试文件隔离运行：**13 passed**（REP-005 10 + REP-016 4）。
+
+**C. 人工验收步骤**
+
+- [ ] 安全：本地 dev/test 默认 `STRICT_SECURITY=False` 不阻断；生产 `docker/.env.production.example` 已设 `STRICT_SECURITY=1`，部署须 `--env-file docker/.env.production`。
+- [ ] 速率/注册：在 `pytest tests/test_auth_hardening.py` 验证注册关闭 403、邮箱非法/密码过短 400、登录限速 429。
+- [ ] JWT 吊销：改密后旧 token 失效（`test_token_revocation.py`）。
+- [ ] 前端：联网 `pnpm store prune` + `pnpm install` 后跑 `vue-tsc --noEmit -p tsconfig.app.json`（应 0 错，因仅删 api.ts 死壳/保留 components）与 `vue-tsc --noEmit -p tsconfig.e2e.json`（新增 e2e 门禁，需 owner 验证）。
+- [ ] e2e：联网 `pnpm install` 后 Playwright 跑 `web/e2e/*.spec.ts`，确认 `/cashflows` 不再 404 兜底。
+
+**D. 验证**
+
+- `py_compile` 全部改动后端文件通过。
+- 新增测试文件 **13 passed**；现金余额专项回归 **37 passed**。
+- 前端离线无法编译（沙箱 DNS 不可达，`pnpm install` 跑不了，`vitest`/`vue-tsc` 损坏）；静态核验：`api.ts` 删死壳后 `components` 仍被 `query.api.ts`/`lib/types.ts` 引用（零悬挂），`operations`/`paths` 全仓零引用；`mock-api.ts` 新增规则语法正确。
+
+**E. ⚠️ 设计取舍 / 异常记录（需 owner 知悉）**
+
+1. **`CashBalancePatchReq` 补 `asOf`（修缺陷，非新功能）**：PATCH 端点原对任意合法请求 500，由新增 REP-005 测试暴露；最小修复 = 补字段 + 服务内应用，向后兼容。
+2. **REP-051 删除 `docs/openapi.json` 连带移除 `generate:api` 脚本**：openapi.json 已严重过时且 api.ts 改为仅维护 `components`，故 npm 脚本不再有输入源，一并移除避免悬空引用。
+3. **E-2 自第10轮候选提至本轮**：计划文档原将其记为「第10轮候选 / 非本轮范畴」，但用户指令「第14轮执行全部候选」明确纳入，故本轮落地并补 mock 规则；原 `/transactions` 死规则（REP-042）经核实此前已删，本轮无重复操作。
+4. **docs/ 工作树被外部进程整目录删除（本轮插曲）**：执行中途 `docs/` 全部文件 ` D`（工作树删除），疑似 D:\sync 云同步 gremlin 复发。已 `git checkout -- docs/` 从索引恢复（= HEAD 版本），并据此重做本计划文档的 LOG_CLEANUP 终稿与本轮记录；**用户此前未提交的 `docs/adr/*` 等预存本地改动随删除一并丢失，无法从索引恢复（索引=HEAD），请 owner 知悉**。
+
+**F. 提交与隔离**
+
+- 安全加固 5 项已先于本提交落地：`45e7958`（STRICT_SECURITY 生产模板）、`50cfdcc`（REP-008）、`0bcddc2`（REP-009）、`6fed1ce`（REP-010）、`9ceca7f`（REP-011 + 迁移链修复），均未 push，author `senior-dev`。
+- 本提交承载：REP-005/016 测试、`web/src/types/api.ts` REP-051、`web/e2e` E-2、`web/tsconfig.e2e.json` E-1、`backend` cashbalance 缺陷修复、本计划文档（LOG_CLEANUP 终稿 + 本轮记录）。
+- **隔离**：`.codebase-memory/*`、`backend/uv.lock`、`docs/adr/*` 等预存无关改动刻意排除，未入本轮提交。
 
 ## 相关文档
 

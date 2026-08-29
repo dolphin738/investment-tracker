@@ -1,8 +1,6 @@
 /* eslint-disable */
-// Generated from docs/openapi.json (OpenAPI 3.1).
-// Produced by a deterministic converter mirroring openapi-typescript's
-// `components['schemas']` output. Drop-in compatible if the CLI is run later.
-export interface paths { [name: string]: unknown }
+// 后端 schema 类型字典（components['schemas']）。paths / operations 死壳已按 REP-051 删除，
+// docs/openapi.json 同步废弃；本文件仅保留 components，供前端按 components['schemas']['XxxOut'] 取值。
 export interface components {
   schemas: {
     /** AccountStatsOut */
@@ -1003,63 +1001,6 @@ PG 原生枚举类型名 `interface_direction`（由迁移创建）。
   };
 }
 
-/** operationId -> response schema name (HTTP 200, application/json). */
-export interface operations {
-    account_stats_api_account_stats_get: components['schemas']['AccountStatsOut'];
-    restore_api_auth_account_restore_post: components['schemas']['AuthTokenOut'];
-    change_email_api_auth_email_patch: components['schemas']['AuthTokenOut'];
-    login_api_auth_login_post: components['schemas']['AuthTokenOut'];
-    me_api_auth_me_get: components['schemas']['UserPublicOut'];
-    change_password_api_auth_password_patch: components['schemas']['AuthTokenOut'];
-    get_profile_api_auth_profile_get: components['schemas']['UserPublicOut'];
-    profile_api_auth_profile_patch: components['schemas']['UserPublicOut'];
-    register_api_auth_register_post: components['schemas']['UserPublicOut'];
-    create_portfolio_api_portfolios_post: components['schemas']['PortfolioOut'];
-    get_portfolio_detail_api_portfolios__portfolio_id__get: components['schemas']['PortfolioOut'];
-    patch_portfolio_api_portfolios__portfolio_id__patch: components['schemas']['PortfolioOut'];
-    archive_portfolio_api_portfolios__portfolio_id__archive_patch: components['schemas']['PortfolioOut'];
-    list_cashbalances_api_portfolios__portfolio_id__cash_balances_get: components['schemas']['Paginated_CashBalanceOut_'];
-    create_cashbalance_api_portfolios__portfolio_id__cash_balances_post: components['schemas']['CashBalanceOut'];
-    patch_cashbalance_api_portfolios__portfolio_id__cash_balances__cb_id__patch: components['schemas']['CashBalanceOut'];
-    list_cashflows_api_portfolios__portfolio_id__cashflows_get: components['schemas']['Paginated_CashflowOut_'];
-    create_cashflow_api_portfolios__portfolio_id__cashflows_post: components['schemas']['CashflowOut'];
-    get_cashflow_api_portfolios__portfolio_id__cashflows__cf_id__get: components['schemas']['CashflowOut'];
-    patch_cashflow_api_portfolios__portfolio_id__cashflows__cf_id__patch: components['schemas']['CashflowOut'];
-    clear_data_api_portfolios__portfolio_id__data_delete: components['schemas']['ClearDataOut'];
-    set_default_portfolio_api_portfolios__portfolio_id__default_patch: components['schemas']['PreferenceOut'];
-    list_dividends_api_portfolios__portfolio_id__dividends_get: components['schemas']['Paginated_DividendOut_'];
-    create_dividend_api_portfolios__portfolio_id__dividends_post: components['schemas']['DividendOut'];
-    patch_dividend_api_portfolios__portfolio_id__dividends__div_id__patch: components['schemas']['DividendOut'];
-    get_holdings_api_portfolios__portfolio_id__holdings_get: components['schemas']['HoldingsOut'];
-    import_commit_api_portfolios__portfolio_id__import_commit_post: components['schemas']['ImportCommitOut'];
-    import_preview_api_portfolios__portfolio_id__import_preview_post: components['schemas']['ImportPreviewOut'];
-    get_nav_history_api_portfolios__portfolio_id__nav_history_get: components['schemas']['Paginated_NavPointOut_'];
-    get_nav_latest_api_portfolios__portfolio_id__nav_latest_get: components['schemas']['NavPointOut'];
-    overview_api_portfolios__portfolio_id__overview_get: components['schemas']['OverviewOut'];
-    recalculate_full_api_portfolios__portfolio_id__recalculate_post: components['schemas']['RecalcOut'];
-    recalculate_range_api_portfolios__portfolio_id__recalculate_range_post: components['schemas']['RecalcOut'];
-    list_securities_api_portfolios__portfolio_id__securities_get: components['schemas']['Paginated_SecurityOut_'];
-    create_security_api_portfolios__portfolio_id__securities_post: components['schemas']['SecurityOut'];
-    get_security_api_portfolios__portfolio_id__securities__sec_id__get: components['schemas']['SecurityOut'];
-    patch_security_api_portfolios__portfolio_id__securities__sec_id__patch: components['schemas']['SecurityOut'];
-    list_prices_api_portfolios__portfolio_id__security_prices_get: components['schemas']['Paginated_PriceOut_'];
-    create_price_api_portfolios__portfolio_id__security_prices_post: components['schemas']['PriceOut'];
-    patch_price_api_portfolios__portfolio_id__security_prices__price_id__patch: components['schemas']['PriceOut'];
-    list_trades_api_portfolios__portfolio_id__security_trades_get: components['schemas']['Paginated_TradeOut_'];
-    create_trade_api_portfolios__portfolio_id__security_trades_post: components['schemas']['TradeOut'];
-    get_trade_api_portfolios__portfolio_id__security_trades__trade_id__get: components['schemas']['TradeOut'];
-    patch_trade_api_portfolios__portfolio_id__security_trades__trade_id__patch: components['schemas']['TradeOut'];
-    list_snapshots_api_portfolios__portfolio_id__snapshots_get: components['schemas']['Paginated_SnapshotOut_'];
-    create_snapshot_api_portfolios__portfolio_id__snapshots_post: components['schemas']['SnapshotOut'];
-    get_snapshot_by_date_api_portfolios__portfolio_id__snapshots__snap_date__get: components['schemas']['SnapshotOut'];
-    reset_snapshot_api_portfolios__portfolio_id__snapshots__snap_date__reset_post: components['schemas']['SnapshotOut'];
-    patch_snapshot_api_portfolios__portfolio_id__snapshots__snap_id__patch: components['schemas']['SnapshotOut'];
-    summary_api_portfolios__portfolio_id__summary_get: components['schemas']['PortfolioSummaryOut'];
-    get_xirr_history_api_portfolios__portfolio_id__xirr_history_get: components['schemas']['Paginated_XirrPointOut_'];
-    get_xirr_latest_api_portfolios__portfolio_id__xirr_latest_get: components['schemas']['XirrLatestOut'];
-    get_preferences_api_users_preferences_get: components['schemas']['PreferenceOut'];
-    patch_preferences_api_users_preferences_patch: components['schemas']['PreferenceOut'];
-  };
 
 // ── Generated from backend/app/core/enums.py BusinessErrorCode (single source of truth) ──
 export const BUSINESS_ERROR_CODE = {
