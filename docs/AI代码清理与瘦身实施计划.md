@@ -9,7 +9,7 @@ aliases:
   - AI代码清理实施计划
   - 代码瘦身计划
 parent: "[[AI代码清理与瘦身指南]]"
-status: 执行中（阶段3·第14轮 安全加固 REP-008/009/010/011 + 缺失测试 REP-005/016 + 废弃接口/门禁 REP-051/E-1/E-2 已落地，待 owner 验收）
+status: 收尾中（阶段3·第14轮安全加固/缺失测试/废弃接口/门禁已落地；后续 BF-02/BF-03/DEL-02 缺陷修复 + alembic 漂移修复已提交；前端测试门禁已实证可用；待 owner 验收 + push）
 ---
 
 # AI 代码清理与瘦身实施计划
@@ -952,6 +952,38 @@ REP-003 报告裁决为**采纳**，建议「环境开关 / 命令白名单 / BF
 - 安全加固 5 项已先于本提交落地：`45e7958`（STRICT_SECURITY 生产模板）、`50cfdcc`（REP-008）、`0bcddc2`（REP-009）、`6fed1ce`（REP-010）、`9ceca7f`（REP-011 + 迁移链修复），均未 push，author `senior-dev`。
 - 本提交承载：REP-005/016 测试、`web/src/types/api.ts` REP-051、`web/e2e` E-2、`web/tsconfig.e2e.json` E-1、`backend` cashbalance 缺陷修复、本计划文档（LOG_CLEANUP 终稿 + 本轮记录）。
 - **隔离**：`.codebase-memory/*`、`backend/uv.lock`、`docs/adr/*` 等预存无关改动刻意排除，未入本轮提交。
+
+## 阶段3 收口记录（2026-08-29）
+
+> 第14轮主体（安全加固 + 缺失测试 + 废弃接口/门禁）已落地后，backlog 缺陷池与一段迁移漂移插曲相继收口；前端测试门禁经实证确认可用。本段为阶段3 总收尾，供 owner 验收与 push 前过目。
+
+### 1. 第14轮后续缺陷修复（backlog 池，均已提交·未 push）
+
+| 项 | 文件 | 提交 | 验证 |
+| --- | --- | --- | --- |
+| **BF-02** 设置页过时文案（删「即将上线」） | `web/src/modules/settings/pages/SettingsPage.vue:554` | `26a10e2` | 纯文案，零逻辑变化 |
+| **BF-03** 快照路由路径参数注解规范 | `backend/app/modules/data/router.py`（get_snapshot_by_date / reset_snapshot 两处 `snap_date` 重排为签名首位必填 `date`） | `a415b62` | `py_compile` OK；`pytest -k snapshot` **9 passed** 无回归 |
+| **DEL-02** XIRR 页冗余 `yearlyData` computed | `web/src/modules/analysis/pages/XirrAnalysisPage.vue` | `fd0a12f` | 全仓 `grep yearlyData` 0 命中；v-if 守卫改 `seriesData.length>0`（保留「无数据隐藏」，纠正报告"length 冗余"误判） |
+
+### 2. Alembic 迁移漂移修复（插曲）
+
+- **现象**：`alembic upgrade head` 报 `DuplicateColumnError: column "max_logs" of relation "job_configs" already exists`。
+- **根因**：开发库为**部分漂移态**——`create_all` 建表 + `stamp` 打戳到 `t7u8v9w0x1y2`，DDL 未实际跑；且 `create_all` 发生在模型纳入 `token_version`（REP-011）之前，故 `max_logs`/`app_logs` 已存在而 `users.token_version` 不存在。
+- **修复**：`u1v2w3x4y5z6`（加 `max_logs`）与 `x4y5z6a7b8c9`(head)（加 `token_version`）两迁移 `upgrade()` 改为 `ALTER TABLE … ADD COLUMN IF NOT EXISTS …`，`downgrade()` 对称 `DROP COLUMN IF EXISTS`；`import sqlalchemy as sa` → `from sqlalchemy import text`（消 F401）。v2/w3 此前已有 `IF NOT EXISTS` 守卫，无需改。
+- **提交**：`7dda9cb`（未 push）。**QA 回归全绿**：开发库升级至 head、全新库从 base 全链 25 迁移、幂等重跑、downgrade round-trip 均通过（源码无 Bug，Routing: NoOne）。
+
+### 3. 前端测试门禁（REP-006/007 解锁）——关键更正
+
+- ⚠️ **此前"vitest 损坏阻断前端测试"的判断已不成立**：用户级 `MEMORY.md`（2026-08-28 已记录）证实项目已移出 `D:\sync` 同步盘、联网 `pnpm install` 干净重建 node_modules，vitest 软链不再被同步污染。
+- **实证**：本会话 `node node_modules/vitest/vitest.mjs run` 全量 **59 文件 / 452 测试全绿（EXIT=0）**；`settings-danger-zone.test.ts`（REP-006 · FE-SET-11/12 清空组合 / 注销账户**名称精确匹配守卫** + trim 边界 + 「自助恢复」文案硬约束）**4 passed**。
+- **REP-006 状态**：settings 危险区（全应用最具破坏性的两个入口）已覆盖；**FE-SNAP-04/05**（快照删除 / 重置撤销行操作）报告建议补 e2e，未做（依赖 e2e 基建，列为后续）。
+- **REP-007**（6 条 P0 部分覆盖：BE-PF-07 / BE-ADM-13 / FE-GLOBAL-01 / FE-OVW-06-07 / FE-SNP-03）本轮未批量补——属"测试补齐"专项，建议单列一轮（门禁已通，不再受阻）。
+
+### 4. 阶段3 收口结论
+
+- **删除类 / 安全类 / 废弃接口 / 门禁**候选已全部落地；**缺陷池** BF-01~04、DEL-02 已修复，**仅 DEL-01**（删 `GET /api/token` + health 演示端点整体评估）留待单独排期。
+- **REP-005/016/008/009/010/011/051** 及 **E-1/E-2** 均已提交；**REP-006/007** 因"测试补齐"性质，建议后续单列轮次补 e2e / 端点层用例（环境已具备）。
+- **当前未 push**，分支 `cleanup/phase-0`，本地 main 领先 cnb/main（含第1~14轮 + 上述收口）。待 owner 验收后走 `dev-scripts/push-all.ps1` 或提供 CNB_TOKEN 代推。
 
 ## 相关文档
 

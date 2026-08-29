@@ -6,8 +6,8 @@
 ## 缺陷修复池
 
 - **BF-01** [BE-SCH-07] 任务执行日志权限缺失：`backend/app/modules/admin/schedule.py:346` 的 `GET /api/admin/tasks/{id}/logs` 只挂 `get_current_user`，同组其余端点均 `require_admin`，与模块 docstring（schedule.py:12）矛盾。修复：一行改为 `require_admin`。
-- **BF-02** [FE-SET-06] 设置页文案过时：`web/src/modules/settings/pages/SettingsPage.vue:554` 写「SET-P0-07，即将上线」，但 FLOW-P0-06 软提示已实现（`use-transactions.ts:125,175,246`）。修复：删去「即将上线」措辞。
-- **BF-03** [BE-SNP-02/06] 快照路由类型注解不规范：`backend/app/modules/data/router.py:399,434` `snap_date: date = None`（路径参数默认值不可达）。修复：规范化为必填 `date` 或显式 `Optional[date]`。
+- **BF-02** [FE-SET-06] 设置页文案过时：`web/src/modules/settings/pages/SettingsPage.vue:554` 写「SET-P0-07，即将上线」，但 FLOW-P0-06 软提示已实现（`use-transactions.ts:125,175,246`）。修复：删去「即将上线」措辞。✅ **已修复（2026-08-29）**：SettingsPage.vue:554 删除「即将上线」、保留 SET-P0-07 标签；纯文案改动。提交 `26a10e2`。
+- **BF-03** [BE-SNP-02/06] 快照路由类型注解不规范：`backend/app/modules/data/router.py:399,434` `snap_date: date = None`（路径参数默认值不可达）。修复：规范化为必填 `date` 或显式 `Optional[date]`。✅ **已修复（2026-08-29）**：router.py 的 `get_snapshot_by_date`/`reset_snapshot` 两处 `snap_date` 重排为签名首位必填 `date`（满足 Python 无默认参数不能位于有默认参数之后的约束；FastAPI 按名称绑定，行为不变）。py_compile OK、pytest -k snapshot 9 passed 无回归。提交 `a415b62`。
 - **BF-04** [BE-AUTH] auth 模块内联 user dict 缺 createdAt：8 处中 7 处缺字段（register/login/restore/me/PATCH profile/PATCH password/PATCH email），与 response_model 必填声明及前端契约（lib/types.ts:413）不符；login/改密/改邮箱响应写 localStorage 形成缺字段脏缓存。✅ **已修复（2026-08-25）**：7 处各补 `"createdAt"` 一行，pytest 通过。
 
 ## 改进项
@@ -18,7 +18,7 @@
 ## 删除池（阶段 3 执行）
 
 - **DEL-01** [BE-HLTH-07] 删除 `GET /api/token`（health/router.py:75-92）：公开签发 demo token 属安全面 P0 隐患；冒烟改走 `/api/auth/login`。同步清理 health 模块中 demo 用户自动创建逻辑。
-- **DEL-02** [FE-XIRR-05] 删除 XIRR 页 yearlyData 冗余 computed（XirrAnalysisPage.vue:129-133）：柱状图实际用 `aggregateByYear(seriesData)`，v-if 中的 length 判断与第一条件语义重复；删除零行为变化。
+- **DEL-02** [FE-XIRR-05] 删除 XIRR 页 yearlyData 冗余 computed（XirrAnalysisPage.vue:129-133）：柱状图实际用 `aggregateByYear(seriesData)`，v-if 中的 length 判断与第一条件语义重复；删除零行为变化。✅ **已修复（2026-08-29）**：删除 yearlyData computed（值从未作为图表数据，仅被 v-if 绕弯判断 seriesData 有数据），v-if 守卫改 `seriesData.length > 0`（保留「无数据隐藏」语义，纠正报告"length 冗余"误判——length 守卫实为非年且数据存在，非冗余）。vue-tsc 沙箱离线未跑。提交 `fd0a12f`。
 
 ## 其他已知事实（不构成行动项）
 
