@@ -4,10 +4,14 @@
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
+from app.core.enums import BusinessErrorCode
 from app.core.envelope import EnvelopeRoute
+from app.core.exceptions import BusinessException
+from app.core import rate_limit
 from app.core.security import CurrentUser, get_current_user
 from app.db.database import get_db
 from app.schemas import (
@@ -26,14 +30,45 @@ router = APIRouter(prefix="/api/auth", tags=["auth"], route_class=EnvelopeRoute)
 
 
 @router.post("/register", response_model=UserPublicOut)
-async def register(req: RegisterReq, db: AsyncSession = Depends(get_db)) -> dict:
+async def register(
+    req: RegisterReq, request: Request, db: AsyncSession = Depends(get_db)
+) -> dict:
+    if not get_settings().REGISTRATION_ENABLED:
+        raise BusinessException(
+            code=BusinessErrorCode.FORBIDDEN,
+            message="当前部署已关闭公开注册",
+            status_code=403,
+        )
     user = await UserService(db).register(req.email, req.password, req.name)
     return serialize_user(user)
 
 
 @router.post("/login", response_model=AuthTokenOut)
-async def login(req: LoginReq, db: AsyncSession = Depends(get_db)) -> dict:
-    user = await UserService(db).authenticate(req.email, req.password)
+async def login(
+    req: LoginReq, request: Request, db: AsyncSession = Depends(get_db)
+) -> dict:
+    settings = get_settings()
+    ip = request.client.host if request.client else "unknown"
+    email = (req.email or "").lower()
+    # 登录失败限速（REP-010）：达上限直接 429，阻断爆破/枚举
+    if rate_limit.is_limited(
+        ip,
+        email,
+        settings.LOGIN_RATE_LIMIT_PER_MINUTE,
+        settings.LOGIN_RATE_LIMIT_WINDOW_SECONDS,
+    ):
+        raise BusinessException(
+            code=BusinessErrorCode.RATE_LIMITED,
+            message="登录尝试过于频繁，请稍后再试",
+            status_code=429,
+        )
+    try:
+        user = await UserService(db).authenticate(req.email, req.password)
+    except BusinessException as exc:
+        if exc.status_code == 401:
+            rate_limit.record_failure(ip, email)
+        raise
+    rate_limit.reset(ip, email)
     token = UserService.issue_token(user)
     return {
         "accessToken": token,

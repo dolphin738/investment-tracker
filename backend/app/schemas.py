@@ -12,15 +12,27 @@ from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.core.config import get_settings
 from app.core.types import DecimalStr
 from app.models.enums import ImportType
+
+# 邮箱格式（轻量正则；不引入 email-validator 依赖，避免 venv 隔离外溢）。
+# 与 shared 端 BUSINESS_ERROR_CODE 无关，仅做入参格式门禁（REP-010）。
+_EMAIL_RE = __import__("re").compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 # ── 认证 ──
 class RegisterReq(BaseModel):
     email: str
-    password: str
+    password: str = Field(min_length=8)
     name: Optional[str] = None
+
+    @field_validator("email")
+    @classmethod
+    def _check_email(cls, v: str) -> str:
+        if not _EMAIL_RE.match(v or ""):
+            raise ValueError("邮箱格式无效")
+        return v
 
 
 class LoginReq(BaseModel):

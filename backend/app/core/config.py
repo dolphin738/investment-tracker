@@ -69,6 +69,17 @@ class Settings(BaseSettings):
     # 设为 1/true：检测到危险配置直接拒绝启动（生产部署推荐开启）。
     STRICT_SECURITY: bool = False
 
+    # 公开注册开关（REP-010）：单用户/内网部署可关闭公开注册（默认开启）。
+    REGISTRATION_ENABLED: bool = True
+
+    # 登录失败限速（REP-010）：每 (客户端 IP, 邮箱) 在窗口内的失败次数上限；
+    # 0 = 关闭（内网默认关闭，公网/生产建议在 .env 设 10~20）。
+    LOGIN_RATE_LIMIT_PER_MINUTE: int = 0
+    LOGIN_RATE_LIMIT_WINDOW_SECONDS: int = 60
+
+    # 密码最小长度（REP-010）：注册时强制，降低弱口令风险。
+    MIN_PASSWORD_LENGTH: int = 8
+
 
 @lru_cache
 def get_settings() -> Settings:
