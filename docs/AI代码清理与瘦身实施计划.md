@@ -9,7 +9,7 @@ aliases:
   - AI代码清理实施计划
   - 代码瘦身计划
 parent: "[[AI代码清理与瘦身指南]]"
-status: 执行中（阶段3·第12轮 BF-01 权限收口 + REP-003 C 档移除 LOCAL_COMMAND 已落地，待第13轮）
+status: 执行中（阶段3·第13轮 REP-002 启动期安全配置校验已落地，待 owner 验收 / 第14轮）
 ---
 
 # AI 代码清理与瘦身实施计划
@@ -851,9 +851,49 @@ REP-003 报告裁决为**采纳**，建议「环境开关 / 命令白名单 / BF
 - 前端 `vue-tsc --noEmit -p tsconfig.app.json` **EXIT=0**。
 - 全量 `pytest tests` **291 passed / 0 failed**（289 基线 + 第12轮-A 新增 2 条）。
 
-**F. 新发现（本轮不修，记录备查）**
+**F. 前后端类型差异裁决（owner 2026-08-29）**
 
-前端 `JobTaskType`（`schedule.api.ts:18-23`）**缺 `LOG_CLEANUP`** —— 后端枚举有该值（`w3x4y5z6a7b8` 迁移加入），前端类型与 `TASK_TYPE_LABEL` 均未同步。属既有的前后端类型滞后，与 LOCAL_COMMAND 移除无关，按隔离纪律**未混入本轮**。
+前端 `JobTaskType`（`schedule.api.ts:18-23`）**不含 `LOG_CLEANUP`** —— 后端枚举有该值（`w3x4y5z6a7b8` 迁移加入）。owner 裁决：**无需在前端补 `LOG_CLEANUP`**——`LOG_CLEANUP` 是**系统级定时任务**（归入「系统任务」Tab，普通任务新建下拉不出现该类型），与 LOCAL_COMMAND 移除无关，按隔离纪律**未混入本轮**。渲染走 `TASK_TYPE_LABEL[x] ?? x` 兜底，缺值不会崩。
+
+### 第13轮 · REP-002（启动期安全配置校验）—— 安全隐患类（安全面 P0）
+
+**A. 范畴与裁决依据**
+
+- 报告裁决：REP-002 **采纳**（高风险）；建议「JWT_SECRET 等于默认值或长度不足则拒绝启动（至少 FATAL 日志告警）」。
+- 一轮一类：本轮仅做「启动期安全配置校验」这一类。`DATABASE_URL` 弱默认一并纳入同一校验函数（仅比对代码内字面默认值），不误伤已配置的 `.env`（dev/test 库用 `127.0.0.1` 真实库，不触发）。
+- 关键约束（报告同族明确要求）：「不改默认值行为本身以免破坏本地开发流」→ 校验**不放在 `Settings()` 构造期**（`main.py:46`/`security.py:25` 模块导入即调用 `get_settings()`，放构造期会破坏测试/dev），改为挂在 `main.py` 的 **lifespan 启动钩子**；默认仅 CRITICAL 告警，设 `STRICT_SECURITY=1` 才拒绝启动。
+
+**B. 取证（信任但验证）**
+
+1. `config.py:22` `JWT_SECRET: str = "change-me-in-prod"` —— 默认危险占位值，`.env` 漏传即静默回退。
+2. `security.py:40,45` `jwt.encode/decode(..., settings.JWT_SECRET, ...)` —— 默认密钥可被离线伪造任意用户（含 admin）JWT，与 REP-001（已 R11 删端点）叠加曾构成完整接管链路。
+3. `main.py:46,25` 模块导入期即 `get_settings()`；`main.py:50` 有 `lifespan` 钩子（调用 `start_scheduler`）—— 是唯一下方能挂启动校验且不破坏导入期的地方。
+4. `docker-entrypoint.sh` 仅 `alembic upgrade head` + `uvicorn`，**无任何密钥/配置校验** → 默认密钥可直达生产。
+
+**C. 改动**
+
+| 文件 | 改动 |
+| --- | --- |
+| `backend/app/core/config.py` | 新增 `STRICT_SECURITY: bool = False` 开关；新增 `validate_security_config()` 哨兵：JWT_SECRET 为已知弱值/长度 <32 字节、或 DATABASE_URL 仍为字面默认 → 收集问题；`STRICT_SECURITY` 真则 `raise RuntimeError` 拒绝启动，否则 `logger.critical` 告警（不阻断）。 |
+| `backend/app/main.py` | `lifespan` 启动首行调用 `validate_security_config()`（在 `start_scheduler` 之前）。 |
+| `backend/tests/test_security_config.py` | 新增（6 用例）：默认模式弱配置仅告警不抛异常；`STRICT_SECURITY=1` 下弱 JWT/短 JWT/默认 DB 均拒绝启动；强配置两种模式均通过。 |
+
+**D. 验证**
+
+- `py_compile` config.py / main.py 全过。
+- 新测试 `pytest tests/test_security_config.py` **6 passed**。
+- 全量 `pytest tests`：**297 passed / 0 failed**（291 基线 + 第12轮-A 2 条 + 本轮 6 条）→ 零回归（R3.2 未触发回滚）。
+- 源码零悬挂：`validate_security_config` 仅被 `main.py` lifespan 调用；`STRICT_SECURITY` 仅被该校验读取。
+
+**E. ⚠️ 设计取舍（需 owner 知悉）**
+
+- **默认不阻断（仅告警）**：为遵守报告「不改默认值行为本身以免破坏本地开发流」+ 不破坏测试套件（测试 import 触发 `get_settings()`），默认 `STRICT_SECURITY=False` 仅打 CRITICAL 日志。**生产部署务必设 `STRICT_SECURITY=1`** 以启用 fail-fast。若 owner 希望默认严格（拒绝启动），需同步在 `pytest`/dev 环境设逃生开关（如 `STRICT_SECURITY=0`），以免开发/测试启动失败——此为后续决策项。
+- **DATABASE_URL 仅比对字面默认**：只检测「完全没配数据库（仍是代码内 `postgres:postgres@localhost`）」，不误伤已配置的真实库（dev/test 用 `127.0.0.1`）。口令强度（如 `postgres/postgres`）未做深度检查，避免误伤测试库。
+
+**F. 提交与隔离**
+
+- 提交（父 `8f926a9`，未 push；author `senior-dev`；仅 config.py / main.py / test_security_config.py + 本计划文档）。
+- **隔离**：`.codebase-memory/*`、`backend/uv.lock`、`docs/adr/*`、`docs/analysis-interface-*`、`docs/代码体检报告-*`、`web/vitest.config.ts.timestamp-*.mjs` 等预存无关改动刻意排除，未入本轮提交。
 
 ## 相关文档
 
