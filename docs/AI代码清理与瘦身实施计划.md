@@ -977,13 +977,44 @@ REP-003 报告裁决为**采纳**，建议「环境开关 / 命令白名单 / BF
 - ⚠️ **此前"vitest 损坏阻断前端测试"的判断已不成立**：用户级 `MEMORY.md`（2026-08-28 已记录）证实项目已移出 `D:\sync` 同步盘、联网 `pnpm install` 干净重建 node_modules，vitest 软链不再被同步污染。
 - **实证**：本会话 `node node_modules/vitest/vitest.mjs run` 全量 **59 文件 / 452 测试全绿（EXIT=0）**；`settings-danger-zone.test.ts`（REP-006 · FE-SET-11/12 清空组合 / 注销账户**名称精确匹配守卫** + trim 边界 + 「自助恢复」文案硬约束）**4 passed**。
 - **REP-006 状态**：settings 危险区（全应用最具破坏性的两个入口）已覆盖；**FE-SNAP-04/05**（快照删除 / 重置撤销行操作）报告建议补 e2e，未做（依赖 e2e 基建，列为后续）。
-- **REP-007**（6 条 P0 部分覆盖：BE-PF-07 / BE-ADM-13 / FE-GLOBAL-01 / FE-OVW-06-07 / FE-SNP-03）本轮未批量补——属"测试补齐"专项，建议单列一轮（门禁已通，不再受阻）。
+- **REP-007**（6 条 P0 部分覆盖：BE-PF-07 / BE-ADM-13 / FE-GLOBAL-01 / FE-OVW-06-07 / FE-SNP-03）**已于 round-15（2026-08-29）补全**——见下方「### 5. round-15 · REP-007 五项 P0 部分覆盖补完」；BE-SNP-04 经核实已于前序 `test_missing_p0_coverage.py`（提交 `b2eb668`）覆盖，不重复补。
 
 ### 4. 阶段3 收口结论
 
-- **删除类 / 安全类 / 废弃接口 / 门禁**候选已全部落地；**缺陷池** BF-01~04、DEL-02 已修复，**仅 DEL-01**（删 `GET /api/token` + health 演示端点整体评估）留待单独排期。
-- **REP-005/016/008/009/010/011/051** 及 **E-1/E-2** 均已提交；**REP-006/007** 因"测试补齐"性质，建议后续单列轮次补 e2e / 端点层用例（环境已具备）。
-- **当前未 push**，分支 `cleanup/phase-0`，本地 main 领先 cnb/main（含第1~14轮 + 上述收口）。待 owner 验收后走 `dev-scripts/push-all.ps1` 或提供 CNB_TOKEN 代推。
+- **删除类 / 安全类 / 废弃接口 / 门禁**候选已全部落地；**缺陷池** BF-01~04、DEL-01、DEL-02 均已修复（DEL-01 主体代码在 R11 `46798ca` 已删，本轮 round-15 仅补 backlog 标记）。
+- **REP-005/016/008/009/010/011/051** 及 **E-1/E-2/006/007** 均已提交或落地；REP-007 五项 P0 部分覆盖于 round-15 补完（见 §5），BE-SNP-04 前序已覆盖。
+- **当前未 push**，分支 `cleanup/phase-0`，本地 main 领先 cnb/main（含第1~15轮全部收口）。待 owner 验收后走 `dev-scripts/push-all.ps1` 或提供 CNB_TOKEN 代推。
+
+### 5. round-15 · REP-007 五项 P0 部分覆盖补完（2026-08-29）
+
+> 承接 §3 末「REP-007 建议单列一轮」。前端门禁已实证可用、回退无碍，本轮补齐剩余 5 项 P0 部分覆盖（BE-SNP-04 经核已在前序 `test_missing_p0_coverage.py` `b2eb668` 覆盖，不重复补）。
+
+#### 5.1 新增/修改文件
+
+| 类 | 文件 | 覆盖项 | 说明 |
+| --- | --- | --- | --- |
+| 后端测试（新） | `backend/tests/test_p0_endpoint_coverage_round15.py` | BE-PF-07、BE-ADM-13 | 8 用例：sync + sync-status（401/404 归属/鉴权）、admin 全量刷新编排（403/401）+ mock `MarketDataSyncService.sync_portfolio_prices` 为 AsyncMock |
+| 前端测试（新） | `web/src/router/__tests__/guard.test.ts` | FE-GLOBAL-01 | 3 用例：未登录→`{path:'/login',replace:true}` + `sessionStorage[AUTH_RETURN_KEY]` 深链；已登录→`true` 不写；公开路由放行 |
+| 前端测试（新） | `web/src/modules/overview/__tests__/dashboard-page-dialogs.test.ts` | FE-OVW-06/07 | 2 用例：点「录入出入金」→ `[data-testid="cashflow-form"]`；点「录入买卖」→ `[data-testid="security-trade-form"]`（attachTo document.body，复用 dashboard-page.test.ts mock） |
+| 前端测试（新） | `web/src/modules/snapshot/__tests__/snapshot-edit-entry.test.ts` | FE-SNP-03 | 2 用例：DERIVED/MANUAL 行点「编辑（变手工）」均 `emitted('edit')` 含正确 id |
+| 前端源码（改） | `web/src/router/index.ts` | FE-GLOBAL-01 支撑 | 内联 `router.beforeEach((to)=>{…})` 抽取为导出函数 `authGuard`，`router.beforeEach(authGuard)` 行为保持；`vue-router` 本版 `beforeGuards` 不可迭代，故抽导出函数供单测 |
+| 前端测试（改） | `web/src/modules/snapshot/__tests__/snapshot-list-row-actions.test.ts` | — | 1 行：`valuationFlag: 'AUTO'` → `'COST_BASED'`（TS 枚举值，预存漂移修正，非本次引入） |
+
+#### 5.2 验证（全量门禁，均绿）
+
+- **后端**：`uv run pytest` **349 passed**（无失败）；其中 round-15 新文件 **8 passed**。
+  - 环境坑：pytest 在 STRICT 模式须 `pytestmark = pytest.mark.asyncio`，否则全 FAIL；`SecurityPrice.as_of` 为 `Date` 列须传 `date` 对象（非字符串），否则 asyncpg DataError。
+  - 运行器：项目 venv 由 `uv` 创建，**必须 `uv run pytest`**（直接用 `.venv/Scripts/python -m pytest` 会因 pytest-asyncio 插件自动发现失效报「async def not supported」）。
+- **前端**：`./node_modules/.bin/vitest run` **64 files / 467 tests passed**（router/index.ts 重构零回归）；`./node_modules/.bin/vue-tsc --noEmit -p tsconfig.app.json` **0 errors**。
+  - reka-ui Dialog/AlertDialog 经自研 Portal 渲染到 body，测试须 `attachTo: document.body` 且**不可** `stubs:{teleport:true}`；弹窗内元素在 document 上定位（沿用 settings-danger-zone / snapshot-list-row-actions 模式）。
+
+#### 5.3 提交与隔离
+
+- 提交拆分（author `senior-dev`，未 push）：
+  - **A** `test(be): 补齐 REP-007 后端 P0 部分覆盖（BE-PF-07/BE-ADM-13）` → `backend/tests/test_p0_endpoint_coverage_round15.py`
+  - **B** `test(fe): 补齐 REP-007 前端 P0 部分覆盖（FE-GLOBAL-01/OVW-06-07/SNP-03）+ router 守卫抽取` → 前端 3 测试新文件 + `router/index.ts` + `snapshot-list-row-actions.test.ts`
+- **隔离**：预存无关改动 `.codebase-memory/*`、`backend/uv.lock`、`docs/代码体检报告-终版.md`、`web/vitest.config.ts.timestamp-*.mjs` 刻意排除，未入本轮提交。
+- **DEL-01 关闭**：本轮仅补 `docs/backlog.md` 标记（line 20 ✅），代码主体在 R11 `46798ca` 已删，无代码改动。
 
 ## 相关文档
 

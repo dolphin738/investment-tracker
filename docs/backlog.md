@@ -17,7 +17,7 @@
 
 ## 删除池（阶段 3 执行）
 
-- **DEL-01** [BE-HLTH-07] 删除 `GET /api/token`（health/router.py:75-92）：公开签发 demo token 属安全面 P0 隐患；冒烟改走 `/api/auth/login`。同步清理 health 模块中 demo 用户自动创建逻辑。
+- **DEL-01** [BE-HLTH-07] 删除 `GET /api/token`（health/router.py:75-92）：公开签发 demo token 属安全面 P0 隐患；冒烟改走 `/api/auth/login`。同步清理 health 模块中 demo 用户自动创建逻辑。✅ **已修复（R11 · REP-001，提交 `46798ca` `security(auth): 删除未鉴权的 /api/token 端点`）**：全仓 `grep "api/token" backend/app/` 0 命中、demo 用户自动创建逻辑已删；health 模块仅存 `router.py:42` 一处 `"name": "demo"` 为示例响应负载字符串（非删除对象）。本轮（2026-08-29 round-15）仅补 backlog 标记，不动代码。`/api/token` 残留仅于 `tests/test_contract.py:74` 注释提及（契约测试无实际调用）。
 - **DEL-02** [FE-XIRR-05] 删除 XIRR 页 yearlyData 冗余 computed（XirrAnalysisPage.vue:129-133）：柱状图实际用 `aggregateByYear(seriesData)`，v-if 中的 length 判断与第一条件语义重复；删除零行为变化。✅ **已修复（2026-08-29）**：删除 yearlyData computed（值从未作为图表数据，仅被 v-if 绕弯判断 seriesData 有数据），v-if 守卫改 `seriesData.length > 0`（保留「无数据隐藏」语义，纠正报告"length 冗余"误判——length 守卫实为非年且数据存在，非冗余）。vue-tsc 沙箱离线未跑。提交 `fd0a12f`。
 
 ## 其他已知事实（不构成行动项）
