@@ -383,7 +383,7 @@ async def list_snapshots(
 
 @router_snapshots.get("/{portfolio_id}/snapshots/{snap_date}", response_model=SnapshotOut)
 async def get_snapshot_by_date(
-    p=Depends(get_portfolio), db: AsyncSession = Depends(get_db), snap_date: date = None
+    snap_date: date, p=Depends(get_portfolio), db: AsyncSession = Depends(get_db)
 ):
     snap, derived = await SnapshotService(db).get_by_date(p.id, snap_date)
     return serialize_snapshot(snap, derived_total=derived)
@@ -418,7 +418,7 @@ async def delete_snapshot(
 
 @router_snapshots.post("/{portfolio_id}/snapshots/{snap_date}/reset", response_model=SnapshotOut)
 async def reset_snapshot(
-    p=Depends(get_portfolio), db: AsyncSession = Depends(get_db), snap_date: date = None
+    snap_date: date, p=Depends(get_portfolio), db: AsyncSession = Depends(get_db)
 ):
     snap, derived = await SnapshotService(db).reset(p.id, snap_date)
     return serialize_snapshot(snap, derived_total=derived)
