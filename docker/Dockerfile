@@ -1,6 +1,8 @@
 # 投资收益统计系统 — 单镜像部署（FastAPI 后端同源 serve 前端 + SPA 深链回退）
 # 构建：docker build -f docker/Dockerfile -t invest-tracker:latest .
-# 运行：docker run -d -p 3000:3000 --env-file backend/.env invest-tracker:latest
+# 运行（开发）：docker run -d -p 3000:3000 --env-file backend/.env invest-tracker:latest
+# 运行（生产）：docker run -d -p 3000:3000 --env-file docker/.env.production invest-tracker:latest
+#   → 生产 env 见 docker/.env.production.example（务必含 STRICT_SECURITY=1 与强随机密钥）
 #
 # 关键点：前端 API 地址为相对路径 /api，与后端同源，故单进程即可同时
 # 提供 /api 与前端资源，深链刷新由后端 catch-all 路由回退 index.html。
