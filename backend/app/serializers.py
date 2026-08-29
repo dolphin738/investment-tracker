@@ -8,6 +8,8 @@
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from app.models import (
     AssetSnapshot,
     CashBalance,
@@ -20,6 +22,9 @@ from app.models import (
     User,
 )
 from app.models.enums import DividendType
+
+if TYPE_CHECKING:
+    from app.schemas_resp import CashflowOut
 
 
 def serialize_portfolio(p: Portfolio) -> dict:

@@ -9,10 +9,10 @@
 """
 from __future__ import annotations
 
+from datetime import date
 from typing import Optional
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import CashBalance
 from app.schemas import CashBalanceCreateReq, CashBalancePatchReq

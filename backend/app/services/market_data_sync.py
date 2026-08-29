@@ -1063,13 +1063,15 @@ class MarketDataSyncService:
             # 防源数据误带前缀（如 sz000012 国债指数）导致跨市场撞码
             if asset_class == SecurityType.INDEX:
                 exchange = classify_security(code, name).get("exchange") or exchange
-                code = f"{EXCHANGE_PREFIX.get(exchange or '', '')}{re.sub(r'\D', '', code)}"
+                digits = re.sub(r"\D", "", code)
+                code = f"{EXCHANGE_PREFIX.get(exchange or '', '')}{digits}"
             # 北交所 920xxx 段强制 bj 前缀：源数据（如小熊 /stock/all）将 920 段误带 sz 前缀，
             # 若不强归一，会按 sz920xxx 建新行，撞上历史已自愈为 bj920xxx 记录的派生 id
             # （securities_pkey 唯一约束冲突）
             if re.fullmatch(r"920\d{3}", re.sub(r"\D", "", code)):
                 exchange = "BJ"
-                code = f"bj{re.sub(r'\D', '', code)}"
+                digits = re.sub(r"\D", "", code)
+                code = f"bj{digits}"
 
             existing = (
                 await self.session.execute(

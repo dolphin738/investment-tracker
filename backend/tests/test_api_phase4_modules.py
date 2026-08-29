@@ -294,10 +294,10 @@ async def test_import_securitytrades_and_snapshots(client):
     h = auth(u["token"])
     p = (await client.post("/api/portfolios", headers=h, json={"name": "P1"})).json()["data"]
     pid = p["id"]
-    sid = await _seed_security(client, h, pid, code="600519", name="贵州茅台")
+    await _seed_security(client, h, pid, code="600519", name="贵州茅台")
 
     # trades 导入
-    csv_t = f"date,securityCode,side,quantity,costPrice,feeTotal,note\n2024-04-01,600519,BUY_SEC,10,100.5,0,建仓\n"
+    csv_t = "date,securityCode,side,quantity,costPrice,feeTotal,note\n2024-04-01,600519,BUY_SEC,10,100.5,0,建仓\n"
     prev = (await client.post(
         f"/api/portfolios/{pid}/import/preview",
         headers=h, data={"type": "securityTrades"},
