@@ -10,7 +10,6 @@ from __future__ import annotations
 import uuid
 
 import pytest
-from sqlalchemy import select
 
 from app.models.enums import QuoteProviderAccessMethod
 from app.models.interface_category import InterfaceCategory

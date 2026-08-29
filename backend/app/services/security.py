@@ -15,7 +15,6 @@ from __future__ import annotations
 from typing import Optional
 
 from sqlalchemy import delete, func, select
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.enums import BusinessErrorCode

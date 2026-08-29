@@ -14,7 +14,6 @@ from decimal import Decimal
 from typing import Optional
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums import BusinessErrorCode
 from app.core.exceptions import BusinessException

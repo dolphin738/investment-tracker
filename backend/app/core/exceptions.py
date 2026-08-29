@@ -14,7 +14,6 @@ from typing import Any
 from fastapi import Request
 from fastapi.exceptions import HTTPException as StarletteHTTPException
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
 
 from app.core.enums import BusinessErrorCode, CODE_TO_HTTP_STATUS, HTTP_STATUS_TO_CODE
 from app.core.envelope import EnvelopeJSONResponse

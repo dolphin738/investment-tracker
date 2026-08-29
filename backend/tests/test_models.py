@@ -17,8 +17,6 @@ import app.db.database as dbmod  # 用 dbmod.AsyncSessionLocal() 取“调用时
 # 在导入时捕获开发库工厂，绕过测试库隔离）。
 import app.models  # noqa: F401  ensure all models registered
 from app.models import (
-    DailyNav,
-    DailyXirr,
     Portfolio,
     PortfolioSecurity,
     Security,

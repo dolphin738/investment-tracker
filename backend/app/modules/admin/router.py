@@ -40,7 +40,6 @@ from app.core.security import CurrentUser, get_current_user, require_admin
 from app.db.database import get_db
 from app.models import Portfolio, PortfolioSecurity, Security
 from app.models.enums import InterfaceDirection, QuoteProviderAccessMethod
-from app.models.notification import Notification
 from app.serializers import serialize_security_master
 from app.services import InterfaceCategoryService, QuoteInterfaceService
 from app.services.market_data_sync import MarketDataSyncService

@@ -10,7 +10,6 @@ from decimal import Decimal
 
 from app.finance_core import (
     Cashflow,
-    HoldingView,
     NavState,
     TradeInput,
     calculate_xirr,

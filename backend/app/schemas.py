@@ -12,7 +12,6 @@ from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.core.config import get_settings
 from app.core.types import DecimalStr
 from app.models.enums import ImportType
 

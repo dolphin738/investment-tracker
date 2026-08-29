@@ -30,7 +30,6 @@ from app.models import (
     SnapshotSource,
     SnapshotValuation,
 )
-from app.models.enums import SecuritySide
 from app.services.holding import HoldingService
 
 

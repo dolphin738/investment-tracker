@@ -11,7 +11,6 @@ from __future__ import annotations
 from typing import Optional
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import SecurityPrice
 from app.schemas import PriceCreateReq, PricePatchReq

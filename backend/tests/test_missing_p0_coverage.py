@@ -23,7 +23,7 @@ from sqlalchemy import select
 
 import app.db.database as dbmod
 from app.core.enums import BusinessErrorCode, UserRole
-from app.core.security import create_access_token, hash_password
+from app.core.security import create_access_token
 from app.models import AppLog, User
 
 from tests.helpers import auth, env, register_login

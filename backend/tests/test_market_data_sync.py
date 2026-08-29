@@ -14,14 +14,13 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date
 from decimal import Decimal
 from typing import Any, Optional
 
 import pytest
 from sqlalchemy import select
 
-import app.db.database as dbmod
 from app.models.enums import QuoteProviderAccessMethod, SecurityType
 from app.models.interface_category import InterfaceCategory
 from app.models.portfolio import Portfolio
