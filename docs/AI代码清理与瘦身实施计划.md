@@ -298,10 +298,10 @@ C. 人工验收步骤：对照功能验收表，列出需要人工在界面上�
 
 **阶段执行清单：**
 
-- [ ] 生成并人工审定架构规范文档
-- [ ] 配置 CI/CD 闸门并验证生效
-- [ ] 制定任务微型化的 Prompt 拆分习惯
-- [ ] 建立提交自动检测流程
+- [x] 生成并人工审定架构规范文档 —— `docs/架构治理规范.md`（待 owner 审定）
+- [x] 配置 CI/CD 闸门并验证生效 —— `.cnb.yml` 四流水线 + `scripts/` 闸门脚本，本地全绿；CNB 真实首跑待 push 后确认
+- [x] 制定任务微型化的 Prompt 拆分习惯 —— 治理规范 §7 成文
+- [x] 建立提交自动检测流程 —— `scripts/pre_commit_gate.py` + 人工清单（治理规范 §8）
 
 ---
 
@@ -1015,6 +1015,48 @@ REP-003 报告裁决为**采纳**，建议「环境开关 / 命令白名单 / BF
   - **B** `test(fe): 补齐 REP-007 前端 P0 部分覆盖（FE-GLOBAL-01/OVW-06-07/SNP-03）+ router 守卫抽取` → 前端 3 测试新文件 + `router/index.ts` + `snapshot-list-row-actions.test.ts`
 - **隔离**：预存无关改动 `.codebase-memory/*`、`backend/uv.lock`、`docs/代码体检报告-终版.md`、`web/vitest.config.ts.timestamp-*.mjs` 刻意排除，未入本轮提交。
 - **DEL-01 关闭**：本轮仅补 `docs/backlog.md` 标记（line 20 ✅），代码主体在 R11 `46798ca` 已删，无代码改动。
+
+## 阶段4 执行记录（2026-08-30）
+
+> 防反弹工程规则四项全部落地；过程中 Lint 闸门首战即擒获 **2 个存量真 Bug**。
+
+### 1. 交付物（5 笔提交，author senior-dev，未 push）
+
+| 提交 | 内容 |
+| --- | --- |
+| `48346b7` | **fix(be)** 补 `timezone` 导入：`JobRunLog.started_at` 的 default lambda 引用未导入名，调度器每次写运行日志（`scheduler.py:205`）必 `NameError`；附回归测试 `test_job_run_log_default.py`（真实 INSERT 触发 default 求值） |
+| `dab6ca9` | **chore(be)** ruff F 闸门接入（`[tool.ruff.lint] select=["F"]` + models 层 F821 豁免）+ 基线归零：F401×38 自动修、F841×7 手修、F821×2（serializers `CashflowOut` TYPE_CHECKING、cashbalance `date` import）、**f-string 反斜杠 3.11 语法兼容修复**（`market_data_sync.py` 两处 f-string 内 `re.sub(r'\D',…)` 在 requires-python>=3.11 下属 SyntaxError，3.11 环境导入即崩） |
+| `d7f62fe` | **ci** `.cnb.yml`（CNB main push/PR × backend-lint/backend-test/frontend-lint/frontend-test 四流水线，YAML 锚点复用）+ `scripts/check_line_budget.py`（行数闸门，>800 需 `LARGE_PR_APPROVED=1` 人工豁免，docs/锁文件/生成物排除）+ `scripts/pre_commit_gate.py`（§4.4 可自动化部分）+ `web/knip.json`（依赖闸门）+ `.gitignore` 补 vitest 临时产物 |
+| `0c86f91` | **docs** `docs/架构治理规范.md`：目录职责与禁止事项、依赖方向图、新增依赖准入、文件 400 行上限（存量超限禁止增长）、函数单一职责、任务微型化纪律、提交检测流程 |
+| 本提交 | 计划文档勾选阶段4清单 + 本记录 |
+
+### 2. 闸门口径（与 §4.3 的对应与裁剪）
+
+| 闸门 | 落地方式 | 说明 |
+| --- | --- | --- |
+| Lint（unused error） | ruff `select=["F"]`（F401/F841/F821…）+ knip files | 最小集起步，避免风格类规则海量噪音；后续扩规则需先清零基线 |
+| 依赖闸门 | knip `dependencies,unlisted,files`（web） | 当前基线：未使用依赖 0、未使用文件 0；`postcss-load-config` unlisted 豁免（传递依赖，理由记录于治理规范 §3-5） |
+| 行数闸门 | `scripts/check_line_budget.py`（新增代码 >800 fail） | 「代码」口径：docs/*.md 与锁文件/生成物不计入；豁免=`LARGE_PR_APPROVED=1`（显式人工说明落点） |
+| 测试闸门 | CNB backend-test（真实 PG 容器 + 全量 pytest）+ frontend-test（全量 vitest） | conftest 走 alembic 建库，CI 用 postgres:16-alpine 容器，取容器 IP 带 localhost 兜底 |
+| 附加：架构边界 | `uv run lint-imports`（既有 `.importlinter`）入 CI | 把阶段 2 的层契约变成强制门禁 |
+| 未落（§6 列明） | 体积闸门、覆盖率 80%、缺测试标签 | 需先补基线测量/平台 API，owner 排期 |
+
+### 3. 验证（全绿）
+
+- ruff（backend app+tests+conftest）：**All checks passed**（基线 73→0，其中 39 处安全自动修）。
+- import-linter：契约全过；knip（dependencies,unlisted,files）：**EXIT=0**。
+- `pre_commit_gate.py` 端到端（--skip lines）：ruff ✓ / import-linter ✓ / knip ✓ → EXIT=0。
+- 行数闸门三态实测：超限 EXIT=2 / `LARGE_PR_APPROVED=1` 放行 / 基线=HEAD 0-diff 通过。
+- 后端全量 pytest：**350 passed**（349 基线 + JobRunLog 回归 1）；`py_compile` 全过。
+- `.cnb.yml`：YAML 解析 + 锚点 + push/PR 流水线一致性脚本校验通过。
+- 前端 vitest / vue-tsc：见提交后终验（knip.json 不影响应用代码，仍全量跑一遍）。
+
+### 4. 已知边界与后续
+
+- **CI 真实首跑未验证**（本地无法执行 CNB 流水线）：语法/锚点已静态校验，PG 容器组网取 IP 方案带 localhost 兜底；首次 push 后需在 CNB 观察一轮并修正环境差异。
+- **行数闸门对本分支合并会报警**：cleanup/phase-0 相对 cnb/main 新增代码约 3300 行（阶段 3~4 的测试补齐等），合并时需 owner `LARGE_PR_APPROVED=1` 一次性豁免，之后增量 PR 即受 800 行约束。
+- knip 另报**未使用导出 17 处**（13 函数 + 2 类型 + 2 枚举成员，见 knip 全量输出）——按「只记账不顺手修」纪律，属删除类候选，建议单列清理轮（gate 口径未包含 exports，不阻塞 CI）。
+- ruff 扩展规则（E/W/I/B/UP 等）、前端 AST 边界检查（components 禁 import modules）列为治理规范 §6 后续项。
 
 ## 相关文档
 
