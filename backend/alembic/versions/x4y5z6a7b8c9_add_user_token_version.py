@@ -8,8 +8,8 @@
 """
 from __future__ import annotations
 
-import sqlalchemy as sa
 from alembic import op
+from sqlalchemy import text
 
 
 # revision identifiers, used by Alembic.
@@ -20,16 +20,17 @@ depends_on: str | None = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "users",
-        sa.Column(
-            "token_version",
-            sa.Integer(),
-            nullable=False,
-            server_default=sa.text("0"),
-        ),
+    # 漂移态守卫：IF NOT EXISTS 使迁移幂等（全新库照常加列，漂移库无操作）。
+    # 语义对齐原 sa.Column(Integer, nullable=False, server_default=sa.text("0"))；
+    # 存量用户行由 DEFAULT 0 填充，不会违反 NOT NULL。
+    op.execute(
+        text(
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS "
+            "token_version INTEGER NOT NULL DEFAULT 0"
+        )
     )
 
 
 def downgrade() -> None:
-    op.drop_column("users", "token_version")
+    # 与 upgrade 对称使用 IF EXISTS，容忍「列已不存在」的漂移库，保证降级不中断。
+    op.execute(text("ALTER TABLE users DROP COLUMN IF EXISTS token_version"))
