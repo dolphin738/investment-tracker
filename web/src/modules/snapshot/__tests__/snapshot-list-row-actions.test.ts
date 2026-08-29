@@ -96,7 +96,7 @@ const derivedRow: SnapshotResponse = {
   marketValue: '600.00',
   cashBalance: '400.00',
   source: 'DERIVED',
-  valuationFlag: 'AUTO',
+  valuationFlag: 'COST_BASED',
   note: null,
   recordedAt: '2024-02-01T00:00:00.000Z',
   derivedTotalAsset: '1000.00',
