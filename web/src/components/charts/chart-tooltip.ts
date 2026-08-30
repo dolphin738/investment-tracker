@@ -2,7 +2,7 @@
  * components/charts/chart-tooltip.ts — 图表 tooltip / 轴样式共享符号
  *
  * 归并 nav / xirr / yearly 三图逐字复制的 tooltip 入参类型、浮层样式、
- * 百分比轴标签与双向网格 splitLine（REP-031 / REP-032 / REP-033）。
+ * 双向网格 splitLine（REP-031 / REP-032 / REP-033）。
  */
 
 import { formatPercent } from '@/lib/utils';
@@ -25,11 +25,6 @@ export const TOOLTIP_EXTRA_CSS_TEXT =
   'color: hsl(var(--popover-foreground));' +
   'padding: 8px 12px;' +
   'box-shadow: none;';
-
-/** 百分比轴标签格式化（yAxis axisLabel，如 XIRR / 收益率轴） */
-export function formatPercentAxisLabel(v: number): string {
-  return `${(v * 100).toFixed(0)}%`;
-}
 
 /** 双向网格 splitLine（category / value 轴通用；颜色随主题） */
 export function axisSplitLine(color: string): {

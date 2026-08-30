@@ -66,9 +66,6 @@ export const EXPORT_TYPE_OPTIONS = [
   { value: ExportType.NAV_SERIES, label: '净值序列' },
 ] as const;
 
-// ===== 默认分页参数 =====
-export const DEFAULT_PAGE_SIZE = 20;
-
 /** 将 Date 转为 YYYY-MM-DD（本地时区）。委托 formatDate 复用同一日期渲染口径（REP-035）。 */
 export function toIsoDate(date: Date): string {
   return formatDate(date, 'yyyy-MM-dd');
