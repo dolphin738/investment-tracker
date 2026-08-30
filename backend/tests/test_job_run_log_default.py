@@ -2,7 +2,7 @@
 
 job.py 的 `default=lambda: datetime.now(timezone.utc)`（started_at 列）引用了
 未导入的 `timezone`（模块原仅 `from datetime import datetime`）→ 调度器每次
-执行任务写运行日志（`app/core/scheduler.py:205` 构造 `JobRunLog(...)`）时，
+执行任务写运行日志（`app/services/scheduler.py` 构造 `JobRunLog(...)`）时，
 INSERT 求值该 lambda 触发 ``NameError: name 'timezone' is not defined``，
 任务执行日志整体不可写。测试此前只查日志端点、从未真实 INSERT JobRunLog，
 故全量 pytest 349 绿也未暴露。修复：补 `timezone` 导入。

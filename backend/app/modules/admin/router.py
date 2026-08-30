@@ -36,7 +36,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common import paginate
 from app.core.envelope import EnvelopeRoute
-from app.core.security import CurrentUser, get_current_user, require_admin
+from app.services.auth import CurrentUser, get_current_user, require_admin
 from app.db.database import get_db
 from app.models import Portfolio, PortfolioSecurity, Security
 from app.models.enums import InterfaceDirection, QuoteProviderAccessMethod

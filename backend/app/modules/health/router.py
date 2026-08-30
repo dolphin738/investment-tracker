@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from app.core.enums import BusinessErrorCode
 from app.core.envelope import EnvelopeRoute
 from app.core.exceptions import BusinessException
-from app.core.security import CurrentUser, get_current_user
+from app.services.auth import CurrentUser, get_current_user
 from app.core.types import DecimalStr
 
 # 所有业务 router 必须用 EnvelopeRoute，才能自动包信封

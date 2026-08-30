@@ -26,7 +26,7 @@ from app.core.exceptions import (
     unhandled_exception_handler,
     validation_exception_handler,
 )
-from app.core.scheduler import shutdown_scheduler, start_scheduler
+from app.services.scheduler import shutdown_scheduler, start_scheduler
 from app.modules import (
     admin,
     aggregation,

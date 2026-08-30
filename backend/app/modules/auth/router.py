@@ -12,7 +12,7 @@ from app.core.enums import BusinessErrorCode
 from app.core.envelope import EnvelopeRoute
 from app.core.exceptions import BusinessException
 from app.core import rate_limit
-from app.core.security import CurrentUser, get_current_user
+from app.services.auth import CurrentUser, get_current_user
 from app.db.database import get_db
 from app.schemas import (
     EmailPatchReq,

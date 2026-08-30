@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums import BusinessErrorCode
 from app.core.exceptions import BusinessException
-from app.core.security import CurrentUser, get_current_user
+from app.services.auth import CurrentUser, get_current_user
 from app.db.database import get_db
 from app.models import Portfolio
 from app.services.base import paged

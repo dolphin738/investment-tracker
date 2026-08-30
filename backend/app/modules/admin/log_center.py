@@ -21,7 +21,7 @@ from sqlalchemy import DateTime, Integer, String
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.envelope import EnvelopeRoute
-from app.core.security import CurrentUser, require_admin, require_any_role
+from app.services.auth import CurrentUser, require_admin, require_any_role
 from app.db.database import get_db
 from app.models.job import JobConfig, JobRunLog
 from app.models.log import AppLog

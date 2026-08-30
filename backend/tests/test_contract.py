@@ -76,7 +76,7 @@ def test_protected_with_valid_token():
     冒烟改走 /api/auth/login）。
 
     注意：不能仅改为内联 `create_access_token` —— `get_current_user`
-    （app/core/security.py:99-107）会查库校验「用户存在且未软删除」，
+    （app/services/auth.py）会查库校验「用户存在且未软删除」，
     DB 无对应用户时 /api/protected 直接返回 401。故必须先确保用户真实存在。
     """
     email = "contract-protected@example.com"

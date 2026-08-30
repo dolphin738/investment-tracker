@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.envelope import EnvelopeRoute
-from app.core.security import CurrentUser, get_current_user
+from app.services.auth import CurrentUser, get_current_user
 from app.db.database import get_db
 from app.serializers import serialize_preference
 from app.schemas_resp import PreferenceOut
