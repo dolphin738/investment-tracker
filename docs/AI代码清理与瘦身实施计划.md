@@ -1037,7 +1037,7 @@ REP-003 报告裁决为**采纳**，建议「环境开关 / 命令白名单 / BF
 | --- | --- | --- |
 | Lint（unused error） | ruff `select=["F"]`（F401/F841/F821…）+ knip files | 最小集起步，避免风格类规则海量噪音；后续扩规则需先清零基线 |
 | 依赖闸门 | knip `dependencies,unlisted,files`（web） | 当前基线：未使用依赖 0、未使用文件 0；`postcss-load-config` unlisted 豁免（传递依赖，理由记录于治理规范 §3-5） |
-| 行数闸门 | `scripts/check_line_budget.py`（新增代码 >800 fail） | 「代码」口径：docs/*.md 与锁文件/生成物不计入；豁免=`LARGE_PR_APPROVED=1`（显式人工说明落点） |
+| 行数闸门 | `scripts/check_line_budget.py`（新增代码 >800 fail） | 「代码」口径：**所有 `.md`**（非仅 docs/）与锁文件/生成物不计入；豁免=`LARGE_PR_APPROVED=1`（显式人工说明落点） |
 | 测试闸门 | CNB backend-test（真实 PG 容器 + 全量 pytest）+ frontend-test（全量 vitest） | conftest 走 alembic 建库，CI 用 postgres:16-alpine 容器，取容器 IP 带 localhost 兜底 |
 | 附加：架构边界 | `uv run lint-imports`（既有 `.importlinter`）入 CI | 把阶段 2 的层契约变成强制门禁 |
 | 未落（§6 列明） | 体积闸门、覆盖率 80%、缺测试标签 | 需先补基线测量/平台 API，owner 排期 |

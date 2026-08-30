@@ -10,6 +10,8 @@
 - 统计 ``git diff --numstat <merge-base(base)..HEAD>`` 的**新增行数**（不含删除）。
 - 排除锁文件与生成物（pnpm-lock.yaml / uv.lock / package-lock.json / *.snap），
   避免机械性变更吞掉预算。
+- **所有 ``.md`` 文档不计入**（非仅 docs/，见 `_collect_added_lines` 的
+  ``path.endswith(".md")`` 判断），与实施计划「新增代码」口径一致。
 - 超限退出码 2，输出拆分指引；人工审定后可设环境变量 LARGE_PR_APPROVED=1 显式豁免
   （owner 在 CI 变量层面控制，豁免动作本身即「人工说明」的落点）。
 - 基线分支不可解析时（如浅克隆未取到 origin/main）只警告并放行（退出码 0），
