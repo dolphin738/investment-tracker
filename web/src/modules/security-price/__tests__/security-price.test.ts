@@ -32,7 +32,6 @@ vi.mock('@/api/portfolio-price.api', () => ({
 
 vi.mock('@/api/security-price.api', () => ({
   listSecurityPrices: vi.fn(),
-  deleteSecurityPrice: vi.fn(),
   upsertSecurityPrice: vi.fn(),
 }));
 

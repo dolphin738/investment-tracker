@@ -53,9 +53,6 @@ const SAMPLE_LIST = [
 
 vi.mock('@/api/quote-provider.api', () => ({
   listQuoteProviders: vi.fn(() => Promise.resolve(SAMPLE_LIST)),
-  getQuoteProvider: vi.fn((id: string) =>
-    Promise.resolve(SAMPLE_LIST.find((p) => p.id === id) ?? null),
-  ),
   createQuoteProvider: vi.fn((body: unknown) =>
     Promise.resolve({ ...SAMPLE_LIST[0], id: 'new', name: '新建源', ...(body as object) }),
   ),
@@ -65,7 +62,6 @@ vi.mock('@/api/quote-provider.api', () => ({
 
 vi.mock('@/api/quote-interface.api', () => ({
   listProviderInterfaces: vi.fn(() => Promise.resolve([])),
-  getInterface: vi.fn(() => Promise.resolve(null)),
   createInterface: vi.fn(() => Promise.resolve(null)),
   updateInterface: vi.fn(() => Promise.resolve(null)),
   deleteInterface: vi.fn(() => Promise.resolve(null)),
@@ -76,9 +72,7 @@ vi.mock('@/api/quote-interface.api', () => ({
 
 vi.mock('@/api/interface-category.api', () => ({
   listInterfaceCategories: vi.fn(() => Promise.resolve([])),
-  createInterfaceCategory: vi.fn(() => Promise.resolve(null)),
   updateInterfaceCategory: vi.fn(() => Promise.resolve(null)),
-  deleteInterfaceCategory: vi.fn(() => Promise.resolve(null)),
 }));
 
 vi.mock('@/composables/use-toast', () => ({

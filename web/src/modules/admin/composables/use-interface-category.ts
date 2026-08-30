@@ -3,18 +3,17 @@
  *
  * 平移自 React 版 web/src/hooks/use-interface-category.ts，行为契约一致。
  * - useInterfaceCategories：列出全部分类（非管理员 enabled:isAdmin）；
- * - useCreateInterfaceCategory / useUpdateInterfaceCategory / useDeleteInterfaceCategory：
- *   各类写操作并失效分类列表缓存。
+ * - useUpdateInterfaceCategory：更新分类并失效分类列表缓存。
+ *
+ * 分类改版后为固定分类，前端不提供新增/删除入口（后端端点保留），
+ * 故不再封装 create / delete 两个写操作 hook。
  */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query';
 import { toast } from '@/composables/use-toast';
 import {
-  createInterfaceCategory,
-  deleteInterfaceCategory,
   listInterfaceCategories,
   updateInterfaceCategory,
-  type InterfaceCategoryCreate,
   type InterfaceCategoryUpdate,
 } from '@/api/interface-category.api';
 import { useIsAdmin } from '@/stores/auth.store';
@@ -34,19 +33,6 @@ export function useInterfaceCategories() {
   });
 }
 
-/** 新增分类（key 重复时后端返回 409 / VALIDATION_FAILED，拦截器已 toast，此处不二次提示） */
-export function useCreateInterfaceCategory() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (body: InterfaceCategoryCreate) => createInterfaceCategory(body),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: interfaceCategoriesKey() });
-      toast.success('分类已新增');
-    },
-    onError: () => toast.error('新增失败（key 可能已存在）'),
-  });
-}
-
 /** 更新分类 */
 export function useUpdateInterfaceCategory() {
   const queryClient = useQueryClient();
@@ -58,18 +44,5 @@ export function useUpdateInterfaceCategory() {
       toast.success('已保存');
     },
     onError: () => toast.error('保存失败（key 可能已存在）'),
-  });
-}
-
-/** 删除分类（不影响接口） */
-export function useDeleteInterfaceCategory() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (id: string) => deleteInterfaceCategory(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: interfaceCategoriesKey() });
-      toast.success('已删除');
-    },
-    onError: () => toast.error('删除失败'),
   });
 }

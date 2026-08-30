@@ -39,7 +39,6 @@ const apiMocks = vi.hoisted(() => ({
   resetToDerived: vi.fn(),
   upsertSnapshot: vi.fn(),
   updateSnapshot: vi.fn(),
-  getSnapshotByDate: vi.fn(),
 }));
 
 vi.mock('@/api/snapshot.api', () => apiMocks);

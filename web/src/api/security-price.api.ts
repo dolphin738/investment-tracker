@@ -4,7 +4,7 @@
  * 对应后端 /api/portfolios/:portfolioId/security-prices：
  * - POST   /security-prices     — 录入/覆盖标的最新价（同日期覆盖旧值）
  * - GET    /security-prices     — 列表（分页 + 日期范围 + 标的筛选）
- * - DELETE /security-prices/:id — 删除价格记录
+ * - DELETE /security-prices/:id — 删除价格记录（前端未接线）
  *
  * 方案B：SecurityPrice 按 asOf 日期向前沿用，写入会触发后端重算。
  */
@@ -36,15 +36,5 @@ export function listSecurityPrices(
   return http.get<PaginatedResponse<SecurityPriceResponse>>(
     `/portfolios/${portfolioId}/security-prices`,
     { params: query },
-  );
-}
-
-/** 删除价格记录 */
-export function deleteSecurityPrice(
-  portfolioId: string,
-  id: string,
-): Promise<null> {
-  return http.delete<null>(
-    `/portfolios/${portfolioId}/security-prices/${id}`,
   );
 }

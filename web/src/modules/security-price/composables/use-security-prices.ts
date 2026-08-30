@@ -3,12 +3,13 @@
  *
  * B11 补齐：B5 持仓批次已平移 React 版 use-security-prices.ts 中的
  * useUpsertSecurityPrice（见 modules/holdings/composables/use-security-prices.ts），
- * 此处补齐该批次仍未平移的 list / delete，并将「组合行情同步」封装为 mutation，
+ * 此处补齐该批次仍未平移的 list，并将「组合行情同步」封装为 mutation，
  * 同时对 React 版完整接口 re-export useUpsertSecurityPrice 便于统一从本模块导入。
  *
  * - useSecurityPrices：标的最新价列表（按组合 + 可选标的/日期范围查询）
- * - useDeleteSecurityPrice：删除单条价格记录（成功后失效相关缓存）
  * - useSyncPortfolioPrices：触发组合行情同步（路径 C，POST /prices/sync）
+ *
+ * 删除单条价格记录的功能从未接线，故不提供对应的 delete hook。
  *
  * 价格变更 / 同步会触发持仓/净值/快照重算，故成功后一并失效相关缓存。
  */
@@ -16,10 +17,7 @@
 import { computed, toValue, type Ref } from 'vue';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query';
 import { toast } from '@/composables/use-toast';
-import {
-  listSecurityPrices as listApi,
-  deleteSecurityPrice as deleteApi,
-} from '@/api/security-price.api';
+import { listSecurityPrices as listApi } from '@/api/security-price.api';
 import {
   syncPortfolioPrices as syncApi,
   type PriceSyncResult,
@@ -55,26 +53,6 @@ export function useSecurityPrices(
     queryFn: () => listApi(toValue(portfolioId) as string, query),
     enabled: computed(() => Boolean(toValue(portfolioId))),
     staleTime: 30 * 1000,
-  });
-}
-
-/** 删除价格记录（成功后失效相关缓存并提示） */
-export function useDeleteSecurityPrice() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({
-      portfolioId,
-      id,
-    }: {
-      portfolioId: string;
-      id: string;
-    }) => deleteApi(portfolioId, id),
-    onSuccess: () => {
-      toast.success('价格记录已删除');
-      AFFECTED_QUERY_KEYS.forEach((key) =>
-        queryClient.invalidateQueries({ queryKey: [...key] }),
-      );
-    },
   });
 }
 
