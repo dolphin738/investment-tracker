@@ -32,7 +32,7 @@ KPIN_VERSION = "5"  # 与 CI 保持一致的大版本；配置见 web/knip.json
 
 MANUAL_CHECKLIST = """
 ── 人工检查清单（提交人自证，§4.4-1/2/3/4）──
-  □ 新增的每个 export 至少有一处使用（knip exports 未启用前的人工替代）
+  □ 新增的每个 export 至少有一处使用（已由 knip exports 自动强制，本条仅作提交前提醒）
   □ 新增依赖已在提交说明中写明「为什么现有依赖/原生能力做不到」（§4.1-3 准入）
   □ 无防御性垃圾：异常后静默返回默认值、无意义重试包裹、复制粘贴相似块（相似度 ≥0.9）
   □ 本次提交只做一件事；功能+重构+格式化混排的先拆分再提交
@@ -91,7 +91,7 @@ def main() -> int:
     if "knip" not in skip:
         results["knip"] = _run(
             "knip",
-            ["npx", "-y", f"knip@{KPIN_VERSION}", "--include", "dependencies,unlisted,files"],
+            ["npx", "-y", f"knip@{KPIN_VERSION}", "--include", "dependencies,unlisted,files,exports"],
             REPO_ROOT / "web",
         )
     if "lines" not in skip:

@@ -52,7 +52,7 @@ main:
         - name: typecheck-gate-e2e
           script: cd web && pnpm run typecheck:e2e
         - name: knip-dependency-gate
-          script: cd web && npx -y knip@5 --include dependencies,unlisted,files
+          script: cd web && npx -y knip@5 --include dependencies,unlisted,files,exports
     - &backend_test
       name: backend-test
       docker:
