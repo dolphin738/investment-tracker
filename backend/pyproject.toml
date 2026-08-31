@@ -36,6 +36,8 @@ dev = [
     "httpx2==2.9.1",
     # 架构边界强制：层契约（import-linter）+ 接入 pytest 的 tests/test_import_linter.py
     "import-linter>=2.13,<3",
+    # 覆盖率闸门基线测量与强制（§6）：先测真实基线再按基线定阈值，避免直接拍 80% 全面 fail
+    "pytest-cov>=5,<7",
 ]
 
 [tool.pytest.ini_options]
