@@ -57,11 +57,19 @@ MANUAL_CHECKLIST = """
 
 
 def _resolve(cmd: str) -> str:
-    """Windows 下 subprocess 不能直接执行 .cmd（如 npx.cmd）→ 用 which 解析全路径。"""
+    """Windows 下 subprocess 不能直接执行 .cmd（如 npx.cmd）→ 用 which 解析全路径。
+
+    uv / uvx 额外回退：官方安装器默认装到 ``~/.local/bin``，该目录**并不总在 PATH**
+    （本机实测同一项目不同 shell 会话下时有时无），故 which 失败时回退该默认位置，
+    避免脚本因环境 PATH 差异而抛 FileNotFoundError(WinError 2)。
+    """
     if os.name == "nt" and not cmd.lower().endswith((".exe", ".cmd", ".bat")):
         found = shutil.which(cmd)
         if found:
             return found
+        fallback = Path.home() / ".local" / "bin" / f"{cmd}.exe"
+        if fallback.exists():
+            return str(fallback)
     return cmd
 
 

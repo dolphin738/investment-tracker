@@ -36,6 +36,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -118,11 +119,31 @@ def _normalize_path(raw: str) -> str | None:
     return normalized
 
 
+def _resolve_uv() -> str:
+    """解析 uv 可执行文件路径；找不到时给出明确错误。
+
+    uv 官方安装器默认装到 ``~/.local/bin``，而该目录**并不总在 PATH 中**（本机实测：
+    同一项目不同 shell 会话下 ``shutil.which("uv")`` 时有时无，导致脚本时而可用、
+    时而抛 FileNotFoundError(WinError 2)）。故 which 失败时回退到默认安装位置；
+    仍找不到则抛出可读错误，而不是让 subprocess 抛难以定位的 WinError 2。
+    """
+    found = shutil.which("uv")
+    if found:
+        return found
+    fallback = Path.home() / ".local" / "bin" / ("uv.exe" if os.name == "nt" else "uv")
+    if fallback.exists():
+        return str(fallback)
+    raise RuntimeError(
+        "找不到 uv 可执行文件：PATH 中不存在，默认位置 "
+        f"{fallback} 也不存在。请先安装 uv，或将其所在目录加入 PATH。"
+    )
+
+
 def _run_pytest(cov_json: Path) -> int:
     """在 backend/ 下跑 pytest 并产出覆盖率 JSON；返回 pytest 退出码。"""
     result = subprocess.run(
         [
-            "uv",
+            _resolve_uv(),
             "run",
             "pytest",
             "--cov=app",
@@ -215,7 +236,13 @@ def main() -> int:
     cov_json = Path(handle.name)
     handle.close()
     try:
-        print(f"[覆盖率闸门] 执行 pytest（cwd=backend，--cov=app）...")
+        uv_path = _resolve_uv()
+    except RuntimeError as exc:
+        print(f"[覆盖率闸门] {exc}")
+        return 3
+
+    try:
+        print(f"[覆盖率闸门] 执行 pytest（cwd=backend，--cov=app，uv={uv_path}）...")
         returncode = _run_pytest(cov_json)
         if returncode != 0:
             print(
