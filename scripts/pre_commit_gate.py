@@ -7,13 +7,20 @@
 包含的自动检查：
   1. 后端 ruff（F：未使用 import/变量、未定义名）——读 backend/pyproject.toml 配置
   2. 后端 import-linter（架构边界：models 不反向依赖上层、services 不依赖路由层）
-  3. 前端 knip 依赖/文件闸门（未被使用的依赖、未列名依赖、未使用文件）
+  3. 前端 knip 依赖/文件闸门（未被使用的依赖、未列名依赖、未使用文件、未使用导出）
   4. 行数预算（调 scripts/check_line_budget.py）
+  5. 「缺测试」标记（调 scripts/check_tests_touched.py）：改了业务源码却没动测试时打标，
+     默认告警（一次性重构属合理场景），设 REQUIRE_TESTS=1 升级为硬失败
+  6. 后端覆盖率（调 scripts/check_coverage.py）：默认**跳过**（需跑全量 pytest，约 4 分钟），
+     用 --only coverage 显式执行
+  7. 前端体积（调 scripts/check_bundle_size.py）：默认**跳过**（需 vite build，约 1 分钟），
+     用 --only bundle 显式执行
 
 用法：
-  python scripts/pre_commit_gate.py               # 全量（需联网拉 knip）
+  python scripts/pre_commit_gate.py               # 默认项（ruff/imports/knip/lines/tests）
   python scripts/pre_commit_gate.py --skip knip   # 离线快速模式
   python scripts/pre_commit_gate.py --only ruff   # 只跑某几项
+  python scripts/pre_commit_gate.py --only coverage bundle  # 跑耗时项（CI 已含，本地按需）
 
 退出码：存在任一失败项 → 1；否则 0。
 """
@@ -29,6 +36,11 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 KPIN_VERSION = "5"  # 与 CI 保持一致的大版本；配置见 web/knip.json
+
+# 全部检查项；coverage 需跑全量 pytest（约 4 分钟）、bundle 需 vite build（约 1 分钟），
+# 二者由 CI 强制（.cnb.yml），本地默认跳过，按需用 --only 显式执行。
+ALL_CHECKS = frozenset({"ruff", "imports", "knip", "lines", "tests", "coverage", "bundle"})
+SLOW_CHECKS = frozenset({"coverage", "bundle"})
 
 MANUAL_CHECKLIST = """
 ── 人工检查清单（提交人自证，§4.4-1/2/3/4）──
@@ -63,20 +75,22 @@ def main() -> int:
         "--skip",
         nargs="*",
         default=[],
-        choices=["ruff", "imports", "knip", "lines"],
+        choices=sorted(ALL_CHECKS),
         help="跳过指定检查（离线时跳 knip）",
     )
     parser.add_argument(
         "--only",
         nargs="*",
         default=None,
-        choices=["ruff", "imports", "knip", "lines"],
-        help="只运行指定检查",
+        choices=sorted(ALL_CHECKS),
+        help="只运行指定检查（coverage/bundle 为耗时项，默认不跑）",
     )
     args = parser.parse_args()
     skip = set(args.skip)
     if args.only:
-        skip = {"ruff", "imports", "knip", "lines"} - set(args.only)
+        skip = set(ALL_CHECKS) - set(args.only)
+    else:
+        skip |= SLOW_CHECKS  # 耗时项（全量 pytest / vite build）默认不进本地快检
 
     results: dict[str, bool] = {}
 
@@ -97,6 +111,22 @@ def main() -> int:
     if "lines" not in skip:
         results["lines"] = _run(
             "line-budget", [sys.executable, str(REPO_ROOT / "scripts" / "check_line_budget.py")], REPO_ROOT
+        )
+    if "tests" not in skip:
+        results["tests"] = _run(
+            "missing-test-tag",
+            [sys.executable, str(REPO_ROOT / "scripts" / "check_tests_touched.py")],
+            REPO_ROOT,
+        )
+    if "coverage" not in skip:
+        results["coverage"] = _run(
+            "coverage", [sys.executable, str(REPO_ROOT / "scripts" / "check_coverage.py")], REPO_ROOT
+        )
+    if "bundle" not in skip:
+        results["bundle"] = _run(
+            "bundle-size",
+            [sys.executable, str(REPO_ROOT / "scripts" / "check_bundle_size.py")],
+            REPO_ROOT,
         )
 
     print(MANUAL_CHECKLIST)

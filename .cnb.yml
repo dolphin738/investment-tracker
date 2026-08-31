@@ -6,16 +6,16 @@
 #
 # 结构：main 分支的 push / pull_request 事件共用同一组流水线（YAML 锚点复用）：
 #   - backend-lint   ruff(F) + import-linter 架构边界 + 行数预算
-#   - frontend-lint  vue-tsc(app+e2e) + knip 依赖/文件闸门
-#   - backend-test   真实 Postgres（docker 起容器）+ 全量 pytest
+#   - frontend-lint  vue-tsc(app+e2e) + knip 依赖/文件/导出闸门 + 体积闸门
+#   - backend-test   真实 Postgres（docker 起容器）+ 全量 pytest + 覆盖率闸门
 #   - frontend-test  全量 vitest
 # 任一失败即打回，不通过禁止合并。
 #
-# 已落地（本轮）：Lint / 依赖 / 行数 / 测试 四类闸门。
-# 列为后续（§4.3-3/5 未落，见 docs/架构治理规范.md「后续闸门」）：
-#   - 体积闸门（构建产物对比 main 增长 >5% 告警）
-#   - 覆盖率闸门（核心链路 <80% fail；先补覆盖率基线测量）
-#   - 「缺测试」标签（改动文件无对应测试变更时打标）
+# 已落地：Lint / 依赖 / 导出 / 行数 / 测试 / 体积 / 覆盖率 七类闸门。
+#   - 体积闸门：告警型，产物增长 >5% 打印告警（配 BUNDLE_SIZE_STRICT=1 升级为硬闸门）
+#   - 覆盖率闸门：分层阈值（finance_core 90 / services 60 / app 70），按真实基线留缓冲
+#   - 「缺测试」标签：本地 pre_commit_gate.py 打标；CI 不重复执行
+#     （CNB 浅克隆下 merge-base 基线不可靠，且该项为提醒性质）
 # =====================================================================
 main:
   push:
@@ -53,6 +53,17 @@ main:
           script: cd web && pnpm run typecheck:e2e
         - name: knip-dependency-gate
           script: cd web && npx -y knip@5 --include dependencies,unlisted,files,exports
+        - name: bundle-size-gate-体积闸门
+          script: |
+            cd web && npx vite build
+            # node:22-slim 不保证自带 python3；本闸门为告警型，装不上也不阻塞合并
+            command -v python3 >/dev/null || apt-get update -qq >/dev/null 2>&1 || true
+            command -v python3 >/dev/null || apt-get install -y -qq --no-install-recommends python3 >/dev/null 2>&1 || true
+            if command -v python3 >/dev/null; then
+              python3 ../scripts/check_bundle_size.py
+            else
+              echo "[体积闸门] python3 不可用，跳过（告警型闸门，不阻塞合并）"
+            fi
     - &backend_test
       name: backend-test
       docker:
@@ -83,6 +94,12 @@ main:
             export DATABASE_URL="postgresql+asyncpg://pgtest:pgtest@${PG_HOST}:5432/investment_tracker"
             export TEST_DATABASE_URL="postgresql+asyncpg://pgtest:pgtest@${PG_HOST}:5432/investment_tracker_test"
             cd backend && uv sync --extra dev && uv run pytest
+        - name: coverage-gate-覆盖率闸门
+          script: |
+            . /tmp/env.sh
+            export DATABASE_URL="postgresql+asyncpg://pgtest:pgtest@${PG_HOST}:5432/investment_tracker"
+            export TEST_DATABASE_URL="postgresql+asyncpg://pgtest:pgtest@${PG_HOST}:5432/investment_tracker_test"
+            cd backend && python ../scripts/check_coverage.py
     - &frontend_test
       name: frontend-test
       docker:
