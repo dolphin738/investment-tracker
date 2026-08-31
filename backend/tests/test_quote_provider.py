@@ -183,3 +183,79 @@ async def test_get_active_provider_removed_no_global_switch(client):
     assert "is_default" not in data
     assert "is_active" not in data
     assert data["enabled"] is True
+
+
+async def test_update_can_clear_description(client):
+    """显式传 description=null（清空描述）必须真正置空 —— 同类「可空字段无法清空」缺陷核心回归点。"""
+    token = await _admin_token(client, "qp_admin_7@example.com")
+    pid = env(
+        await client.post(
+            "/api/admin/quote-providers",
+            json={**HTTPS_BODY, "description": "旧描述"},
+            headers=auth(token),
+        )
+    )[2]["id"]
+    r = await client.patch(
+        f"/api/admin/quote-providers/{pid}",
+        json={"description": None},
+        headers=auth(token),
+    )
+    status, code, data, _ = env(r)
+    assert status == 200 and code == 0
+    assert data["description"] is None
+
+
+async def test_update_can_set_description(client):
+    """显式传 description 应正常写入（修复前即已可用，锁定不被回归破坏）。"""
+    token = await _admin_token(client, "qp_admin_8@example.com")
+    pid = env(
+        await client.post("/api/admin/quote-providers", json=HTTPS_BODY, headers=auth(token))
+    )[2]["id"]
+    r = await client.patch(
+        f"/api/admin/quote-providers/{pid}",
+        json={"description": "备注用途"},
+        headers=auth(token),
+    )
+    assert env(r)[0] == 200 and env(r)[2]["description"] == "备注用途"
+
+
+async def test_update_omitted_field_keeps_original(client):
+    """未传的字段不得改动原值（exclude_unset 局部更新语义）。"""
+    token = await _admin_token(client, "qp_admin_13@example.com")
+    pid = env(
+        await client.post(
+            "/api/admin/quote-providers",
+            json={**HTTPS_BODY, "description": "原始备注"},
+            headers=auth(token),
+        )
+    )[2]["id"]
+    r = await client.patch(
+        f"/api/admin/quote-providers/{pid}",
+        json={"name": "改名_13"},
+        headers=auth(token),
+    )
+    assert env(r)[0] == 200
+    r2 = await client.get(f"/api/admin/quote-providers/{pid}", headers=auth(token))
+    d = env(r2)[2]
+    assert d["name"] == "改名_13"
+    assert d["description"] == "原始备注"  # 未传字段保持
+
+
+async def test_update_non_nullable_explicit_null_skipped(client):
+    """NOT NULL 列收到显式 null 应被跳过，避免 IntegrityError（enabled 保持原值）。"""
+    token = await _admin_token(client, "qp_admin_14@example.com")
+    pid = env(
+        await client.post(
+            "/api/admin/quote-providers",
+            json={**HTTPS_BODY, "enabled": True},
+            headers=auth(token),
+        )
+    )[2]["id"]
+    r = await client.patch(
+        f"/api/admin/quote-providers/{pid}",
+        json={"enabled": None},
+        headers=auth(token),
+    )
+    assert env(r)[0] == 200
+    r2 = await client.get(f"/api/admin/quote-providers/{pid}", headers=auth(token))
+    assert env(r2)[2]["enabled"] is True  # 原值保留，未被置空

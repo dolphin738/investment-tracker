@@ -367,14 +367,11 @@ async def update_quote_provider(
     if provider is None:
         raise HTTPException(status_code=404, detail="提供方不存在")
     try:
-        provider = await svc.update(
-            provider,
-            name=body.name,
-            access_method=body.access_method.value if body.access_method is not None else None,
-            config=body.config,
-            enabled=body.enabled,
-            description=body.description,
-        )
+        # 用 exclude_unset 区分「客户端显式传 null（清空）」与「未传字段（不改动）」，
+        # 与 QuoteInterfaceUpdate 修复保持一致（修复「可空字段无法清空」缺陷）。
+        # mode="json" 会把 access_method 枚举序列化为字符串值，无需手动 .value。
+        data = body.model_dump(exclude_unset=True, mode="json")
+        provider = await svc.update(provider, **data)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     await db.commit()
