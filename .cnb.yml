@@ -12,6 +12,13 @@
 # 任一失败即打回，不通过禁止合并。
 #
 # 已落地：Lint / 依赖 / 导出 / 行数 / 测试 / 体积 / 覆盖率 七类闸门。
+#
+# pnpm 版本统一为 **11.20.0**（与 web/node_modules 的建树版本一致）：
+#   - 两处 `npm i -g pnpm@11.20.0`（下方 frontend-lint / frontend-test 的 install stage）
+#   - web/package.json 的 `packageManager: "pnpm@11.20.0"` 字段同步锁定
+#   背景：node_modules 由 pnpm@11.20.0 + isolated 建成（virtualStoreDirMaxLength=60），
+#   与 pnpm 9 默认参数不符，用 pnpm 9 操作会触发「删除并重建 node_modules」。
+#   lockfile 格式 pnpm 9 与 11 相同（均 '9.0'），实测二者生成结果 diff 为空。
 #   - 体积闸门：告警型，产物增长 >5% 打印告警（配 BUNDLE_SIZE_STRICT=1 升级为硬闸门）
 #   - 覆盖率闸门：分层阈值（finance_core 90 / services 60 / app 70），按真实基线留缓冲
 #   - 「缺测试」标签：本地 pre_commit_gate.py 打标；CI 不重复执行
@@ -45,7 +52,7 @@ main:
       stages:
         - name: install
           script: |
-            npm i -g pnpm@9
+            npm i -g pnpm@11.20.0
             cd web && pnpm install --frozen-lockfile
         - name: typecheck-gate-app
           script: cd web && pnpm run lint
@@ -109,7 +116,7 @@ main:
       stages:
         - name: install
           script: |
-            npm i -g pnpm@9
+            npm i -g pnpm@11.20.0
             cd web && pnpm install --frozen-lockfile
         - name: run-vitest
           script: cd web && pnpm test

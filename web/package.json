@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "description": "Investment Tracker Web Frontend (Vue 3) - Vite + Vue 3 + Tailwind 3 + shadcn-vue",
+  "packageManager": "pnpm@11.20.0",
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc --noEmit -p tsconfig.app.json && vite build",
