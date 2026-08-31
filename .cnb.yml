@@ -45,10 +45,10 @@ main:
           script: cd backend && uv run lint-imports
         - name: line-budget-gate-行数预算
           script: |
-            # 治理收口 PR（cleanup/phase-0）一次性合入 5208 行，远超行数预算上限（800）。
-            # 按 check_line_budget.py 设计的豁免通道，由 owner 显式放行（等同人工说明）。
-            # ⚠️ 此为一次性收口豁免；合入 main 后如要恢复行数闸门的日常约束力，移除下行 export。
-            export LARGE_PR_APPROVED=1
+            # 行数预算闸门：单次变更新增行数上限 800（scripts/check_line_budget.py）。
+            # 治理收口 PR #1（5208 行）曾在此硬编码 LARGE_PR_APPROVED=1 一次性豁免，已随合并完成移除，
+            # 闸门日常约束力恢复。后续如确有需要放行的大 PR，由 owner 在 CNB 仓库级 CI 变量中
+            # 注入 LARGE_PR_APPROVED=1（该动作本身即人工说明的落点），不要再写回本文件。
             python scripts/check_line_budget.py
     - &frontend_lint
       name: frontend-lint
