@@ -35,6 +35,8 @@ main:
       stages:
         - name: install
           script: |
+            # python:3.12-slim 不含 git；行数预算闸门（check_line_budget.py）需调用 git
+            apt-get update -qq && apt-get install -y -qq git
             pip install uv
             cd backend && uv sync --extra dev
         - name: ruff-gate-pyflakes
@@ -91,19 +93,44 @@ main:
               sleep 1
             done
             docker exec pg pg_isready -U pgtest
-            # 容器网络拓扑不确定性兜底：优先取容器 IP，取不到回退 localhost
-            PG_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' pg)
-            echo "export PG_HOST=${PG_IP:-127.0.0.1}" >> /tmp/env.sh
         - name: run-pytest
           script: |
             pip install uv
-            . /tmp/env.sh
+            cd backend && uv sync --extra dev
+            # 确保 Postgres 就绪：优先复用 start-postgres 阶段已起的容器，否则本阶段自起。
+            # 关键：PG_HOST 在当前阶段内推导，不依赖跨阶段 /tmp/env.sh（阶段间容器状态不共享）。
+            if ! docker ps --format '{{.Names}}' | grep -q '^pg$'; then
+              docker run -d --name pg \
+                -e POSTGRES_USER=pgtest -e POSTGRES_PASSWORD=pgtest \
+                -e POSTGRES_DB=investment_tracker \
+                postgres:16-alpine
+              for i in $(seq 1 30); do
+                docker exec pg pg_isready -U pgtest && break
+                sleep 1
+              done
+            fi
+            docker exec pg pg_isready -U pgtest
+            # 取 postgres 容器桥接 IP（与测试进程同处 dind 网络，桥接 IP 可达）；取不到回退 localhost
+            PG_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' pg)
+            export PG_HOST=${PG_IP:-127.0.0.1}
             export DATABASE_URL="postgresql+asyncpg://pgtest:pgtest@${PG_HOST}:5432/investment_tracker"
             export TEST_DATABASE_URL="postgresql+asyncpg://pgtest:pgtest@${PG_HOST}:5432/investment_tracker_test"
-            cd backend && uv sync --extra dev && uv run pytest
+            uv run pytest
         - name: coverage-gate-覆盖率闸门
           script: |
-            . /tmp/env.sh
+            # 覆盖率闸门同样需要可用的 Postgres（其内部 uv run pytest --cov）
+            if ! docker ps --format '{{.Names}}' | grep -q '^pg$'; then
+              docker run -d --name pg \
+                -e POSTGRES_USER=pgtest -e POSTGRES_PASSWORD=pgtest \
+                -e POSTGRES_DB=investment_tracker \
+                postgres:16-alpine
+              for i in $(seq 1 30); do
+                docker exec pg pg_isready -U pgtest && break
+                sleep 1
+              done
+            fi
+            PG_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' pg)
+            export PG_HOST=${PG_IP:-127.0.0.1}
             export DATABASE_URL="postgresql+asyncpg://pgtest:pgtest@${PG_HOST}:5432/investment_tracker"
             export TEST_DATABASE_URL="postgresql+asyncpg://pgtest:pgtest@${PG_HOST}:5432/investment_tracker_test"
             cd backend && python ../scripts/check_coverage.py
