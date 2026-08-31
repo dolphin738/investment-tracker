@@ -1043,7 +1043,7 @@ REP-003 报告裁决为**采纳**，建议「环境开关 / 命令白名单 / BF
 | 覆盖率闸门（后端） | `scripts/check_coverage.py`，CI backend-test `coverage-gate` | 分层按语句数加权：finance_core ≥90（基线 96.1）/ services ≥60（62.9）/ app 整体 ≥70（73.3）；modules 69.6 为观察项。阈值按实测基线留缓冲，不照搬计划里的 80%（否则一启用即全面 fail）；豁免=`COVERAGE_APPROVED=1`。单次约 4 分钟，由 CI 承担 |
 | 体积闸门 | `scripts/check_bundle_size.py`，CI frontend-lint `bundle-size-gate` | dist 文本类按 gzip 字节计、图片/字体计原始大小、`.map` 不计；对比入库基线 `scripts/bundle-baseline.json`（首版 670.8 kB/99 文件）。默认告警不阻塞，`BUNDLE_SIZE_STRICT=1` 转硬闸门；抬基线走 `--update-baseline` |
 | 「缺测试」标签 | `scripts/check_tests_touched.py`，接入 `pre_commit_gate.py` 默认项 | 改业务源码而无测试变更即打「缺测试」标；默认告警，`REQUIRE_TESTS=1` 转硬闸门。CI 不重复执行（浅克隆下 merge-base 不可靠）；CNB 平台侧打标签需调 API，未做 |
-| 未落（§6 列明） | 前端覆盖率闸门 | 需装 `@vitest/coverage-v8`；阻塞于 `web/node_modules` 由 pnpm@11.20.0+isolated 建成、与 `.npmrc` 的 hoisted 冲突，本机仅 pnpm 9.15.9 无法增删依赖——待环境对齐后单列一轮 |
+| 覆盖率闸门（前端） | `scripts/check_frontend_coverage.py`，CI frontend-test `frontend-coverage-gate` | 分层按语句数加权：src/lib ≥73（基线 78.55）/ src 整体 ≥65（69.05）；src/modules（68.21）、src/api（51.63）为观察项。⚠️ 本地装不到 `@vitest/coverage-v8`（pnpm 环境漂移：建树 pnpm@11.20.0+isolated，现仅 9.15.9 且 .npmrc 声明 hoisted）→ 依赖经 **pnpm 9 临时副本**登记进 package.json / pnpm-lock.yaml（已验证 `--frozen-lockfile` 通过），由 CI 全新环境强制执行；本地执行会报「依赖缺失」（EXIT=3） |
 
 ### 3. 验证（全绿）
 
