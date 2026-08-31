@@ -8,7 +8,10 @@
 ## 0. 项目概览
 
 - **投资回报追踪器** monorepo：Python 后端（`backend/`，FastAPI + SQLAlchemy 2.0 + PostgreSQL）+ **Vue3** 前端（`web/`，Vite + Pinia + vue-query + vee-validate）。
-- 权威远端：`cnb`（cnb.cool）；`github` 仅镜像，**非推送目标**。
+- **包管理**：统一 **pnpm 11.20.0**（`web/package.json` 已 `packageManager` 锁定），CI 与本地均须此版本；`package.json` 与 `pnpm-lock.yaml` 须严格匹配（lockfile 格式 pnpm 9/11 兼容）。
+- **部署形态**：前后端同 Docker 镜像单进程（uvicorn :3000 同源 serve `web/dist` + SPA 回退，由 `FRONTEND_DIR` 控制）；前端 API 相对 `/api`；`pnpm build` = `vue-tsc --noEmit` 类型校验前置 + `vite build`。
+- **文档与提交纪律**：分析/方案/诊断 markdown 落 `docs/`、散落文档归 `docs/archive/`、`adr/` 仅放 ADR；**`git diff` 为空的文件（CRLF/LF 假象，如 `docs/PRD.md`）勿纳入提交**。
+- 权威远端：`cnb`（cnb.cool，推送目标）；`github` 仅镜像，**非推送目标**。
 - 工作流：改动完自动提交（Conventional Commits，作者 `senior-dev <dev@local>`）；**agent 不主动 push**。
 
 ---
@@ -51,6 +54,9 @@
 - **零遗留**：不含任何 NestJS/Prisma/TS 后端代码。
 - `backend/scripts/`（git 跟踪）≠ 仓库根 `dev-scripts/`（`.gitignore` 忽略）。
 - push 必须走 `dev-scripts/push-all.ps1` + `CNB_TOKEN`（内嵌 URL 绕过凭据弹窗）；**不要**直接 `git push`（非交互环境会卡死）。
+- **knip 陷阱**：以字符串形式被引用的依赖（如 `@vitest/coverage-v8` 的 `provider: 'v8'`）会被判 unused（EXIT=1）；新增依赖若仅以字符串引用，须在 `web/knip.json` 的 `ignoreDependencies` 登记并说明理由。
+- **Alembic 迁移写法**：PG 原生枚举列用 `postgresql.ENUM(..., create_type=False)`；**PG 不支持 `ALTER TYPE ... DROP VALUE`**，删枚举值须重建类型（列降级 text → `DROP TYPE` → `CREATE TYPE` → 改回 `USING col::text::"Name"`）。
+- **业务/数据模型决策**见 `docs/` 与 `adr/`（ADR-002 多提供方行情、ADR-003 证券拆表、N1 含费成本基础等）；改动前先对齐，勿凭记忆推断。
 
 ---
 
@@ -59,6 +65,15 @@
 - 后端改动后：`uv run pytest`
 - 前端改动后：`pnpm run lint`（`vue-tsc --noEmit`） + `pnpm test`（`vitest run`）+ 必要时 `pnpm run typecheck:e2e`
 - 提交前：`python scripts/pre_commit_gate.py`
+
+---
+
+## 5. CNB 协作与 CI 约定
+
+- **流水线触发**：`.cnb.yml` 顶层 `main:` 下含 `push` 与 `pull_request` 两组；**push 到 `main` 会触发四条流水线**（`#001` backend-lint / `#002` frontend-lint / `#003` backend-test / `#004` frontend-test）。非 main 分支 push **不触发** CI，必须开 PR。
+- **`statuses` 不阻塞合并**：CNB PR 的 `statuses` 字段恒为空，不能据此推断「CI 全绿才合入」；**合并后须从构建页核验四条流水线**（见下）。
+- **查看 CI 结果**：CNB 无构建列表 API，build id 须从构建页 URL 获取（`/-/build/logs/{id}`，锚点 `#001~#004` 对应各流水线）；日志为 JS 动态加载，须用 `curl` 抓原始 HTML 再解析内嵌 `pipelines` JSON（WebFetch 只能拿外壳）。
+- **开 PR（自动化）**：走 CNB OpenAPI —— `POST https://api.cnb.cool/{owner}/{repo}/-/pulls`，鉴权 `Authorization: Bearer <PAT>` + `Accept: application/vnd.cnb.api+json`，令牌须含 `repo-pr:rw`（建议 `repo:rw`）。agent 可借用户临时 PAT 调用，**仅当次使用、不写盘、不回显**。
 
 ---
 
