@@ -463,26 +463,17 @@ async def update_interface(
         category = await cat_svc.get(body.category_id)
         if category is None:
             raise HTTPException(status_code=400, detail="接口分类不存在")
-    obj = await svc.update(
-        obj,
-        category_id=body.category_id,
-        name=body.name,
-        endpoint=body.endpoint,
-        http_method=body.http_method,
-        params=body.params,
-        enabled=body.enabled,
-        description=body.description,
-        direction=body.direction.value if body.direction is not None else None,
-        timeout=body.timeout,
-        retry_count=body.retry_count,
-        rate_limit=body.rate_limit,
-        asset_class=body.asset_class,
-        resp_code_field=body.resp_code_field,
-        resp_price_field=body.resp_price_field,
-        resp_name_field=body.resp_name_field,
-        resp_exchange_field=body.resp_exchange_field,
-        response_parse=body.response_parse,
-    )
+    # 用 exclude_unset 区分「客户端显式传 null（=清空）」与「未传该字段（=不改动）」。
+    # 旧写法把两者都当 None 传入，服务层一律跳过 → 资产类别取消全选后无法保存（清空失效）。
+    opts = body.model_dump(exclude_unset=True)
+    # direction 是枚举：落库存原始字符串；显式 null 视为「不改动」（该列 NOT NULL，不可清空）
+    if "direction" in opts:
+        direction = opts["direction"]
+        if direction is None:
+            opts.pop("direction")
+        else:
+            opts["direction"] = getattr(direction, "value", direction)
+    obj = await svc.update(obj, **opts)
     await db.commit()
     await db.refresh(obj)
     return QuoteInterfaceOut.model_validate(obj)

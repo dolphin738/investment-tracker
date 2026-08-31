@@ -20,6 +20,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.quote_interface import QuoteInterface
 from app.services.interface_category import InterfaceCategoryService
 
+# 允许被显式置 NULL（清空）的列：由模型可空性派生。
+# 目的是让「清空资产类别」等置空操作生效，同时避免把 NOT NULL 列写成 NULL
+# 触发 IntegrityError（如 name / resp_code_field / resp_price_field）。
+_NULLABLE_COLUMNS = frozenset(
+    col.key for col in QuoteInterface.__table__.columns if col.nullable
+)
+
 
 class QuoteInterfaceService:
     def __init__(self, session: AsyncSession) -> None:
@@ -162,9 +169,14 @@ class QuoteInterfaceService:
     async def update(
         self, obj: QuoteInterface, **opts: Any
     ) -> QuoteInterface:
-        """局部更新：仅应用显式提供的字段（None 表示未提供，跳过）。
+        """局部更新：仅应用调用方显式提供的字段。
 
-        注意 provider_id 不在更新范围内（接口归属不可改）。
+        调用方须传入 Pydantic 的 model_dump(exclude_unset=True) 结果，以便区分
+        「客户端显式传 null（=清空）」与「未传该字段（=不改动）」——旧实现把两者
+        都当 None 并一律跳过，导致资产类别取消全选后无法保存。
+
+        可空列允许被显式置 NULL（清空生效）；非可空列遇到显式 None 仍跳过，
+        避免写入 NULL 触发 IntegrityError。provider_id 不在更新范围内（接口归属不可改）。
         """
         # 若本次要写入新的 category_id（不为空），先校验其指向真实存在的分类。
         # 设为未分类（category_id=None）是允许的，无需校验。
@@ -174,7 +186,8 @@ class QuoteInterfaceService:
             if category is None:
                 raise HTTPException(status_code=400, detail="分类不存在")
         for key, value in opts.items():
-            if value is not None:
+            # 非 None 直接写入；None 仅在该列可空时写入（即「清空」语义）
+            if value is not None or key in _NULLABLE_COLUMNS:
                 setattr(obj, key, value)
         await self.session.flush()
         await self.session.refresh(obj)

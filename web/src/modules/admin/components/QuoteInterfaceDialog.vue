@@ -207,9 +207,12 @@ const removeParamRow = (idx: number): void => {
 
 /** 切换资产类别多选（勾选/取消单个） */
 function toggleAssetClass(value: string): void {
-  const i = form.assetClass.indexOf(value);
-  if (i >= 0) form.assetClass.splice(i, 1);
-  else form.assetClass.push(value);
+  // 整体替换而非原地 splice/push：与表单重置（Object.assign 整体替换）路径一致，
+  // 强制走响应式 set trap，保证 chip 选中态可靠刷新。
+  const next = new Set(form.assetClass);
+  if (next.has(value)) next.delete(value);
+  else next.add(value);
+  form.assetClass = [...next];
 }
 
 function handleSubmit(): void {
