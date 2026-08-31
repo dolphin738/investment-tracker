@@ -87,55 +87,62 @@ main:
       services:
         - docker
       stages:
-        - name: start-postgres
-          script: |
-            docker run -d --name pg \
-              -e POSTGRES_USER=pgtest -e POSTGRES_PASSWORD=pgtest \
-              -e POSTGRES_DB=investment_tracker \
-              postgres:16-alpine
-            for i in $(seq 1 30); do
-              docker exec pg pg_isready -U pgtest && break
-              sleep 1
-            done
-            docker exec pg pg_isready -U pgtest
         - name: run-pytest
           script: |
             pip install uv
             cd backend && uv sync --extra dev
-            # 确保 Postgres 就绪：优先复用 start-postgres 阶段已起的容器，否则本阶段自起。
-            # 关键：PG_HOST 在当前阶段内推导，不依赖跨阶段 /tmp/env.sh（阶段间容器状态不共享）。
-            if ! docker ps --format '{{.Names}}' | grep -q '^pg$'; then
-              docker run -d --name pg \
-                -e POSTGRES_USER=pgtest -e POSTGRES_PASSWORD=pgtest \
-                -e POSTGRES_DB=investment_tracker \
-                postgres:16-alpine
-              for i in $(seq 1 30); do
-                docker exec pg pg_isready -U pgtest && break
-                sleep 1
-              done
+            # 自包含启动 Postgres：同阶段内 docker 起容器，先用 --network host（最稳），
+            # 失败回退 -p 5432:5432 端口映射；再用 /dev/tcp 从本阶段容器实测可达性择优，
+            # 规避跨容器/桥接 IP 不可达导致的全量 TimeoutError。
+            docker rm -f pg 2>/dev/null || true
+            if ! docker run -d --name pg --network host \
+                  -e POSTGRES_USER=pgtest -e POSTGRES_PASSWORD=pgtest \
+                  -e POSTGRES_DB=investment_tracker postgres:16-alpine 2>/dev/null; then
+              docker run -d --name pg -p 5432:5432 \
+                  -e POSTGRES_USER=pgtest -e POSTGRES_PASSWORD=pgtest \
+                  -e POSTGRES_DB=investment_tracker postgres:16-alpine
             fi
-            docker exec pg pg_isready -U pgtest
-            # 取 postgres 容器桥接 IP（与测试进程同处 dind 网络，桥接 IP 可达）；取不到回退 localhost
-            PG_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' pg)
-            export PG_HOST=${PG_IP:-127.0.0.1}
+            for i in $(seq 1 30); do
+              docker exec pg pg_isready -U pgtest >/dev/null 2>&1 && break
+              sleep 1
+            done
+            PG_BRIDGE=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' pg)
+            if timeout 3 bash -c 'cat < /dev/null > /dev/tcp/127.0.0.1/5432' 2>/dev/null; then
+              PG_HOST=127.0.0.1
+            elif [ -n "$PG_BRIDGE" ] && timeout 3 bash -c "cat < /dev/null > /dev/tcp/${PG_BRIDGE}/5432" 2>/dev/null; then
+              PG_HOST=$PG_BRIDGE
+            else
+              PG_HOST=127.0.0.1
+            fi
+            echo "DIAG PG_HOST=$PG_HOST PG_BRIDGE=$PG_BRIDGE"
+            export PG_HOST
             export DATABASE_URL="postgresql+asyncpg://pgtest:pgtest@${PG_HOST}:5432/investment_tracker"
             export TEST_DATABASE_URL="postgresql+asyncpg://pgtest:pgtest@${PG_HOST}:5432/investment_tracker_test"
             uv run pytest
         - name: coverage-gate-覆盖率闸门
           script: |
-            # 覆盖率闸门同样需要可用的 Postgres（其内部 uv run pytest --cov）
-            if ! docker ps --format '{{.Names}}' | grep -q '^pg$'; then
-              docker run -d --name pg \
-                -e POSTGRES_USER=pgtest -e POSTGRES_PASSWORD=pgtest \
-                -e POSTGRES_DB=investment_tracker \
-                postgres:16-alpine
-              for i in $(seq 1 30); do
-                docker exec pg pg_isready -U pgtest && break
-                sleep 1
-              done
+            docker rm -f pg 2>/dev/null || true
+            if ! docker run -d --name pg --network host \
+                  -e POSTGRES_USER=pgtest -e POSTGRES_PASSWORD=pgtest \
+                  -e POSTGRES_DB=investment_tracker postgres:16-alpine 2>/dev/null; then
+              docker run -d --name pg -p 5432:5432 \
+                  -e POSTGRES_USER=pgtest -e POSTGRES_PASSWORD=pgtest \
+                  -e POSTGRES_DB=investment_tracker postgres:16-alpine
             fi
-            PG_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' pg)
-            export PG_HOST=${PG_IP:-127.0.0.1}
+            for i in $(seq 1 30); do
+              docker exec pg pg_isready -U pgtest >/dev/null 2>&1 && break
+              sleep 1
+            done
+            PG_BRIDGE=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' pg)
+            if timeout 3 bash -c 'cat < /dev/null > /dev/tcp/127.0.0.1/5432' 2>/dev/null; then
+              PG_HOST=127.0.0.1
+            elif [ -n "$PG_BRIDGE" ] && timeout 3 bash -c "cat < /dev/null > /dev/tcp/${PG_BRIDGE}/5432" 2>/dev/null; then
+              PG_HOST=$PG_BRIDGE
+            else
+              PG_HOST=127.0.0.1
+            fi
+            echo "DIAG PG_HOST=$PG_HOST PG_BRIDGE=$PG_BRIDGE"
+            export PG_HOST
             export DATABASE_URL="postgresql+asyncpg://pgtest:pgtest@${PG_HOST}:5432/investment_tracker"
             export TEST_DATABASE_URL="postgresql+asyncpg://pgtest:pgtest@${PG_HOST}:5432/investment_tracker_test"
             cd backend && python ../scripts/check_coverage.py
