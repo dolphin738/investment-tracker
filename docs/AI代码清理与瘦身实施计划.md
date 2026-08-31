@@ -1043,10 +1043,11 @@ REP-003 报告裁决为**采纳**，建议「环境开关 / 命令白名单 / BF
 | 覆盖率闸门（后端） | `scripts/check_coverage.py`，CI backend-test `coverage-gate` | 分层按语句数加权：finance_core ≥90（基线 96.1）/ services ≥60（62.9）/ app 整体 ≥70（73.3）；modules 69.6 为观察项。阈值按实测基线留缓冲，不照搬计划里的 80%（否则一启用即全面 fail）；豁免=`COVERAGE_APPROVED=1`。单次约 4 分钟，由 CI 承担 |
 | 体积闸门 | `scripts/check_bundle_size.py`，CI frontend-lint `bundle-size-gate` | dist 文本类按 gzip 字节计、图片/字体计原始大小、`.map` 不计；对比入库基线 `scripts/bundle-baseline.json`（首版 670.8 kB/99 文件）。默认告警不阻塞，`BUNDLE_SIZE_STRICT=1` 转硬闸门；抬基线走 `--update-baseline` |
 | 「缺测试」标签 | `scripts/check_tests_touched.py`，接入 `pre_commit_gate.py` 默认项 | 改业务源码而无测试变更即打「缺测试」标；默认告警，`REQUIRE_TESTS=1` 转硬闸门。CI 不重复执行（浅克隆下 merge-base 不可靠）；CNB 平台侧打标签需调 API，未做 |
-| 覆盖率闸门（前端） | `scripts/check_frontend_coverage.py`，CI frontend-test `frontend-coverage-gate` | 分层按语句数加权：src/lib ≥73（基线 78.55）/ src 整体 ≥65（69.05）；src/modules（68.21）、src/api（51.63）为观察项。**pnpm 版本已统一为 11.20.0**（与 node_modules 建树版本一致）：CI `.cnb.yml` 安装 `pnpm@11.20.0`、
+| 覆盖率闸门（前端） | `scripts/check_frontend_coverage.py`，CI frontend-test `frontend-coverage-gate` | 分层按语句数加权（脚本口径实测基线）：src/lib ≥73（**80.21**）/ src 整体 ≥65（**69.14**）；src/modules（68.21）、src/api（51.63）为观察项。本地亦可直跑（pnpm 11 已增量补装 coverage-v8，node_modules 未重建）。**pnpm 版本已统一为 11.20.0**（与 node_modules 建树版本一致）：CI `.cnb.yml` 安装 `pnpm@11.20.0`、
 `package.json` 锁定 `packageManager`、本机 PATH 内 pnpm 同为 11.20.0；lockfile 经 pnpm 11 重新生成，
-与 pnpm 9 产物完全一致（均 `lockfileVersion: '9.0'`，diff 为空）。本机 node_modules 仍为建树时的
-isolated 结构、尚未实际安装 coverage-v8，故本地执行仍报「依赖缺失」（EXIT=3），由 CI 全新环境强制 |
+与 pnpm 9 产物完全一致（均 `lockfileVersion: '9.0'`，diff 为空）。本机用 pnpm 11 增量补装 coverage-v8 后
+**本地亦可直跑**（node_modules 未重建）；本地沙箱的 safe-delete shim 会让 vitest 在报告写完后清理
+`coverage/.tmp` 时退出码非 0，脚本按特征串识别为噪声并按产物判定 |
 
 ### 3. 验证（全绿）
 
