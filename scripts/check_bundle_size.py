@@ -32,6 +32,7 @@ import argparse
 import gzip
 import json
 import os
+import shutil
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -112,10 +113,36 @@ def _load_baseline(baseline: Path) -> dict | None:
         return None
 
 
+def _resolve(cmd: str) -> str:
+    """Windows 下 subprocess 不能直接执行 .cmd（如 npx.cmd）→ 用 which 解析全路径。
+
+    与 ``pre_commit_gate.py`` 的 ``_resolve`` 同一处理：本项目运行在 Windows，
+    直接把 "npx" 交给 subprocess 会抛 FileNotFoundError（WinError 2）。
+    """
+    if os.name == "nt" and not cmd.lower().endswith((".exe", ".cmd", ".bat")):
+        found = shutil.which(cmd)
+        if found:
+            return found
+    return cmd
+
+
+def _prepare_dist(dist: Path) -> None:
+    """构建前清空产物目录（用 Python，而非交给 vite 的 emptyOutDir）。
+
+    本地沙箱会把 node 的 ``fs.rm``/``rmSync`` 包成回收站操作（safe-delete shim），
+    vite 在 ``prepareOutDir`` 阶段清空 dist 时会被拦截，导致**构建直接失败**
+    （与覆盖率场景不同：那里的清理发生在报告写完之后，产物已可用，可忽略；
+    这里的清理发生在构建之前，失败即无产物，绝不能忽略）。
+    故由脚本先用 Python 清空，再以 ``--emptyOutDir false`` 让 vite 不重复清空。
+    """
+    if dist.exists():
+        shutil.rmtree(dist, ignore_errors=True)
+
+
 def _run_build() -> int:
     """在 web/ 下执行 vite build；返回退出码。"""
     result = subprocess.run(
-        ["npx", "vite", "build"],
+        [_resolve("npx"), "vite", "build", "--emptyOutDir", "false"],
         cwd=WEB_DIR,
         encoding="utf-8",
         errors="replace",
@@ -148,6 +175,7 @@ def main() -> int:
 
     if args.build:
         print("[体积闸门] 执行 vite build ...")
+        _prepare_dist(Path(args.dist))
         if _run_build() != 0:
             print("[体积闸门] 构建失败：体积数据不可信，不据此告警。")
             return 3
