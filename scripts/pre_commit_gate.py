@@ -13,7 +13,10 @@
      默认告警（一次性重构属合理场景），设 REQUIRE_TESTS=1 升级为硬失败
   6. 后端覆盖率（调 scripts/check_coverage.py）：默认**跳过**（需跑全量 pytest，约 4 分钟），
      用 --only coverage 显式执行
-  7. 前端体积（调 scripts/check_bundle_size.py）：默认**跳过**（需 vite build，约 1 分钟），
+  7. 前端覆盖率（调 scripts/check_frontend_coverage.py）：默认**跳过**；且主工作树因 pnpm
+     环境漂移装不到 @vitest/coverage-v8，本地执行会直接报「依赖缺失」（退出码 3），
+     该闸门实际由 CI（全新环境）强制执行
+  8. 前端体积（调 scripts/check_bundle_size.py）：默认**跳过**（需 vite build，约 1 分钟），
      用 --only bundle 显式执行
 
 用法：
@@ -39,8 +42,10 @@ KPIN_VERSION = "5"  # 与 CI 保持一致的大版本；配置见 web/knip.json
 
 # 全部检查项；coverage 需跑全量 pytest（约 4 分钟）、bundle 需 vite build（约 1 分钟），
 # 二者由 CI 强制（.cnb.yml），本地默认跳过，按需用 --only 显式执行。
-ALL_CHECKS = frozenset({"ruff", "imports", "knip", "lines", "tests", "coverage", "bundle"})
-SLOW_CHECKS = frozenset({"coverage", "bundle"})
+ALL_CHECKS = frozenset(
+    {"ruff", "imports", "knip", "lines", "tests", "coverage", "fe-coverage", "bundle"}
+)
+SLOW_CHECKS = frozenset({"coverage", "fe-coverage", "bundle"})
 
 MANUAL_CHECKLIST = """
 ── 人工检查清单（提交人自证，§4.4-1/2/3/4）──
@@ -121,6 +126,12 @@ def main() -> int:
     if "coverage" not in skip:
         results["coverage"] = _run(
             "coverage", [sys.executable, str(REPO_ROOT / "scripts" / "check_coverage.py")], REPO_ROOT
+        )
+    if "fe-coverage" not in skip:
+        results["fe-coverage"] = _run(
+            "frontend-coverage",
+            [sys.executable, str(REPO_ROOT / "scripts" / "check_frontend_coverage.py")],
+            REPO_ROOT,
         )
     if "bundle" not in skip:
         results["bundle"] = _run(
