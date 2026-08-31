@@ -14,7 +14,7 @@ from sqlalchemy import func, select
 import pytest_asyncio
 
 import app.db.database as dbmod
-from app.core.scheduler import _log_cleanup
+from app.services.scheduler import _log_cleanup
 from app.models.job import JobConfig
 from app.models.log import AppLog
 from app.models.notification import Notification
@@ -26,7 +26,7 @@ pytestmark = pytest.mark.asyncio
 async def _bind_test_sessionmaker(_engine):
     """见 test_log_center.py 同名校验：把 scheduler 模块级 AsyncSessionLocal 重绑到
     测试库 maker，确保 _log_cleanup 在测试库内运行，不触碰开发库。"""
-    import app.core.scheduler as scheduler_mod
+    import app.services.scheduler as scheduler_mod
 
     scheduler_mod.AsyncSessionLocal = dbmod.AsyncSessionLocal
     yield

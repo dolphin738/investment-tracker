@@ -23,18 +23,21 @@ dependencies = [
     "pypinyin>=0.53",
     # 可选定时调度器（收盘后全量同步行情），默认关闭、懒导入
     "apscheduler>=3.10",
+    # 行情同步 / 调度器运行时 HTTP 客户端（非仅测试用，REP-004：scheduler.py / market_data_sync.py 顶层 import）
+    "httpx==0.28.1",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.4,<9",
     "pytest-asyncio==1.4.0",
-    "httpx==0.28.1",
     # starlette 1.4 testclient 首选 httpx2（httpx 官方延续版，pydantic 团队维护）；
     # 装上即消除 StarletteDeprecationWarning
     "httpx2==2.9.1",
     # 架构边界强制：层契约（import-linter）+ 接入 pytest 的 tests/test_import_linter.py
     "import-linter>=2.13,<3",
+    # 覆盖率闸门基线测量与强制（§6）：先测真实基线再按基线定阈值，避免直接拍 80% 全面 fail
+    "pytest-cov>=5,<7",
 ]
 
 [tool.pytest.ini_options]
@@ -47,6 +50,18 @@ addopts = "-q"
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+
+[tool.ruff.lint]
+# 阶段4 Lint 闸门（防反弹工程规则）：仅启用 Pyflakes（F）——未使用 import/变量、
+# 未定义名（unused-imports / unused-vars 设为 error）。有意保持最小集，
+# 避免一次性引入风格类规则（import 排序、类型升级建议等）造成海量存量噪音；
+# 后续如需扩展在 select 追加并先清零基线。
+select = ["F"]
+
+[tool.ruff.lint.per-file-ignores]
+# SQLAlchemy 模型的字符串前向引用（如 Mapped["Portfolio"]）由 ORM registry
+# 运行时解析，ruff 无法静态解析 → 模型层豁免 F821（未定义名）。
+"app/models/*" = ["F821"]
 
 # 本项目是 FastAPI 应用（非可分发包），明确声明不构建自身，
 # 否则 `uv sync` 会尝试把 backend 当可安装包去构建而报错。

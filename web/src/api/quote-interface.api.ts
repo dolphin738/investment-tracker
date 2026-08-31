@@ -106,13 +106,6 @@ export function listProviderInterfaces(providerId: string): Promise<QuoteInterfa
   );
 }
 
-/** 读取单个接口 */
-export function getInterface(id: string): Promise<QuoteInterface> {
-  return http.get<QuoteInterface>(
-    `/admin/quote-providers/interfaces/${encodeURIComponent(id)}`,
-  );
-}
-
 /** 新增接口 */
 export function createInterface(
   providerId: string,

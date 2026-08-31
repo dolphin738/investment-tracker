@@ -11,7 +11,6 @@
 import { http } from '@/lib/api-client';
 import type {
   Security,
-  CreateSecurityDto,
   UpdateSecurityDto,
   PaginatedResponse,
   SecurityType,
@@ -38,17 +37,6 @@ export function listSecurities(
   );
 }
 
-/** 新增标的 */
-export function createSecurity(
-  portfolioId: string,
-  payload: CreateSecurityDto,
-): Promise<Security> {
-  return http.post<Security>(
-    `/portfolios/${portfolioId}/securities`,
-    payload,
-  );
-}
-
 /** 编辑标的 */
 export function updateSecurity(
   portfolioId: string,
@@ -58,16 +46,6 @@ export function updateSecurity(
   return http.patch<Security>(
     `/portfolios/${portfolioId}/securities/${securityId}`,
     payload,
-  );
-}
-
-/** 删除标的（级联删除持仓记录） */
-export function deleteSecurity(
-  portfolioId: string,
-  securityId: string,
-): Promise<null> {
-  return http.delete<null>(
-    `/portfolios/${portfolioId}/securities/${securityId}`,
   );
 }
 

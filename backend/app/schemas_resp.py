@@ -19,7 +19,6 @@ from pydantic import BaseModel
 from app.models.enums import (
     CashFlowType,
     DividendType,
-    ExportType,
     ImportErrorCode,
     ImportType,
     SecuritySide,

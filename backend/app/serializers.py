@@ -8,6 +8,8 @@
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from app.models import (
     AssetSnapshot,
     CashBalance,
@@ -17,8 +19,12 @@ from app.models import (
     Security,
     SecurityPrice,
     SecurityTrade,
+    User,
 )
 from app.models.enums import DividendType
+
+if TYPE_CHECKING:
+    from app.schemas_resp import CashflowOut
 
 
 def serialize_portfolio(p: Portfolio) -> dict:
@@ -35,17 +41,34 @@ def serialize_portfolio(p: Portfolio) -> dict:
     }
 
 
-def serialize_cashflow(c: CashFlow) -> dict:
-    return {
-        "id": c.id,
-        "portfolioId": c.portfolio_id,
-        "date": c.date,
-        "type": c.type.value,
-        "amount": c.amount,
-        "note": c.note,
-        "createdAt": c.created_at,
-        "updatedAt": c.updated_at,
-    }
+def serialize_cashflow(c: CashFlow, rec=None) -> "CashflowOut":
+    """组合出入金序列化：返回 CashflowOut 契约对象（REP-038 做法1）。
+
+    将路由层手写的 recalculation 补丁收编进序列化器：调用方传入 rec
+    （重算反馈源，含 from_date / affected_days / skipped_manual_days）即装填，
+    否则 recalculation 为 None。出口仍由 response_model=CashflowOut 强制类型，
+    wire JSON 与「序列化 dict + 路由补丁」逐字节一致。
+    """
+    from app.schemas_resp import CashflowOut, RecalculationMeta
+
+    recalculation = None
+    if rec is not None:
+        recalculation = RecalculationMeta(
+            fromDate=rec.from_date,
+            affectedDays=rec.affected_days,
+            skippedManualDays=rec.skipped_manual_days,
+        )
+    return CashflowOut(
+        id=c.id,
+        portfolioId=c.portfolio_id,
+        date=c.date,
+        type=c.type,
+        amount=str(c.amount),
+        note=c.note,
+        createdAt=c.created_at,
+        updatedAt=c.updated_at,
+        recalculation=recalculation,
+    )
 
 
 def serialize_security(s: PortfolioSecurity) -> dict:
@@ -191,4 +214,22 @@ def serialize_preference(p) -> dict:
         "amountThousands": p.amount_thousands,
         "amountAbbrev": p.amount_abbrev,
         "dashboardLayout": p.dashboard_layout,
+    }
+
+
+def serialize_user(user: User) -> dict:
+    """当前用户响应 dict（对齐 serializers.py 风格：纯函数，输入 User ORM 实例）。
+
+    与 auth/router.py 各路由曾逐份内联的 user dict 键集、表达式逐字一致；
+    收敛到此单一来源，消除重复构造。
+    """
+    return {
+        "id": user.id,
+        "email": user.email,
+        "name": user.name,
+        "avatar": user.avatar,
+        "phone": user.phone,
+        "bio": user.bio,
+        "role": user.role,
+        "createdAt": user.created_at.isoformat() if user.created_at else None,
     }

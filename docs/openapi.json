@@ -196,6 +196,425 @@
         }
       }
     },
+    "/api/admin/logs": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "List Logs",
+        "description": "聚合查询日志中心（三源归一，按 created_at 倒序分页）。\n\nlevel/scope/module 精确匹配；keyword ILIKE 命中 message；start/end 为\ncreated_at 区间（ISO 字符串）。",
+        "operationId": "list_logs_api_admin_logs_get",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "level",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^(error|warning|info)$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Level"
+            }
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^(operation|error|system)$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scope"
+            }
+          },
+          {
+            "name": "module",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Module"
+            }
+          },
+          {
+            "name": "start",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Start"
+            }
+          },
+          {
+            "name": "end",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "End"
+            }
+          },
+          {
+            "name": "keyword",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Keyword"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 20,
+              "title": "Pagesize"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Delete Logs",
+        "description": "删除日志（三源归一，按来源分桶）。\n\n删除权限仅限 admin（``require_admin``）：非管理员 → 403，未登录 → 401。\n\n单事务（结尾仅一处 ``await db.commit()``）：\n- 默认（``all=False``）：按请求体传入的 ``ids`` 删除（带来源前缀，去重后逐个校验）；\n  来源非法 / 不存在 / 未读通知 → 计入 skipped。\n- ``all=True``：用 ``_CTE_INNER``/``_FILTER_WHERE``/``_FILTER_BINDPARAMS`` 并复用列表\n  筛选逻辑取「当前筛选条件下全部匹配 id」（跨所有页），忽略 ``ids``；该模式候选 id\n  全部来自数据库，天然存在，skipped 仅含未读通知。\n- 硬规则：未读通知（source=notification 且 read IS FALSE）一律跳过，仅删已读通知，\n  绝不波及用户未读消息。\n\n返回 ``{deleted, skipped}``；skipped 每项 ``{id, reason}``。",
+        "operationId": "delete_logs_api_admin_logs_delete",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LogDeleteBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/logs/{log_id}": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Get Log",
+        "description": "日志详情：解析 ``<source>:<uuid>`` 前缀后查对应源，返回完整 LogItem（含 trace）。",
+        "operationId": "get_log_api_admin_logs__log_id__get",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "log_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Log Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/notifications": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "List Notifications",
+        "description": "站内信列表（按 created_at 倒序）；前端据 read 字段算未读数。",
+        "operationId": "list_notifications_api_admin_notifications_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/notifications/{notification_id}/read": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Mark Notification Read",
+        "description": "标记单条通知为已读（不存在 → 404）。",
+        "operationId": "mark_notification_read_api_admin_notifications__notification_id__read_post",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "notification_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Notification Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/quote-interfaces/reorder": {
+      "patch": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Reorder Quote Interfaces",
+        "description": "同分类内拖拽调序：前端 dnd 产生的完整有序 id 列表 → priority=index。\n\n跨分类 id 混入 / 不存在 id → 400（由 QuoteInterfaceService.reorder 抛出）。",
+        "operationId": "reorder_quote_interfaces_api_admin_quote_interfaces_reorder_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QuoteInterfaceReorder"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/quote-interfaces/{interface_id}/test": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Test Quote Interface",
+        "description": "单接口测试：用调用方传入的 params 调用，原样回传 raw+parsed（不计入 consecutive_failures）。",
+        "operationId": "test_quote_interface_api_admin_quote_interfaces__interface_id__test_post",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "interface_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Interface Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InterfaceTestRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/admin/quote-providers": {
       "get": {
         "tags": [
@@ -426,6 +845,31 @@
             }
           }
         }
+      }
+    },
+    "/api/admin/quote-providers/sync": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Admin Sync All Prices",
+        "description": "管理面全量刷新（需 admin）：遍历全部组合同步实时行情并重建快照/净值。\n\n返回结构化汇总 ``{portfolios, synced, failed, errors}``。",
+        "operationId": "admin_sync_all_prices_api_admin_quote_providers_sync_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ]
       }
     },
     "/api/admin/quote-providers/{provider_id}": {
@@ -667,13 +1111,14 @@
         }
       }
     },
-    "/api/admin/quote-providers/{provider_id}/set-active": {
-      "post": {
+    "/api/admin/securities/masters": {
+      "get": {
         "tags": [
           "admin"
         ],
-        "summary": "Set Active Quote Provider",
-        "operationId": "set_active_quote_provider_api_admin_quote_providers__provider_id__set_active_post",
+        "summary": "List Security Masters",
+        "description": "系统级证券主数据目录表分页浏览；q 匹配 code/name/拼音首字母。\n\n任意登录用户可读（§10：录入界面证券搜索复用本端点，主数据行是系统级公共字典）；\n写入（sync）与接口测试仍仅限管理员。",
+        "operationId": "list_security_masters_api_admin_securities_masters_get",
         "security": [
           {
             "JWT-auth": []
@@ -681,12 +1126,366 @@
         ],
         "parameters": [
           {
-            "name": "provider_id",
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 20,
+              "title": "Pagesize"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "匹配 code/name/拼音首字母（ILIKE）",
+              "title": "Q"
+            },
+            "description": "匹配 code/name/拼音首字母（ILIKE）"
+          },
+          {
+            "name": "asset_class",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "按资产类别过滤（SecurityType 值；UNCATEGORIZED=未分类，兼容主数据行 asset_class 为 NULL）",
+              "title": "Asset Class"
+            },
+            "description": "按资产类别过滤（SecurityType 值；UNCATEGORIZED=未分类，兼容主数据行 asset_class 为 NULL）"
+          },
+          {
+            "name": "exchange",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "按交易所过滤（SH/SZ/BJ/HK；主数据行 exchange 可空，传入空字符串不做过滤）",
+              "title": "Exchange"
+            },
+            "description": "按交易所过滤（SH/SZ/BJ/HK；主数据行 exchange 可空，传入空字符串不做过滤）"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Delete Security Masters",
+        "description": "批量/单行删除证券主数据（系统级目录表）。\n\n删除权限等同 ``POST /securities/sync``（``require_admin``）：非管理员 → 403，未登录 → 401。\n\n单事务（结尾仅一处 ``await db.commit()``）：先剔除「不存在」与「被组合持仓引用」的 id\n（计入 skipped），仅删除孤儿主数据，绝不波及用户数据——组合持仓/交易/价格/分红经\n``FK ondelete=CASCADE`` 仅在删除「被引用」行时才级联，而本端点只删 **无任何\nportfolio_securities 引用** 的孤儿，DB 级联对孤儿无可删子行。\n\n- 默认（``all=False``）：按请求体传入的 ``ids`` 删除（去重后逐个校验）。\n- ``all=True``：删除「当前筛选条件下全部孤儿主数据」（跨所有页），忽略 ``ids``；\n  ``q/asset_class/exchange`` 与列表端点一致，用于定位目标集合。该模式下候选 id 全部\n  来自数据库，天然存在，``skipped`` 仅含被组合持仓引用的 id。\n\n返回 ``{deleted, skipped}``；skipped 每项 ``{id, reason}``。",
+        "operationId": "delete_security_masters_api_admin_securities_masters_delete",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SecurityMasterDeleteBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/securities/masters/stats": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Security Master Stats",
+        "description": "系统级证券主数据按资产类别统计条数（公共字典统计，任意登录用户可读）。\n\n返回 ``{counts: {资产类别: 条数}}``；主数据行 asset_class 为 NULL 时归入\n``UNCATEGORIZED``（未分类）以便前端与统一中文标签对齐。",
+        "operationId": "security_master_stats_api_admin_securities_masters_stats_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/securities/sync": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Admin Sync Security Masters",
+        "description": "手动触发配置驱动的证券主数据全量同步（遍历全部 MASTER_LIST 接口的资产类别）。",
+        "operationId": "admin_sync_security_masters_api_admin_securities_sync_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/tasks": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "List Tasks",
+        "description": "列出全部任务（含最近一次执行摘要，按创建时间升序）。",
+        "operationId": "list_tasks_api_admin_tasks_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Create Task",
+        "description": "新建普通任务（系统任务不可新建）。",
+        "operationId": "create_task_api_admin_tasks_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/tasks/handlers": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "List Task Handlers",
+        "description": "可新建任务类型清单（供前端表单渲染类型选择与参数字段）。",
+        "operationId": "list_task_handlers_api_admin_tasks_handlers_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/tasks/{task_id}": {
+      "patch": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Update Task",
+        "description": "编辑任务（普通/系统均可；系统任务仅可编辑 cron/启停/参数/名称，不可改类型/归类）。",
+        "operationId": "update_task_api_admin_tasks__task_id__patch",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "task_id",
             "in": "path",
             "required": true,
             "schema": {
               "type": "string",
-              "title": "Provider Id"
+              "title": "Task Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Delete Task",
+        "description": "删除普通任务；系统任务仅可编辑不可删除 → 400。",
+        "operationId": "delete_task_api_admin_tasks__task_id__delete",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
             }
           }
         ],
@@ -712,13 +1511,14 @@
         }
       }
     },
-    "/api/admin/quote-providers/{provider_id}/set-default": {
-      "post": {
+    "/api/admin/tasks/{task_id}/logs": {
+      "get": {
         "tags": [
           "admin"
         ],
-        "summary": "Set Default Quote Provider",
-        "operationId": "set_default_quote_provider_api_admin_quote_providers__provider_id__set_default_post",
+        "summary": "List Task Logs",
+        "description": "分页查询任务执行日志（按开始时间倒序）。\n\n权限：BF-01 修复 —— 原为 `get_current_user`（任意登录用户可读任意任务日志，\n含 LOCAL_COMMAND 的完整 stdout/stderr）。现与其它 admin 端点一致收口为\n`require_admin`（基于数据库实时 role 校验，不信任 JWT payload 的 role）。",
+        "operationId": "list_task_logs_api_admin_tasks__task_id__logs_get",
         "security": [
           {
             "JWT-auth": []
@@ -726,12 +1526,81 @@
         ],
         "parameters": [
           {
-            "name": "provider_id",
+            "name": "task_id",
             "in": "path",
             "required": true,
             "schema": {
               "type": "string",
-              "title": "Provider Id"
+              "title": "Task Id"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 20,
+              "title": "Pagesize"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/tasks/{task_id}/trigger": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Trigger Task",
+        "description": "手动立即执行一次（写入 MANUAL 来源的执行日志）。",
+        "operationId": "trigger_task_api_admin_tasks__task_id__trigger_post",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
             }
           }
         ],
@@ -1121,6 +1990,51 @@
             "content": {
               "application/json": {
                 "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ]
+      }
+    },
+    "/api/client-logs": {
+      "post": {
+        "tags": [
+          "client"
+        ],
+        "summary": "Ingest Client Log",
+        "description": "接收前端上报的客户端错误并写入 ``app_logs``。\n\n落库失败由 ``record`` 内部吞掉，绝不影响主流程（上报本身就是 best-effort）。\n始终返回 ``{\"ok\": True}``，避免前端因上报失败而二次异常。",
+        "operationId": "ingest_client_log_api_client_logs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClientLogIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
               }
             }
           }
@@ -3425,6 +4339,144 @@
         }
       }
     },
+    "/api/portfolios/{portfolio_id}/prices/refresh-async": {
+      "post": {
+        "tags": [
+          "portfolios"
+        ],
+        "summary": "Refresh Async Portfolio Prices",
+        "description": "后台异步刷新（路径 B，fire-and-forget）：立即 202，不阻塞 UI。\n\n用独立会话跑完整链，避免请求会话关闭后后台任务访问已关闭会话。",
+        "operationId": "refresh_async_portfolio_prices_api_portfolios__portfolio_id__prices_refresh_async_post",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Id"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/portfolios/{portfolio_id}/prices/sync": {
+      "post": {
+        "tags": [
+          "portfolios"
+        ],
+        "summary": "Sync Portfolio Prices Endpoint",
+        "description": "同步完整 fallback 链（路径 C）：同步等待，Σtimeout 封顶。\n\n返回结构化结果 ``{synced, failed, skipped, errors}``。",
+        "operationId": "sync_portfolio_prices_endpoint_api_portfolios__portfolio_id__prices_sync_post",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/portfolios/{portfolio_id}/prices/sync-status": {
+      "get": {
+        "tags": [
+          "portfolios"
+        ],
+        "summary": "Sync Status Portfolio Prices",
+        "description": "刷新进度 / 最新 fetched_at 与来源（路径 B 收尾轮询）。",
+        "operationId": "sync_status_portfolio_prices_api_portfolios__portfolio_id__prices_sync_status_get",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Portfolio Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/portfolios/{portfolio_id}/recalculate": {
       "post": {
         "tags": [
@@ -3594,13 +4646,16 @@
             }
           }
         }
-      },
+      }
+    },
+    "/api/portfolios/{portfolio_id}/securities/resolve": {
       "post": {
         "tags": [
           "securities"
         ],
-        "summary": "Create Security",
-        "operationId": "create_security_api_portfolios__portfolio_id__securities_post",
+        "summary": "Resolve Security",
+        "description": "录入界面证券搜索选中后的懒实例化：幂等 upsert by (portfolio_id, master_id)（ADR-003）。\n\n必须选中目录主数据（combobox 搜索 → 点击选中 → 传 master_id）；以目录主数据为模板\n实例化一条组合持仓行（portfolio_securities），name/exchange 经 master_id JOIN 读取；\ntype 不落库（NULL），读取时由代码前缀推断。trade 永远指向组合维度标的。",
+        "operationId": "resolve_security_api_portfolios__portfolio_id__securities_resolve_post",
         "security": [
           {
             "JWT-auth": []
@@ -3622,7 +4677,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/SecurityCreateReq"
+                "$ref": "#/components/schemas/SecurityResolveReq"
               }
             }
           }
@@ -3632,9 +4687,7 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SecurityOut"
-                }
+                "schema": {}
               }
             }
           },
@@ -5187,13 +6240,79 @@
         ]
       }
     },
-    "/api/token": {
+    "/api/quote-sync": {
       "get": {
         "tags": [
-          "contract"
+          "quote-sync"
         ],
-        "summary": "Issue Demo Token",
-        "operationId": "issue_demo_token_api_token_get",
+        "summary": "Get Quote Sync",
+        "operationId": "get_quote_sync_api_quote_sync_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "quote-sync"
+        ],
+        "summary": "Upsert Quote Sync",
+        "operationId": "upsert_quote_sync_api_quote_sync_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QuoteSyncUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ]
+      }
+    },
+    "/api/quote-sync/trigger": {
+      "post": {
+        "tags": [
+          "quote-sync"
+        ],
+        "summary": "Trigger Quote Sync",
+        "operationId": "trigger_quote_sync_api_quote_sync_trigger_post",
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -5533,6 +6652,18 @@
             ],
             "title": "Amount"
           },
+          "asOf": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asof"
+          },
           "note": {
             "anyOf": [
               {
@@ -5727,6 +6858,55 @@
           "deletedCount"
         ],
         "title": "ClearDataOut"
+      },
+      "ClientLogIn": {
+        "properties": {
+          "level": {
+            "type": "string",
+            "enum": [
+              "error",
+              "warning",
+              "info"
+            ],
+            "title": "Level",
+            "default": "error"
+          },
+          "module": {
+            "type": "string",
+            "title": "Module"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "trace": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trace"
+          },
+          "detail": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "module",
+          "message"
+        ],
+        "title": "ClientLogIn",
+        "description": "前端上报的一条客户端错误。"
       },
       "DividendCreateReq": {
         "properties": {
@@ -6597,6 +7777,277 @@
         ],
         "title": "InterfaceDirection",
         "description": "提供方接口方向（入站 / 出站）。\n\nPG 原生枚举类型名 `interface_direction`（由迁移创建）。\n业务当前仅落库使用（默认 in），UI 不暴露该字段。"
+      },
+      "InterfaceTestRequest": {
+        "properties": {
+          "params": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Params"
+          },
+          "codes": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Codes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "params"
+        ],
+        "title": "InterfaceTestRequest",
+        "description": "单接口测试请求体（§5.2）：params 为经前端编辑后的完整有效参数，覆盖 itf.params。"
+      },
+      "JobCreate": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "task_type": {
+            "$ref": "#/components/schemas/JobTaskType"
+          },
+          "cron_expr": {
+            "type": "string",
+            "title": "Cron Expr"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "default": false
+          },
+          "params": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Params"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "max_logs": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Logs"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "task_type",
+          "cron_expr"
+        ],
+        "title": "JobCreate"
+      },
+      "JobTaskType": {
+        "type": "string",
+        "enum": [
+          "MARKET_DATA_SYNC",
+          "SECURITY_MASTER_SYNC",
+          "HTTP_CALLBACK",
+          "ACCOUNT_CLEANUP",
+          "LOG_CLEANUP"
+        ],
+        "title": "JobTaskType",
+        "description": "定时任务类型（统一调度器处理器注册表键 + 数据库任务类型列）。\n\n系统任务（不可追加/删除，仅可编辑）由迁移种子写入；普通任务（可增删改）在\n定时任务管理页由管理员新建。两者共用本枚举。"
+      },
+      "JobUpdate": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "task_type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobTaskType"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cron_expr": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cron Expr"
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          },
+          "params": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Params"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "max_logs": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Logs"
+          }
+        },
+        "type": "object",
+        "title": "JobUpdate"
+      },
+      "LogDeleteBody": {
+        "properties": {
+          "ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Ids",
+            "default": []
+          },
+          "all": {
+            "type": "boolean",
+            "title": "All",
+            "default": false
+          },
+          "level": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Level"
+          },
+          "scope": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope"
+          },
+          "module": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Module"
+          },
+          "start": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start"
+          },
+          "end": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End"
+          },
+          "keyword": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Keyword"
+          }
+        },
+        "type": "object",
+        "title": "LogDeleteBody",
+        "description": "删除日志请求体。\n- ids：待删除日志 id 列表（带来源前缀 app:/notif:/job:）；all=False 时必填，可含重复，后端去重。\n- all=True：删除「当前筛选条件下全部日志」（跨所有页），忽略 ids；\n  level/scope/module/start/end/keyword 与列表端点一致，用于定位目标集合。"
       },
       "LoginReq": {
         "properties": {
@@ -7635,9 +9086,8 @@
         "properties": {
           "category_id": {
             "type": "string",
-            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
             "title": "Category Id",
-            "description": "接口分类 id（UUID，外键→interface_categories.id）"
+            "description": "接口分类 id（外键→quote_provider_interface_categories.id）"
           },
           "name": {
             "type": "string",
@@ -7740,6 +9190,80 @@
               }
             ],
             "title": "Rate Limit"
+          },
+          "asset_class": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asset Class"
+          },
+          "resp_code_field": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resp Code Field"
+          },
+          "resp_price_field": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resp Price Field"
+          },
+          "resp_name_field": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resp Name Field"
+          },
+          "resp_exchange_field": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resp Exchange Field"
+          },
+          "response_parse": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Response Parse"
           }
         },
         "type": "object",
@@ -7749,20 +9273,43 @@
         ],
         "title": "QuoteInterfaceCreate"
       },
+      "QuoteInterfaceReorder": {
+        "properties": {
+          "category_id": {
+            "type": "string",
+            "title": "Category Id",
+            "description": "接口分类 id"
+          },
+          "ordered_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Ordered Ids",
+            "description": "该分类下完整接口 id 列表，顺序即新优先级"
+          }
+        },
+        "type": "object",
+        "required": [
+          "category_id",
+          "ordered_ids"
+        ],
+        "title": "QuoteInterfaceReorder",
+        "description": "同分类内拖拽调序请求体（前端 dnd 产生的完整有序 id 列表）。"
+      },
       "QuoteInterfaceUpdate": {
         "properties": {
           "category_id": {
             "anyOf": [
               {
-                "type": "string",
-                "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                "type": "string"
               },
               {
                 "type": "null"
               }
             ],
             "title": "Category Id",
-            "description": "接口分类 id（UUID），可空表示未分类"
+            "description": "接口分类 id，可空表示未分类（外键→quote_provider_interface_categories.id）"
           },
           "name": {
             "anyOf": [
@@ -7884,6 +9431,80 @@
               }
             ],
             "title": "Rate Limit"
+          },
+          "asset_class": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asset Class"
+          },
+          "resp_code_field": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resp Code Field"
+          },
+          "resp_price_field": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resp Price Field"
+          },
+          "resp_name_field": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resp Name Field"
+          },
+          "resp_exchange_field": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resp Exchange Field"
+          },
+          "response_parse": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Response Parse"
           }
         },
         "type": "object",
@@ -7929,16 +9550,6 @@
               }
             ],
             "title": "Description"
-          },
-          "is_default": {
-            "type": "boolean",
-            "title": "Is Default",
-            "default": false
-          },
-          "is_active": {
-            "type": "boolean",
-            "title": "Is Active",
-            "default": false
           }
         },
         "type": "object",
@@ -8007,32 +9618,53 @@
               }
             ],
             "title": "Description"
-          },
-          "is_default": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Is Default"
-          },
-          "is_active": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Is Active"
           }
         },
         "type": "object",
         "title": "QuoteProviderUpdate"
+      },
+      "QuoteSyncUpdate": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "default": false
+          },
+          "frequency": {
+            "type": "string",
+            "title": "Frequency",
+            "default": "DAY"
+          },
+          "time": {
+            "type": "string",
+            "title": "Time",
+            "default": "09:00"
+          },
+          "weekday": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weekday"
+          },
+          "day_of_month": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Day Of Month"
+          }
+        },
+        "type": "object",
+        "title": "QuoteSyncUpdate"
       },
       "RecalcOut": {
         "properties": {
@@ -8115,6 +9747,7 @@
           },
           "password": {
             "type": "string",
+            "minLength": 8,
             "title": "Password"
           },
           "name": {
@@ -8154,17 +9787,22 @@
         ],
         "title": "RestoreReq"
       },
-      "SecurityCreateReq": {
+      "SecurityMasterDeleteBody": {
         "properties": {
-          "code": {
-            "type": "string",
-            "title": "Code"
+          "ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Ids",
+            "default": []
           },
-          "name": {
-            "type": "string",
-            "title": "Name"
+          "all": {
+            "type": "boolean",
+            "title": "All",
+            "default": false
           },
-          "type": {
+          "q": {
             "anyOf": [
               {
                 "type": "string"
@@ -8173,21 +9811,34 @@
                 "type": "null"
               }
             ],
-            "title": "Type",
-            "default": "STOCK"
+            "title": "Q"
           },
-          "currency": {
-            "type": "string",
-            "title": "Currency",
-            "default": "CNY"
+          "asset_class": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asset Class"
+          },
+          "exchange": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exchange"
           }
         },
         "type": "object",
-        "required": [
-          "code",
-          "name"
-        ],
-        "title": "SecurityCreateReq"
+        "title": "SecurityMasterDeleteBody",
+        "description": "批量/单行删除证券主数据请求体。\n- ids：待删除主数据 id 列表（all=False 时必填，可含重复，后端去重）。\n- all=True：删除「当前筛选条件下全部孤儿主数据」（跨所有页），忽略 ids；\n  q/asset_class/exchange 与列表端点一致，用于定位目标集合。"
       },
       "SecurityOut": {
         "properties": {
@@ -8206,9 +9857,24 @@
           "type": {
             "$ref": "#/components/schemas/SecurityType"
           },
+          "exchange": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exchange"
+          },
           "currency": {
             "type": "string",
             "title": "Currency"
+          },
+          "masterId": {
+            "type": "string",
+            "title": "Masterid"
           },
           "createdAt": {
             "type": "string",
@@ -8228,6 +9894,7 @@
           "name",
           "type",
           "currency",
+          "masterId",
           "createdAt",
           "updatedAt"
         ],
@@ -8235,17 +9902,6 @@
       },
       "SecurityPatchReq": {
         "properties": {
-          "name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Name"
-          },
           "type": {
             "anyOf": [
               {
@@ -8259,7 +9915,35 @@
           }
         },
         "type": "object",
-        "title": "SecurityPatchReq"
+        "title": "SecurityPatchReq",
+        "description": "组合标的 PATCH：仅允许 type override（name 等维度归目录主数据）。"
+      },
+      "SecurityResolveReq": {
+        "properties": {
+          "masterId": {
+            "type": "string",
+            "title": "Masterid",
+            "description": "目录主数据 id（securities.id）"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type",
+            "description": "可选 type override；不传=按代码前缀推断"
+          }
+        },
+        "type": "object",
+        "required": [
+          "masterId"
+        ],
+        "title": "SecurityResolveReq",
+        "description": "录入界面证券搜索选中后，懒实例化为组合标的的幂等 upsert 请求体（ADR-003）。\n\n必须选中目录主数据（combobox 搜索 → 点击选中 → 传 masterId），不再支持手输 code。\ntype 为可选 override；不传则读取时由代码前缀推断（infer_security_type）。"
       },
       "SecuritySide": {
         "type": "string",
@@ -8273,10 +9957,14 @@
         "type": "string",
         "enum": [
           "STOCK",
-          "FUND",
+          "ON_EXCHANGE_FUND",
           "BOND",
           "OTHER",
-          "CASH"
+          "HK_STOCK",
+          "CONVERTIBLE_BOND",
+          "INDEX",
+          "OFF_EXCHANGE_FUND",
+          "UNCATEGORIZED"
         ],
         "title": "SecurityType"
       },

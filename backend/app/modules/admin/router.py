@@ -36,11 +36,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common import paginate
 from app.core.envelope import EnvelopeRoute
-from app.core.security import CurrentUser, get_current_user, require_admin
+from app.services.auth import CurrentUser, get_current_user, require_admin
 from app.db.database import get_db
 from app.models import Portfolio, PortfolioSecurity, Security
 from app.models.enums import InterfaceDirection, QuoteProviderAccessMethod
-from app.models.notification import Notification
 from app.serializers import serialize_security_master
 from app.services import InterfaceCategoryService, QuoteInterfaceService
 from app.services.market_data_sync import MarketDataSyncService
@@ -51,8 +50,13 @@ from app.services.quote_provider import QuoteProviderService
 def _check_config(access_method: QuoteProviderAccessMethod, config: dict[str, Any]) -> None:
     """按接入方式校验 config 的必填字段。"""
     if access_method == QuoteProviderAccessMethod.HTTPS:
-        if not isinstance(config.get("base_url"), str) or not config.get("base_url"):
+        base_url = config.get("base_url")
+        if not isinstance(base_url, str) or not base_url:
             raise ValueError("HTTPS 接入方式必须提供 base_url（字符串）")
+        # SSRF 防护：base_url 仅允许 http/https（provider 可能位于内网，放开私网）
+        from app.core.url_guard import assert_safe_url
+
+        assert_safe_url(base_url, allow_private=True)
     elif access_method == QuoteProviderAccessMethod.SDK:
         if not isinstance(config.get("sdk_name"), str) or not config.get("sdk_name"):
             raise ValueError("SDK 接入方式必须提供 sdk_name（字符串，如 akshare）")

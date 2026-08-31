@@ -4,11 +4,15 @@
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
+from app.core.enums import BusinessErrorCode
 from app.core.envelope import EnvelopeRoute
-from app.core.security import CurrentUser, get_current_user
+from app.core.exceptions import BusinessException
+from app.core import rate_limit
+from app.services.auth import CurrentUser, get_current_user
 from app.db.database import get_db
 from app.schemas import (
     EmailPatchReq,
@@ -18,6 +22,7 @@ from app.schemas import (
     RegisterReq,
     RestoreReq,
 )
+from app.serializers import serialize_user
 from app.services.user import UserService
 from app.schemas_resp import AuthTokenOut, UserPublicOut
 
@@ -25,34 +30,49 @@ router = APIRouter(prefix="/api/auth", tags=["auth"], route_class=EnvelopeRoute)
 
 
 @router.post("/register", response_model=UserPublicOut)
-async def register(req: RegisterReq, db: AsyncSession = Depends(get_db)) -> dict:
+async def register(
+    req: RegisterReq, request: Request, db: AsyncSession = Depends(get_db)
+) -> dict:
+    if not get_settings().REGISTRATION_ENABLED:
+        raise BusinessException(
+            code=BusinessErrorCode.FORBIDDEN,
+            message="当前部署已关闭公开注册",
+            status_code=403,
+        )
     user = await UserService(db).register(req.email, req.password, req.name)
-    return {
-        "id": user.id,
-        "email": user.email,
-        "name": user.name,
-        "avatar": user.avatar,
-        "phone": user.phone,
-        "bio": user.bio,
-        "role": user.role,
-    }
+    return serialize_user(user)
 
 
 @router.post("/login", response_model=AuthTokenOut)
-async def login(req: LoginReq, db: AsyncSession = Depends(get_db)) -> dict:
-    user = await UserService(db).authenticate(req.email, req.password)
+async def login(
+    req: LoginReq, request: Request, db: AsyncSession = Depends(get_db)
+) -> dict:
+    settings = get_settings()
+    ip = request.client.host if request.client else "unknown"
+    email = (req.email or "").lower()
+    # 登录失败限速（REP-010）：达上限直接 429，阻断爆破/枚举
+    if rate_limit.is_limited(
+        ip,
+        email,
+        settings.LOGIN_RATE_LIMIT_PER_MINUTE,
+        settings.LOGIN_RATE_LIMIT_WINDOW_SECONDS,
+    ):
+        raise BusinessException(
+            code=BusinessErrorCode.RATE_LIMITED,
+            message="登录尝试过于频繁，请稍后再试",
+            status_code=429,
+        )
+    try:
+        user = await UserService(db).authenticate(req.email, req.password)
+    except BusinessException as exc:
+        if exc.status_code == 401:
+            rate_limit.record_failure(ip, email)
+        raise
+    rate_limit.reset(ip, email)
     token = UserService.issue_token(user)
     return {
         "accessToken": token,
-        "user": {
-            "id": user.id,
-            "email": user.email,
-            "name": user.name,
-            "avatar": user.avatar,
-            "phone": user.phone,
-            "bio": user.bio,
-            "role": user.role,
-        },
+        "user": serialize_user(user),
     }
 
 
@@ -62,15 +82,7 @@ async def restore(req: RestoreReq, db: AsyncSession = Depends(get_db)) -> dict:
     token = UserService.issue_token(user)
     return {
         "accessToken": token,
-        "user": {
-            "id": user.id,
-            "email": user.email,
-            "name": user.name,
-            "avatar": user.avatar,
-            "phone": user.phone,
-            "bio": user.bio,
-            "role": user.role,
-        },
+        "user": serialize_user(user),
     }
 
 
@@ -80,15 +92,7 @@ async def me(
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     u = await UserService(db).get_profile(user.user_id)
-    return {
-        "id": u.id,
-        "email": u.email,
-        "name": u.name,
-        "avatar": u.avatar,
-        "phone": u.phone,
-        "bio": u.bio,
-        "role": u.role,
-    }
+    return serialize_user(u)
 
 
 @router.get("/profile", response_model=UserPublicOut)
@@ -102,16 +106,7 @@ async def get_profile(
     读操作收口到 UserService.get_profile，router 仅做序列化。
     """
     u = await UserService(db).get_profile(user.user_id)
-    return {
-        "id": u.id,
-        "email": u.email,
-        "name": u.name,
-        "avatar": u.avatar,
-        "phone": u.phone,
-        "bio": u.bio,
-        "role": u.role,
-        "createdAt": u.created_at.isoformat() if u.created_at else None,
-    }
+    return serialize_user(u)
 
 
 @router.patch("/profile", response_model=UserPublicOut)
@@ -123,15 +118,7 @@ async def profile(
     u = await UserService(db).update_profile(
         user.user_id, req.name, req.avatar, req.phone, req.bio
     )
-    return {
-        "id": u.id,
-        "email": u.email,
-        "name": u.name,
-        "avatar": u.avatar,
-        "phone": u.phone,
-        "bio": u.bio,
-        "role": u.role,
-    }
+    return serialize_user(u)
 
 
 @router.patch("/password", response_model=AuthTokenOut)
@@ -145,15 +132,7 @@ async def change_password(
     )
     return {
         "accessToken": UserService.issue_token(u),
-        "user": {
-            "id": u.id,
-            "email": u.email,
-            "name": u.name,
-            "avatar": u.avatar,
-            "phone": u.phone,
-            "bio": u.bio,
-            "role": u.role,
-        },
+        "user": serialize_user(u),
     }
 
 
@@ -168,15 +147,7 @@ async def change_email(
     )
     return {
         "accessToken": UserService.issue_token(u),
-        "user": {
-            "id": u.id,
-            "email": u.email,
-            "name": u.name,
-            "avatar": u.avatar,
-            "phone": u.phone,
-            "bio": u.bio,
-            "role": u.role,
-        },
+        "user": serialize_user(u),
     }
 
 

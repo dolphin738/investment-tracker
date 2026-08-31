@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from app.core.envelope import EnvelopeRoute
-from app.core.security import CurrentUser, get_current_user
+from app.services.auth import CurrentUser, get_current_user
 from app.services.log import record
 
 router_client_log = APIRouter(

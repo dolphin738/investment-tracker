@@ -1,7 +1,7 @@
 """用户级行情自动同步配置路由。
 
 把行情自动同步改造为每用户独立配置，仅同步该用户自己的组合（仍由 APScheduler
-统一调度，见 app/core/scheduler.py 的 user:{user_id} cron job）。
+统一调度，见 app/services/scheduler.py 的 user:{user_id} cron job）。
 
 - GET  /api/quote-sync          取当前用户配置（无则返回默认值，不落库）
 - PUT  /api/quote-sync          校验并 upsert 当前用户配置，提交后 reload_schedule
@@ -16,8 +16,8 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.envelope import EnvelopeRoute
-from app.core.scheduler import reload_schedule, run_user_sync_now
-from app.core.security import CurrentUser, get_current_user
+from app.services.scheduler import reload_schedule, run_user_sync_now
+from app.services.auth import CurrentUser, get_current_user
 from app.db.database import get_db
 from app.models import UserQuoteSyncConfig
 

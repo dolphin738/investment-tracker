@@ -53,9 +53,6 @@ const SAMPLE_LIST = [
 
 vi.mock('@/api/quote-provider.api', () => ({
   listQuoteProviders: vi.fn(() => Promise.resolve(SAMPLE_LIST)),
-  getQuoteProvider: vi.fn((id: string) =>
-    Promise.resolve(SAMPLE_LIST.find((p) => p.id === id) ?? null),
-  ),
   createQuoteProvider: vi.fn((body: unknown) =>
     Promise.resolve({ ...SAMPLE_LIST[0], id: 'new', name: '新建源', ...(body as object) }),
   ),
@@ -65,7 +62,6 @@ vi.mock('@/api/quote-provider.api', () => ({
 
 vi.mock('@/api/quote-interface.api', () => ({
   listProviderInterfaces: vi.fn(() => Promise.resolve([])),
-  getInterface: vi.fn(() => Promise.resolve(null)),
   createInterface: vi.fn(() => Promise.resolve(null)),
   updateInterface: vi.fn(() => Promise.resolve(null)),
   deleteInterface: vi.fn(() => Promise.resolve(null)),
@@ -76,9 +72,7 @@ vi.mock('@/api/quote-interface.api', () => ({
 
 vi.mock('@/api/interface-category.api', () => ({
   listInterfaceCategories: vi.fn(() => Promise.resolve([])),
-  createInterfaceCategory: vi.fn(() => Promise.resolve(null)),
   updateInterfaceCategory: vi.fn(() => Promise.resolve(null)),
-  deleteInterfaceCategory: vi.fn(() => Promise.resolve(null)),
 }));
 
 vi.mock('@/composables/use-toast', () => ({
@@ -157,35 +151,12 @@ vi.mock('../components/StockListTestSection.vue', () => ({
 
 import AdminPage from '../pages/AdminPage.vue';
 import { createQuoteProvider, listQuoteProviders } from '@/api/quote-provider.api';
+import { installJsdomPolyfills } from '@/test-utils/jsdom-polyfills';
 
 let queryClient: QueryClient;
 let pinia: Pinia;
 
 /** jsdom 缺失的浏览器 API 兜底（reka-ui Dialog Portal 需要，同 portfolio-dialog.test） */
-function installJsdomPolyfills(): void {
-  if (!('ResizeObserver' in globalThis)) {
-    (globalThis as { ResizeObserver?: unknown }).ResizeObserver = class {
-      observe(): void {}
-      unobserve(): void {}
-      disconnect(): void {}
-    };
-  }
-  if (!window.matchMedia) {
-    window.matchMedia = ((query: string) => ({
-      matches: false,
-      media: query,
-      onchange: null,
-      addListener: () => {},
-      removeListener: () => {},
-      addEventListener: () => {},
-      removeEventListener: () => {},
-      dispatchEvent: () => false,
-    })) as unknown as typeof window.matchMedia;
-  }
-  if (!Element.prototype.scrollIntoView) {
-    Element.prototype.scrollIntoView = function scrollIntoView(): void {};
-  }
-}
 
 async function mountPage(): Promise<VueWrapper> {
   const wrapper = mount(AdminPage, {
@@ -299,8 +270,10 @@ describe('AdminPage — 多提供方管理 RBAC 与表单', () => {
 
     expect(wrapper.find('.interface-category-stub').exists()).toBe(false);
 
-    await findButton(wrapper, '接口分类管理').trigger('click');
+    // reka-ui TabsTrigger 以 onMousedown 切换激活页签，jsdom 下触发 mousedown 以驱动切换
+    await findButton(wrapper, '接口分类管理').trigger('mousedown');
     await nextTick();
+    await flushPromises();
 
     expect(wrapper.find('.interface-category-stub').exists()).toBe(true);
     expect(localStorage.getItem('invest:admin-active-module')).toBe(

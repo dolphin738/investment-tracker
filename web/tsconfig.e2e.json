@@ -1,0 +1,19 @@
+{
+  // e2e 类型门禁（E-1）：将 web/e2e/** 纳入 vue-tsc 类型检查，
+  // 弥补 tsconfig.app.json 仅覆盖 src/ 导致的 e2e 无类型守护盲区。
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2021", "DOM", "DOM.Iterable"],
+    "types": ["@playwright/test", "node"],
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false
+  },
+  "include": ["e2e/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}

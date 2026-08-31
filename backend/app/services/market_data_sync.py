@@ -433,6 +433,10 @@ class MarketDataSyncService:
         base_url = config.get("base_url")
         if not base_url or not itf.endpoint:
             raise ValueError("HTTPS 接口缺少 base_url 或 endpoint")
+        # SSRF 防护：provider base_url 仅允许 http/https（私网/环回放开，内部源常见）
+        from app.core.url_guard import assert_safe_url, clamp_timeout
+
+        assert_safe_url(base_url, allow_private=True)
         rp = itf.response_parse or {}
         # 参数传递：值为空（None / "" / 空列表）或模板占位符（如 string / 示例）直接忽略，
         # 不进入请求——避免 ?key= 这类无效参数，以及占位符把上游过滤成空列表
@@ -461,7 +465,7 @@ class MarketDataSyncService:
                 url = base_url.rstrip("/") + "/" + itf.endpoint.lstrip("/")
         else:
             url = base_url.rstrip("/") + "/" + itf.endpoint.lstrip("/")
-        timeout = itf.timeout or DEFAULT_TIMEOUT
+        timeout = clamp_timeout(itf.timeout or DEFAULT_TIMEOUT)
 
         async def _do() -> list[dict]:
             async with httpx.AsyncClient(timeout=timeout) as client:
@@ -1059,13 +1063,15 @@ class MarketDataSyncService:
             # 防源数据误带前缀（如 sz000012 国债指数）导致跨市场撞码
             if asset_class == SecurityType.INDEX:
                 exchange = classify_security(code, name).get("exchange") or exchange
-                code = f"{EXCHANGE_PREFIX.get(exchange or '', '')}{re.sub(r'\D', '', code)}"
+                digits = re.sub(r"\D", "", code)
+                code = f"{EXCHANGE_PREFIX.get(exchange or '', '')}{digits}"
             # 北交所 920xxx 段强制 bj 前缀：源数据（如小熊 /stock/all）将 920 段误带 sz 前缀，
             # 若不强归一，会按 sz920xxx 建新行，撞上历史已自愈为 bj920xxx 记录的派生 id
             # （securities_pkey 唯一约束冲突）
             if re.fullmatch(r"920\d{3}", re.sub(r"\D", "", code)):
                 exchange = "BJ"
-                code = f"bj{re.sub(r'\D', '', code)}"
+                digits = re.sub(r"\D", "", code)
+                code = f"bj{digits}"
 
             existing = (
                 await self.session.execute(

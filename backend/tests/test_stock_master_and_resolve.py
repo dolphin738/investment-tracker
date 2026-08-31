@@ -12,7 +12,6 @@
 from __future__ import annotations
 
 import uuid
-from typing import Any
 
 import pytest
 from sqlalchemy import select
@@ -450,7 +449,7 @@ async def test_sync_security_masters_dispatch_uses_provider_access_method(
     await _seed_fixed_categories(session)
     cid = MASTER_LIST_CAT_ID
     # 主数据接口归属「证券列表」固定分类（reform 后按 category_id 路由）
-    iid = await _create_interface(
+    await _create_interface(
         client,
         token,
         pid,
@@ -803,7 +802,7 @@ async def test_dedupe_masters_merges_existing_duplicate_rows(client, session):
     模拟「现在有 2 个平安银行」的历史脏数据，验证下次同步自动合并、保留最新更新行、
     且不误删被引用持仓（引用安全转移到保留行）。
     """
-    token = await _admin_token(client, "sm_dedup_2@example.com")
+    await _admin_token(client, "sm_dedup_2@example.com")
 
     # 直接种入两条重复主数据（不同 code 字符串但同资产类别，规范后应都变成 sz000001）
     async with dbmod.AsyncSessionLocal() as s:
@@ -1130,9 +1129,9 @@ async def test_delete_security_master_stats_and_list_updated(client, session):
 async def test_delete_security_master_all_deletes_orphans_only(client, session):
     """all=True：删除「当前筛选条件下全部孤儿主数据」，被引用的转入 skipped。"""
     token = await _admin_token(client, "del_all_admin@example.com")
-    o1 = await _seed_master(session, "sh600000", "浦发银行", SecurityType.STOCK, "pfyh", "SH")
-    o2 = await _seed_master(session, "sz000001", "平安银行", SecurityType.STOCK, "payh", "SZ")
-    o3 = await _seed_master(session, "hk00700", "腾讯控股", SecurityType.HK_STOCK, "txkh", "HK")
+    await _seed_master(session, "sh600000", "浦发银行", SecurityType.STOCK, "pfyh", "SH")
+    await _seed_master(session, "sz000001", "平安银行", SecurityType.STOCK, "payh", "SZ")
+    await _seed_master(session, "hk00700", "腾讯控股", SecurityType.HK_STOCK, "txkh", "HK")
     referenced = await _seed_master(session, "bj600519", "贵州茅台", SecurityType.STOCK, "gzmz", "SH")
     await _seed_user_portfolio_and_holding(session, "del_all_user@example.com", referenced.id)
 

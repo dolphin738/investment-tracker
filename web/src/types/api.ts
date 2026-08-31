@@ -1,8 +1,7 @@
 /* eslint-disable */
-// Generated from docs/openapi.json (OpenAPI 3.1).
-// Produced by a deterministic converter mirroring openapi-typescript's
-// `components['schemas']` output. Drop-in compatible if the CLI is run later.
-export interface paths { [name: string]: unknown }
+// Generated from docs/openapi.json (OpenAPI 3.1) by web/scripts/gen-api-types.py.
+// components['schemas'] 为后端 Pydantic schema 类型字典；paths / operations 死壳
+// 已按 REP-051 删除，不再生成。BUSINESS_ERROR_CODE 见文件尾（enums.py 单一事实源）。
 export interface components {
   schemas: {
     /** AccountStatsOut */
@@ -67,6 +66,8 @@ export interface components {
     CashBalancePatchReq: {
         /** Amount */
         amount?: string | null;
+        /** Asof */
+        asOf?: string | null;
         /** Note */
         note?: string | null;
       };
@@ -117,6 +118,19 @@ export interface components {
     ClearDataOut: {
         /** Deletedcount */
         deletedCount: Record<string, number>;
+      };
+    /** 前端上报的一条客户端错误。 */
+    ClientLogIn: {
+        /** Level */
+        level?: 'error' | 'warning' | 'info';
+        /** Module */
+        module: string;
+        /** Message */
+        message: string;
+        /** Trace */
+        trace?: string | null;
+        /** Detail */
+        detail?: unknown | null;
       };
     /** DividendCreateReq */
     DividendCreateReq: {
@@ -366,6 +380,72 @@ export interface components {
 PG 原生枚举类型名 `interface_direction`（由迁移创建）。
 业务当前仅落库使用（默认 in），UI 不暴露该字段。 */
     InterfaceDirection: 'in' | 'out';
+    /** 单接口测试请求体（§5.2）：params 为经前端编辑后的完整有效参数，覆盖 itf.params。 */
+    InterfaceTestRequest: {
+        /** Params */
+        params: Record<string, unknown>;
+        /** Codes */
+        codes?: string[] | null;
+      };
+    /** JobCreate */
+    JobCreate: {
+        /** Name */
+        name: string;
+        task_type: components['schemas']['JobTaskType'];
+        /** Cron Expr */
+        cron_expr: string;
+        /** Enabled */
+        enabled?: boolean;
+        /** Params */
+        params?: Record<string, unknown> | null;
+        /** Description */
+        description?: string | null;
+        /** Max Logs */
+        max_logs?: number | null;
+      };
+    /** 定时任务类型（统一调度器处理器注册表键 + 数据库任务类型列）。
+
+系统任务（不可追加/删除，仅可编辑）由迁移种子写入；普通任务（可增删改）在
+定时任务管理页由管理员新建。两者共用本枚举。 */
+    JobTaskType: 'MARKET_DATA_SYNC' | 'SECURITY_MASTER_SYNC' | 'HTTP_CALLBACK' | 'ACCOUNT_CLEANUP' | 'LOG_CLEANUP';
+    /** JobUpdate */
+    JobUpdate: {
+        /** Name */
+        name?: string | null;
+        task_type?: components['schemas']['JobTaskType'] | null;
+        /** Cron Expr */
+        cron_expr?: string | null;
+        /** Enabled */
+        enabled?: boolean | null;
+        /** Params */
+        params?: Record<string, unknown> | null;
+        /** Description */
+        description?: string | null;
+        /** Max Logs */
+        max_logs?: number | null;
+      };
+    /** 删除日志请求体。
+- ids：待删除日志 id 列表（带来源前缀 app:/notif:/job:）；all=False 时必填，可含重复，后端去重。
+- all=True：删除「当前筛选条件下全部日志」（跨所有页），忽略 ids；
+  level/scope/module/start/end/keyword 与列表端点一致，用于定位目标集合。 */
+    LogDeleteBody: {
+        /** Ids */
+        ids?: string[];
+        /** All */
+        all?: boolean;
+        /** Level */
+        level?: string | null;
+        /** Scope */
+        scope?: string | null;
+        /** Module */
+        module?: string | null;
+        /** Start */
+        start?: string | null;
+        /** End */
+        end?: string | null;
+        /** Keyword */
+        keyword?: string | null;
+      };
     /** LoginReq */
     LoginReq: {
         /** Email */
@@ -678,7 +758,7 @@ PG 原生枚举类型名 `interface_direction`（由迁移创建）。
       };
     /** QuoteInterfaceCreate */
     QuoteInterfaceCreate: {
-        /** 接口分类 id（UUID，外键→interface_categories.id） */
+        /** 接口分类 id（外键→quote_provider_interface_categories.id） */
         category_id: string;
         /** Name */
         name: string;
@@ -699,10 +779,29 @@ PG 原生枚举类型名 `interface_direction`（由迁移创建）。
         retry_count?: number | null;
         /** Rate Limit */
         rate_limit?: string | null;
+        /** Asset Class */
+        asset_class?: string[] | null;
+        /** Resp Code Field */
+        resp_code_field?: string | null;
+        /** Resp Price Field */
+        resp_price_field?: string | null;
+        /** Resp Name Field */
+        resp_name_field?: string | null;
+        /** Resp Exchange Field */
+        resp_exchange_field?: string | null;
+        /** Response Parse */
+        response_parse?: Record<string, unknown> | null;
+      };
+    /** 同分类内拖拽调序请求体（前端 dnd 产生的完整有序 id 列表）。 */
+    QuoteInterfaceReorder: {
+        /** 接口分类 id */
+        category_id: string;
+        /** 该分类下完整接口 id 列表，顺序即新优先级 */
+        ordered_ids: string[];
       };
     /** QuoteInterfaceUpdate */
     QuoteInterfaceUpdate: {
-        /** 接口分类 id（UUID），可空表示未分类 */
+        /** 接口分类 id，可空表示未分类（外键→quote_provider_interface_categories.id） */
         category_id?: string | null;
         /** Name */
         name?: string | null;
@@ -723,6 +822,18 @@ PG 原生枚举类型名 `interface_direction`（由迁移创建）。
         retry_count?: number | null;
         /** Rate Limit */
         rate_limit?: string | null;
+        /** Asset Class */
+        asset_class?: string[] | null;
+        /** Resp Code Field */
+        resp_code_field?: string | null;
+        /** Resp Price Field */
+        resp_price_field?: string | null;
+        /** Resp Name Field */
+        resp_name_field?: string | null;
+        /** Resp Exchange Field */
+        resp_exchange_field?: string | null;
+        /** Response Parse */
+        response_parse?: Record<string, unknown> | null;
       };
     /** 证券行情数据提供方接入方式（多提供方管理）。 */
     QuoteProviderAccessMethod: 'https' | 'sdk';
@@ -749,6 +860,19 @@ PG 原生枚举类型名 `interface_direction`（由迁移创建）。
         enabled?: boolean | null;
         /** Description */
         description?: string | null;
+      };
+    /** QuoteSyncUpdate */
+    QuoteSyncUpdate: {
+        /** Enabled */
+        enabled?: boolean;
+        /** Frequency */
+        frequency?: string;
+        /** Time */
+        time?: string;
+        /** Weekday */
+        weekday?: number | null;
+        /** Day Of Month */
+        day_of_month?: number | null;
       };
     /** RecalcOut */
     RecalcOut: {
@@ -789,16 +913,21 @@ PG 原生枚举类型名 `interface_direction`（由迁移创建）。
         /** Password */
         password: string;
       };
-    /** SecurityCreateReq */
-    SecurityCreateReq: {
-        /** Code */
-        code: string;
-        /** Name */
-        name: string;
-        /** Type */
-        type?: string | null;
-        /** Currency */
-        currency?: string;
+    /** 批量/单行删除证券主数据请求体。
+- ids：待删除主数据 id 列表（all=False 时必填，可含重复，后端去重）。
+- all=True：删除「当前筛选条件下全部孤儿主数据」（跨所有页），忽略 ids；
+  q/asset_class/exchange 与列表端点一致，用于定位目标集合。 */
+    SecurityMasterDeleteBody: {
+        /** Ids */
+        ids?: string[];
+        /** All */
+        all?: boolean;
+        /** Q */
+        q?: string | null;
+        /** Asset Class */
+        asset_class?: string | null;
+        /** Exchange */
+        exchange?: string | null;
       };
     /** SecurityOut */
     SecurityOut: {
@@ -809,24 +938,36 @@ PG 原生枚举类型名 `interface_direction`（由迁移创建）。
         /** Name */
         name: string;
         type: components['schemas']['SecurityType'];
+        /** Exchange */
+        exchange?: string | null;
         /** Currency */
         currency: string;
+        /** Masterid */
+        masterId: string;
         /** Createdat */
         createdAt: string;
         /** Updatedat */
         updatedAt: string;
       };
-    /** SecurityPatchReq */
+    /** 组合标的 PATCH：仅允许 type override（name 等维度归目录主数据）。 */
     SecurityPatchReq: {
-        /** Name */
-        name?: string | null;
         /** Type */
+        type?: string | null;
+      };
+    /** 录入界面证券搜索选中后，懒实例化为组合标的的幂等 upsert 请求体（ADR-003）。
+
+必须选中目录主数据（combobox 搜索 → 点击选中 → 传 masterId），不再支持手输 code。
+type 为可选 override；不传则读取时由代码前缀推断（infer_security_type）。 */
+    SecurityResolveReq: {
+        /** 目录主数据 id（securities.id） */
+        masterId: string;
+        /** 可选 type override；不传=按代码前缀推断 */
         type?: string | null;
       };
     /** SecuritySide */
     SecuritySide: 'BUY_SEC' | 'SELL_SEC';
     /** SecurityType */
-    SecurityType: 'STOCK' | 'ON_EXCHANGE_FUND' | 'BOND' | 'OTHER' | 'HK_STOCK' | 'CONVERTIBLE_BOND' | 'INDEX' | 'OFF_EXCHANGE_FUND';
+    SecurityType: 'STOCK' | 'ON_EXCHANGE_FUND' | 'BOND' | 'OTHER' | 'HK_STOCK' | 'CONVERTIBLE_BOND' | 'INDEX' | 'OFF_EXCHANGE_FUND' | 'UNCATEGORIZED';
     /** SnapshotCreateReq */
     SnapshotCreateReq: {
         /** Date */
@@ -1003,64 +1144,6 @@ PG 原生枚举类型名 `interface_direction`（由迁移创建）。
   };
 }
 
-/** operationId -> response schema name (HTTP 200, application/json). */
-export interface operations {
-    account_stats_api_account_stats_get: components['schemas']['AccountStatsOut'];
-    restore_api_auth_account_restore_post: components['schemas']['AuthTokenOut'];
-    change_email_api_auth_email_patch: components['schemas']['AuthTokenOut'];
-    login_api_auth_login_post: components['schemas']['AuthTokenOut'];
-    me_api_auth_me_get: components['schemas']['UserPublicOut'];
-    change_password_api_auth_password_patch: components['schemas']['AuthTokenOut'];
-    get_profile_api_auth_profile_get: components['schemas']['UserPublicOut'];
-    profile_api_auth_profile_patch: components['schemas']['UserPublicOut'];
-    register_api_auth_register_post: components['schemas']['UserPublicOut'];
-    create_portfolio_api_portfolios_post: components['schemas']['PortfolioOut'];
-    get_portfolio_detail_api_portfolios__portfolio_id__get: components['schemas']['PortfolioOut'];
-    patch_portfolio_api_portfolios__portfolio_id__patch: components['schemas']['PortfolioOut'];
-    archive_portfolio_api_portfolios__portfolio_id__archive_patch: components['schemas']['PortfolioOut'];
-    list_cashbalances_api_portfolios__portfolio_id__cash_balances_get: components['schemas']['Paginated_CashBalanceOut_'];
-    create_cashbalance_api_portfolios__portfolio_id__cash_balances_post: components['schemas']['CashBalanceOut'];
-    patch_cashbalance_api_portfolios__portfolio_id__cash_balances__cb_id__patch: components['schemas']['CashBalanceOut'];
-    list_cashflows_api_portfolios__portfolio_id__cashflows_get: components['schemas']['Paginated_CashflowOut_'];
-    create_cashflow_api_portfolios__portfolio_id__cashflows_post: components['schemas']['CashflowOut'];
-    get_cashflow_api_portfolios__portfolio_id__cashflows__cf_id__get: components['schemas']['CashflowOut'];
-    patch_cashflow_api_portfolios__portfolio_id__cashflows__cf_id__patch: components['schemas']['CashflowOut'];
-    clear_data_api_portfolios__portfolio_id__data_delete: components['schemas']['ClearDataOut'];
-    set_default_portfolio_api_portfolios__portfolio_id__default_patch: components['schemas']['PreferenceOut'];
-    list_dividends_api_portfolios__portfolio_id__dividends_get: components['schemas']['Paginated_DividendOut_'];
-    create_dividend_api_portfolios__portfolio_id__dividends_post: components['schemas']['DividendOut'];
-    patch_dividend_api_portfolios__portfolio_id__dividends__div_id__patch: components['schemas']['DividendOut'];
-    get_holdings_api_portfolios__portfolio_id__holdings_get: components['schemas']['HoldingsOut'];
-    import_commit_api_portfolios__portfolio_id__import_commit_post: components['schemas']['ImportCommitOut'];
-    import_preview_api_portfolios__portfolio_id__import_preview_post: components['schemas']['ImportPreviewOut'];
-    get_nav_history_api_portfolios__portfolio_id__nav_history_get: components['schemas']['Paginated_NavPointOut_'];
-    get_nav_latest_api_portfolios__portfolio_id__nav_latest_get: components['schemas']['NavPointOut'];
-    overview_api_portfolios__portfolio_id__overview_get: components['schemas']['OverviewOut'];
-    recalculate_full_api_portfolios__portfolio_id__recalculate_post: components['schemas']['RecalcOut'];
-    recalculate_range_api_portfolios__portfolio_id__recalculate_range_post: components['schemas']['RecalcOut'];
-    list_securities_api_portfolios__portfolio_id__securities_get: components['schemas']['Paginated_SecurityOut_'];
-    create_security_api_portfolios__portfolio_id__securities_post: components['schemas']['SecurityOut'];
-    get_security_api_portfolios__portfolio_id__securities__sec_id__get: components['schemas']['SecurityOut'];
-    patch_security_api_portfolios__portfolio_id__securities__sec_id__patch: components['schemas']['SecurityOut'];
-    list_prices_api_portfolios__portfolio_id__security_prices_get: components['schemas']['Paginated_PriceOut_'];
-    create_price_api_portfolios__portfolio_id__security_prices_post: components['schemas']['PriceOut'];
-    patch_price_api_portfolios__portfolio_id__security_prices__price_id__patch: components['schemas']['PriceOut'];
-    list_trades_api_portfolios__portfolio_id__security_trades_get: components['schemas']['Paginated_TradeOut_'];
-    create_trade_api_portfolios__portfolio_id__security_trades_post: components['schemas']['TradeOut'];
-    get_trade_api_portfolios__portfolio_id__security_trades__trade_id__get: components['schemas']['TradeOut'];
-    patch_trade_api_portfolios__portfolio_id__security_trades__trade_id__patch: components['schemas']['TradeOut'];
-    list_snapshots_api_portfolios__portfolio_id__snapshots_get: components['schemas']['Paginated_SnapshotOut_'];
-    create_snapshot_api_portfolios__portfolio_id__snapshots_post: components['schemas']['SnapshotOut'];
-    get_snapshot_by_date_api_portfolios__portfolio_id__snapshots__snap_date__get: components['schemas']['SnapshotOut'];
-    reset_snapshot_api_portfolios__portfolio_id__snapshots__snap_date__reset_post: components['schemas']['SnapshotOut'];
-    patch_snapshot_api_portfolios__portfolio_id__snapshots__snap_id__patch: components['schemas']['SnapshotOut'];
-    summary_api_portfolios__portfolio_id__summary_get: components['schemas']['PortfolioSummaryOut'];
-    get_xirr_history_api_portfolios__portfolio_id__xirr_history_get: components['schemas']['Paginated_XirrPointOut_'];
-    get_xirr_latest_api_portfolios__portfolio_id__xirr_latest_get: components['schemas']['XirrLatestOut'];
-    get_preferences_api_users_preferences_get: components['schemas']['PreferenceOut'];
-    patch_preferences_api_users_preferences_patch: components['schemas']['PreferenceOut'];
-  };
-
 // ── Generated from backend/app/core/enums.py BusinessErrorCode (single source of truth) ──
 export const BUSINESS_ERROR_CODE = {
   SUCCESS: 0,
@@ -1072,6 +1155,7 @@ export const BUSINESS_ERROR_CODE = {
   PENDING_DELETION: 1007,
   ACCOUNT_NOT_DELETED: 1008,
   RESTORE_EXPIRED: 1009,
+  RATE_LIMITED: 1029,
   VALIDATION_FAILED: 2000,
   NOT_FOUND: 3001,
   FORBIDDEN: 4001,

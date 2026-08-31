@@ -33,7 +33,7 @@ import {
   resolveQuickRange,
   type ResolvedDateRange,
 } from '@/modules/query/quick-range';
-import { useDefaultDateRange } from '@/composables/use-default-date-range';
+import { useDefaultDateRange } from '@/modules/query/use-default-date-range';
 
 /** 对齐回调载荷：快捷项 + 已解析的具体起止日期（页面按自己的载体挑用） */
 export interface RangePreferenceAlignment extends ResolvedDateRange {

@@ -30,7 +30,6 @@ from app.models import (
     SnapshotSource,
     SnapshotValuation,
 )
-from app.models.enums import SecuritySide
 from app.services.holding import HoldingService
 
 
@@ -157,6 +156,46 @@ class AssetValuationService:
         return 0
 
     # ── 落库：手工三路径 ──
+    async def _upsert_snapshot(
+        self,
+        portfolio_id: str,
+        d: date,
+        *,
+        total_asset: Decimal,
+        market_value: Decimal | None,
+        cash_balance: Decimal | None,
+        note: str | None,
+        source: SnapshotSource,
+        valuation_flag: SnapshotValuation,
+    ) -> AssetSnapshot:
+        """existing 则原地改 8 字段，否则新建；统一录制 recorded_at。
+
+        upsertManual / resetToDerived 同构骨架收敛点（REP-036）。
+        """
+        existing = await self._get_snapshot(portfolio_id, d)
+        if existing is not None:
+            existing.total_asset = total_asset
+            existing.market_value = market_value
+            existing.cash_balance = cash_balance
+            existing.source = source
+            existing.valuation_flag = valuation_flag
+            existing.note = note
+            existing.recorded_at = datetime.now(timezone.utc)
+            return existing
+        snap = AssetSnapshot(
+            portfolio_id=portfolio_id,
+            date=d,
+            total_asset=total_asset,
+            market_value=market_value,
+            cash_balance=cash_balance,
+            source=source,
+            valuation_flag=valuation_flag,
+            note=note,
+            recorded_at=datetime.now(timezone.utc),
+        )
+        self.session.add(snap)
+        return snap
+
     async def upsertManual(
         self,
         portfolio_id: str,
@@ -166,60 +205,32 @@ class AssetValuationService:
         cash_balance: Decimal | None,
         note: str | None,
     ) -> AssetSnapshot:
-        existing = await self._get_snapshot(portfolio_id, d)
-        if existing is not None:
-            existing.total_asset = total_asset
-            existing.market_value = market_value
-            existing.cash_balance = cash_balance
-            existing.source = SnapshotSource.MANUAL
-            existing.valuation_flag = SnapshotValuation.MANUAL_INPUT
-            existing.note = note
-            existing.recorded_at = datetime.now(timezone.utc)
-            snap = existing
-        else:
-            snap = AssetSnapshot(
-                portfolio_id=portfolio_id,
-                date=d,
-                total_asset=total_asset,
-                market_value=market_value,
-                cash_balance=cash_balance,
-                source=SnapshotSource.MANUAL,
-                valuation_flag=SnapshotValuation.MANUAL_INPUT,
-                note=note,
-                recorded_at=datetime.now(timezone.utc),
-            )
-            self.session.add(snap)
-        return snap
+        return await self._upsert_snapshot(
+            portfolio_id,
+            d,
+            total_asset=total_asset,
+            market_value=market_value,
+            cash_balance=cash_balance,
+            note=note,
+            source=SnapshotSource.MANUAL,
+            valuation_flag=SnapshotValuation.MANUAL_INPUT,
+        )
 
     async def resetToDerived(
         self, portfolio_id: str, d: date
     ) -> AssetSnapshot:
         """↺ 重置为自动值：原地覆盖该行（非删除），source 置回 DERIVED。"""
         derived = await self.computeDerived(portfolio_id, d)
-        existing = await self._get_snapshot(portfolio_id, d)
-        if existing is not None:
-            existing.total_asset = derived.total_asset
-            existing.market_value = derived.market_value
-            existing.cash_balance = derived.cash_balance
-            existing.source = SnapshotSource.DERIVED
-            existing.valuation_flag = derived.valuation_flag
-            existing.note = None
-            existing.recorded_at = datetime.now(timezone.utc)
-            snap = existing
-        else:
-            snap = AssetSnapshot(
-                portfolio_id=portfolio_id,
-                date=d,
-                total_asset=derived.total_asset,
-                market_value=derived.market_value,
-                cash_balance=derived.cash_balance,
-                source=SnapshotSource.DERIVED,
-                valuation_flag=derived.valuation_flag,
-                note=None,
-                recorded_at=datetime.now(timezone.utc),
-            )
-            self.session.add(snap)
-        return snap
+        return await self._upsert_snapshot(
+            portfolio_id,
+            d,
+            total_asset=derived.total_asset,
+            market_value=derived.market_value,
+            cash_balance=derived.cash_balance,
+            note=None,
+            source=SnapshotSource.DERIVED,
+            valuation_flag=derived.valuation_flag,
+        )
 
     async def deleteRecord(
         self, portfolio_id: str, d: date

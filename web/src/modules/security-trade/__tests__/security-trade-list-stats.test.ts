@@ -20,6 +20,7 @@ import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query';
 import SecurityTradeList from '../components/SecurityTradeList.vue';
 import { formatCurrency } from '@/lib/utils';
 import type { SecurityTradeResponse } from '@/api/types';
+import { installJsdomPolyfills } from '@/test-utils/jsdom-polyfills';
 
 // ---------------------------------------------------------------------------
 // mock
@@ -39,20 +40,6 @@ vi.mock('@/modules/security-trade/composables/use-security-trades', () => ({
   useDeleteSecurityTrade: () => ({ mutate: vi.fn(), isPending: { value: false } }),
 }));
 vi.mock('vue-sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
-
-function installJsdomPolyfills(): void {
-  if (!Element.prototype.scrollIntoView) {
-    Element.prototype.scrollIntoView = function scrollIntoView(): void {};
-  }
-  if (!Element.prototype.hasPointerCapture) {
-    Element.prototype.hasPointerCapture = function hasPointerCapture(): boolean {
-      return false;
-    };
-  }
-  if (!Element.prototype.releasePointerCapture) {
-    Element.prototype.releasePointerCapture = function releasePointerCapture(): void {};
-  }
-}
 
 async function settle(): Promise<void> {
   for (let i = 0; i < 4; i++) {

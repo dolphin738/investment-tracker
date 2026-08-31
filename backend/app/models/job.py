@@ -10,7 +10,7 @@
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import (
     JSON,
@@ -48,7 +48,7 @@ class JobConfig(Base, TimestampMixin):
     )
     # 5 字段 cron 表达式（分 时 日 月 周），APScheduler`CronTrigger.from_crontab`
     cron_expr: Mapped[str] = mapped_column(String(64), nullable=False)
-    # 任务类型相关的可选参数（如 LOCAL_COMMAND.command / HTTP_CALLBACK.url）
+    # 任务类型相关的可选参数（如 HTTP_CALLBACK.url）
     params: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     description: Mapped[str | None] = mapped_column(String(512), nullable=True)
     # 保留执行日志条数上限：NULL/<=0 表示不限制；有值时删除该任务超出的最旧日志

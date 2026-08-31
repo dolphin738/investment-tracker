@@ -22,3 +22,29 @@ name = services 不得依赖 modules（路由层）
 type = forbidden
 source_modules = app.services
 forbidden_modules = app.modules
+
+# common.py 为路由层公共辅助（归属隔离 / 分页），仅 modules 可依赖；禁止被下层 models/services 反向依赖
+[importlinter:bottom_no_common]
+name = models / services 不得依赖 common（路由层公共辅助）
+type = forbidden
+source_modules =
+    app.models
+    app.services
+forbidden_modules = app.common
+
+# core 为无业务底座层（config/enums/exceptions/types/security 纯函数等）：禁止依赖业务层。
+# A1 方案乙已把违规住户迁出 core：scheduler（编排，依赖 services/models）→ services/scheduler.py；
+# auth 依赖（CurrentUser/get_current_user/角色守卫，查库依赖 models.User）→ services/auth.py。
+[importlinter:core_no_business]
+name = core 不得依赖业务层（services / modules / models）
+type = forbidden
+source_modules = app.core
+forbidden_modules =
+    app.services
+    app.modules
+    app.models
+ignore_imports =
+    # 单点豁免：exceptions.unhandled_exception_handler 函数内延迟落库（5xx 错误日志，
+    # core/exceptions.py:104），循环依赖所迫（services.log -> models.log 且 handler
+    # 须在 app 装配前可用），与业务编排无涉。
+    app.core.exceptions -> app.services.log

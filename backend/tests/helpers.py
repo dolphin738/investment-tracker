@@ -59,7 +59,7 @@ async def seed_security(
     替代已移除的 POST /api/portfolios/{pid}/securities（D3 删除 Security.create）。
     """
     import app.db.database as dbmod
-    from app.models import PortfolioSecurity, Security, SecurityType
+    from app.models import Security, SecurityType
 
     async with dbmod.AsyncSessionLocal() as s:
         master = Security(

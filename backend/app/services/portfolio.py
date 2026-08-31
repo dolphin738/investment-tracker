@@ -11,7 +11,6 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from sqlalchemy import delete, select, update
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
     AssetSnapshot,

@@ -21,7 +21,11 @@
  */
 
 import { createRouter, createWebHistory } from 'vue-router';
-import type { RouteRecordRaw } from 'vue-router';
+import type {
+  RouteLocationNormalized,
+  RouteLocationRaw,
+  RouteRecordRaw,
+} from 'vue-router';
 import { useAuthStore } from '@/stores/auth.store';
 import { AUTH_RETURN_KEY, ROUTE_PATH } from '@/lib/constants';
 
@@ -119,8 +123,10 @@ const router = createRouter({
   routes,
 });
 
-/** 全局前置守卫：JWT 认证拦截 + 回跳意图记录 */
-router.beforeEach((to) => {
+/** 全局前置守卫：JWT 认证拦截 + 回跳意图记录（导出以便单测，FE-GLOBAL-01） */
+export function authGuard(
+  to: RouteLocationNormalized,
+): boolean | RouteLocationRaw {
   const auth = useAuthStore();
 
   // 公开页面直接放行
@@ -143,6 +149,8 @@ router.beforeEach((to) => {
   }
 
   return true;
-});
+}
+
+router.beforeEach(authGuard);
 
 export default router;

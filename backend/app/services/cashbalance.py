@@ -9,10 +9,10 @@
 """
 from __future__ import annotations
 
+from datetime import date
 from typing import Optional
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import CashBalance
 from app.schemas import CashBalanceCreateReq, CashBalancePatchReq
@@ -79,6 +79,7 @@ class CashBalanceService(PortfolioChildService):
         old_as_of = cb.as_of
         if req.asOf is not None:
             validate_date_not_future(req.asOf)
+            cb.as_of = req.asOf
         if req.amount is not None:
             cb.amount = req.amount
         if req.note is not None:

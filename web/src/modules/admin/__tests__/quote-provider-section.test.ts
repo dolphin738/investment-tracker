@@ -101,7 +101,6 @@ const SAMPLE_INTERFACES = [
 
 vi.mock('@/api/quote-provider.api', () => ({
   listQuoteProviders: vi.fn(() => Promise.resolve(MOCK_PROVIDERS)),
-  getQuoteProvider: vi.fn(() => Promise.resolve(null)),
   createQuoteProvider: vi.fn(() => Promise.resolve(null)),
   updateQuoteProvider: vi.fn(() => Promise.resolve(null)),
   deleteQuoteProvider: vi.fn(() => Promise.resolve(null)),
@@ -109,7 +108,6 @@ vi.mock('@/api/quote-provider.api', () => ({
 
 vi.mock('@/api/quote-interface.api', () => ({
   listProviderInterfaces: vi.fn(() => Promise.resolve([])),
-  getInterface: vi.fn(() => Promise.resolve(null)),
   createInterface: vi.fn(() => Promise.resolve(null)),
   updateInterface: vi.fn(() => Promise.resolve(null)),
   deleteInterface: vi.fn(() => Promise.resolve(null)),
@@ -131,9 +129,7 @@ vi.mock('@/api/interface-category.api', () => ({
       },
     ]),
   ),
-  createInterfaceCategory: vi.fn(() => Promise.resolve(null)),
   updateInterfaceCategory: vi.fn(() => Promise.resolve(null)),
-  deleteInterfaceCategory: vi.fn(() => Promise.resolve(null)),
 }));
 
 vi.mock('@/composables/use-toast', () => ({

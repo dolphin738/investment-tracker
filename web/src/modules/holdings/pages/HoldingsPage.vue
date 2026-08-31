@@ -48,7 +48,7 @@ import { createHoldingsSchema } from '../query-params';
 import type { HoldingsFilterState } from '../query-params';
 import { deriveTradeSecurityFilter } from '../trade-security-filter';
 import { resolveQuickRange } from '@/modules/query/quick-range';
-import { useDefaultDateRange } from '@/composables/use-default-date-range';
+import { useDefaultDateRange } from '@/modules/query/use-default-date-range';
 import { usePortfolios } from '@/composables/use-portfolios';
 import { useSecurities } from '@/composables/use-securities';
 import { useHoldings } from '../composables/use-holdings';

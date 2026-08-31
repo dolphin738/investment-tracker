@@ -2,7 +2,6 @@
  * modules/security-trade/composables/use-security-trades.ts — 证券买卖流水 CRUD vue-query hooks
  *
  * 平移自 React 版 web/src/hooks/use-security-trades.ts,行为契约一致:
- * - useSecurityTrades:列表 query(分页 + 日期范围 + 标的/方向筛选)
  * - useCreateSecurityTrade / useUpdateSecurityTrade / useDeleteSecurityTrade:mutation
  * - mutation 成功后失效持仓 / 净值 / XIRR / 快照 / 概览等计算链路 query 缓存
  *
@@ -15,20 +14,16 @@
 
 import {
   useMutation,
-  useQuery,
   useQueryClient,
 } from '@tanstack/vue-query';
 import { toast } from '@/composables/use-toast';
 import {
   createSecurityTrade as createApi,
   deleteSecurityTrade as deleteApi,
-  listSecurityTrades as listApi,
   updateSecurityTrade as updateApi,
 } from '@/api/security-trade.api';
 import type {
   CreateSecurityTradeRequest,
-  SecurityTradeQuery,
-  SecurityTradeResponse,
   UpdateSecurityTradeRequest,
 } from '@/api/types';
 
@@ -41,21 +36,6 @@ const AFFECTED_QUERY_KEYS = [
   ['snapshots'],
   ['overview'],
 ] as const;
-
-/** 证券买卖流水列表 */
-export function useSecurityTrades(
-  portfolioId: string | null,
-  query: SecurityTradeQuery = {},
-) {
-  return useQuery({
-    queryKey: portfolioId
-      ? ['security-trades', 'list', portfolioId, query]
-      : ['security-trades', 'disabled'],
-    queryFn: () => listApi(portfolioId!, query),
-    enabled: Boolean(portfolioId),
-    staleTime: 30 * 1000,
-  });
-}
 
 /** 创建证券买卖流水(INC-04 物理并表:费用随 trade 单行一并提交) */
 export function useCreateSecurityTrade() {

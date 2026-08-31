@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy import JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -25,6 +25,8 @@ class User(Base, TimestampMixin):
         String(20), default=UserRole.USER.value, nullable=False
     )
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # JWT 吊销版本号（REP-011）：改密/改邮箱/恢复账户时自增，旧 token 因 tv 不匹配即失效。
+    token_version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
     portfolios: Mapped[list["Portfolio"]] = relationship(
         back_populates="user", passive_deletes=True

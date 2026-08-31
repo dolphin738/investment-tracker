@@ -476,7 +476,7 @@ class AggregationService:
                 .limit(n)
             )
         ).scalars().all()
-        return [serialize_cashflow(c) for c in reversed(rows)]
+        return [serialize_cashflow(c).model_dump() for c in reversed(rows)]
 
     # ── 内部：窗口/账户级 XIRR ──
     async def _xirr_scope(

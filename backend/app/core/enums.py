@@ -35,6 +35,7 @@ class BusinessErrorCode(IntEnum):
     PENDING_DELETION = 1007      # 注销冷静期（HTTP 409 + data.remainingDays）
     ACCOUNT_NOT_DELETED = 1008   # 账户未注销（HTTP 409）
     RESTORE_EXPIRED = 1009       # 恢复期已过（HTTP 410）
+    RATE_LIMITED = 1029          # 触发限速（HTTP 429）
     # 参数校验 2000-2999
     VALIDATION_FAILED = 2000     # 参数校验错误（HTTP 400）
     # 业务 3000-3999
@@ -52,6 +53,7 @@ HTTP_STATUS_TO_CODE: dict[int, int] = {
     403: BusinessErrorCode.TOKEN_EXPIRED,
     404: BusinessErrorCode.NOT_FOUND,
     409: BusinessErrorCode.EMAIL_TAKEN,
+    429: BusinessErrorCode.RATE_LIMITED,
     500: BusinessErrorCode.INTERNAL_ERROR,
 }
 
@@ -65,6 +67,7 @@ CODE_TO_HTTP_STATUS: dict[int, int] = {
     BusinessErrorCode.PENDING_DELETION: 409,
     BusinessErrorCode.ACCOUNT_NOT_DELETED: 409,
     BusinessErrorCode.RESTORE_EXPIRED: 410,
+    BusinessErrorCode.RATE_LIMITED: 429,
     BusinessErrorCode.VALIDATION_FAILED: 400,
     BusinessErrorCode.NOT_FOUND: 404,
     BusinessErrorCode.FORBIDDEN: 403,

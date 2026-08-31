@@ -12,6 +12,7 @@
  * 鉴权：useHasRole('admin','auditor') 双重门控（菜单已过滤，此处防直达深链 403 兜底）。
  */
 import { computed, reactive, ref, type ComponentPublicInstance } from 'vue';
+import { formatDateTime } from '@/lib/utils';
 import {
   Loader2,
   RotateCcw,
@@ -322,14 +323,6 @@ function scopeLabel(scope: string | null): string {
   return scope ?? '-';
 }
 
-/** 本地时间格式化：YYYY-MM-DD HH:mm:ss */
-function formatDateTime(value: string | null): string {
-  if (!value) return '-';
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return '-';
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
-}
 
 /** detail 字段安全 JSON 化（用于展示结构化附加信息） */
 function stringifyDetail(detail: unknown): string {

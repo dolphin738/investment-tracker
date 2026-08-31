@@ -125,13 +125,6 @@ const changeFromYearStart = computed(() =>
   formatChange(currentValue.value, yearStartValue.value, xirrDecimals),
 );
 
-// 年度聚合数据（用于柱状图）；原样平移 React 的 filter 写法：非「按年」维度时保留全量
-const yearlyData = computed<XirrSeriesPoint[]>(() =>
-  seriesData.value.filter(
-    () => dimension.value.granularity !== QueryGranularity.YEAR,
-  ),
-);
-
 /** 明细表行（倒序展示 + 前值索引配对，等价 React 模板内的 prev 计算） */
 const detailRows = computed(() => {
   const data = seriesData.value;
@@ -239,7 +232,7 @@ function aggregateByYear(data: XirrSeriesPoint[]): XirrSeriesPoint[] {
 
     <!-- 年度柱状图（当年柱高亮，DASH-P1-05 验收 2） -->
     <YearlyBarChart
-      v-if="dimension.granularity !== 'year' && yearlyData.length > 0"
+      v-if="dimension.granularity !== 'year' && seriesData.length > 0"
       :data="aggregateByYear(seriesData)"
       title="年度 XIRR 对比"
       highlight-current-year

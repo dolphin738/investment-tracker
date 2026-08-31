@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "description": "Investment Tracker Web Frontend (Vue 3) - Vite + Vue 3 + Tailwind 3 + shadcn-vue",
+  "packageManager": "pnpm@11.20.0",
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc --noEmit -p tsconfig.app.json && vite build",
@@ -11,7 +12,7 @@
     "lint": "vue-tsc --noEmit -p tsconfig.app.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "generate:api": "python3 scripts/gen-api-types.py ../docs/openapi.json src/types/api.ts",
+    "typecheck:e2e": "vue-tsc --noEmit -p tsconfig.e2e.json",
     "clean": "rimraf dist"
   },
   "dependencies": {
@@ -19,10 +20,8 @@
     "axios": "^1.6.7",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.0",
-    "date-fns": "^3.3.0",
     "echarts": "^5.5.0",
     "lucide-vue-next": "^0.460.0",
-    "papaparse": "^5.4.1",
     "pinia": "^2.2.0",
     "reka-ui": "^2.0.0",
     "tailwind-merge": "^2.2.0",
@@ -37,8 +36,8 @@
   "devDependencies": {
     "@playwright/test": "^1.62.1",
     "@types/node": "^20.11.0",
-    "@types/papaparse": "^5.3.14",
     "@vitejs/plugin-vue": "^5.0.0",
+    "@vitest/coverage-v8": "^1.2.2",
     "@vue/test-utils": "^2.4.0",
     "autoprefixer": "^10.4.18",
     "jsdom": "^24.0.0",

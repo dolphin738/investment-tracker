@@ -40,8 +40,6 @@ from app.models import (
     PortfolioSecurity,
     SecurityPrice,
     SecurityTrade,
-    SnapshotSource,
-    SnapshotValuation,
 )
 from app.models.enums import CashFlowType, SecuritySide
 from app.services.cashflow import CashflowService

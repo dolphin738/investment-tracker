@@ -12,15 +12,14 @@ from datetime import date
 from decimal import Decimal
 from typing import Optional
 
-from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from app.core.enums import BusinessErrorCode
 from app.core.exceptions import BusinessException
 from app.models import DividendRecord, PortfolioSecurity
 from app.models.enums import DividendType
 from app.schemas import DividendCreateReq, DividendPatchReq
-from app.services.base import PortfolioChildService, coerce_enum, split_ids
+from app.services.base import PortfolioChildService, coerce_enum, split_ids, paged
 
 
 class DividendService(PortfolioChildService):
@@ -46,16 +45,7 @@ class DividendService(PortfolioChildService):
         stmt = stmt.order_by(
             DividendRecord.date.desc(), DividendRecord.created_at.desc()
         )
-        total = (
-            await self.session.execute(
-                select(func.count()).select_from(stmt.subquery())
-            )
-        ).scalar_one()
-        rows = (
-            await self.session.execute(
-                stmt.limit(pageSize).offset((page - 1) * pageSize)
-            )
-        ).scalars().all()
+        rows, total = await paged(self.session, stmt, page, pageSize)
         return rows, total
 
     async def get(self, portfolio_id: str, div_id: str) -> DividendRecord:

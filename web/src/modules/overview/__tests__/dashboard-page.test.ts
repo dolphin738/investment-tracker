@@ -27,6 +27,7 @@ import type {
   TransactionResponse,
 } from '@/api/types';
 import type { Portfolio } from '@/lib/types';
+import { installJsdomPolyfills } from '@/test-utils/jsdom-polyfills';
 
 // ---------------------------------------------------------------------------
 // mock：数据层 API（可变夹具：各用例按需覆写）
@@ -93,10 +94,10 @@ vi.mock('@/composables/use-toast', () => ({
 // mock：重型子组件 stub（ECharts / 弹窗表单 / 轮询徽标 / 日期范围选择器）
 // ---------------------------------------------------------------------------
 
-vi.mock('@/modules/overview/components/NavTrendChart.vue', () => ({
+vi.mock('@/components/charts/NavTrendChart.vue', () => ({
   default: { name: 'NavTrendChart', template: '<div data-testid="nav-chart" />' },
 }));
-vi.mock('@/modules/overview/components/XirrTrendChart.vue', () => ({
+vi.mock('@/components/charts/XirrTrendChart.vue', () => ({
   default: {
     name: 'XirrTrendChart',
     template: '<div data-testid="xirr-chart" />',
@@ -210,30 +211,6 @@ function makeTx(p: Partial<TransactionResponse>): TransactionResponse {
 }
 
 /** jsdom 缺失的浏览器 API 兜底（reka-ui Tabs / Dialog 需要） */
-function installJsdomPolyfills(): void {
-  if (!('ResizeObserver' in globalThis)) {
-    (globalThis as { ResizeObserver?: unknown }).ResizeObserver = class {
-      observe(): void {}
-      unobserve(): void {}
-      disconnect(): void {}
-    };
-  }
-  if (!window.matchMedia) {
-    window.matchMedia = ((query: string) => ({
-      matches: false,
-      media: query,
-      onchange: null,
-      addListener: () => {},
-      removeListener: () => {},
-      addEventListener: () => {},
-      removeEventListener: () => {},
-      dispatchEvent: () => false,
-    })) as unknown as typeof window.matchMedia;
-  }
-  if (!Element.prototype.scrollIntoView) {
-    Element.prototype.scrollIntoView = function scrollIntoView(): void {};
-  }
-}
 
 let pinia: Pinia;
 let queryClient: QueryClient;

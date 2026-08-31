@@ -107,7 +107,6 @@ class JobTaskType(str, enum.Enum):
 
     MARKET_DATA_SYNC = "MARKET_DATA_SYNC"  # 行情同步（遍历组合拉实时价，普通可建）
     SECURITY_MASTER_SYNC = "SECURITY_MASTER_SYNC"  # 证券主数据同步（普通可建）
-    LOCAL_COMMAND = "LOCAL_COMMAND"  # 定时执行本地脚本/命令（普通可建）
     HTTP_CALLBACK = "HTTP_CALLBACK"  # HTTP 回调（普通可建）
     ACCOUNT_CLEANUP = "ACCOUNT_CLEANUP"  # 账户物理清理（系统任务，迁移种子写入）
     LOG_CLEANUP = "LOG_CLEANUP"  # 日志中心清理（系统任务，迁移种子写入）

@@ -24,7 +24,7 @@ import {
 /** 可控偏好默认值（mock useDefaultDateRange） */
 const pref = vi.hoisted(() => ({ value: '1y' }));
 
-vi.mock('@/composables/use-default-date-range', () => ({
+vi.mock('@/modules/query/use-default-date-range', () => ({
   useDefaultDateRange: () => computed(() => pref.value),
 }));
 

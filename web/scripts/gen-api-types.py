@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 """Deterministic OpenAPI 3.1 -> TypeScript types generator.
 
-Mirrors the `components['schemas']` (and a convenience `operations` map) portion
-of openapi-typescript's output, so docs/openapi.json can be converted to
-web/src/types/api.ts without the CLI (which is unavailable in this sandbox).
+Mirrors the `components['schemas']` portion of openapi-typescript's output, so
+docs/openapi.json can be converted to web/src/types/api.ts without the CLI
+(which is unavailable in this sandbox).
+
+REP-051 后仅输出 components（paths / operations 死壳前端零引用，已删除）：
+- components['schemas']：后端 Pydantic schema 类型字典（单一事实源）；
+- BUSINESS_ERROR_CODE：从 backend/app/core/enums.py 解析（见 gen_business_error_code）。
 
 Output shape is compatible with openapi-typescript's exported `components`
 namespace, so this file is a drop-in if the real tool is run later.
@@ -145,14 +149,12 @@ def main():
     with open(src, encoding="utf-8") as f:
         spec = json.load(f)
     schemas = spec.get("components", {}).get("schemas", {})
-    paths = spec.get("paths", {})
 
     lines = []
     lines.append("/* eslint-disable */")
-    lines.append("// Generated from docs/openapi.json (OpenAPI 3.1).")
-    lines.append("// Produced by a deterministic converter mirroring openapi-typescript's")
-    lines.append("// `components['schemas']` output. Drop-in compatible if the CLI is run later.")
-    lines.append("export interface paths { [name: string]: unknown }")
+    lines.append("// Generated from docs/openapi.json (OpenAPI 3.1) by web/scripts/gen-api-types.py.")
+    lines.append("// components['schemas'] 为后端 Pydantic schema 类型字典；paths / operations 死壳")
+    lines.append("// 已按 REP-051 删除，不再生成。BUSINESS_ERROR_CODE 见文件尾（enums.py 单一事实源）。")
     lines.append("export interface components {")
     lines.append(f"{INDENT}schemas: {{")
 
@@ -167,41 +169,13 @@ def main():
     lines.append(f"{INDENT}}};")
     lines.append("}")
 
-    # Convenience operationId -> 200-response schema name map.
-    lines.append("")
-    lines.append("/** operationId -> response schema name (HTTP 200, application/json). */")
-    lines.append("export interface operations {")
-    op_entries = []
-    for path, methods in paths.items():
-        if not isinstance(methods, dict):
-            continue
-        for method, op in methods.items():
-            if not isinstance(op, dict):
-                continue
-            op_id = op.get("operationId")
-            if not op_id:
-                continue
-            resp = (op.get("responses") or {}).get("200") or {}
-            content = resp.get("content") or {}
-            js = content.get("application/json") or {}
-            sch = js.get("schema") or {}
-            ref = sch.get("$ref")
-            if ref:
-                nm = ref.split("/")[-1]
-                op_entries.append(f"{INDENT}{INDENT}{op_id}: components['schemas']['{nm}'];")
-    if op_entries:
-        lines.extend(op_entries)
-    else:
-        lines.append(f"{INDENT}{INDENT}[op: string]: unknown;")
-    lines.append(f"{INDENT}}};")
-
     # Business error codes — parsed from backend/app/core/enums.py (single source
     # of truth) so the generated file stays in sync with the Python backend.
     lines.extend(gen_business_error_code())
 
     with open(out, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
-    print(f"Wrote {out}: {len(schemas)} schemas, {len(op_entries)} operations")
+    print(f"Wrote {out}: {len(schemas)} schemas")
 
 
 if __name__ == "__main__":

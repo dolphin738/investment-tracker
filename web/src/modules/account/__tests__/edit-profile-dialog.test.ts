@@ -14,6 +14,7 @@ import { updateProfile } from '@/api/auth.api';
 import { uploadAvatar } from '@/api/upload.api';
 import { useAuthStore } from '@/stores/auth.store';
 import type { UserPublic } from '@/lib/types';
+import { installJsdomPolyfills } from '@/test-utils/jsdom-polyfills';
 
 const apiMocks = vi.hoisted(() => ({
   updateProfile: vi.fn(),
@@ -49,31 +50,6 @@ const USER = {
   role: 'user',
   createdAt: '2024-01-01T00:00:00Z',
 } as unknown as UserPublic;
-
-function installJsdomPolyfills(): void {
-  if (!('ResizeObserver' in globalThis)) {
-    (globalThis as { ResizeObserver?: unknown }).ResizeObserver = class {
-      observe(): void {}
-      unobserve(): void {}
-      disconnect(): void {}
-    };
-  }
-  if (!window.matchMedia) {
-    window.matchMedia = ((query: string) => ({
-      matches: false,
-      media: query,
-      onchange: null,
-      addListener: () => {},
-      removeListener: () => {},
-      addEventListener: () => {},
-      removeEventListener: () => {},
-      dispatchEvent: () => false,
-    })) as unknown as typeof window.matchMedia;
-  }
-  if (!Element.prototype.scrollIntoView) {
-    Element.prototype.scrollIntoView = function scrollIntoView(): void {};
-  }
-}
 
 const bodyText = (): string => document.body.textContent ?? '';
 

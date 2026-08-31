@@ -453,7 +453,13 @@ describe('HoldingsPage 阶段 A 对齐（§9.2）', () => {
       };
       const wrapper = await mountPage();
 
-      const el = wrapper.findAll('p').find((p) => p.text() === '-12.34%');
+      // MetricCard 数值渲染在 <div>（带 tabular-nums 特征类），按文本+类精确匹配后断言负值着色
+      const el = wrapper
+        .findAll('div')
+        .find(
+          (d) =>
+            d.text() === '-12.34%' && d.classes().includes('tabular-nums'),
+        );
       expect(el).toBeDefined();
       expect(el!.classes()).toContain('text-down');
 

@@ -19,6 +19,7 @@ import XirrAnalysisPage from '../pages/XirrAnalysisPage.vue';
 import { usePortfolioStore } from '@/stores/portfolio.store';
 import type { Portfolio } from '@/lib/types';
 import type { XirrSeriesPoint } from '@/lib/types';
+import { installJsdomPolyfills } from '@/test-utils/jsdom-polyfills';
 
 // ---------------------------------------------------------------------------
 // mock：图表组件（echarts canvas 渲染在 jsdom 不可用，替身为纯文本节点）
@@ -142,30 +143,6 @@ vi.mock('@/api/query.api', () => ({
 // ---------------------------------------------------------------------------
 
 /** jsdom 缺失的浏览器 API 兜底（reka-ui / 图表容器挂载需要） */
-function installJsdomPolyfills(): void {
-  if (!('ResizeObserver' in globalThis)) {
-    (globalThis as { ResizeObserver?: unknown }).ResizeObserver = class {
-      observe(): void {}
-      unobserve(): void {}
-      disconnect(): void {}
-    };
-  }
-  if (!window.matchMedia) {
-    window.matchMedia = ((query: string) => ({
-      matches: false,
-      media: query,
-      onchange: null,
-      addListener: () => {},
-      removeListener: () => {},
-      addEventListener: () => {},
-      removeEventListener: () => {},
-      dispatchEvent: () => false,
-    })) as unknown as typeof window.matchMedia;
-  }
-  if (!Element.prototype.scrollIntoView) {
-    Element.prototype.scrollIntoView = function scrollIntoView(): void {};
-  }
-}
 
 let pinia: Pinia;
 let queryClient: QueryClient;

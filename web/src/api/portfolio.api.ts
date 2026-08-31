@@ -31,11 +31,6 @@ export function createPortfolio(
   return http.post<PortfolioResponse>('/portfolios', payload);
 }
 
-/** 获取组合详情 */
-export function getPortfolio(id: string): Promise<PortfolioResponse> {
-  return http.get<PortfolioResponse>(`/portfolios/${id}`);
-}
-
 /** 更新组合（名称/描述） */
 export function updatePortfolio(
   id: string,

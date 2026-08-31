@@ -112,7 +112,6 @@ async def test_comparison(client):
 
     st, code, data, msg = env(await client.get("/api/portfolios/comparison", headers=h))
     assert st == 200 and code == 0, (st, code, msg)
-    ids = {d["inceptionDate"] for d in data}  # 仅校验结构
     assert isinstance(data, list)
     assert len(data) == 2
     for item in data:

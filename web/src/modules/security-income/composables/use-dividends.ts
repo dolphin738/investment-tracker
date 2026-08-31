@@ -35,9 +35,6 @@ import type {
   UpdateDividendRecordDto,
 } from '@/api/types';
 
-/** 分红列表 query key 前缀 */
-export const DIVIDENDS_KEY = ['dividends'] as const;
-
 /** 分红类型中文映射（表单与列表共用；编辑态下拉遍历） */
 export const DIVIDEND_TYPE_LABEL: Record<DividendType, string> = {
   CASH: '现金分红',

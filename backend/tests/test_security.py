@@ -14,12 +14,8 @@ from sqlalchemy import select
 
 import app.db.database as dbmod
 from app.core.enums import BusinessErrorCode, UserRole
-from app.core.security import (
-    CurrentUser,
-    create_access_token,
-    get_current_user,
-    require_admin,
-)
+from app.core.security import create_access_token
+from app.services.auth import CurrentUser, require_admin
 from app.models import User
 
 from tests.helpers import auth, env, register_login
@@ -111,7 +107,7 @@ async def test_require_admin_dependency():
     故用 require_any_role("admin") 验证实质：user → 抛权限异常；admin → 透传。
     同时验证 require_admin 对 admin 的薄包装透传。
     """
-    from app.core.security import require_any_role
+    from app.services.auth import require_any_role
 
     with pytest.raises(Exception) as exc_info_user:
         await require_any_role("admin")(CurrentUser("u", "e", "user"))

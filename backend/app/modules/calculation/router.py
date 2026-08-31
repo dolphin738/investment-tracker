@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import time
 from datetime import date, timedelta
-from decimal import Decimal
 from typing import Optional
 
 from fastapi import APIRouter, Depends
@@ -17,7 +16,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.envelope import EnvelopeRoute
-from app.core.security import CurrentUser, get_current_user
 from app.db.database import get_db
 from app.finance_core.holding import ZERO
 from app.models import (
@@ -302,11 +300,6 @@ async def get_nav_series(
             }
         )
     return out
-
-
-def _shares_at(rows, d: date) -> Decimal | None:
-    match = [r for r in rows if r.date == d]
-    return match[-1].shares if match else None
 
 
 @router_nav.get("/{portfolio_id}/nav/latest", response_model=NavPointOut)

@@ -43,7 +43,6 @@ export default defineConfig({
             if (id.includes('reka-ui')) return 'vendor-reka';
             if (id.includes('@tanstack')) return 'vendor-vue-query';
             if (id.includes('vee-validate') || id.includes('zod') || id.includes('@vee')) return 'vendor-forms';
-            if (id.includes('papaparse')) return 'vendor-papaparse';
             if (id.includes('vue-draggable-plus')) return 'vendor-draggable';
             if (id.includes('vue-sonner')) return 'vendor-sonner';
             if (
@@ -51,7 +50,6 @@ export default defineConfig({
               id.includes('/pinia/') ||
               id.includes('/vue/') ||
               id.includes('/axios/') ||
-              id.includes('/date-fns/') ||
               id.includes('/clsx/') ||
               id.includes('/tailwind-merge/') ||
               id.includes('/class-variance-authority/')

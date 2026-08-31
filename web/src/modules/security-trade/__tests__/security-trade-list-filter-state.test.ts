@@ -13,6 +13,7 @@ import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query';
 import SecurityTradeList from '../components/SecurityTradeList.vue';
 import type { SecurityTradeResponse } from '@/api/types';
+import { installJsdomPolyfills } from '@/test-utils/jsdom-polyfills';
 
 // ---------------------------------------------------------------------------
 // mock：数据层（组件直接调用 listSecurityTrades + useSecurities，不走 useSecurityTrades 封装）
@@ -36,19 +37,6 @@ vi.mock('vue-sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 // ---------------------------------------------------------------------------
 // 工具
 // ---------------------------------------------------------------------------
-function installJsdomPolyfills(): void {
-  if (!Element.prototype.scrollIntoView) {
-    Element.prototype.scrollIntoView = function scrollIntoView(): void {};
-  }
-  if (!Element.prototype.hasPointerCapture) {
-    Element.prototype.hasPointerCapture = function hasPointerCapture(): boolean {
-      return false;
-    };
-  }
-  if (!Element.prototype.releasePointerCapture) {
-    Element.prototype.releasePointerCapture = function releasePointerCapture(): void {};
-  }
-}
 
 /** 等待 vue-query notifyManager 调度完成 */
 async function settle(): Promise<void> {

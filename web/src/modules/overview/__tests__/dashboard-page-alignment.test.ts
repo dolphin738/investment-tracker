@@ -22,6 +22,7 @@ import { usePortfolioStore } from '@/stores/portfolio.store';
 import { usePreferenceStore } from '@/stores/preference.store';
 import type { OverviewResponse, PortfolioSummary } from '@/api/types';
 import type { Portfolio } from '@/lib/types';
+import { installJsdomPolyfills } from '@/test-utils/jsdom-polyfills';
 
 const fixtures = vi.hoisted(() => ({
   portfolios: [] as Portfolio[],
@@ -76,10 +77,10 @@ vi.mock('@/composables/use-toast', () => ({
 }));
 
 // 重型子组件 stub（同 dashboard-page.test.ts）
-vi.mock('@/modules/overview/components/NavTrendChart.vue', () => ({
+vi.mock('@/components/charts/NavTrendChart.vue', () => ({
   default: { name: 'NavTrendChart', template: '<div data-testid="nav-chart" />' },
 }));
-vi.mock('@/modules/overview/components/XirrTrendChart.vue', () => ({
+vi.mock('@/components/charts/XirrTrendChart.vue', () => ({
   default: { name: 'XirrTrendChart', template: '<div data-testid="xirr-chart" />' },
 }));
 vi.mock('@/modules/overview/components/TotalAssetTrendChart.vue', () => ({
@@ -186,30 +187,6 @@ const BASE_PREF = {
 };
 
 /** jsdom 缺失的浏览器 API 兜底 */
-function installJsdomPolyfills(): void {
-  if (!('ResizeObserver' in globalThis)) {
-    (globalThis as { ResizeObserver?: unknown }).ResizeObserver = class {
-      observe(): void {}
-      unobserve(): void {}
-      disconnect(): void {}
-    };
-  }
-  if (!window.matchMedia) {
-    window.matchMedia = ((query: string) => ({
-      matches: false,
-      media: query,
-      onchange: null,
-      addListener: () => {},
-      removeListener: () => {},
-      addEventListener: () => {},
-      removeEventListener: () => {},
-      dispatchEvent: () => false,
-    })) as unknown as typeof window.matchMedia;
-  }
-  if (!Element.prototype.scrollIntoView) {
-    Element.prototype.scrollIntoView = function scrollIntoView(): void {};
-  }
-}
 
 let pinia: Pinia;
 let queryClient: QueryClient;

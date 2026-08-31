@@ -52,11 +52,6 @@ export function listQuoteProviders(): Promise<QuoteProvider[]> {
   return http.get<QuoteProvider[]>('/admin/quote-providers');
 }
 
-/** 读取单个提供方 */
-export function getQuoteProvider(id: string): Promise<QuoteProvider> {
-  return http.get<QuoteProvider>(`/admin/quote-providers/${encodeURIComponent(id)}`);
-}
-
 /** 新增提供方 */
 export function createQuoteProvider(
   body: QuoteProviderCreate,

@@ -98,14 +98,7 @@ async def create_cashflow(
     req: CashflowCreateReq, p=Depends(get_portfolio), db: AsyncSession = Depends(get_db)
 ):
     cf, rec = await CashflowService(db).create(p.id, req)
-    result = serialize_cashflow(cf)
-    # D3：完整对齐 app/ 的 recalculation 反馈字段
-    result["recalculation"] = {
-        "fromDate": rec.from_date,
-        "affectedDays": rec.affected_days,
-        "skippedManualDays": rec.skipped_manual_days,
-    }
-    return result
+    return serialize_cashflow(cf, rec)
 
 
 @router_cashflows.patch("/{portfolio_id}/cashflows/{cf_id}", response_model=CashflowOut)
@@ -116,13 +109,7 @@ async def patch_cashflow(
     cf_id: str = "",
 ):
     cf, rec = await CashflowService(db).patch(p.id, cf_id, req)
-    result = serialize_cashflow(cf)
-    result["recalculation"] = {
-        "fromDate": rec.from_date,
-        "affectedDays": rec.affected_days,
-        "skippedManualDays": rec.skipped_manual_days,
-    }
-    return result
+    return serialize_cashflow(cf, rec)
 
 
 @router_cashflows.delete("/{portfolio_id}/cashflows/{cf_id}")
@@ -396,7 +383,7 @@ async def list_snapshots(
 
 @router_snapshots.get("/{portfolio_id}/snapshots/{snap_date}", response_model=SnapshotOut)
 async def get_snapshot_by_date(
-    p=Depends(get_portfolio), db: AsyncSession = Depends(get_db), snap_date: date = None
+    snap_date: date, p=Depends(get_portfolio), db: AsyncSession = Depends(get_db)
 ):
     snap, derived = await SnapshotService(db).get_by_date(p.id, snap_date)
     return serialize_snapshot(snap, derived_total=derived)
@@ -431,7 +418,7 @@ async def delete_snapshot(
 
 @router_snapshots.post("/{portfolio_id}/snapshots/{snap_date}/reset", response_model=SnapshotOut)
 async def reset_snapshot(
-    p=Depends(get_portfolio), db: AsyncSession = Depends(get_db), snap_date: date = None
+    snap_date: date, p=Depends(get_portfolio), db: AsyncSession = Depends(get_db)
 ):
     snap, derived = await SnapshotService(db).reset(p.id, snap_date)
     return serialize_snapshot(snap, derived_total=derived)

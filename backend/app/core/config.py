@@ -4,10 +4,12 @@
 """
 from __future__ import annotations
 
+import logging
 from functools import lru_cache
 
-from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = logging.getLogger("app.core.config")
 
 
 class Settings(BaseSettings):
@@ -61,18 +63,80 @@ class Settings(BaseSettings):
     # 任务配置存 job_configs 表：普通任务可增删改、系统任务仅可编辑；调度器在应用
     # 启动时从库中加载全部 enabled 任务注册为 cron job，运行时写 job_run_logs 日志。
     SCHEDULER_ENABLED: bool = True
-    # —— 已废弃（统一定时任务管理取代）：行情同步迁为普通任务 MARKET_DATA_SYNC，
-    #    任务配置与开关由 job_configs 表维护，不再由环境变量驱动。保留字段仅为兼容旧 env。
-    QUOTE_SYNC_SCHEDULER_ENABLED: bool = Field(
-        default=False,
-        deprecated="Use job_configs (MARKET_DATA_SYNC) + SCHEDULER_ENABLED instead",
-    )
-    QUOTE_SYNC_SCHEDULER_CRON: str = Field(
-        default="0 16 * * 1-5",
-        deprecated="Use job_configs.cron_expr (MARKET_DATA_SYNC) instead",
-    )
+
+    # 启动期安全配置严格模式（REP-002）。
+    # 默认 False：检测到弱密钥/弱默认仅输出 CRITICAL 日志告警，不阻断本地开发流；
+    # 设为 1/true：检测到危险配置直接拒绝启动（生产部署推荐开启）。
+    STRICT_SECURITY: bool = False
+
+    # 公开注册开关（REP-010）：单用户/内网部署可关闭公开注册（默认开启）。
+    REGISTRATION_ENABLED: bool = True
+
+    # 登录失败限速（REP-010）：每 (客户端 IP, 邮箱) 在窗口内的失败次数上限；
+    # 0 = 关闭（内网默认关闭，公网/生产建议在 .env 设 10~20）。
+    LOGIN_RATE_LIMIT_PER_MINUTE: int = 0
+    LOGIN_RATE_LIMIT_WINDOW_SECONDS: int = 60
+
+    # 密码最小长度（REP-010）：注册时强制，降低弱口令风险。
+    MIN_PASSWORD_LENGTH: int = 8
 
 
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+# ---------------------------------------------------------------------------
+# REP-002：启动期安全配置哨兵
+# 危险默认值/弱密钥会在启动时告警；设置 STRICT_SECURITY=1 则拒绝启动（生产推荐）。
+# ---------------------------------------------------------------------------
+_KNOWN_WEAK_JWT_SECRETS = {"change-me-in-prod"}
+_MIN_JWT_SECRET_BYTES = 32
+_KNOWN_WEAK_INTERNAL_TOKENS = {"change-me-internal"}
+
+
+def validate_security_config() -> None:
+    """启动期安全配置校验（REP-002 / REP-008）。
+
+    检测到以下任一情况时：默认仅输出 CRITICAL 日志（不破坏本地开发流）；
+    当环境变量 ``STRICT_SECURITY`` 为真时改为拒绝启动（抛出 RuntimeError）。
+
+    - ``JWT_SECRET`` 仍为默认占位值 ``change-me-in-prod``（任何人可离线伪造任意用户 JWT）；
+    - ``JWT_SECRET`` 长度不足 32 字节（存在被暴力破解风险）；
+    - ``INTERNAL_CLEANUP_TOKEN`` 仍为默认占位值 ``change-me-internal``
+      （任何人可触发不可逆物理清理）；
+    - ``DATABASE_URL`` 仍为代码内硬编码弱默认（postgres:postgres@localhost，数据库未配置）。
+    """
+    s = get_settings()
+    problems: list[str] = []
+
+    if s.JWT_SECRET in _KNOWN_WEAK_JWT_SECRETS:
+        problems.append(
+            "JWT_SECRET 仍是默认占位值 'change-me-in-prod'，任何人可离线伪造任意用户 JWT"
+        )
+    elif len(s.JWT_SECRET.encode("utf-8")) < _MIN_JWT_SECRET_BYTES:
+        problems.append(
+            f"JWT_SECRET 长度不足 {_MIN_JWT_SECRET_BYTES} 字节，存在被暴力破解风险"
+        )
+
+    if s.INTERNAL_CLEANUP_TOKEN in _KNOWN_WEAK_INTERNAL_TOKENS:
+        problems.append(
+            "INTERNAL_CLEANUP_TOKEN 仍是默认占位值 'change-me-internal'，"
+            "任何人可携带默认令牌触发不可逆物理清理"
+        )
+
+    if s.DATABASE_URL == Settings.model_fields["DATABASE_URL"].default:
+        problems.append(
+            "DATABASE_URL 仍是代码内硬编码弱默认（postgres:postgres@localhost），数据库未配置"
+        )
+
+    if not problems:
+        return
+
+    detail = "；".join(problems)
+    if s.STRICT_SECURITY:
+        logger.critical("安全配置校验失败，拒绝启动：%s", detail)
+        raise RuntimeError(f"安全配置校验未通过：{detail}")
+    logger.critical(
+        "安全配置风险（STRICT_SECURITY 未开启，仅告警不阻断启动）：%s", detail
+    )

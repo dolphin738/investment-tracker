@@ -17,7 +17,6 @@ import app.db.database as dbmod
 from app.core.enums import BusinessErrorCode, UserRole
 from app.core.security import create_access_token
 from app.models import User
-from app.services.quote_provider import QuoteProviderService
 
 from tests.helpers import auth, env, register_login
 

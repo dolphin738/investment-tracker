@@ -24,7 +24,6 @@ import app.db.database as dbmod
 from app.db.base import Base
 import app.models  # noqa: F401  确保全部模型注册到 Base.metadata
 
-import pytest
 
 
 def _db_name_from_url(url: str) -> str:

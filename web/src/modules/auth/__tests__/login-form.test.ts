@@ -9,7 +9,7 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
-import { createMemoryHistory, createRouter, type Router } from 'vue-router';
+import { type Router } from 'vue-router';
 import { createPinia, setActivePinia, type Pinia } from 'pinia';
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query';
 import LoginForm from '../components/LoginForm.vue';
@@ -19,6 +19,7 @@ import { useAuthStore } from '@/stores/auth.store';
 import { ApiError } from '@/lib/api-client';
 import { AUTH_RETURN_KEY } from '@/lib/constants';
 import type { UserPublic } from '@/api/types';
+import { buildRouter } from './build-router';
 
 vi.mock('@/api/auth.api', () => ({
   login: vi.fn(),
@@ -54,18 +55,6 @@ const loginResponse = { accessToken: 'token-1', user: mockUser };
 let router: Router;
 let pinia: Pinia;
 let queryClient: QueryClient;
-
-function buildRouter(): Router {
-  return createRouter({
-    history: createMemoryHistory(),
-    routes: [
-      { path: '/login', name: 'login', component: { template: '<div>login-page</div>' } },
-      { path: '/register', name: 'register', component: { template: '<div>register-page</div>' } },
-      { path: '/', name: 'dashboard', component: { template: '<div>dashboard-page</div>' } },
-      { path: '/holdings', name: 'holdings', component: { template: '<div>holdings-page</div>' } },
-    ],
-  });
-}
 
 /** 等待 mutation 微任务链 + tanstack query 批量通知 + vee-validate 校验管线全部落地 */
 async function settle(): Promise<void> {

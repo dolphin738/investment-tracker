@@ -8,19 +8,22 @@
 """
 from __future__ import annotations
 
-import sqlalchemy as sa
 from alembic import op
+from sqlalchemy import text
 
 # revision identifiers, used by Alembic.
 revision: str = "u1v2w3x4y5z6"
-down_revision: str | None = "t0u1v2w3x4y5"
+down_revision: str | None = "t7u8v9w0x1y2"
 branch_labels: str | None = None
 depends_on: str | None = None
 
 
 def upgrade() -> None:
-    op.add_column("job_configs", sa.Column("max_logs", sa.Integer(), nullable=True))
+    # 漂移态守卫：开发库可能经 create_all 建表 + stamp 打戳，列已存在；
+    # IF NOT EXISTS 使迁移幂等（全新库照常加列，漂移库无操作）。
+    op.execute(text("ALTER TABLE job_configs ADD COLUMN IF NOT EXISTS max_logs INTEGER"))
 
 
 def downgrade() -> None:
-    op.drop_column("job_configs", "max_logs")
+    # 与 upgrade 对称使用 IF EXISTS，容忍「列已不存在」的漂移库，保证降级不中断。
+    op.execute(text("ALTER TABLE job_configs DROP COLUMN IF EXISTS max_logs"))

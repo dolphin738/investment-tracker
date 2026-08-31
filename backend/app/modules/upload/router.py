@@ -15,7 +15,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, File, UploadFile
 
 from app.core.envelope import EnvelopeRoute
-from app.core.security import CurrentUser, get_current_user
+from app.services.auth import CurrentUser, get_current_user
 from app.db.database import get_db
 from app.services.upload import UploadService
 
