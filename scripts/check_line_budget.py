@@ -35,6 +35,9 @@ EXCLUDED_NAMES = {
     "uv.lock",
     "poetry.lock",
     "Cargo.lock",
+    # 闸门自身的基线数据：由脚本生成/刷新（产物体积快照），非手写代码，
+    # 与锁文件同理不计入「新增代码」预算
+    "bundle-baseline.json",
 }
 EXCLUDED_SUFFIXES = (".snap", ".svg", ".ico", ".png", ".jpg", ".woff", ".woff2")
 
