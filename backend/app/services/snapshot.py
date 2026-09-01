@@ -9,7 +9,7 @@ RecalculationService.recalculateNavRange（T5，不重建快照层）。
 """
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Optional
 
@@ -18,7 +18,7 @@ from sqlalchemy import select
 from app.core.enums import BusinessErrorCode
 from app.core.exceptions import BusinessException
 from app.models import AssetSnapshot
-from app.models.enums import SnapshotSource
+from app.models.enums import SnapshotSource, SnapshotValuation
 from app.schemas import SnapshotCreateReq, SnapshotPatchReq
 from app.services.asset_valuation import AssetValuationService
 from app.services.base import PortfolioChildService, validate_date_not_future, paged
@@ -121,37 +121,61 @@ class SnapshotService(PortfolioChildService):
     async def bulk_upsert(
         self, portfolio_id: str, rows: list[dict]
     ) -> tuple[int, int]:
-        """导入批量写入：逐行 upsertManual（手工快照），不 commit（由
+        """导入批量写入：手工快照批量 upsert，不 commit（由
         commit_import 末尾统一提交）；返回 (inserted, updated) 计数。
 
-        与 REST 单条 create 收敛到同一 Service，消除导入路径的双真源。
+        与 REST 单条 create 收敛到同一 Service，消除导入路径的双真源；
+        字段覆盖语义与 AssetValuationService._upsert_snapshot 一致
+        （8 字段原地覆盖 + recorded_at），仅将逐行 SELECT 收敛为一次存量载入。
         """
-        av = AssetValuationService(self.session)
-        inserted = updated = 0
+        if not rows:
+            return 0, 0
+        parsed: list[tuple[date, Decimal, Optional[Decimal], Optional[Decimal], Optional[str]]] = []
         for r in rows:
             d = date.fromisoformat(r["date"])
             mv = Decimal(r["marketValue"]) if r.get("marketValue") else None
             cb = Decimal(r["cashBalance"]) if r.get("cashBalance") else None
-            existing = (
-                await self.session.execute(
-                    select(AssetSnapshot.id).where(
-                        AssetSnapshot.portfolio_id == portfolio_id,
-                        AssetSnapshot.date == d,
-                    )
+            parsed.append((d, Decimal(r["totalAsset"]), mv, cb, r.get("note") or None))
+
+        existing_rows = (
+            await self.session.execute(
+                select(AssetSnapshot).where(
+                    AssetSnapshot.portfolio_id == portfolio_id,
+                    AssetSnapshot.date.in_([d for d, *_ in parsed]),
                 )
-            ).scalar_one_or_none()
-            await av.upsertManual(
-                portfolio_id,
-                d,
-                Decimal(r["totalAsset"]),
-                mv,
-                cb,
-                r.get("note") or None,
             )
-            if existing is not None:
+        ).scalars().all()
+        by_date = {s.date: s for s in existing_rows}
+
+        recorded_at = datetime.now(timezone.utc)
+        inserted = updated = 0
+        for d, total, mv, cb, note in parsed:
+            snap = by_date.get(d)
+            if snap is not None:
+                snap.total_asset = total
+                snap.market_value = mv
+                snap.cash_balance = cb
+                snap.source = SnapshotSource.MANUAL
+                snap.valuation_flag = SnapshotValuation.MANUAL_INPUT
+                snap.note = note
+                snap.recorded_at = recorded_at
                 updated += 1
             else:
+                self.session.add(
+                    AssetSnapshot(
+                        portfolio_id=portfolio_id,
+                        date=d,
+                        total_asset=total,
+                        market_value=mv,
+                        cash_balance=cb,
+                        source=SnapshotSource.MANUAL,
+                        valuation_flag=SnapshotValuation.MANUAL_INPUT,
+                        note=note,
+                        recorded_at=recorded_at,
+                    )
+                )
                 inserted += 1
+        await self.session.flush()
         return inserted, updated
 
     async def patch(
