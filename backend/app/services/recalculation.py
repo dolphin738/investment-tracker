@@ -10,9 +10,10 @@ end 缺省 = today（UTC+8），绝非 start（PRD §5.4.4）。
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, timezone
 
 from sqlalchemy import delete, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.date_utils import today_app_tz
@@ -87,11 +88,50 @@ class RecalculationService:
                     AssetSnapshot.source == SnapshotSource.DERIVED,
                 )
             )
-        # ② 逐事件日重派生（双保险②：persistDerived 内部遇 MANUAL 跳过，返回 1）
+        # ② 批量重派生（双保险②：MANUAL 跳过不覆盖，语义与 persistDerived 对齐）。
+        #    复用 computeDerivedBatch（N 日恒 3 次查库）替代逐事件日 persistDerived
+        #    （每日约 5 次查询 + 累积扫描），区间重建查询数从 O(5D) 降为常数级；
+        #    写入合并为单条多值 INSERT ... ON CONFLICT DO NOTHING（步骤①已删除
+        #    区间内 DERIVED，此处仅剩插入与 MANUAL 跳过两种情形）。
         av = AssetValuationService(self.session)
         skipped_manual_days = 0
-        for d in event_dates:
-            skipped_manual_days += await av.persistDerived(portfolio_id, d)
+        if event_dates:
+            derived_map = await av.computeDerivedBatch(portfolio_id, event_dates)
+            manual_dates = set(
+                (
+                    await self.session.execute(
+                        select(AssetSnapshot.date).where(
+                            AssetSnapshot.portfolio_id == portfolio_id,
+                            AssetSnapshot.date.in_(event_dates),
+                            AssetSnapshot.source == SnapshotSource.MANUAL,
+                        )
+                    )
+                ).scalars().all()
+            )
+            skipped_manual_days = len(manual_dates)
+            values = [
+                {
+                    "portfolio_id": portfolio_id,
+                    "date": d,
+                    "total_asset": derived_map[d].total_asset,
+                    "market_value": derived_map[d].market_value,
+                    "cash_balance": derived_map[d].cash_balance,
+                    "source": SnapshotSource.DERIVED,
+                    "valuation_flag": derived_map[d].valuation_flag,
+                    "note": None,
+                    "recorded_at": datetime.now(timezone.utc),
+                }
+                for d in event_dates
+                if d not in manual_dates
+            ]
+            if values:
+                await self.session.execute(
+                    pg_insert(AssetSnapshot.__table__)
+                    .values(values)
+                    .on_conflict_do_nothing(
+                        index_elements=["portfolio_id", "date"]
+                    )
+                )
         await self.session.flush()
         # ③ 按「快照日期集合」逐日重算 NAV→XIRR
         nav_result = await self.recalculateNavRange(portfolio_id, start, until)
