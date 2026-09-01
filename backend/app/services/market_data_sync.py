@@ -477,10 +477,12 @@ class MarketDataSyncService:
                 raise RuntimeError(f"鉴权失败: {resp.status_code}")
             resp.raise_for_status()
             if (rp.get("format") or "json").lower() == "text_split":
-                # 非 JSON 文本（如腾讯财经 ~ 分隔 + gbk 编码）：按 response_parse 解析
+                # 非 JSON 文本（如腾讯财经 ~ 分隔 + gbk 编码）：按 response_parse 解析。
+                # 正则回放属重 CPU（admin 可自由配置 line_regex），丢线程池避免
+                # 阻塞事件循环（ReDoS 时仅占用单线程而非整个服务）。
                 enc = rp.get("encoding") or "utf-8"
                 resp.encoding = enc
-                return self._parse_text_split(resp.text, rp)
+                return await asyncio.to_thread(self._parse_text_split, resp.text, rp)
             return self._normalize_rows(resp.json())
 
         return await self._guarded_fetch(itf, _do)
@@ -503,6 +505,8 @@ class MarketDataSyncService:
         sep = rp.get("sep", "~")
         line_regex = rp.get("line_regex")
         rows: list[dict] = []
+        # 响应体长度钳制：超大体量文本先截断，限制正则回放的 CPU 上界
+        text = text[:5_000_000]
         if not line_regex:
             fields = text.split(sep)
             rows.append({str(i): v for i, v in enumerate(fields)})
@@ -673,35 +677,50 @@ class MarketDataSyncService:
     # ------------------------------------------------------------------ #
     # 组合级同步
     # ------------------------------------------------------------------ #
-    async def _upsert_price(
+    async def _upsert_prices_batch(
         self,
         portfolio_id: str,
-        security_id: str,
-        price: Decimal,
+        pairs: list[tuple[str, Decimal]],
         as_of: date,
         source: Optional[str],
     ) -> None:
-        existing = (
+        """批量 upsert 当日行情（同一天一次 SELECT + 批量写入，消除逐行往返）。
+
+        ``pairs`` 为 (security_id, price) 列表；existing 原地改字段，新行批量 add。
+        （security_prices 无 (portfolio_id, security_id, as_of) 唯一约束，
+        沿用 SELECT-then-write 语义，不引入 on_conflict。）
+        """
+        if not pairs:
+            return
+        sids = [sid for sid, _ in pairs]
+        existing_rows = (
             await self.session.execute(
                 select(SecurityPrice).where(
                     SecurityPrice.portfolio_id == portfolio_id,
-                    SecurityPrice.security_id == security_id,
                     SecurityPrice.as_of == as_of,
+                    SecurityPrice.security_id.in_(sids),
                 )
             )
-        ).scalar_one_or_none()
-        if existing is None:
-            existing = SecurityPrice(
-                portfolio_id=portfolio_id,
-                security_id=security_id,
-                price=price,
-                as_of=as_of,
-            )
-            self.session.add(existing)
-        else:
-            existing.price = price
-        existing.fetched_at = datetime.now(timezone.utc)
-        existing.source = source
+        ).scalars().all()
+        by_sid = {r.security_id: r for r in existing_rows}
+        fetched_at = datetime.now(timezone.utc)
+        for sid, price in pairs:
+            row = by_sid.get(sid)
+            if row is None:
+                self.session.add(
+                    SecurityPrice(
+                        portfolio_id=portfolio_id,
+                        security_id=sid,
+                        price=price,
+                        as_of=as_of,
+                        fetched_at=fetched_at,
+                        source=source,
+                    )
+                )
+            else:
+                row.price = price
+                row.fetched_at = fetched_at
+                row.source = source
         await self.session.flush()
 
     async def sync_portfolio_prices(
@@ -728,12 +747,14 @@ class MarketDataSyncService:
         failed = 0
         errors: list[str] = []
         result = await self.fallback_fetch(QUOTE_CAT_ID, codes)
+        pairs: list[tuple[str, Decimal]] = []
         for code, price in result.prices.items():
             sid = securities.get(code)
             if sid is None:
                 continue
-            await self._upsert_price(portfolio_id, sid, price, as_of, result.source)
+            pairs.append((sid, price))
             synced += 1
+        await self._upsert_prices_batch(portfolio_id, pairs, as_of, result.source)
 
         # 重建快照/净值（不 commit，由调用方提交）
         await RecalculationService(self.session).recalculateRange(
