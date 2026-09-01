@@ -10,6 +10,7 @@ preview / commit 走正常信封。
 """
 from __future__ import annotations
 
+import asyncio
 from datetime import date
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile
@@ -70,7 +71,8 @@ async def export_data(
             media_type="text/csv; charset=utf-8",
             headers={"Content-Disposition": f"attachment; filename={fname}"},
         )
-    content = dt.to_xlsx(columns, rows)
+    # xlsx 打包属重 CPU（openpyxl），丢线程池避免阻塞事件循环
+    content = await asyncio.to_thread(dt.to_xlsx, columns, rows)
     return Response(
         content=content,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -100,7 +102,8 @@ async def import_preview(
             status_code=400,
         )
 
-    header, data = dt._read_sheet(content, ext)
+    # xlsx 解析属重 CPU（openpyxl read_only 仍逐格转换），丢线程池避免阻塞事件循环
+    header, data = await asyncio.to_thread(dt._read_sheet, content, ext)
     secs = (
         await db.execute(
             select(PortfolioSecurity)
@@ -179,7 +182,7 @@ async def download_template(
             media_type="text/csv; charset=utf-8",
             headers={"Content-Disposition": f"attachment; filename={fname}"},
         )
-    content = dt.to_xlsx(columns, sample)
+    content = await asyncio.to_thread(dt.to_xlsx, columns, sample)
     return Response(
         content=content,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
