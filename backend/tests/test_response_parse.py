@@ -51,7 +51,7 @@ class _FakeClient:
     async def __aexit__(self, *exc: object) -> bool:
         return False
 
-    async def request(self, method: str, url: str, params=None) -> _FakeResp:
+    async def request(self, method: str, url: str, params=None, **kwargs) -> _FakeResp:
         self.last = (method, url, params)
         return self._resp
 
@@ -139,13 +139,13 @@ async def test_fetch_https_inline_code_param_and_text_split(session) -> None:
     fake = _FakeClient(_FakeResp(text=_tencent_sample()))
     import app.services.market_data_sync as mds
 
-    original = mds.httpx.AsyncClient
-    mds.httpx.AsyncClient = lambda *a, **k: fake  # type: ignore[misc,assignment]
+    original = mds._get_shared_http_client
+    mds._get_shared_http_client = lambda: fake  # type: ignore[misc,assignment]
     try:
         svc = MarketDataSyncService(session)
         rows = await svc._fetch_https_raw(itf, {}, ["sz000001", "hk00700"])
     finally:
-        mds.httpx.AsyncClient = original  # type: ignore[assignment]
+        mds._get_shared_http_client = original  # type: ignore[assignment]
 
     # 1) URL 必须为内联形态 q=sz000001,hk00700（无 ?code=）
     method, url, params = fake.last
@@ -180,13 +180,13 @@ async def test_fetch_https_json_default(session) -> None:
     fake = _FakeClient(_FakeResp(json_data=body))
     import app.services.market_data_sync as mds
 
-    original = mds.httpx.AsyncClient
-    mds.httpx.AsyncClient = lambda *a, **k: fake  # type: ignore[misc,assignment]
+    original = mds._get_shared_http_client
+    mds._get_shared_http_client = lambda: fake  # type: ignore[misc,assignment]
     try:
         svc = MarketDataSyncService(session)
         rows = await svc._fetch_https_raw(itf, {}, ["sz000001"])
     finally:
-        mds.httpx.AsyncClient = original  # type: ignore[assignment]
+        mds._get_shared_http_client = original  # type: ignore[assignment]
 
     # 默认 json：走 _normalize_rows 解 data 包 + 默认 code 参数名
     assert rows == [{"code": "sz000001", "price": "15.00"}]
@@ -231,14 +231,14 @@ async def test_fetch_https_skips_placeholder_params(session) -> None:
     fake = _FakeClient(_FakeResp(json_data={"code": 200, "data": []}))
     import app.services.market_data_sync as mds
 
-    original = mds.httpx.AsyncClient
-    mds.httpx.AsyncClient = lambda *a, **k: fake  # type: ignore[misc,assignment]
+    original = mds._get_shared_http_client
+    mds._get_shared_http_client = lambda: fake  # type: ignore[misc,assignment]
     try:
         svc = MarketDataSyncService(session)
         # 模拟同步引擎直接用 itf.params（含占位符）发起请求
         await svc._fetch_https_raw(itf, {"keyWord": "string", "region": "HK"}, None)
     finally:
-        mds.httpx.AsyncClient = original  # type: ignore[assignment]
+        mds._get_shared_http_client = original  # type: ignore[assignment]
 
     method, url, params = fake.last
     # 占位符 keyWord=string 被丢弃，仅 region=HK 进入请求
@@ -353,14 +353,14 @@ async def test_fetch_https_auto_code_prefix(session) -> None:
     fake = _FakeClient(_FakeResp(json_data={"code": 0, "data": []}))
     import app.services.market_data_sync as mds
 
-    original = mds.httpx.AsyncClient
-    mds.httpx.AsyncClient = lambda *a, **k: fake  # type: ignore[misc,assignment]
+    original = mds._get_shared_http_client
+    mds._get_shared_http_client = lambda: fake  # type: ignore[misc,assignment]
     try:
         svc = MarketDataSyncService(session)
         # 混合：纯数字 600519/000001 应补前缀，已带前缀 sh600519 不动
         await svc._fetch_https_raw(itf, {}, ["600519", "000001", "sh600519"])
     finally:
-        mds.httpx.AsyncClient = original  # type: ignore[assignment]
+        mds._get_shared_http_client = original  # type: ignore[assignment]
 
     method, url, params = fake.last
     assert params == {"code": "sh600519,sz000001,sh600519"}

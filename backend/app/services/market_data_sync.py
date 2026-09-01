@@ -280,6 +280,23 @@ def _compute_pinyin_initials(name: str) -> Optional[str]:
         return None
 
 
+# 进程内共享 HTTP 连接池：行情请求（含重试）复用 TCP 连接，避免每次新建
+# AsyncClient 重新握手。连接池绑定创建时的事件循环（anyio 要求），跨循环
+# 时重建——测试环境每用例新建 loop 也能安全复用各自连接。
+_shared_http_client: Optional[httpx.AsyncClient] = None
+_shared_http_client_loop: Optional[asyncio.AbstractEventLoop] = None
+
+
+def _get_shared_http_client() -> httpx.AsyncClient:
+    """返回绑定当前事件循环的共享 AsyncClient（连接池复用）。"""
+    global _shared_http_client, _shared_http_client_loop
+    loop = asyncio.get_running_loop()
+    if _shared_http_client is None or _shared_http_client_loop is not loop:
+        _shared_http_client = httpx.AsyncClient()
+        _shared_http_client_loop = loop
+    return _shared_http_client
+
+
 class MarketDataSyncService:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
@@ -468,8 +485,10 @@ class MarketDataSyncService:
         timeout = clamp_timeout(itf.timeout or DEFAULT_TIMEOUT)
 
         async def _do() -> list[dict]:
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                resp = await client.request(itf.http_method or "GET", url, params=params)
+            client = _get_shared_http_client()
+            resp = await client.request(
+                itf.http_method or "GET", url, params=params, timeout=timeout
+            )
             self._last_http_status = resp.status_code
             if resp.status_code >= 500:
                 raise RuntimeError(f"上游 5xx: {resp.status_code}")
