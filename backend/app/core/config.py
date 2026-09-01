@@ -65,9 +65,14 @@ class Settings(BaseSettings):
     SCHEDULER_ENABLED: bool = True
 
     # 启动期安全配置严格模式（REP-002）。
-    # 默认 False：检测到弱密钥/弱默认仅输出 CRITICAL 日志告警，不阻断本地开发流；
-    # 设为 1/true：检测到危险配置直接拒绝启动（生产部署推荐开启）。
+    # 检测到弱密钥/弱默认时直接拒绝启动（fail-secure，生产与本地均生效；
+    # 本地 .env 已配置强 JWT_SECRET，不受影响）。
     STRICT_SECURITY: bool = False
+
+    # 弱密钥逃生阀：仅用于本地快速试验（无 .env 临时起服务）。
+    # 设为 1 时弱密钥降级为 CRITICAL 告警、不阻断启动；
+    # 但 STRICT_SECURITY=1 恒为阻断，优先级高于本开关。
+    ALLOW_WEAK_SECRETS: bool = False
 
     # 公开注册开关（REP-010）：单用户/内网部署可关闭公开注册（默认开启）。
     REGISTRATION_ENABLED: bool = True
@@ -88,7 +93,9 @@ def get_settings() -> Settings:
 
 # ---------------------------------------------------------------------------
 # REP-002：启动期安全配置哨兵
-# 危险默认值/弱密钥会在启动时告警；设置 STRICT_SECURITY=1 则拒绝启动（生产推荐）。
+# 弱密钥（JWT_SECRET 占位值/过短、INTERNAL_CLEANUP_TOKEN 占位值）默认拒绝启动
+# （fail-secure）；本地临时试验可设 ALLOW_WEAK_SECRETS=1 降级为告警；
+# STRICT_SECURITY=1 恒为拒绝启动（同时覆盖 DATABASE_URL 弱默认）。
 # ---------------------------------------------------------------------------
 _KNOWN_WEAK_JWT_SECRETS = {"change-me-in-prod"}
 _MIN_JWT_SECRET_BYTES = 32
@@ -98,45 +105,63 @@ _KNOWN_WEAK_INTERNAL_TOKENS = {"change-me-internal"}
 def validate_security_config() -> None:
     """启动期安全配置校验（REP-002 / REP-008）。
 
-    检测到以下任一情况时：默认仅输出 CRITICAL 日志（不破坏本地开发流）；
-    当环境变量 ``STRICT_SECURITY`` 为真时改为拒绝启动（抛出 RuntimeError）。
+    检测到以下任一情况时的处理：
 
-    - ``JWT_SECRET`` 仍为默认占位值 ``change-me-in-prod``（任何人可离线伪造任意用户 JWT）；
-    - ``JWT_SECRET`` 长度不足 32 字节（存在被暴力破解风险）；
+    - ``JWT_SECRET`` 仍为默认占位值 ``change-me-in-prod``（任何人可离线伪造任意用户 JWT）
+      → **默认拒绝启动**；``ALLOW_WEAK_SECRETS=1`` 时降级为 CRITICAL 告警；
+    - ``JWT_SECRET`` 长度不足 32 字节（存在被暴力破解风险）
+      → **默认拒绝启动**；``ALLOW_WEAK_SECRETS=1`` 时降级为告警；
     - ``INTERNAL_CLEANUP_TOKEN`` 仍为默认占位值 ``change-me-internal``
-      （任何人可触发不可逆物理清理）；
-    - ``DATABASE_URL`` 仍为代码内硬编码弱默认（postgres:postgres@localhost，数据库未配置）。
+      （任何人可触发不可逆物理清理）→ **默认拒绝启动**；``ALLOW_WEAK_SECRETS=1`` 时降级为告警；
+    - ``DATABASE_URL`` 仍为代码内硬编码弱默认（postgres:postgres@localhost，数据库未配置）
+      → 默认仅告警；``STRICT_SECURITY`` 为真时拒绝启动。
+
+    ``STRICT_SECURITY`` 为真时以上全部问题均拒绝启动（优先级最高）。
     """
     s = get_settings()
-    problems: list[str] = []
+    secret_problems: list[str] = []
+    other_problems: list[str] = []
 
     if s.JWT_SECRET in _KNOWN_WEAK_JWT_SECRETS:
-        problems.append(
+        secret_problems.append(
             "JWT_SECRET 仍是默认占位值 'change-me-in-prod'，任何人可离线伪造任意用户 JWT"
         )
     elif len(s.JWT_SECRET.encode("utf-8")) < _MIN_JWT_SECRET_BYTES:
-        problems.append(
+        secret_problems.append(
             f"JWT_SECRET 长度不足 {_MIN_JWT_SECRET_BYTES} 字节，存在被暴力破解风险"
         )
 
     if s.INTERNAL_CLEANUP_TOKEN in _KNOWN_WEAK_INTERNAL_TOKENS:
-        problems.append(
+        secret_problems.append(
             "INTERNAL_CLEANUP_TOKEN 仍是默认占位值 'change-me-internal'，"
             "任何人可携带默认令牌触发不可逆物理清理"
         )
 
     if s.DATABASE_URL == Settings.model_fields["DATABASE_URL"].default:
-        problems.append(
+        other_problems.append(
             "DATABASE_URL 仍是代码内硬编码弱默认（postgres:postgres@localhost），数据库未配置"
         )
 
-    if not problems:
-        return
-
-    detail = "；".join(problems)
-    if s.STRICT_SECURITY:
+    # STRICT_SECURITY：所有问题均拒绝启动（fail-secure 总开关，优先级最高）
+    if s.STRICT_SECURITY and (secret_problems or other_problems):
+        detail = "；".join(secret_problems + other_problems)
         logger.critical("安全配置校验失败，拒绝启动：%s", detail)
         raise RuntimeError(f"安全配置校验未通过：{detail}")
-    logger.critical(
-        "安全配置风险（STRICT_SECURITY 未开启，仅告警不阻断启动）：%s", detail
-    )
+
+    # 弱密钥：默认拒绝启动；ALLOW_WEAK_SECRETS=1 时降级为告警
+    if secret_problems:
+        detail = "；".join(secret_problems)
+        if s.ALLOW_WEAK_SECRETS:
+            logger.critical(
+                "安全配置风险（ALLOW_WEAK_SECRETS 已开启，仅告警不阻断启动）：%s", detail
+            )
+        else:
+            logger.critical("安全配置校验失败，拒绝启动：%s", detail)
+            raise RuntimeError(f"安全配置校验未通过：{detail}")
+
+    # 其余弱默认（DATABASE_URL）：仅告警
+    if other_problems:
+        logger.critical(
+            "安全配置风险（仅告警不阻断启动，STRICT_SECURITY=1 可拒绝启动）：%s",
+            "；".join(other_problems),
+        )

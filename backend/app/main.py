@@ -48,7 +48,7 @@ settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 启动期安全配置哨兵（REP-002）：弱密钥/弱默认告警或拒绝启动
+    # 启动期安全配置哨兵（REP-002）：弱密钥默认拒绝启动（ALLOW_WEAK_SECRETS=1 降级告警）
     validate_security_config()
     # 启动：受 SCHEDULER_ENABLED 总开关控制，从 job_configs 加载 enabled 任务注册调度
     # （懒导入 apscheduler，未安装 / 未启用环境启动直接跳过）。
