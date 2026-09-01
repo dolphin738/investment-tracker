@@ -13,7 +13,7 @@
  * 无副作用、无兜底错误处理；cron 合法性校验由后端 APScheduler 负责，
  * 本组件的解析与说明仅用于界面即时反馈。
  */
-import { computed, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
@@ -162,8 +162,24 @@ function buildCron(): string {
 
 const isCronMode = computed(() => mode.value === 'cron');
 
-/** 底部常驻预览（说明 + 下次执行） */
-const preview = computed(() => previewCron(buildCron()));
+// 高级模式输入防抖：cronNextRun 为逐分钟暴力扫描（永不匹配的表达式最坏
+// 57.6 万次迭代），每次击键同步重算会明显卡顿，收敛为 250ms 防抖后再预览。
+const debouncedCronText = ref(cronText.value);
+let cronDebounceTimer: ReturnType<typeof setTimeout> | undefined;
+watch(cronText, (val) => {
+  if (cronDebounceTimer !== undefined) clearTimeout(cronDebounceTimer);
+  cronDebounceTimer = setTimeout(() => {
+    debouncedCronText.value = val;
+  }, 250);
+});
+onBeforeUnmount(() => {
+  if (cronDebounceTimer !== undefined) clearTimeout(cronDebounceTimer);
+});
+
+/** 底部常驻预览（说明 + 下次执行）；高级模式对输入防抖，其余模式即时 */
+const preview = computed(() =>
+  previewCron(isCronMode.value ? debouncedCronText.value : buildCron()),
+);
 
 /** 单位切换时收敛步长到新单位上限，避免产出非法 cron */
 function onUnitChange(u: string): void {

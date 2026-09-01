@@ -110,12 +110,13 @@ const rawText = computed(() =>
 const matchIndices = computed(() => {
   if (!findQuery.value) return [];
   const q = findQuery.value.toLowerCase();
-  const raw = rawText.value;
+  // 小写化提出循环：避免每次命中都重复全文 toLowerCase（O(命中数×全文长度)）
+  const lower = rawText.value.toLowerCase();
   const idxs: number[] = [];
-  let i = raw.toLowerCase().indexOf(q);
+  let i = lower.indexOf(q);
   while (i !== -1) {
     idxs.push(i);
-    i = raw.toLowerCase().indexOf(q, i + q.length);
+    i = lower.indexOf(q, i + q.length);
   }
   return idxs;
 });
