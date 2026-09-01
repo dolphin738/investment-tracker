@@ -35,7 +35,7 @@ import pypinyin
 from pypinyin import Style
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import exists as sa_exists
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select, tuple_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -938,9 +938,12 @@ class MarketDataSyncService:
             for (code, ex, ac), items in groups.items():
                 if len(items) == 1:
                     s = items[0]
-                    s.code, s.exchange, s.asset_class = code, ex, ac
+                    if (s.code, s.exchange, s.asset_class) != (code, ex, ac):
+                        s.code, s.exchange, s.asset_class = code, ex, ac
+                    # id 与自然键一致时 _reassign_master_id 纯 CPU 早退（无 SQL）；
+                    # 错位脏数据仍走 reassign 自愈，语义与逐行版本一致。
+                    # 仅省去无变化行的无条件 flush（万行级时 dirty 扫描可观）。
                     await self._reassign_master_id(s)
-                    await self.session.flush()  # 单行无撞键风险
                     continue
                 items.sort(key=lambda x: (x.updated_at or datetime.min), reverse=True)
                 keep = items[0]
@@ -1025,18 +1028,19 @@ class MarketDataSyncService:
         s.id = new_id  # 保持 ORM 对象状态与库一致
         await self.session.flush()
 
-    async def _upsert_masters(self, itf: QuoteInterface, rows: list[Any]) -> int:
-        """把原始行 upsert 进 securities 系统主数据目录表（ADR-003 后仅主数据行）。
+    def _prepare_master_rows(
+        self, itf: QuoteInterface, rows: list[Any]
+    ) -> list[dict[str, Any]]:
+        """第一遍：纯 CPU 归一化（无查库），把原始行整理为待 upsert 载荷。
 
-        行级 asset_class 由代码前缀 + 交易所**逐行推断**（infer_security_type，与组合持仓 type 同源）：
-        港股经交易所识别归 HK_STOCK，无法可靠区分的类（如场外基金）落 UNCATEGORIZED；
-        接口 asset_class 仅用于同步选源批次归属，不再强制打标。
+        含交易所/资产类别推断、规范码归一与拼音首字母（pypinyin 为纯 CPU 计算，
+        全市场万行级时须在 ``asyncio.to_thread`` 中执行，避免阻塞事件循环）。
         """
         code_field = itf.resp_code_field or "code"
         name_field = itf.resp_name_field or "name"
         exchange_field = itf.resp_exchange_field
 
-        count = 0
+        payload: list[dict[str, Any]] = []
         for r in rows:
             code = _row_get(r, code_field)
             if code is None:
@@ -1072,31 +1076,66 @@ class MarketDataSyncService:
                 exchange = "BJ"
                 digits = re.sub(r"\D", "", code)
                 code = f"bj{digits}"
+            payload.append(
+                {
+                    "code": code,
+                    "name": name,
+                    "exchange": exchange,
+                    "pinyin": pinyin,
+                    "asset_class": asset_class,
+                }
+            )
+        return payload
 
-            existing = (
+    async def _upsert_masters(self, itf: QuoteInterface, rows: list[Any]) -> int:
+        """把原始行 upsert 进 securities 系统主数据目录表（ADR-003 后仅主数据行）。
+
+        行级 asset_class 由代码前缀 + 交易所**逐行推断**（infer_security_type，与组合持仓 type 同源）：
+        港股经交易所识别归 HK_STOCK，无法可靠区分的类（如场外基金）落 UNCATEGORIZED；
+        接口 asset_class 仅用于同步选源批次归属，不再强制打标。
+
+        性能：第一遍纯 CPU 归一化放 ``asyncio.to_thread``（pypinyin/正则不阻塞事件循环）；
+        第二遍一次性载入存量 ``(asset_class, code) → Security`` 映射，替代逐行 SELECT
+        （全市场万行级时由 N 次往返降为 ⌈N/1000⌉ 次）。
+        """
+        payload = await asyncio.to_thread(self._prepare_master_rows, itf, rows)
+
+        key_list = list({(p["asset_class"], p["code"]) for p in payload})
+        existing_map: dict[tuple[Any, str], Security] = {}
+        chunk_size = 1000
+        for i in range(0, len(key_list), chunk_size):
+            chunk = key_list[i : i + chunk_size]
+            existing_rows = (
                 await self.session.execute(
                     select(Security).where(
-                        Security.asset_class == asset_class,
-                        Security.code == code,
+                        tuple_(Security.asset_class, Security.code).in_(chunk)
                     )
                 )
-            ).scalar_one_or_none()
+            ).scalars().all()
+            for sec in existing_rows:
+                existing_map[(sec.asset_class, sec.code)] = sec
 
+        count = 0
+        for p in payload:
+            key = (p["asset_class"], p["code"])
+            existing = existing_map.get(key)
             if existing is None:
                 sec = Security(
-                    id=master_id_for(asset_class, code),
-                    asset_class=asset_class,
-                    code=code,
-                    name=name,
-                    exchange=exchange,
-                    pinyin_initials=pinyin,
+                    id=master_id_for(p["asset_class"], p["code"]),
+                    asset_class=p["asset_class"],
+                    code=p["code"],
+                    name=p["name"],
+                    exchange=p["exchange"],
+                    pinyin_initials=p["pinyin"],
                 )
                 self.session.add(sec)
+                # 同批重复行命中同一键：后续行走 UPDATE 分支，不重复 INSERT
+                existing_map[key] = sec
             else:
-                existing.asset_class = asset_class
-                existing.name = name
-                existing.exchange = exchange
-                existing.pinyin_initials = pinyin
+                existing.asset_class = p["asset_class"]
+                existing.name = p["name"]
+                existing.exchange = p["exchange"]
+                existing.pinyin_initials = p["pinyin"]
             count += 1
         await self.session.flush()
         return count
