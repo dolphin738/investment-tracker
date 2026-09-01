@@ -78,12 +78,16 @@ class Settings(BaseSettings):
     REGISTRATION_ENABLED: bool = True
 
     # 登录失败限速（REP-010）：每 (客户端 IP, 邮箱) 在窗口内的失败次数上限；
-    # 0 = 关闭（内网默认关闭，公网/生产建议在 .env 设 10~20）。
-    LOGIN_RATE_LIMIT_PER_MINUTE: int = 0
+    # 默认开启（10 次/分钟）阻断爆破与枚举；0 = 显式关闭（仅限可信内网）。
+    LOGIN_RATE_LIMIT_PER_MINUTE: int = 10
     LOGIN_RATE_LIMIT_WINDOW_SECONDS: int = 60
 
     # 密码最小长度（REP-010）：注册时强制，降低弱口令风险。
     MIN_PASSWORD_LENGTH: int = 8
+
+    # OpenAPI 文档开关（/api/docs、/api/redoc、/api/openapi.json）。
+    # 默认开启便于本地开发；生产部署建议 .env 设 0，避免暴露 API 面。
+    ENABLE_DOCS: bool = True
 
 
 @lru_cache

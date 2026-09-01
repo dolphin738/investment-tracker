@@ -21,9 +21,13 @@ _EMAIL_RE = __import__("re").compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 # ── 认证 ──
+# 密码长度上限：防超长输入进 bcrypt/argon2 的资源消耗（登录口也做入口钳制）
+_PASSWORD_MAX = 128
+
+
 class RegisterReq(BaseModel):
     email: str
-    password: str = Field(min_length=8)
+    password: str = Field(min_length=8, max_length=_PASSWORD_MAX)
     name: Optional[str] = None
 
     @field_validator("email")
@@ -36,7 +40,7 @@ class RegisterReq(BaseModel):
 
 class LoginReq(BaseModel):
     email: str
-    password: str
+    password: str = Field(max_length=_PASSWORD_MAX)
 
 
 class ProfilePatchReq(BaseModel):
@@ -48,13 +52,14 @@ class ProfilePatchReq(BaseModel):
 
 class RestoreReq(BaseModel):
     email: str
-    password: str
+    password: str = Field(max_length=_PASSWORD_MAX)
 
 
 # ── 改密 / 改邮（§4.2.1）──
 class PasswordPatchReq(BaseModel):
-    currentPassword: str
-    newPassword: str
+    currentPassword: str = Field(max_length=_PASSWORD_MAX)
+    # 与注册口径一致：新密码最短 8 位（防改密路径绕过注册最小长度）
+    newPassword: str = Field(min_length=8, max_length=_PASSWORD_MAX)
 
 
 class EmailPatchReq(BaseModel):

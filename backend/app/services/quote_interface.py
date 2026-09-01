@@ -11,6 +11,7 @@ list_all() 供「按分类汇总所有提供方接口」总览：
 """
 from __future__ import annotations
 
+import re
 from typing import Any, Optional
 
 from fastapi import HTTPException
@@ -26,6 +27,30 @@ from app.services.interface_category import InterfaceCategoryService
 _NULLABLE_COLUMNS = frozenset(
     col.key for col in QuoteInterface.__table__.columns if col.nullable
 )
+
+# line_regex 防护（P3）：长度上限 + 保存时预编译（非法正则直接 400）。
+# 运行期在 market_data_sync 侧另有线程池隔离与文本长度钳制兜底。
+_LINE_REGEX_MAX_LEN = 256
+
+
+def _validate_response_parse(rp: Optional[dict[str, Any]]) -> None:
+    """校验 response_parse.line_regex：超长/非法正则 → 400，防 ReDoS 配置入库。"""
+    if not rp:
+        return
+    pattern = rp.get("line_regex")
+    if not pattern:
+        return
+    if len(pattern) > _LINE_REGEX_MAX_LEN:
+        raise HTTPException(
+            status_code=400,
+            detail=f"line_regex 过长（>{_LINE_REGEX_MAX_LEN} 字符），疑似非法配置",
+        )
+    try:
+        re.compile(pattern)
+    except re.error as exc:
+        raise HTTPException(
+            status_code=400, detail=f"line_regex 非法正则：{exc}"
+        ) from exc
 
 
 class QuoteInterfaceService:
@@ -138,6 +163,7 @@ class QuoteInterfaceService:
         category = await InterfaceCategoryService(self.session).get_or_none(category_id)
         if category is None:
             raise HTTPException(status_code=400, detail="分类不存在")
+        _validate_response_parse(response_parse)
         # 默认优先级：落该分类末位（COALESCE(MAX(priority),-1)+1）；未分类留 NULL。
         priority = await self._next_priority(category_id)
         obj = QuoteInterface(
@@ -185,6 +211,8 @@ class QuoteInterfaceService:
             category = await InterfaceCategoryService(self.session).get_or_none(new_category_id)
             if category is None:
                 raise HTTPException(status_code=400, detail="分类不存在")
+        if "response_parse" in opts:
+            _validate_response_parse(opts["response_parse"])
         for key, value in opts.items():
             # 非 None 直接写入；None 仅在该列可空时写入（即「清空」语义）
             if value is not None or key in _NULLABLE_COLUMNS:

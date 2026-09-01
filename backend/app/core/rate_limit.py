@@ -6,14 +6,33 @@
 from __future__ import annotations
 
 import time
-from collections import defaultdict
+from collections import OrderedDict
 
+# 追踪的 (ip, email) 键上限：防攻击者用海量假邮箱把字典撑爆（内存 DoS）。
+# 超限时先清过期键，仍超限则淘汰最旧插入的键（OrderedDict）。
+_MAX_TRACKED_KEYS = 10_000
 
-_FAILURES: dict[tuple[str, str], list[float]] = defaultdict(list)
+_FAILURES: OrderedDict[tuple[str, str], list[float]] = OrderedDict()
 
 
 def _prune(records: list[float], now: float, window: int) -> list[float]:
     return [t for t in records if now - t < window]
+
+
+def _evict_over_limit(now: float, window: int) -> None:
+    """键数超上限时：先删全部已过期键，仍超限再按插入序淘汰最旧键。"""
+    if len(_FAILURES) <= _MAX_TRACKED_KEYS:
+        return
+    for key in list(_FAILURES.keys()):
+        if len(_FAILURES) <= _MAX_TRACKED_KEYS:
+            break
+        recs = _prune(_FAILURES[key], now, window)
+        if recs:
+            _FAILURES[key] = recs
+        else:
+            _FAILURES.pop(key, None)
+    while len(_FAILURES) > _MAX_TRACKED_KEYS:
+        _FAILURES.popitem(last=False)
 
 
 def is_limited(ip: str, email: str, limit: int, window: int) -> bool:
@@ -22,13 +41,21 @@ def is_limited(ip: str, email: str, limit: int, window: int) -> bool:
         return False
     now = time.monotonic()
     key = (ip, email.lower())
-    recs = _prune(_FAILURES[key], now, window)
-    _FAILURES[key] = recs
+    recs = _prune(_FAILURES.get(key, []), now, window)
+    if recs:
+        _FAILURES[key] = recs
+        _FAILURES.move_to_end(key)
     return len(recs) >= limit
 
 
 def record_failure(ip: str, email: str) -> None:
-    _FAILURES[(ip, email.lower())].append(time.monotonic())
+    now = time.monotonic()
+    key = (ip, email.lower())
+    recs = _prune(_FAILURES.get(key, []), now, 10_800)
+    recs.append(now)
+    _FAILURES[key] = recs
+    _FAILURES.move_to_end(key)
+    _evict_over_limit(now, 10_800)
 
 
 def reset(ip: str, email: str) -> None:

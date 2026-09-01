@@ -9,10 +9,10 @@ admin/auditor 守卫，互不影响。
 """
 from __future__ import annotations
 
-from typing import Any, Literal, Optional
+from typing import Any, ClassVar, Literal, Optional
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
 from app.core.envelope import EnvelopeRoute
 from app.services.auth import CurrentUser, get_current_user
@@ -24,13 +24,38 @@ router_client_log = APIRouter(
 
 
 class ClientLogIn(BaseModel):
-    """前端上报的一条客户端错误。"""
+    """前端上报的一条客户端错误。
+
+    长度钳制：客户端输入不可信，超长文本截断入库，防单条日志撑爆
+    app_logs（message/trace/detail 均为无界 Text/JSON 列）。
+    """
 
     level: Literal["error", "warning", "info"] = "error"
-    module: str
+    module: str = Field(max_length=64)
     message: str
     trace: Optional[str] = None
     detail: Optional[Any] = None
+
+    _MAX_MESSAGE: ClassVar[int] = 2_000
+    _MAX_TRACE: ClassVar[int] = 8_000
+    _MAX_DETAIL_STR: ClassVar[int] = 4_000
+
+    @field_validator("message")
+    @classmethod
+    def _clip_message(cls, v: str) -> str:
+        return v[: cls._MAX_MESSAGE]
+
+    @field_validator("trace")
+    @classmethod
+    def _clip_trace(cls, v: Optional[str]) -> Optional[str]:
+        return v[: cls._MAX_TRACE] if v else v
+
+    @field_validator("detail")
+    @classmethod
+    def _clip_detail(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            return v[: cls._MAX_DETAIL_STR]
+        return v
 
 
 @router_client_log.post("")
