@@ -74,8 +74,8 @@ async def list_cashflows(
     types: Optional[str] = Query(
         None, description="逗号分隔类型过滤，如 BUY 或 BUY,SELL；非法值忽略"
     ),
-    page: int = 1,
-    pageSize: int = 20,
+    page: int = Query(1, ge=1),
+    pageSize: int = Query(20, ge=1, le=200),
 ):
     # 仅保留白名单内的类型（BUY/SELL），非法片段忽略，避免注入/误过滤
     type_filter: list[CashFlowType] | None = None
@@ -139,8 +139,8 @@ router_securities = APIRouter(
 async def list_securities(
     p=Depends(get_portfolio),
     db: AsyncSession = Depends(get_db),
-    page: int = 1,
-    pageSize: int = 20,
+    page: int = Query(1, ge=1),
+    pageSize: int = Query(20, ge=1, le=200),
 ):
     stmt = await SecurityService(db).list_stmt(p.id)
     return await paginate(db, stmt, page, pageSize, serialize_security)
@@ -214,8 +214,8 @@ async def list_trades(
     side: Optional[str] = None,
     startDate: Optional[date] = None,
     endDate: Optional[date] = None,
-    page: int = 1,
-    pageSize: int = 20,
+    page: int = Query(1, ge=1),
+    pageSize: int = Query(20, ge=1, le=200),
 ):
     stmt = await TradeService(db).list_stmt(
         p.id, securityId, side, startDate, endDate
@@ -271,8 +271,8 @@ async def list_prices(
     p=Depends(get_portfolio),
     db: AsyncSession = Depends(get_db),
     securityId: Optional[str] = None,
-    page: int = 1,
-    pageSize: int = 20,
+    page: int = Query(1, ge=1),
+    pageSize: int = Query(20, ge=1, le=200),
 ):
     stmt = await PriceService(db).list_stmt(p.id, securityId)
     return await paginate(db, stmt, page, pageSize, serialize_price)
@@ -318,8 +318,8 @@ async def list_cashbalances(
     p=Depends(get_portfolio),
     db: AsyncSession = Depends(get_db),
     asOf: Optional[date] = None,
-    page: int = 1,
-    pageSize: int = 20,
+    page: int = Query(1, ge=1),
+    pageSize: int = Query(20, ge=1, le=200),
 ):
     stmt = await CashBalanceService(db).list_stmt(p.id, asOf)
     return await paginate(db, stmt, page, pageSize, serialize_cashbalance)
@@ -367,8 +367,8 @@ async def list_snapshots(
     startDate: Optional[date] = None,
     endDate: Optional[date] = None,
     source: Optional[SnapshotSource] = None,
-    page: int = 1,
-    pageSize: int = 20,
+    page: int = Query(1, ge=1),
+    pageSize: int = Query(20, ge=1, le=200),
 ):
     items, total = await SnapshotService(db).list(
         p.id, startDate, endDate, source, page, pageSize
