@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     # JWT（HS256，与 app 的 passport-jwt 完全兼容）
     JWT_SECRET: str = "change-me-in-prod"
     JWT_ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 天
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 3  # 3 天（收紧；原 7 天过长）
 
     # 数据库（SQLAlchemy async + asyncpg）
     DATABASE_URL: str = (
