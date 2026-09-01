@@ -26,6 +26,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 from typing import Any, Literal, Optional
 
@@ -37,7 +38,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.common import paginate
 from app.core.envelope import EnvelopeRoute
 from app.services.auth import CurrentUser, get_current_user, require_admin
-from app.db.database import get_db
+from app.db.database import AsyncSessionLocal, get_db
 from app.models import Portfolio, PortfolioSecurity, Security
 from app.models.enums import InterfaceDirection, QuoteProviderAccessMethod
 from app.serializers import serialize_security_master
@@ -402,22 +403,36 @@ async def admin_sync_all_prices(
     """管理面全量刷新（需 admin）：遍历全部组合同步实时行情并重建快照/净值。
 
     返回结构化汇总 ``{portfolios, synced, failed, errors}``。
+    性能：按组合并发执行（信号量限流 4，独立会话独立事务），替代原单请求内
+    串行遍历（P 组合 × 最坏 8s 上游预算 → 分钟级请求易超时）。
     """
     portfolio_rows = (
         await db.execute(select(Portfolio.id))
     ).scalars().all()
+
+    semaphore = asyncio.Semaphore(4)
+
+    async def _sync_one(pid: str) -> dict:
+        # 每组合独立会话/事务：互不持锁，单组合失败不影响其余
+        async with semaphore:
+            async with AsyncSessionLocal() as session:
+                result = await MarketDataSyncService(session).sync_portfolio_prices(pid)
+                await session.commit()
+                return result
+
+    outcomes = await asyncio.gather(
+        *(_sync_one(pid) for pid in portfolio_rows), return_exceptions=True
+    )
     total_synced = 0
     total_failed = 0
     errors: list[str] = []
-    for pid in portfolio_rows:
-        try:
-            result = await MarketDataSyncService(db).sync_portfolio_prices(pid)
-            total_synced += result["synced"]
-            total_failed += result["failed"]
-            errors.extend(result["errors"])
-        except Exception as exc:
-            errors.append(str(exc))
-    await db.commit()
+    for pid, outcome in zip(portfolio_rows, outcomes):
+        if isinstance(outcome, BaseException):
+            errors.append(f"{pid}: {outcome}")
+        else:
+            total_synced += outcome["synced"]
+            total_failed += outcome["failed"]
+            errors.extend(outcome["errors"])
     return {
         "portfolios": len(portfolio_rows),
         "synced": total_synced,
