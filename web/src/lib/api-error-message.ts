@@ -37,6 +37,9 @@ export function resolveApiErrorMessage(
   if (error instanceof ApiError) {
     return error.message || CODE_FALLBACK[error.code] || fallback;
   }
+  // 非 ApiError：Error.message 多为后端业务错误文本（axios 拦截器封装，
+  // 如「生效日期不能为未来」），是就地反馈最贴业务的文案，透出之；
+  // 真正含堆栈/内部细节的异常不会走到这里（后端异常不泄栈）
   if (error instanceof Error && error.message) {
     return error.message;
   }

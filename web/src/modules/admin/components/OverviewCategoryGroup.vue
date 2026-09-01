@@ -35,14 +35,14 @@ const props = defineProps<{
 
 const reorderMut = useReorderInterfaces();
 
-// 本地可拖拽列表：query 数据变化时同步；拖拽时由 VueDraggable 自动重排
+// 本地可拖拽列表：query 数据变化时同步；拖拽时由 VueDraggable 自动重排。
+// 浅监听即可：父组件每次 fetch 都换新数组引用，deep 监听属冗余开销
 const localItems = ref<QuoteInterface[]>([...props.items]);
 watch(
   () => props.items,
   (val) => {
     localItems.value = [...val];
   },
-  { deep: true },
 );
 
 function providerName(it: QuoteInterface): string {
