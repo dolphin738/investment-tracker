@@ -17,7 +17,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 from typing import Iterable, Optional
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select, tuple_
 
 from app.core.date_utils import today_app_tz
 from app.finance_core.holding import ZERO
@@ -77,6 +77,72 @@ class AggregationService:
             )
         ).scalar_one_or_none()
 
+    # ── 跨组合批量读取（N+1 规避：全部组合常数次查询）──
+    async def _latest_by_portfolio(
+        self,
+        model,
+        date_col,
+        pids: list[str],
+        extra_filter=None,
+    ) -> dict[str, object]:
+        """每个组合取 date_col 最新一行，返回 {portfolio_id: row}。
+
+        两步查询（group-by max + tuple IN 回表），与组合数无关。
+        """
+        q = (
+            select(model.portfolio_id, func.max(date_col).label("max_date"))
+            .where(model.portfolio_id.in_(pids))
+            .group_by(model.portfolio_id)
+        )
+        if extra_filter is not None:
+            q = q.where(extra_filter)
+        latest = (await self.session.execute(q)).all()
+        if not latest:
+            return {}
+        rows = (
+            await self.session.execute(
+                select(model).where(
+                    tuple_(model.portfolio_id, date_col).in_(
+                        [(pid, md) for pid, md in latest]
+                    )
+                )
+            )
+        ).scalars().all()
+        return {r.portfolio_id: r for r in rows}
+
+    async def _net_invested_by_portfolio(self, pids: list[str]) -> dict[str, Decimal]:
+        """净投入 = Σ存入 − Σ取出，SQL 聚合一次覆盖全部组合（无出入金为 0）。"""
+        rows = (
+            await self.session.execute(
+                select(
+                    CashFlow.portfolio_id,
+                    func.sum(
+                        case(
+                            (CashFlow.type == CashFlowType.BUY, CashFlow.amount),
+                            else_=-CashFlow.amount,
+                        )
+                    ),
+                )
+                .where(CashFlow.portfolio_id.in_(pids))
+                .group_by(CashFlow.portfolio_id)
+            )
+        ).all()
+        return {pid: (s if s is not None else Decimal(0)) for pid, s in rows}
+
+    async def _last_trade_date_by_portfolio(
+        self, pids: list[str]
+    ) -> dict[str, Optional[date]]:
+        rows = (
+            await self.session.execute(
+                select(
+                    SecurityTrade.portfolio_id, func.max(SecurityTrade.date)
+                )
+                .where(SecurityTrade.portfolio_id.in_(pids))
+                .group_by(SecurityTrade.portfolio_id)
+            )
+        ).all()
+        return {pid: d for pid, d in rows}
+
     # ── §4.2.14 统计摘要 ──
     async def portfolio_summary(self, p: Portfolio) -> dict:
         snap = await self._latest_snapshot(p.id)
@@ -126,14 +192,8 @@ class AggregationService:
         fresh = await self.freshness(p, p.user_id)
 
         # 净投入 = Σ存入 − Σ取出（概览 8 卡之「净投入」；summary_list 已算，此处补齐）
-        cf_rows = (
-            await self.session.execute(
-                select(CashFlow).where(CashFlow.portfolio_id == p.id)
-            )
-        ).scalars().all()
-        net_invested = sum(
-            (cf.amount if cf.type is CashFlowType.BUY else -cf.amount for cf in cf_rows),
-            Decimal(0),
+        net_invested = (await self._net_invested_by_portfolio([p.id])).get(
+            p.id, Decimal(0)
         )
 
         return {
@@ -192,9 +252,11 @@ class AggregationService:
 
     # ── 全部组合摘要行（GET /portfolios/summary · Web 客户端绑定）──
     async def summary_list(self, user_id: str) -> list[dict]:
-        """返回 PortfolioSummaryRow 列表，形状与 PortfolioSummaryOut 不同。"""
-        from app.models import SecurityTrade
+        """返回 PortfolioSummaryRow 列表，形状与 PortfolioSummaryOut 不同。
 
+        批量化：最新快照/净值/XIRR、净投入、最近买卖日均跨组合一次查询
+        （原逐组合约 7 查询 → 与组合数无关的常数级）。
+        """
         portfolios = (
             await self.session.execute(
                 select(Portfolio)
@@ -202,23 +264,29 @@ class AggregationService:
                 .order_by(Portfolio.created_at.desc())
             )
         ).scalars().all()
+        pids = [p.id for p in portfolios]
+        if not pids:
+            return []
+
+        snaps = await self._latest_by_portfolio(AssetSnapshot, AssetSnapshot.date, pids)
+        navs = await self._latest_by_portfolio(DailyNav, DailyNav.date, pids)
+        xirrs = await self._latest_by_portfolio(
+            DailyXirr,
+            DailyXirr.date,
+            pids,
+            extra_filter=DailyXirr.xirr_value.is_not(None),
+        )
+        net_invested_map = await self._net_invested_by_portfolio(pids)
+        last_trade_map = await self._last_trade_date_by_portfolio(pids)
 
         out: list[dict] = []
         for p in portfolios:
-            snap = await self._latest_snapshot(p.id)
-            nav = await self._latest_nav(p.id)
-            xirr = await self._latest_xirr(p.id)
+            snap = snaps.get(p.id)
+            nav = navs.get(p.id)
+            xirr = xirrs.get(p.id)
 
-            # 净投入 = Σ存入 − Σ取出
-            cf_rows = (
-                await self.session.execute(
-                    select(CashFlow).where(CashFlow.portfolio_id == p.id)
-                )
-            ).scalars().all()
-            net_invested = sum(
-                (cf.amount if cf.type is CashFlowType.BUY else -cf.amount for cf in cf_rows),
-                Decimal(0),
-            )
+            # 净投入 = Σ存入 − Σ取出（SQL 聚合，无出入金为 0）
+            net_invested = net_invested_map.get(p.id, Decimal(0))
 
             # 持仓标的数
             held = await HoldingService(self.session).derive(
@@ -227,13 +295,7 @@ class AggregationService:
             holdings_count = sum(1 for h in held if h.quantity > 0)
 
             # lastUpdatedAt = 快照/买卖较晚者
-            last_trade_date = (
-                await self.session.execute(
-                    select(func.max(SecurityTrade.date)).where(
-                        SecurityTrade.portfolio_id == p.id
-                    )
-                )
-            ).scalar()
+            last_trade_date = last_trade_map.get(p.id)
             snap_date = snap.date if snap else None
             last_updated = max(
                 d for d in [snap_date, last_trade_date] if d is not None
