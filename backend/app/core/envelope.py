@@ -15,6 +15,7 @@ from __future__ import annotations
 import functools
 import inspect
 import json
+import math
 from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
@@ -42,7 +43,12 @@ def decimal_jsonable_encoder(obj: Any) -> Any:
         return {k: decimal_jsonable_encoder(v) for k, v in obj.items()}
     if isinstance(obj, (list, tuple, set, frozenset)):
         return [decimal_jsonable_encoder(v) for v in obj]
-    if obj is None or isinstance(obj, (str, int, float, bool)):
+    if obj is None or isinstance(obj, (str, int, bool)):
+        return obj
+    if isinstance(obj, float):
+        # NaN/Infinity 非合法 JSON 字面量，浏览器 JSON.parse 会失败，归一为 None
+        if math.isnan(obj) or math.isinf(obj):
+            return None
         return obj
     if hasattr(obj, "model_dump"):
         return decimal_jsonable_encoder(obj.model_dump(mode="json"))
