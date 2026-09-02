@@ -1211,7 +1211,8 @@ class MarketDataSyncService:
                 "elapsedMs": round(elapsed * 1000, 2),
                 "raw": None,
                 "parsed": None,
-                "error": str(exc),
+                # 兜底：异常消息可能为空字符串，回退到异常类型名，避免前端显示「未知错误」
+                "error": str(exc) or type(exc).__name__,
                 "interfaceId": interface_id,
             }
         elapsed = time.perf_counter() - start
