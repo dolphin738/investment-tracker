@@ -66,7 +66,14 @@ interface ParamRow {
   value: string;
   /** 模板默认值：仅作输入框占位提示，不实际填入（以 placeholder 展示） */
   defaultValue: string;
+  /** 参数输入提示（针对易填错的参数，如报告期），为空不展示 */
+  hint: string;
 }
+
+/** 已知参数名的输入提示（针对易填错参数，避免填入非季度末报告期） */
+const PARAM_HINTS: Record<string, string> = {
+  date: '报告期，形如 20231231（季度末：0331/0630/0930/1231）',
+};
 
 /** 识别接口参数模板里的占位符默认值（如 string / 示例 / example），留空时不作为真实参数发送 */
 function isPlaceholderValue(v: string): boolean {
@@ -76,6 +83,9 @@ function isPlaceholderValue(v: string): boolean {
 
 /** 未知结构安全序列化（避免循环引用等导致 JSON.stringify 抛错） */
 function safeStringify(v: unknown): string {
+  // JSON.stringify(undefined) 会返回 undefined（非法 string），此处兜底为 ''，
+  // 避免上游接口测试的 raw 缺失时，渲染层读取 rawText.length 崩溃。
+  if (v === undefined) return '';
   try {
     return JSON.stringify(v, null, 2);
   } catch {
@@ -187,6 +197,7 @@ watch(
       key: k,
       value: '',
       defaultValue: v == null ? '' : String(v),
+      hint: PARAM_HINTS[k] ?? '',
     }));
   },
   { immediate: true },
@@ -196,7 +207,7 @@ function updateRow(idx: number, patch: Partial<ParamRow>): void {
   paramRows.value[idx] = { ...paramRows.value[idx], ...patch };
 }
 function addRow(): void {
-  paramRows.value.push({ key: '', value: '', defaultValue: '' });
+  paramRows.value.push({ key: '', value: '', defaultValue: '', hint: '' });
 }
 function removeRow(idx: number): void {
   paramRows.value.splice(idx, 1);
@@ -283,31 +294,36 @@ function highlightSegments(text: string, query: string): Array<{ text: string; h
           该接口无默认参数模板
         </p>
         <div class="space-y-2">
-          <div v-for="(row, idx) in paramRows" :key="idx" class="flex items-center gap-2">
-            <Input
-              class="w-2/5"
-              placeholder="参数名"
-              v-model="row.key"
-            />
-            <Input
-              class="flex-1"
-              :placeholder="
-                row.defaultValue
-                  ? isPlaceholderValue(row.defaultValue)
-                    ? `示例值（留空不发送）：${row.defaultValue}`
-                    : `默认：${row.defaultValue}`
-                  : '参数值'
-              "
-              v-model="row.value"
-            />
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label="删除参数"
-              @click="removeRow(idx)"
-            >
-              <Trash2 class="h-4 w-4" />
-            </Button>
+          <div v-for="(row, idx) in paramRows" :key="idx" class="space-y-1">
+            <div class="flex items-center gap-2">
+              <Input
+                class="w-2/5"
+                placeholder="参数名"
+                v-model="row.key"
+              />
+              <Input
+                class="flex-1"
+                :placeholder="
+                  row.defaultValue
+                    ? isPlaceholderValue(row.defaultValue)
+                      ? `示例值（留空不发送）：${row.defaultValue}`
+                      : `默认：${row.defaultValue}`
+                    : '参数值'
+                "
+                v-model="row.value"
+              />
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="删除参数"
+                @click="removeRow(idx)"
+              >
+                <Trash2 class="h-4 w-4" />
+              </Button>
+            </div>
+            <p v-if="row.hint" class="pl-1 text-xs text-muted-foreground">
+              {{ row.hint }}
+            </p>
           </div>
         </div>
       </div>
