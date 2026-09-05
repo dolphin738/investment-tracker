@@ -223,3 +223,58 @@ async def test_create_category_with_system_label_rejected(client):
     # 非同名自定义分类不受影响
     cid = await _create_category(client, token, label="自定义分类")
     assert cid
+
+
+async def test_create_blank_label_rejected(client):
+    """全空白 label 入库前应被 trim 后判空 → 400（防止空白占位数据）。"""
+    token = await _admin_token(client, "ic_admin_7@example.com")
+    r = await client.post(
+        "/api/admin/interface-categories",
+        json={"label": "   "},
+        headers=auth(token),
+    )
+    status, _, _, msg = env(r)
+    assert status == 400, msg
+    assert "分类名不能为空" in msg
+
+
+async def test_create_system_label_with_whitespace_rejected(client):
+    """创建带首尾空格的系统同名分类，strip 后仍应触发同名 dup → 400。"""
+    token = await _admin_token(client, "ic_admin_8@example.com")
+    await _seed_system_categories()
+
+    r = await client.post(
+        "/api/admin/interface-categories",
+        json={"label": "  证券列表  "},
+        headers=auth(token),
+    )
+    status, _, _, msg = env(r)
+    assert status == 400, msg
+    assert "同名系统分类" in msg
+
+
+async def test_delete_category_with_multiple_interfaces_rejected(client):
+    """删除保护文案分支：同一分类下配置 2 个接口时 DELETE → 400，文案含「2 个接口」。"""
+    token = await _admin_token(client, "ic_admin_9@example.com")
+    pid = await _create_provider(client, token)
+    cid = await _create_category(client, token, label="多接口分类")
+    for idx in range(2):
+        r = await client.post(
+            f"/api/admin/quote-providers/{pid}/interfaces",
+            json={**INTERFACE_BASE, "name": f"测试接口{idx}", "category_id": cid},
+            headers=auth(token),
+        )
+        assert env(r)[0] == 200, env(r)[3]
+
+    # 列表返回该分类下的接口计数应为 2
+    r = await client.get("/api/admin/interface-categories", headers=auth(token))
+    _, _, data, _ = env(r)
+    row = next(c for c in data if c["id"] == cid)
+    assert row["interface_count"] == 2
+
+    r = await client.delete(
+        f"/api/admin/interface-categories/{cid}", headers=auth(token)
+    )
+    status, _, _, msg = env(r)
+    assert status == 400, msg
+    assert "2 个接口" in msg

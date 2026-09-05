@@ -19,9 +19,9 @@ export interface InterfaceCategory {
   icon: string | null;
   sort_order: number;
   /** 系统内置分类（不可删除，不可新增同名） */
-  system?: boolean;
-  /** 该分类下已配置接口数（后端本次新增，据此禁用删除入口） */
-  interface_count?: number;
+  system: boolean;
+  /** 该分类下已配置接口数（后端每次返回，据此禁用删除入口） */
+  interface_count: number;
   created_at: string;
   updated_at: string;
 }

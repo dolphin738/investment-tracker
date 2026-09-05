@@ -474,7 +474,7 @@ async def update_interface(
     # category_id 为 None 表示「置为未分类」，属合法意图，无需校验。
     if body.category_id is not None:
         cat_svc = InterfaceCategoryService(db)
-        category = await cat_svc.get(body.category_id)
+        category = await cat_svc.get_or_none(body.category_id)
         if category is None:
             raise HTTPException(status_code=400, detail="接口分类不存在")
     # 用 exclude_unset 区分「客户端显式传 null（=清空）」与「未传该字段（=不改动）」。
@@ -594,7 +594,7 @@ async def update_interface_category(
     db: AsyncSession = Depends(get_db),
 ) -> InterfaceCategoryOut:
     svc = InterfaceCategoryService(db)
-    cat = await svc.get(category_id)
+    cat = await svc.get_or_none(category_id)
     if cat is None:
         raise HTTPException(status_code=404, detail="分类不存在")
     cat = await svc.update(
@@ -615,7 +615,7 @@ async def delete_interface_category(
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     svc = InterfaceCategoryService(db)
-    cat = await svc.get(category_id)
+    cat = await svc.get_or_none(category_id)
     if cat is None:
         raise HTTPException(status_code=404, detail="分类不存在")
     # 系统分类不可删除、分类下已配置接口不可删除（有接口的分类返回 400）

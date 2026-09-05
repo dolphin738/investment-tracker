@@ -124,6 +124,8 @@ vi.mock('@/api/interface-category.api', () => ({
         label: '行情分类',
         icon: null,
         sort_order: 0,
+        system: false,
+        interface_count: 0,
         created_at: '',
         updated_at: '',
       },

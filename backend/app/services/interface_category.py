@@ -3,9 +3,8 @@
 与 QuoteProviderService 保持一致的风格。分类无唯一业务键（仅 label + sort_order），
 label 重复允许（UI 自行去重展示）。
 
-分类删除保护：分类下已配置接口时禁止删除（400），需先移除接口或改分类；
-仅空分类可删，故 QuoteInterface.category_id 外键的 ON DELETE SET NULL 实际不再
-触发（外键定义保持不动，仅作为兜底约束）。
+分类删除保护：分类下已配置接口时禁止删除（400），需先移除接口或改分类，
+删除受 RESTRICT 约束保护，非空分类不可删（应用层 400 前置 + DB 层兜底）。
 """
 from __future__ import annotations
 
@@ -32,14 +31,11 @@ class InterfaceCategoryService:
         )
         return list(result.scalars().all())
 
-    async def get(self, category_id: str) -> Optional[InterfaceCategory]:
-        return await self.session.get(InterfaceCategory, category_id)
-
     async def get_or_none(self, category_id: str) -> Optional[InterfaceCategory]:
         """按 id 查询分类；缺失时返回 None（不抛异常）。
 
         用于「分类存在性预校验」场景：调用方据此主动映射成 4xx，
-        避免误用 .get() 将来若改为 get-or-404 风格时误传播 404。
+        避免误将缺失值按 404 统一处理。
         """
         return await self.session.get(InterfaceCategory, category_id)
 
@@ -50,6 +46,10 @@ class InterfaceCategoryService:
         icon: Optional[str] = None,
         sort_order: int = 0,
     ) -> InterfaceCategory:
+        # 入库前归一化：去除首尾空白；全空白视为空名，禁止落库
+        label = label.strip()
+        if not label:
+            raise HTTPException(status_code=400, detail="分类名不能为空")
         # 不可创建与已有系统内置分类同名的分类（分类即用途，系统分类不可被覆盖）
         dup = (
             await self.session.execute(
@@ -78,7 +78,7 @@ class InterfaceCategoryService:
         sort_order: Optional[int] = None,
     ) -> InterfaceCategory:
         if label is not None:
-            obj.label = label
+            obj.label = label.strip()
         if icon is not None:
             obj.icon = icon
         if sort_order is not None:

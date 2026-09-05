@@ -118,7 +118,7 @@ function handleSubmit(): void {
           </div>
           <div class="space-y-2">
             <Label for="cat-order">排序</Label>
-            <Input id="cat-order" v-model="form.sortOrder" type="number" />
+            <Input id="cat-order" v-model.number="form.sortOrder" type="number" />
           </div>
         </div>
       </div>

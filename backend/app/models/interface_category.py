@@ -4,8 +4,8 @@
 - icon：lucide-react 图标名字符串（如 List / LineChart），UI 动态映射渲染。
 - sort_order：排序权重（升序）。
 
-接口（QuoteInterface.category_id）外键到本表（ON DELETE SET NULL）；
-删除分类仅把接口的 category_id 置 NULL，不影响接口存活（接口变为「未分类」）。
+接口（QuoteInterface.category_id）外键到本表（ON DELETE RESTRICT）；
+删除受 RESTRICT 约束保护，非空分类不可删（应用层 400 前置 + DB 层兜底）。
 """
 from __future__ import annotations
 

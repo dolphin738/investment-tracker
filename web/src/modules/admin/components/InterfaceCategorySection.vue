@@ -52,7 +52,7 @@ const deleteId = ref<string | null>(null);
 
 /** 分类下是否已配置接口（据此禁用删除） */
 function hasInterfaces(c: InterfaceCategory): boolean {
-  return (c.interface_count ?? 0) > 0;
+  return c.interface_count > 0;
 }
 
 function openCreate(): void {
@@ -161,7 +161,7 @@ function handleDeleteDialogOpenChange(open: boolean): void {
                   :disabled="hasInterfaces(c)"
                   :title="
                     hasInterfaces(c)
-                      ? `已配置 ${c.interface_count ?? 0} 个接口，不可删除`
+                      ? `已配置 ${c.interface_count} 个接口，不可删除`
                       : undefined
                   "
                   @click="deleteId = c.id"
