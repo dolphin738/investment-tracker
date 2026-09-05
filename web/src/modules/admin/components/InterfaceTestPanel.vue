@@ -84,6 +84,11 @@ const ENDPOINT_PARAM_HINTS: Record<string, Record<string, string>> = {
       '可选：全部、重大事项、财务报告、融资公告、风险提示、资产重组、信息变更、持股变动',
     date: '指定日期，形如 20240613',
   },
+  stock_history_dividend_detail: {
+    symbol: '股票代码，如 600012',
+    indicator: '可选：分红、配股',
+    date: '可选，形如 1994-12-24；留空=全量历史',
+  },
 };
 
 /** 识别接口参数模板里的占位符默认值（如 string / 示例 / example），留空时不作为真实参数发送 */
