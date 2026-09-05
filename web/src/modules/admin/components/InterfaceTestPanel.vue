@@ -75,6 +75,17 @@ const PARAM_HINTS: Record<string, string> = {
   date: '报告期，形如 20231231（季度末：0331/0630/0930/1231）',
 };
 
+/** 按接口（endpoint）覆盖的参数提示：同名参数在不同接口含义不同，优先于 PARAM_HINTS。
+ *  如 stock_notice_report（沪深京 A 股公告）的 date 为任意指定日期（不限季度末），
+ *  symbol 为公告类别枚举。 */
+const ENDPOINT_PARAM_HINTS: Record<string, Record<string, string>> = {
+  stock_notice_report: {
+    symbol:
+      '可选：全部、重大事项、财务报告、融资公告、风险提示、资产重组、信息变更、持股变动',
+    date: '指定日期，形如 20240613',
+  },
+};
+
 /** 识别接口参数模板里的占位符默认值（如 string / 示例 / example），留空时不作为真实参数发送 */
 function isPlaceholderValue(v: string): boolean {
   const s = v.trim().toLowerCase();
@@ -193,11 +204,13 @@ watch(
       (i) => i.id === selectedId.value,
     );
     const params = (itf?.params ?? {}) as Record<string, unknown>;
+    // 提示优先级：接口级覆盖（ENDPOINT_PARAM_HINTS）> 参数名兜底（PARAM_HINTS）
+    const endpointHints = ENDPOINT_PARAM_HINTS[itf?.endpoint ?? ''] ?? {};
     paramRows.value = Object.entries(params).map(([k, v]) => ({
       key: k,
       value: '',
       defaultValue: v == null ? '' : String(v),
-      hint: PARAM_HINTS[k] ?? '',
+      hint: endpointHints[k] ?? PARAM_HINTS[k] ?? '',
     }));
   },
   { immediate: true },
