@@ -2,10 +2,10 @@
  * api/interface-category.api.ts — 接口分类（后台管理）API
  *
  * 对应后端 modules/admin/router.py（前缀 /api/admin）：
- * - GET    /api/admin/interface-categories：列出全部分类（按 sort_order 升序）
- * - POST   /api/admin/interface-categories：新增分类（前端未暴露）
+ * - GET    /api/admin/interface-categories：列出全部分类（按 sort_order 升序，含各分类下接口数）
+ * - POST   /api/admin/interface-categories：新增分类（label 必填）
  * - PATCH  /api/admin/interface-categories/{id}：更新分类
- * - DELETE /api/admin/interface-categories/{id}：删除分类（不影响接口，前端未暴露）
+ * - DELETE /api/admin/interface-categories/{id}：删除分类（系统内置或分类下已配置接口时后端返回 400）
  *
  * 与 quote-provider.api.ts 保持一致的信封解包风格。
  */
@@ -20,8 +20,17 @@ export interface InterfaceCategory {
   sort_order: number;
   /** 系统内置分类（不可删除，不可新增同名） */
   system?: boolean;
+  /** 该分类下已配置接口数（后端本次新增，据此禁用删除入口） */
+  interface_count?: number;
   created_at: string;
   updated_at: string;
+}
+
+/** 新增分类请求体（label 必填） */
+export interface InterfaceCategoryCreate {
+  label: string;
+  icon?: string | null;
+  sort_order?: number;
 }
 
 /** 更新分类请求体（全字段可选） */
@@ -36,6 +45,13 @@ export function listInterfaceCategories(): Promise<InterfaceCategory[]> {
   return http.get<InterfaceCategory[]>('/admin/interface-categories');
 }
 
+/** 新增分类 */
+export function createInterfaceCategory(
+  body: InterfaceCategoryCreate,
+): Promise<InterfaceCategory> {
+  return http.post<InterfaceCategory>('/admin/interface-categories', body);
+}
+
 /** 更新分类 */
 export function updateInterfaceCategory(
   id: string,
@@ -44,5 +60,14 @@ export function updateInterfaceCategory(
   return http.patch<InterfaceCategory>(
     `/admin/interface-categories/${encodeURIComponent(id)}`,
     body,
+  );
+}
+
+/** 删除分类（后端返回 { id, deleted }） */
+export function deleteInterfaceCategory(
+  id: string,
+): Promise<{ id: string; deleted: boolean }> {
+  return http.delete<{ id: string; deleted: boolean }>(
+    `/admin/interface-categories/${encodeURIComponent(id)}`,
   );
 }

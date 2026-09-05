@@ -16,10 +16,10 @@
 - DELETE /api/admin/quote-providers/interfaces/{interface_id}：删除。
 
 接口分类（InterfaceCategory）CRUD：
-- GET    /api/admin/interface-categories：列出全部分类（按 sort_order 升序）。
+- GET    /api/admin/interface-categories：列出全部分类（按 sort_order 升序，含各分类下接口数）。
 - POST   /api/admin/interface-categories：新增分类（label 必填）。
 - PATCH  /api/admin/interface-categories/{id}：更新分类。
-- DELETE /api/admin/interface-categories/{id}：删除（不影响接口）。
+- DELETE /api/admin/interface-categories/{id}：删除（分类下已配置接口 → 400，需先移除或改分类）。
 
 安全约束：所有端点均依赖 require_admin（查库校验角色），非管理员返回 403。
 提供方仅保留 enabled 启停开关（全局单一活跃源 is_default/is_active 已移除，见 ADR-002）。
@@ -227,6 +227,8 @@ class InterfaceCategoryOut(BaseModel):
     sort_order: int
     # 系统内置分类（固定 2 类：证券列表 / 证券行情）：前端据此隐藏删除入口
     system: bool = False
+    # 该分类下已配置的接口数，前端据此禁用删除（模型上无此属性，由列表端点填充）
+    interface_count: int = 0
     created_at: datetime
     updated_at: datetime
 
@@ -557,7 +559,15 @@ async def list_interface_categories(
 ) -> list[InterfaceCategoryOut]:
     svc = InterfaceCategoryService(db)
     items = await svc.list()
-    return [InterfaceCategoryOut.model_validate(i) for i in items]
+    # interface_count 非 ORM 属性，from_attributes 校验拿不到：先 model_validate
+    # 再逐个回填（计数用一次 group-by 批量取，避免 N+1 查询）
+    counts = await svc.counts_by_category()
+    out_list: list[InterfaceCategoryOut] = []
+    for i in items:
+        out = InterfaceCategoryOut.model_validate(i)
+        out.interface_count = counts.get(i.id, 0)
+        out_list.append(out)
+    return out_list
 
 
 @router_admin.post("/interface-categories")
@@ -608,7 +618,8 @@ async def delete_interface_category(
     cat = await svc.get(category_id)
     if cat is None:
         raise HTTPException(status_code=404, detail="分类不存在")
-    # 系统分类不可删除的校验统一在 service 层
+    # 系统分类不可删除、分类下已配置接口不可删除（有接口的分类返回 400）
+    # 的校验统一在 service 层
     await svc.delete(cat)
     await db.commit()
     return {"id": category_id, "deleted": True}

@@ -1,13 +1,14 @@
 <script setup lang="ts">
 /**
- * modules/admin/components/InterfaceCategoryDialog.vue — 接口分类编辑对话框
+ * modules/admin/components/InterfaceCategoryDialog.vue — 接口分类新增/编辑对话框
  *
  * 平移自 React 版 features/admin/interface-category-dialog.tsx，行为契约一致。
+ * editing 为 null 时为新增模式（提交调 create），传入分类则为编辑模式（提交调 update）。
  * 字段：label、icon（lucide 图标名）、sort_order。
  * label 重复时后端允许（UI 自行去重展示），此处不二次提示。
  */
 
-import { reactive, ref, watch } from 'vue';
+import { computed, reactive, watch } from 'vue';
 import { Loader2 } from 'lucide-vue-next';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -21,7 +22,10 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import type { InterfaceCategory } from '@/api/interface-category.api';
-import { useUpdateInterfaceCategory } from '../composables/use-interface-category';
+import {
+  useCreateInterfaceCategory,
+  useUpdateInterfaceCategory,
+} from '../composables/use-interface-category';
 
 interface FormState {
   label: string;
@@ -42,14 +46,23 @@ function toForm(edit: InterfaceCategory | null): FormState {
 
 const props = defineProps<{
   open: boolean;
-  /** 传入则编辑模式 */
+  /** 传入则编辑模式；null 为新增模式 */
   editing: InterfaceCategory | null;
 }>();
 
 const emit = defineEmits<{ openChange: [open: boolean] }>();
 
+/** 新增模式：未传入编辑对象 */
+const isCreate = computed(() => props.editing === null);
+
+const createMut = useCreateInterfaceCategory();
 const updateMut = useUpdateInterfaceCategory();
 const form = reactive<FormState>(toForm(props.editing));
+
+// 提交中状态：新增 / 编辑任一 pending 即禁用提交按钮
+const submitting = computed(
+  () => createMut.isPending.value || updateMut.isPending.value,
+);
 
 // 打开时按传入分类重置表单
 watch(
@@ -74,6 +87,10 @@ function handleSubmit(): void {
       { id: props.editing.id, body: payload },
       { onSuccess: () => emit('openChange', false) },
     );
+  } else {
+    createMut.mutate(payload, {
+      onSuccess: () => emit('openChange', false),
+    });
   }
 }
 </script>
@@ -82,8 +99,10 @@ function handleSubmit(): void {
   <Dialog :open="props.open" @update:open="(v: boolean) => emit('openChange', v)">
     <DialogContent class="max-w-md">
       <DialogHeader>
-        <DialogTitle>编辑分类</DialogTitle>
-        <DialogDescription>修改接口分类</DialogDescription>
+        <DialogTitle>{{ isCreate ? '新增分类' : '编辑分类' }}</DialogTitle>
+        <DialogDescription>
+          {{ isCreate ? '新增接口分类' : '修改接口分类' }}
+        </DialogDescription>
       </DialogHeader>
 
       <div class="space-y-4">
@@ -106,12 +125,9 @@ function handleSubmit(): void {
 
       <DialogFooter>
         <Button variant="outline" @click="emit('openChange', false)">取消</Button>
-        <Button :disabled="updateMut.isPending.value" @click="handleSubmit">
-          <Loader2
-            v-if="updateMut.isPending.value"
-            class="mr-2 h-4 w-4 animate-spin"
-          />
-          保存
+        <Button :disabled="submitting" @click="handleSubmit">
+          <Loader2 v-if="submitting" class="mr-2 h-4 w-4 animate-spin" />
+          {{ isCreate ? '新增' : '保存' }}
         </Button>
       </DialogFooter>
     </DialogContent>

@@ -72,7 +72,11 @@ vi.mock('@/api/quote-interface.api', () => ({
 
 vi.mock('@/api/interface-category.api', () => ({
   listInterfaceCategories: vi.fn(() => Promise.resolve([])),
+  createInterfaceCategory: vi.fn(() => Promise.resolve(null)),
   updateInterfaceCategory: vi.fn(() => Promise.resolve(null)),
+  deleteInterfaceCategory: vi.fn(() =>
+    Promise.resolve({ id: '', deleted: true }),
+  ),
 }));
 
 vi.mock('@/composables/use-toast', () => ({

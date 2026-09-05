@@ -1,8 +1,9 @@
-"""接口分类 CRUD + 删除不影响接口（SET NULL）— admin 集成测试。
+"""接口分类 CRUD + 删除保护（分类下有接口不可删）— admin 集成测试。
 
 依赖 require_admin（非管理员 → 403）。覆盖：
 - CRUD：create / list（按 sort_order 升序）/ get / update / delete；
-- 删除分类不影响接口：接口的 category_id 置 NULL（SET NULL），接口仍存活；
+- 删除保护：分类下已配置接口时 DELETE → 400（接口归属不变）；空分类可删；
+- 列表返回各分类下的接口数 interface_count；
 - 非管理员 → 403。
 
 测试库在会话内共享，_clean_db 每个测试前 TRUNCATE 全部表（含迁移种子，故测试内自行创建数据）。
@@ -108,6 +109,9 @@ async def test_create_and_list(client):
     r2 = await client.get("/api/admin/interface-categories", headers=auth(token))
     _, _, data2, _ = env(r2)
     assert isinstance(data2, list) and any(c["id"] == cid for c in data2)
+    # 新建分类下无接口，interface_count 应为 0
+    created = next(c for c in data2 if c["id"] == cid)
+    assert created["interface_count"] == 0
 
 
 async def test_get_update_delete(client):
@@ -138,8 +142,8 @@ async def test_get_update_delete(client):
     assert isinstance(data, list) and not any(c["id"] == cid for c in data)
 
 
-async def test_delete_category_sets_interface_category_id_null(client):
-    """删除分类不应删除接口：接口 category_id 置 NULL（SET NULL），接口仍存活。"""
+async def test_delete_category_with_interfaces_rejected(client):
+    """分类删除保护：分类下已配置接口时 DELETE → 400（接口归属不变）；空分类可删。"""
     token = await _admin_token(client, "ic_admin_4@example.com")
     pid = await _create_provider(client, token)
     cid = await _create_category(client, token, label="A股列表")
@@ -151,18 +155,36 @@ async def test_delete_category_sets_interface_category_id_null(client):
     )
     iid = env(r)[2]["id"]
 
-    # 删除分类
+    # 列表返回该分类下已配置的接口数（前端据此禁用删除按钮）
+    r = await client.get("/api/admin/interface-categories", headers=auth(token))
+    _, _, data, _ = env(r)
+    row = next(c for c in data if c["id"] == cid)
+    assert row["interface_count"] == 1
+
+    # 有接口的分类删除 → 400
     r = await client.delete(
         f"/api/admin/interface-categories/{cid}", headers=auth(token)
     )
-    assert env(r)[0] == 200
-    # 接口仍然存活，category_id 被置 NULL（未分类）
+    status, _, _, msg = env(r)
+    assert status == 400, msg
+    assert "1 个接口" in msg
+
+    # 接口不受影响，category_id 保持不变
     r = await client.get(
         f"/api/admin/quote-providers/interfaces/{iid}", headers=auth(token)
     )
     status, _, data, _ = env(r)
     assert status == 200
-    assert data["category_id"] is None
+    assert data["category_id"] == cid
+
+    # 空分类删除 → 200 {"deleted": true}
+    empty_cid = await _create_category(client, token, label="空分类")
+    r = await client.delete(
+        f"/api/admin/interface-categories/{empty_cid}", headers=auth(token)
+    )
+    status, _, data, _ = env(r)
+    assert status == 200
+    assert data["deleted"] is True
 
 
 async def test_system_category_cannot_be_deleted(client):
