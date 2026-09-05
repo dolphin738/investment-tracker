@@ -13,6 +13,7 @@ import { Loader2 } from 'lucide-vue-next';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import InterfaceCategoryIconPicker from './InterfaceCategoryIconPicker.vue';
 import {
   Dialog,
   DialogContent,
@@ -30,17 +31,17 @@ import {
 interface FormState {
   label: string;
   icon: string;
-  sortOrder: string;
+  sortOrder: number;
 }
 
 function toForm(edit: InterfaceCategory | null): FormState {
   if (!edit) {
-    return { label: '', icon: '', sortOrder: '0' };
+    return { label: '', icon: '', sortOrder: 0 };
   }
   return {
     label: edit.label,
     icon: edit.icon ?? '',
-    sortOrder: String(edit.sort_order),
+    sortOrder: Number(edit.sort_order ?? 0),
   };
 }
 
@@ -80,7 +81,7 @@ function handleSubmit(): void {
   const payload = {
     label: form.label.trim(),
     icon: form.icon.trim() || null,
-    sort_order: form.sortOrder.trim() ? Number(form.sortOrder) : 0,
+    sort_order: Number(form.sortOrder) || 0,
   };
   if (props.editing) {
     updateMut.mutate(
@@ -113,8 +114,8 @@ function handleSubmit(): void {
 
         <div class="grid grid-cols-2 gap-4">
           <div class="space-y-2">
-            <Label for="cat-icon">图标（lucide 名）</Label>
-            <Input id="cat-icon" v-model="form.icon" placeholder="如 List" />
+            <Label for="cat-icon">图标</Label>
+            <InterfaceCategoryIconPicker id="cat-icon" v-model="form.icon" />
           </div>
           <div class="space-y-2">
             <Label for="cat-order">排序</Label>
