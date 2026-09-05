@@ -253,6 +253,20 @@ async def test_create_system_label_with_whitespace_rejected(client):
     assert "同名系统分类" in msg
 
 
+async def test_update_blank_label_rejected(client):
+    """PATCH 空白 label 应被 trim 后判空 → 400（与 create 行为一致，防 API 直调绕过）。"""
+    token = await _admin_token(client, "ic_admin_9b@example.com")
+    cid = await _create_category(client, token, label="期权列表")
+    r = await client.patch(
+        f"/api/admin/interface-categories/{cid}",
+        json={"label": "   "},
+        headers=auth(token),
+    )
+    status, _, _, msg = env(r)
+    assert status == 400, msg
+    assert "分类名不能为空" in msg
+
+
 async def test_delete_category_with_multiple_interfaces_rejected(client):
     """删除保护文案分支：同一分类下配置 2 个接口时 DELETE → 400，文案含「2 个接口」。"""
     token = await _admin_token(client, "ic_admin_9@example.com")

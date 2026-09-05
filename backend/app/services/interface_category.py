@@ -78,7 +78,10 @@ class InterfaceCategoryService:
         sort_order: Optional[int] = None,
     ) -> InterfaceCategory:
         if label is not None:
-            obj.label = label.strip()
+            label = label.strip()
+            if not label:
+                raise HTTPException(status_code=400, detail="分类名不能为空")
+            obj.label = label
         if icon is not None:
             obj.icon = icon
         if sort_order is not None:
