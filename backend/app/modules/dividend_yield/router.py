@@ -5,7 +5,7 @@
 - GET   /api/dividend-yield/top20                股息率前 20（A12 剔除 suspicious、A13 封顶 20）
 - GET   /api/dividend-yield/{master_id}/curve     单证券过去一年每日股息率曲线（§9 逐点现算）
 - GET   /api/dividend-yield/{master_id}/implied-price 反推价格（§9）
-- GET   /api/dividend-yield/settings     admin 读取全局配置（§5.4）
+- GET   /api/dividend-yield/settings     登录读取全局配置（§9：阈值标色需要）
 - PUT   /api/dividend-yield/settings     admin 更新全局配置（阈值 + 接口三重校验）
 
 口径/计算全部复用纯函数（services/dividend_yield.py），不在此重写计算逻辑；
@@ -441,10 +441,10 @@ async def _settings_out(db: AsyncSession, row: DividendYieldSettings) -> dict[st
 
 @router_dividend_yield.get("/settings")
 async def get_dividend_yield_settings(
-    admin: CurrentUser = Depends(require_admin),
+    user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """读取全局配置（admin-only）。"""
+    """读取全局配置（登录即可读，§9：仅 PUT 收 admin——非 admin 拿到阈值才能标色）。"""
     row = await _load_settings(db)
     return await _settings_out(db, row)
 

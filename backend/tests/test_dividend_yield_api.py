@@ -226,13 +226,13 @@ async def test_top20_double_board_contract(session, client):
     assert cy == sorted(cy, reverse=True)  # consecutive_years DESC
 
 
-# ───────────────────────── settings：非 admin 403（§12） ─────────────────────────
+# ───────────────────────── settings：GET 登录可读，PUT admin-only（§9，P1-1） ─────────────────────────
 @pytest.mark.asyncio
-async def test_settings_requires_admin(session, client):
-    """守护 §9/§12：非 admin GET/PUT /settings → 403。"""
+async def test_settings_put_requires_admin(session, client):
+    """守护 §9/P1-1：GET /settings 登录即可读（非 admin 拿阈值标色）；PUT 仍 admin-only 403。"""
     info = await register_login(client)
     h = auth(info["token"])
-    assert (await client.get("/api/dividend-yield/settings", headers=h)).status_code == 403
+    assert (await client.get("/api/dividend-yield/settings", headers=h)).status_code == 200
     r = await client.put(
         "/api/dividend-yield/settings",
         json={"green_threshold": "0.05", "red_threshold": "0.03"},
