@@ -33,7 +33,12 @@ from app.models import (
     SecurityDividend,
     SecurityDividendYield,
 )
-from app.models.enums import DividendStatus, DividendYieldMode, ReportPeriodType
+from app.models.enums import (
+    DividendStatus,
+    DividendYieldMode,
+    JobTriggerSource,
+    ReportPeriodType,
+)
 from app.services.dividend_yield import (
     DividendCell,
     compute_yield,
