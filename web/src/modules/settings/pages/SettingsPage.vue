@@ -78,12 +78,7 @@ import { useDeleteAccount } from '@/modules/account/composables/use-account';
 import { QUICK_RANGE_OPTIONS } from '@/modules/query/quick-range';
 import { ROUTE_PATH, AGGREGATION_OPTIONS, GRANULARITY_OPTIONS } from '@/lib/constants';
 import type { UpdatePreferenceDto } from '@/api/types';
-import type { UpdateDividendYieldSettingsDto } from '@/api/types';
-import {
-  useDividendYieldSettings,
-  useDividendYieldInterfaces,
-  useUpdateDividendYieldSettings,
-} from '@/modules/dividend-yield/composables/use-dividend-yield';
+import PrefsDividendTab from '../components/PrefsDividendTab.vue';
 
 /** 主题选项 */
 const THEME_OPTIONS = [
@@ -129,108 +124,10 @@ const updatePrefsMutation = useUpdatePreferences();
 const updatePending = computed(() => updatePrefsMutation.isPending.value);
 const updateError = computed(() => updatePrefsMutation.isError.value);
 
-// 股息率配置（admin-only）：阈值 + 双源 + 行情源 设置
+// 股息率配置 TAB 内容已抽至 components/PrefsDividendTab.vue（§10.4：容器只做组合）
 const isAdmin = computed(() => useIsAdmin());
 // 默认激活 TAB：偏好设置（既有测试直接 mount 后即访问偏好元素，需保证首帧可见）
 const activeTab = ref('preferences');
-
-const settingsQuery = useDividendYieldSettings(isAdmin);
-const dividendSettings = computed(() => settingsQuery.data.value);
-const settingsLoading = computed(() => settingsQuery.isLoading.value);
-const settingsMutation = useUpdateDividendYieldSettings();
-const settingsPending = computed(() => settingsMutation.isPending.value);
-const settingsError = computed(() => settingsMutation.isError.value);
-
-// 双源/行情源候选接口（复用 listAllInterfaces，前端按 category_id 过滤；admin 才发起）
-const interfacesQuery = useDividendYieldInterfaces(isAdmin);
-const category3Enabled = computed(() =>
-  (interfacesQuery.data.value ?? []).filter((i) => i.category_id === '3' && i.enabled),
-);
-/** 股息主源 / 补充源候选（category_id === '3'） */
-const dividendSourceOptions = category3Enabled;
-const dividendDetailOptions = category3Enabled;
-/** 行情源候选（category_id === '2'） */
-const priceSourceOptions = computed(() =>
-  (interfacesQuery.data.value ?? []).filter((i) => i.category_id === '2' && i.enabled),
-);
-
-// 股息率设置本地表单（回填自服务端）
-const settingsForm = reactive({
-  greenThreshold: '',
-  redThreshold: '',
-  dividendReportSourceInterfaceId: '',
-  dividendDetailSourceInterfaceId: '',
-  priceSourceInterfaceId: '',
-});
-const settingsFormError = ref('');
-
-watch(dividendSettings, (s) => {
-  if (!s) return;
-  settingsForm.greenThreshold = s.green_threshold != null ? String(s.green_threshold) : '';
-  settingsForm.redThreshold = s.red_threshold != null ? String(s.red_threshold) : '';
-  settingsForm.dividendReportSourceInterfaceId = s.dividend_report_source?.id ?? '';
-  settingsForm.dividendDetailSourceInterfaceId = s.dividend_detail_source?.id ?? '';
-  settingsForm.priceSourceInterfaceId = s.price_source?.id ?? '';
-});
-
-/** 字符串 → 数字 / null（空串视为 null） */
-function toNumOrNull(v: string): number | null {
-  const t = v.trim();
-  if (t === '') return null;
-  const n = Number(t);
-  return Number.isFinite(n) ? n : null;
-}
-
-/** 阈值前置校验（后端也会 400：0 < red < green <= 1） */
-function validateSettings(): string | null {
-  const green = toNumOrNull(settingsForm.greenThreshold);
-  const red = toNumOrNull(settingsForm.redThreshold);
-  if (green !== null && green <= 0) return '绿色阈值须大于 0';
-  if (green !== null && green > 1) return '绿色阈值须不大于 1';
-  if (red !== null && red <= 0) return '红色阈值须大于 0';
-  if (red !== null && red > 1) return '红色阈值须不大于 1';
-  if (red !== null && green !== null && red >= green) {
-    return '红色阈值须小于绿色阈值';
-  }
-  return null;
-}
-
-/** 股息率设置是否有本地变更（与服务端对比） */
-const settingsHasChanges = computed(() => {
-  const s = dividendSettings.value;
-  if (!s) return false;
-  return (
-    settingsForm.greenThreshold !==
-      (s.green_threshold != null ? String(s.green_threshold) : '') ||
-    settingsForm.redThreshold !==
-      (s.red_threshold != null ? String(s.red_threshold) : '') ||
-    settingsForm.dividendReportSourceInterfaceId !==
-      (s.dividend_report_source?.id ?? '') ||
-    settingsForm.dividendDetailSourceInterfaceId !==
-      (s.dividend_detail_source?.id ?? '') ||
-    settingsForm.priceSourceInterfaceId !== (s.price_source?.id ?? '')
-  );
-});
-
-/** 保存股息率设置 */
-function handleSaveSettings(): void {
-  const err = validateSettings();
-  if (err) {
-    settingsFormError.value = err;
-    return;
-  }
-  settingsFormError.value = '';
-  const payload: UpdateDividendYieldSettingsDto = {
-    green_threshold: toNumOrNull(settingsForm.greenThreshold),
-    red_threshold: toNumOrNull(settingsForm.redThreshold),
-    dividend_report_source_interface_id:
-      settingsForm.dividendReportSourceInterfaceId || null,
-    dividend_detail_source_interface_id:
-      settingsForm.dividendDetailSourceInterfaceId || null,
-    price_source_interface_id: settingsForm.priceSourceInterfaceId || null,
-  };
-  settingsMutation.mutate(payload);
-}
 
 // 本地偏好编辑状态（乐观更新）
 const prefForm = reactive({
@@ -783,140 +680,9 @@ function confirmClearData(): void {
         </Card>
       </TabsContent>
 
-      <!-- 股息率（admin-only）：阈值 + 双源 + 行情源 -->
+      <!-- 股息率（admin-only）：内容承载于 PrefsDividendTab（§10.4） -->
       <TabsContent v-if="isAdmin" value="dividend">
-        <Card>
-          <CardHeader>
-            <CardTitle class="text-base">股息率</CardTitle>
-            <CardDescription>
-              股息率榜单的彩色阈值（绿色以上 / 红色以下）与数据源接口配置；非管理员不可见本项，后端仍会 403 兜底
-            </CardDescription>
-          </CardHeader>
-          <CardContent class="space-y-6">
-            <div v-if="settingsLoading" class="space-y-3">
-              <Skeleton v-for="i in 4" :key="i" class="h-10 w-full" />
-            </div>
-            <template v-else>
-              <!-- 股息率阈值 -->
-              <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <div class="space-y-2">
-                  <Label for="dy-green">绿色阈值（股息率 ≥ 显示绿色）</Label>
-                  <Input
-                    id="dy-green"
-                    type="number"
-                    min="0"
-                    max="1"
-                    step="0.01"
-                    placeholder="如 0.05（5%）"
-                    v-model="settingsForm.greenThreshold"
-                  />
-                </div>
-                <div class="space-y-2">
-                  <Label for="dy-red">红色阈值（股息率 ≤ 显示红色）</Label>
-                  <Input
-                    id="dy-red"
-                    type="number"
-                    min="0"
-                    max="1"
-                    step="0.01"
-                    placeholder="如 0.02（2%）"
-                    v-model="settingsForm.redThreshold"
-                  />
-                </div>
-              </div>
-              <p class="text-xs text-muted-foreground">
-                阈值为小数比率（0.05 = 5%）；校验规则：0 &lt; 红色 &lt; 绿色 ≤ 1
-              </p>
-
-              <!-- 股息主源 -->
-              <div class="space-y-2">
-                <Label for="dy-report-source">股息主数据源接口</Label>
-                <Select v-model="settingsForm.dividendReportSourceInterfaceId">
-                  <SelectTrigger id="dy-report-source" class="w-full">
-                    <SelectValue placeholder="选择股息主数据源接口" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="">不设置</SelectItem>
-                    <SelectItem
-                      v-for="itf in dividendSourceOptions"
-                      :key="itf.id"
-                      :value="itf.id"
-                    >
-                      {{ itf.name }}
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <!-- 股息补充源 -->
-              <div class="space-y-2">
-                <Label for="dy-detail-source">股息明细源接口</Label>
-                <Select v-model="settingsForm.dividendDetailSourceInterfaceId">
-                  <SelectTrigger id="dy-detail-source" class="w-full">
-                    <SelectValue placeholder="选择股息明细源接口" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="">不设置</SelectItem>
-                    <SelectItem
-                      v-for="itf in dividendDetailOptions"
-                      :key="itf.id"
-                      :value="itf.id"
-                    >
-                      {{ itf.name }}
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <!-- 行情源 -->
-              <div class="space-y-2">
-                <Label for="dy-price-source">行情源接口</Label>
-                <Select v-model="settingsForm.priceSourceInterfaceId">
-                  <SelectTrigger id="dy-price-source" class="w-full">
-                    <SelectValue placeholder="选择行情源接口" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="">不设置</SelectItem>
-                    <SelectItem
-                      v-for="itf in priceSourceOptions"
-                      :key="itf.id"
-                      :value="itf.id"
-                    >
-                      {{ itf.name }}
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <p v-if="settingsFormError" class="text-xs text-red-500">
-                {{ settingsFormError }}
-              </p>
-
-              <!-- 保存 -->
-              <div class="flex items-center gap-3 pt-2">
-                <Button
-                  :disabled="!settingsHasChanges || settingsPending"
-                  @click="handleSaveSettings"
-                >
-                  <Loader2
-                    v-if="settingsPending"
-                    class="mr-2 h-4 w-4 animate-spin"
-                  />
-                  保存股息率设置
-                </Button>
-                <span v-if="settingsError" class="text-xs text-red-500">
-                  保存失败，请重试
-                </span>
-                <span
-                  v-if="settingsHasChanges && !settingsPending"
-                  class="text-xs text-muted-foreground"
-                >
-                  有未保存的更改
-                </span>
-              </div>
-            </template>
-          </CardContent>
-        </Card>
+        <PrefsDividendTab />
       </TabsContent>
 
     <!-- 数据管理（T05 · SET-P0-03 导出 / SET-P0-04 导入 / FLOW-P1-01） -->
