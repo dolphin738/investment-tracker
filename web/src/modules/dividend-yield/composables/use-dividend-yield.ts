@@ -26,6 +26,7 @@ import {
 } from '@/api/dividend-yield.api';
 import { listAllInterfaces } from '@/api/quote-interface.api';
 import type {
+  DividendYieldRankFilters,
   DividendYieldSort,
   UpdateDividendYieldSettingsDto,
 } from '@/api/types';
@@ -33,7 +34,7 @@ import type {
 /** 股息率领域 queryKey 前缀 */
 export const DIVIDEND_YIELD_KEY = ['dividend-yield'] as const;
 
-/** Top20 股息率看板（后端已剔除 suspicious、封顶 20） */
+/** Top20 股息率看板（§8.3 双榜：top + consecutive，后端封顶 20、剔除 suspicious/僵尸行） */
 export function useTop20() {
   return useQuery({
     queryKey: [...DIVIDEND_YIELD_KEY, 'top20'],
@@ -42,22 +43,32 @@ export function useTop20() {
   });
 }
 
-/** 股息率榜单分页（按 sort 排序） */
+/** 股息率榜单分页（按 sort 排序 + §8.1 过滤参数） */
 export function useRank(
   page: MaybeRefOrGetter<number>,
   pageSize: MaybeRefOrGetter<number>,
   sort: MaybeRefOrGetter<DividendYieldSort>,
   enabled: MaybeRefOrGetter<boolean> = true,
+  filters: MaybeRefOrGetter<DividendYieldRankFilters> = {},
 ) {
   return useQuery({
-    queryKey: computed(() => [
-      ...DIVIDEND_YIELD_KEY,
-      'rank',
-      toValue(page),
-      toValue(pageSize),
-      toValue(sort),
-    ]),
-    queryFn: () => getDividendYieldRank(toValue(page), toValue(pageSize), toValue(sort)),
+    queryKey: computed(() => {
+      const f = toValue(filters);
+      return [
+        ...DIVIDEND_YIELD_KEY,
+        'rank',
+        toValue(page),
+        toValue(pageSize),
+        toValue(sort),
+        f.exchange ?? null,
+        f.mode ?? null,
+        f.min_consecutive ?? null,
+        f.include_proposed ?? true,
+        f.include_no_dividend ?? false,
+      ];
+    }),
+    queryFn: () =>
+      getDividendYieldRank(toValue(page), toValue(pageSize), toValue(sort), toValue(filters)),
     enabled: computed(() => Boolean(toValue(enabled))),
     staleTime: 60 * 1000,
   });

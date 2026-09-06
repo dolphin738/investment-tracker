@@ -2,9 +2,11 @@
 /**
  * modules/dividend-yield/pages/DividendYieldRankPage.vue — 股息率榜单页（阶段5）
  *
- * 两块看板（页内 TAB 切换）：
- * - 股息率 Top20：useTop20()（后端已剔除 suspicious、封顶 20）
- * - 连续分红榜：useRank(sort=consecutive_years)，按连续分红年数排序（每页 30）
+ * 三块看板（页内 TAB 切换）：
+ * - 股息率 Top20：useTop20().top（剔除 suspicious 与近两年无分红，封顶 20，§8.3）
+ * - 连续分红榜：useTop20().consecutive（>=2 年、三元组排序、封顶 20，§8.3/A13）
+ * - 全部榜单：useRank + §8.1 过滤条（交易所/口径/连续年数/含预案/两年无分红）+ 分页 + 列排序
+ *   （P0-1 管理视图；后续随 RankingPage/TopPage 路由拆分整体迁移）
  *
  * 阈值标色：admin 时拉取 useDividendYieldSettings 的 green/red 阈值；
  * 无阈值数据（或未配置阈值）时股息率灰显（text-muted-foreground）。
@@ -15,10 +17,12 @@
  * 真正的 403 由后端 require_admin 保证，前端不做授权唯一防线。
  */
 
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import type { EChartsOption } from 'echarts';
 import PageHeader from '@/components/common/PageHeader.vue';
 import EmptyState from '@/components/common/EmptyState.vue';
+import Pagination from '@/components/common/Pagination.vue';
+import TableSkeleton from '@/components/common/TableSkeleton.vue';
 import {
   Card,
   CardContent,
@@ -39,6 +43,14 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { Switch } from '@/components/ui/switch';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import {
   Tabs,
   TabsList,
@@ -55,10 +67,10 @@ import {
   useTop20,
   useDividendYieldSettings,
 } from '../composables/use-dividend-yield';
-import type { DividendYieldMode } from '@/api/types';
+import type { DividendYieldMode, DividendYieldSort } from '@/api/types';
 
 /** 页内看板 TAB */
-type BoardTab = 'top20' | 'consecutive';
+type BoardTab = 'top20' | 'consecutive' | 'all';
 
 const innerTab = ref<BoardTab>('top20');
 
@@ -68,13 +80,47 @@ const settingsQuery = useDividendYieldSettings(isAdmin);
 const thresholds = computed(() => settingsQuery.data.value);
 
 const top20 = useTop20();
-const top20Items = computed(() => top20.data.value?.items ?? []);
+// §8.3 双榜：Top20（剔除 suspicious + 近两年无分红）与连续分红榜（>=2 年、封顶 20）
+const top20Items = computed(() => top20.data.value?.top ?? []);
+const consecutiveItems = computed(() => top20.data.value?.consecutive ?? []);
 
-// 连续分红榜（分页，每页 30）
-const consecutiveRank = useRank(1, 30, 'consecutive_years', true);
-const consecutiveItems = computed(
-  () => consecutiveRank.data.value?.items ?? [],
-);
+// ── 全部榜单（管理视图，§8.1/§10.2：过滤条 + 分页 + 列排序） ──
+const allPage = ref(1);
+const allPageSize = ref(20);
+const allSort = ref<DividendYieldSort>('dividend_yield');
+const fExchange = ref<string>('ALL');
+const fMode = ref<string>('ALL');
+const fMinConsecutive = ref<string>('');
+const fIncludeProposed = ref(true);
+const fIncludeNoDividend = ref(false);
+
+const rankFilters = computed(() => ({
+  exchange: fExchange.value === 'ALL' ? undefined : fExchange.value,
+  mode: fMode.value === 'ALL' ? undefined : (fMode.value as 'TTM' | 'LFY'),
+  min_consecutive:
+    fMinConsecutive.value.trim() === '' || Number.isNaN(Number(fMinConsecutive.value))
+      ? undefined
+      : Math.max(0, Math.floor(Number(fMinConsecutive.value))),
+  include_proposed: fIncludeProposed.value,
+  include_no_dividend: fIncludeNoDividend.value,
+}));
+// 过滤条件变化后回到第一页，避免落在越界页
+watch(rankFilters, () => {
+  allPage.value = 1;
+});
+
+const allRank = useRank(allPage, allPageSize, allSort, true, rankFilters);
+const allItems = computed(() => allRank.data.value?.items ?? []);
+const allTotal = computed(() => allRank.data.value?.total ?? 0);
+const allTotalPages = computed(() => Math.max(1, Math.ceil(allTotal.value / allPageSize.value)));
+
+/** 列头点击排序（后端白名单内两列，§8.1；其余列待后端扩展） */
+function sortBy(col: DividendYieldSort): void {
+  allSort.value = col;
+}
+function isSorted(col: DividendYieldSort): boolean {
+  return allSort.value === col;
+}
 
 /** 当前展示的数据源（供详情卡 / 曲线使用） */
 const selected = ref<{
@@ -153,7 +199,8 @@ const curveOption = computed<EChartsOption>(() => {
       {
         type: 'line',
         data: y,
-        connectNulls: true,
+        // §3.5/§7 缺失语义：缺段不返回 0，视觉断开（connectNulls 跨空连线等于伪造中间值）
+        connectNulls: false,
         smooth: true,
         symbolSize: 4,
         lineStyle: { width: 2 },
@@ -179,6 +226,7 @@ function modeLabel(mode: DividendYieldMode): string {
       <TabsList>
         <TabsTrigger value="top20">股息率 Top20</TabsTrigger>
         <TabsTrigger value="consecutive">连续分红榜</TabsTrigger>
+        <TabsTrigger value="all">全部榜单</TabsTrigger>
       </TabsList>
 
       <!-- Top20 -->
@@ -276,11 +324,11 @@ function modeLabel(mode: DividendYieldMode): string {
           <CardHeader>
             <CardTitle class="text-base">连续分红榜</CardTitle>
             <CardDescription>
-              按连续分红年数（consecutive_years）降序，每页展示 30 条；stale 数据灰显
+              连续分红 ≥2 年，按连续年数与股息率降序；条数上限 20（§8.3 / 决策 A13）；stale 数据灰显
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <Skeleton v-if="consecutiveRank.isLoading.value" class="h-64 w-full" />
+            <Skeleton v-if="top20.isLoading.value" class="h-64 w-full" />
             <EmptyState
               v-else-if="consecutiveItems.length === 0"
               title="暂无连续分红数据"
@@ -341,6 +389,170 @@ function modeLabel(mode: DividendYieldMode): string {
                 </TableBody>
               </Table>
             </div>
+          </CardContent>
+        </Card>
+      </TabsContent>
+
+      <!-- 全部榜单（管理视图：过滤条 + 分页 + 列排序） -->
+      <TabsContent value="all">
+        <Card>
+          <CardHeader>
+            <CardTitle class="text-base">全部榜单</CardTitle>
+            <CardDescription>
+              按 §8.1 过滤与排序浏览全部有分红记录公司；含预案口径切换时服务端现算「过滤态股息率」
+            </CardDescription>
+          </CardHeader>
+          <CardContent class="space-y-4">
+            <!-- 过滤条 -->
+            <div class="flex flex-wrap items-end gap-4">
+              <div class="space-y-1.5">
+                <Label class="text-xs text-muted-foreground">交易所</Label>
+                <Select v-model="fExchange">
+                  <SelectTrigger class="w-28">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ALL">全部</SelectItem>
+                    <SelectItem value="SH">上交所</SelectItem>
+                    <SelectItem value="SZ">深交所</SelectItem>
+                    <SelectItem value="BJ">北交所</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div class="space-y-1.5">
+                <Label class="text-xs text-muted-foreground">口径</Label>
+                <Select v-model="fMode">
+                  <SelectTrigger class="w-28">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ALL">全部</SelectItem>
+                    <SelectItem value="TTM">TTM</SelectItem>
+                    <SelectItem value="LFY">LFY</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div class="space-y-1.5">
+                <Label class="text-xs text-muted-foreground" for="dy-min-cons">
+                  连续年数 ≥
+                </Label>
+                <Input
+                  id="dy-min-cons"
+                  v-model="fMinConsecutive"
+                  type="number"
+                  min="0"
+                  max="5"
+                  class="w-24"
+                  placeholder="不限"
+                />
+              </div>
+              <div class="flex items-center gap-2 pb-1.5">
+                <Switch id="dy-include-proposed" v-model="fIncludeProposed" />
+                <Label for="dy-include-proposed" class="text-xs">含预案</Label>
+              </div>
+              <div class="flex items-center gap-2 pb-1.5">
+                <Switch id="dy-include-no-div" v-model="fIncludeNoDividend" />
+                <Label for="dy-include-no-div" class="text-xs">显示两年无分红</Label>
+              </div>
+            </div>
+
+            <TableSkeleton v-if="allRank.isLoading.value" :rows="8" :cols="6" />
+            <EmptyState
+              v-else-if="allItems.length === 0"
+              title="无符合条件的记录"
+              description="尝试调整过滤条件（如打开「显示两年无分红」）"
+            />
+            <template v-else>
+              <div class="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>代码 / 名称</TableHead>
+                      <TableHead class="text-right">股息率</TableHead>
+                      <TableHead class="text-right">每股分红</TableHead>
+                      <TableHead class="text-right">最新价</TableHead>
+                      <TableHead
+                        class="cursor-pointer text-right"
+                        @click="sortBy('dividend_yield')"
+                      >
+                        口径
+                        <span v-if="isSorted('dividend_yield')" aria-hidden>↓</span>
+                      </TableHead>
+                      <TableHead
+                        class="cursor-pointer text-right"
+                        @click="sortBy('consecutive_years')"
+                      >
+                        连续年数
+                        <span v-if="isSorted('consecutive_years')" aria-hidden>↓</span>
+                      </TableHead>
+                      <TableHead>数据状态</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    <TableRow
+                      v-for="item in allItems"
+                      :key="item.master_id"
+                      :class="cn(
+                        item.stale ? 'opacity-60' : '',
+                        'cursor-pointer',
+                      )"
+                      @click="selectRow(item)"
+                    >
+                      <TableCell class="sticky left-0 z-10 bg-background">
+                        <div>
+                          <p class="font-medium">
+                            {{ item.name || item.code || '未命名' }}
+                          </p>
+                          <p class="font-mono text-xs text-muted-foreground">
+                            {{ item.code || '-' }}
+                          </p>
+                        </div>
+                      </TableCell>
+                      <TableCell
+                        :class="cn(
+                          'text-right font-mono tabular-nums',
+                          yieldClass(item),
+                        )"
+                      >
+                        {{ formatPercent(item.dividend_yield) }}
+                      </TableCell>
+                      <TableCell class="text-right font-mono tabular-nums">
+                        {{ formatCurrency(item.numerator_per_share) }}
+                      </TableCell>
+                      <TableCell class="text-right font-mono tabular-nums">
+                        {{ formatCurrency(item.latest_price) }}
+                      </TableCell>
+                      <TableCell class="text-right">
+                        <div class="flex flex-wrap items-center justify-end gap-1">
+                          <Badge variant="outline">{{ modeLabel(item.mode) }}</Badge>
+                          <Badge v-if="item.filtered" variant="secondary">过滤态</Badge>
+                        </div>
+                      </TableCell>
+                      <TableCell class="text-right font-mono tabular-nums">
+                        {{ item.consecutive_years ?? '-' }}
+                      </TableCell>
+                      <TableCell>
+                        <Badge v-if="item.stale" variant="outline">
+                          数据截至 {{ item.latest_trade_date ?? '-' }}
+                        </Badge>
+                        <Badge v-else variant="secondary">最新</Badge>
+                      </TableCell>
+                    </TableRow>
+                  </TableBody>
+                </Table>
+              </div>
+              <Pagination
+                :page="allPage"
+                :total-pages="allTotalPages"
+                :total="allTotal"
+                :page-size="allPageSize"
+                :page-size-options="[10, 20, 50, 100]"
+                show-first-last
+                show-jumper
+                @page-change="(p: number) => (allPage = p)"
+                @page-size-change="(s: number) => { allPageSize = s; allPage = 1; }"
+              />
+            </template>
           </CardContent>
         </Card>
       </TabsContent>
@@ -428,6 +640,14 @@ function modeLabel(mode: DividendYieldMode): string {
               {{ formatCurrency(implied.data.value.numerator_per_share) }}
              ，目标收益率
               {{ formatPercent(implied.data.value.target_ratio) }}
+              <template
+                v-if="implied.data.value.current_price != null"
+              >
+                ，当前价
+                {{ formatCurrency(implied.data.value.current_price) }}
+                （当前股息率
+                {{ formatPercent(implied.data.value.current_dividend_yield) }}）
+              </template>
             </p>
           </div>
         </div>

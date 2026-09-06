@@ -790,19 +790,24 @@ export interface DividendYieldRankItem {
   stale: boolean;
   suspicious: boolean;
   computed_at: string | null;
+  /** true = include_proposed=false 的「过滤态股息率」（§8.1，按过滤记录集现算） */
+  filtered?: boolean;
 }
 
 /** 股息率榜单分页响应 */
 export type DividendYieldRankResponse = PaginatedResponse<DividendYieldRankItem>;
 
-/** Top20 榜单响应（后端已剔除 suspicious、封顶 20） */
+/** Top20 + 连续分红榜双榜响应（§8.3：top 剔除 suspicious 与近两年无分红；榜二 consecutive_years>=2） */
 export interface DividendYieldTop20Response {
-  items: DividendYieldRankItem[];
+  top: DividendYieldRankItem[];
+  consecutive: DividendYieldRankItem[];
 }
 
-/** 股息率曲线数据点 */
+/** 股息率曲线数据点（close/numerator_per_share 供「分子不变段」提示，§9） */
 export interface DividendYieldCurveItem {
   trade_date: string;
+  close: number | null;
+  numerator_per_share: number | null;
   dividend_yield: number | null;
   mode: DividendYieldMode;
 }
@@ -815,7 +820,7 @@ export interface DividendYieldCurveResponse {
   name: string | null;
 }
 
-/** 隐含股息收益率反推价格响应 */
+/** 隐含股息收益率反推价格响应（含当前价/当前股息率对照，§9） */
 export interface ImpliedPriceResult {
   master_id: string;
   code: string | null;
@@ -823,6 +828,8 @@ export interface ImpliedPriceResult {
   numerator_per_share: number | null;
   target_ratio: number;
   implied_price: number | null;
+  current_price: number | null;
+  current_dividend_yield: number | null;
 }
 
 /** 股息率设置中「已 resolve」的接口引用（读取返回对象，非 *_interface_id） */

@@ -23,15 +23,25 @@ import type {
   UpdateDividendYieldSettingsDto,
 } from './types';
 
-/** 股息率榜单（分页/排序） */
+/** 股息率榜单过滤参数（§8.1；include_no_dividend 默认 false=剔除近两年无分红） */
+export interface DividendYieldRankFilters {
+  exchange?: string;
+  mode?: 'TTM' | 'LFY';
+  min_consecutive?: number;
+  include_proposed?: boolean;
+  include_no_dividend?: boolean;
+}
+
+/** 股息率榜单（分页/排序/过滤） */
 export function getDividendYieldRank(
   page: number,
   pageSize: number,
   sort: DividendYieldSort = 'dividend_yield',
+  filters: DividendYieldRankFilters = {},
 ): Promise<DividendYieldRankResponse> {
   return http.get<DividendYieldRankResponse>(
     '/dividend-yield/rankings',
-    { params: { page, pageSize, sort } },
+    { params: { page, pageSize, sort, ...filters } },
   );
 }
 
