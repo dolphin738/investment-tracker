@@ -35,7 +35,12 @@ from app.services.market_data_sync import (
     _row_get,
     infer_exchange,
 )
-from app.services.dividend_sync import _parse_date, is_trade_day, refresh_yields_for_masters
+from app.services.dividend_sync import (
+    _parse_date,
+    is_trade_day,
+    refresh_yields_for_masters,
+    update_stale_flags,
+)
 
 # 回补限速与批量常量（决策 A15 / 附录 A.11）：burst≈10 只 + 冷却 60–120s + 指数退避。
 _BACKFILL_BURST = 10
@@ -169,11 +174,12 @@ class MarketDailyPriceSyncService:
                 failed_batches += 1
                 logger.warning("收盘价批次 %d 只整批丢弃", len(batch))
                 continue
-            # 防线二：返回日期比对（不一致 → 整批跳过不写入，节假日/停牌防污）
+            # 防线二：返回日期比对（§6.2——返回日期 ≠ 今日即整批跳过，节假日/停牌防污。
+            # 同批混有停牌股（返回上一交易日日期）时也必须拦下，故收紧为全等比较）
             if resp_date_field is not None:
                 dates = {_parse_date(_row_get(r, resp_date_field)) for r in rows}
                 dates.discard(None)
-                if dates and today not in dates:
+                if dates and dates != {today}:
                     logger.warning(
                         "批次返回日期 %s ≠ 今日 %s，整批跳过", sorted(dates), today.isoformat()
                     )
@@ -216,12 +222,14 @@ class MarketDailyPriceSyncService:
                 success_batches += 1
                 total_rows += batch_written
 
+        stale_count = await update_stale_flags(self.session)  # §7：任务末统一扫描 stale
         if changed:
             await refresh_yields_for_masters(self.session, list(changed))
         await self.session.commit()
         return (
             f"收盘价抓取完成：成功批次 {success_batches}，成功行 {total_rows}，"
-            f"失败批次 {failed_batches}，重算证券 {len(changed)} 只，日期 {today.isoformat()}"
+            f"失败批次 {failed_batches}，重算证券 {len(changed)} 只，"
+            f"stale 标记 {stale_count} 行，日期 {today.isoformat()}"
         )
 
 

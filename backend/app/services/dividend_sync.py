@@ -15,12 +15,13 @@ from __future__ import annotations
 
 import asyncio
 import calendar
+import logging
 import re
 from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Optional
 
-from sqlalchemy import delete as sa_delete, func, select
+from sqlalchemy import case, delete as sa_delete, func, select, update as sa_update
 
 from app.core.date_utils import today_app_tz
 from app.models import (
@@ -46,6 +47,8 @@ from app.services.market_data_sync import (
     _normalize_master_code,
     infer_exchange,
 )
+
+logger = logging.getLogger(__name__)
 
 # 方案进度 → DividendStatus 精确映射（§3.2 五值表；命中 REJECTED 防止计作分子）
 _STATUS_MAP = {
@@ -205,6 +208,7 @@ async def refresh_yields_for_masters(session, master_ids: list[str]) -> None:
             snapshot.stale = False  # 本次重算成功即视为新鲜
             snapshot.computed_at = datetime.now(timezone.utc)
         except Exception:  # 单个证券失败不中断其余（任务级异常由 handler 汇总）
+            logger.warning("股息率快照重算失败 master_id=%s，保留旧快照", mid, exc_info=True)
             continue
 
 
@@ -230,7 +234,62 @@ async def refresh_trade_calendar(session) -> None:
                 continue
             await session.merge(MarketTradeCalendar(trade_date=d))
     except Exception:  # 刷新失败不阻断清理（§6.3 语义）
+        logger.warning("交易日历刷新失败，日线任务降级依赖「返回日期比对」防线", exc_info=True)
         return
+
+
+async def update_stale_flags(session) -> int:
+    """§7 stale 治理：收盘价落后全市场最新交易日 ≥3 个已记录交易日 → ``stale=True``。
+
+    - 基准 = ``market_trade_calendar`` 最新交易日；日历为空时降级为快照表
+      ``max(trade_date)`` 基准并记告警（§7 降级语义）；
+    - 「落后 ≥3 个已记录交易日」＝ 证券 ``latest_trade_date`` 早于基准日往前数第 3 个
+      交易日（含基准日）；基准不足 3 个交易日时无从判定，不动任何行；
+    - 由 §6.2 任务末统一调用（非查询时现算）。
+
+    返回被置为 ``stale=True`` 的行数。
+    """
+    base = (
+        await session.execute(select(func.max(MarketTradeCalendar.trade_date)))
+    ).scalar_one_or_none()
+    if base is not None:
+        recent = (
+            await session.execute(
+                select(MarketTradeCalendar.trade_date)
+                .where(MarketTradeCalendar.trade_date <= base)
+                .order_by(MarketTradeCalendar.trade_date.desc())
+                .limit(3)
+            )
+        ).scalars().all()
+    else:
+        logger.warning("交易日历为空，stale 判定降级为快照表已记录交易日（§7）")
+        recent = (
+            await session.execute(
+                select(MarketSecurityDailyPrice.trade_date)
+                .distinct()
+                .order_by(MarketSecurityDailyPrice.trade_date.desc())
+                .limit(3)
+            )
+        ).scalars().all()
+    if len(recent) < 3:
+        return 0  # 基准不足 3 个交易日，无从判定落后
+    threshold = recent[-1]
+    res = await session.execute(
+        sa_update(SecurityDividendYield)
+        .where(
+            SecurityDividendYield.latest_trade_date.is_not(None),
+            SecurityDividendYield.stale != (
+                SecurityDividendYield.latest_trade_date < threshold
+            ),
+        )
+        .values(
+            stale=case(
+                (SecurityDividendYield.latest_trade_date < threshold, True),
+                else_=False,
+            )
+        )
+    )
+    return int(res.rowcount or 0)
 
 
 async def is_trade_day(session, d: date) -> bool:
@@ -380,7 +439,11 @@ class DividendSyncService:
             status_txt = str(r.get(_COL_STATUS)).strip() if r.get(_COL_STATUS) is not None else ""
             status = _STATUS_MAP.get(status_txt)
             if status is None:
-                continue  # 未识别方案进度：跳过（§3.2 未识别不落库）
+                logger.warning(
+                    "东财未识别「方案进度」取值 %r（报告期 %sQ%s），按 §3.2 跳过不落库",
+                    status_txt, ry, rq,
+                )
+                continue
             ex_date = _parse_date(r.get(_COL_EX_DATE))
             rec_date = _parse_date(r.get(_COL_RECORD_DATE))
             await self._eastward_dedup(master_id, ex_date, ry, rq, cash)

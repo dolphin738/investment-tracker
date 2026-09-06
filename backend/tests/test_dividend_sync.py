@@ -332,3 +332,68 @@ async def test_refresh_trade_calendar_filters_by_horizon(session, monkeypatch):
     assert date(cur, 9, 3) in dates
     assert date(cur, 9, 4) in dates
     assert date(cur + 5, 12, 31) not in dates  # 超出 horizon 过滤
+
+# ───────────────────────── §7 stale 治理（update_stale_flags，P1-2） ─────────────────────────
+@pytest.mark.asyncio
+async def test_update_stale_flags_lags_3_trade_days(session):
+    """守护 §7：落后基准 ≥3 个已记录交易日 → stale=True；不足 3 个交易日 → False。"""
+    from datetime import datetime, timezone as tz
+
+    from app.services.dividend_sync import update_stale_flags
+
+    d1, d2, d3, d4, d5 = (date(2026, 1, 5 + i) for i in range(5))
+    for d in (d1, d2, d3, d4, d5):
+        session.add(MarketTradeCalendar(trade_date=d))
+    m1 = await _add_master(session, code="sh600001")
+    m2 = await _add_master(session, code="sh600002")
+    session.add(
+        SecurityDividendYield(
+            master_id=m1.id, mode=DividendYieldMode.TTM,
+            numerator_per_share=Decimal("1.0"),
+            latest_trade_date=d1,  # 早于基准往前第 3 个交易日 d3 → stale
+            computed_at=datetime.now(tz.utc),
+        )
+    )
+    session.add(
+        SecurityDividendYield(
+            master_id=m2.id, mode=DividendYieldMode.TTM,
+            numerator_per_share=Decimal("1.0"),
+            latest_trade_date=d4,  # 仅落后 1 个交易日 → 不 stale
+            computed_at=datetime.now(tz.utc),
+        )
+    )
+    await session.commit()
+
+    flagged = await update_stale_flags(session)
+
+    rows = (await session.execute(select(SecurityDividendYield))).scalars().all()
+    by_mid = {r.master_id: r for r in rows}
+    assert by_mid[m1.id].stale is True
+    assert by_mid[m2.id].stale is False
+    assert flagged == 1
+
+
+@pytest.mark.asyncio
+async def test_update_stale_flags_insufficient_base_noop(session):
+    """守护 §7 降级：日历基准不足 3 个交易日时无从判定，不动任何行。"""
+    from datetime import datetime, timezone as tz
+
+    from app.services.dividend_sync import update_stale_flags
+
+    session.add(MarketTradeCalendar(trade_date=date(2026, 1, 5)))
+    m = await _add_master(session, code="sh600003")
+    session.add(
+        SecurityDividendYield(
+            master_id=m.id, mode=DividendYieldMode.TTM,
+            numerator_per_share=Decimal("1.0"),
+            latest_trade_date=date(2020, 1, 1),
+            computed_at=datetime.now(tz.utc),
+        )
+    )
+    await session.commit()
+
+    flagged = await update_stale_flags(session)
+
+    assert flagged == 0
+    row = (await session.execute(select(SecurityDividendYield))).scalars().one()
+    assert row.stale is False

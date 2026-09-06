@@ -162,3 +162,58 @@ async def test_daily_close_fetch_writes_on_matching_date(session):
     assert rows[0].trade_date == today
     assert rows[0].close == Decimal("12.34")
     assert "成功行 1" in result
+
+@pytest.mark.asyncio
+async def test_daily_close_fetch_mixed_dates_batch_rejected(session, monkeypatch):
+    """守护 P2-2（§6.2）：批次混有停牌股（返回上一交易日日期）→ 整批跳过。
+
+    旧实现「today in dates（任一命中即放行）」拦不住停牌脏价；收紧为 dates != {today} 后，
+    本测试构成真回归守护。
+    """
+    today = today_app_tz()
+    session.add(MarketTradeCalendar(trade_date=today))
+    m1 = await _add_master(session, code="600001")
+    m2 = await _add_master(session, code="600002")
+    for m in (m1, m2):
+        session.add(
+            SecurityDividend(master_id=m.id, report_year=today.year, report_quarter=1,
+                             period_type=ReportPeriodType.ANNUAL,
+                             cash_per_share=Decimal("1.0"), status=DividendStatus.PAID)
+        )
+    provider = SecuritiesDataProvider(
+        id=_uid(), name="腾讯", access_method=QuoteProviderAccessMethod.HTTPS,
+        config={"base_url": "https://qt.gtimg.cn"}, enabled=True,
+    )
+    itf = QuoteInterface(
+        id=_uid(), provider_id=provider.id, category_id=QUOTE_CAT_ID, name="腾讯",
+        endpoint="/q", http_method="GET", enabled=True, priority=1,
+        resp_code_field="代码", resp_price_field="收盘",
+        response_parse={"resp_date_field": "日期", "max_codes_per_request": 800},
+        params={},
+    )
+    session.add(provider)
+    await session.flush()
+    session.add(InterfaceCategory(id=QUOTE_CAT_ID, label="证券行情", system=True))
+    await session.flush()
+    session.add(itf)
+    await session.flush()
+    session.add(DividendYieldSettings(green_threshold=Decimal("0.05"),
+                                      red_threshold=Decimal("0.03"),
+                                      price_source_interface_id=itf.id))
+    await session.commit()
+
+    svc = MarketDailyPriceSyncService(session)
+
+    async def _fake_raw(itf_obj, params, codes):
+        # 混合日期：一只正常返回今日、一只停牌返回上一交易日 → 整批必须被拦
+        return [
+            {"代码": "600001", "收盘": "10.5", "日期": today.strftime("%Y-%m-%d")},
+            {"代码": "600002", "收盘": "9.9", "日期": "2020-01-01"},
+        ]
+
+    svc._mds._call_interface_raw = _fake_raw
+    result = await svc.daily_close_fetch({})
+
+    rows = (await session.execute(select(MarketSecurityDailyPrice))).scalars().all()
+    assert rows == []  # 混合日期批次整批跳过，停牌脏价不得写入
+    assert "失败批次 1" in result
