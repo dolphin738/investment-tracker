@@ -26,9 +26,11 @@ from app.models import (
     DividendYieldSettings,
     MarketSecurityDailyPrice,
     QuoteInterface,
+    SecuritiesDataProvider,
     Security,
     SecurityDividend,
 )
+from app.models.enums import QuoteProviderAccessMethod
 from app.services.market_data_sync import (
     QUOTE_CAT_ID,
     MarketDataSyncService,
@@ -227,11 +229,44 @@ class MarketDailyPriceSyncService:
         if changed:
             await refresh_yields_for_masters(self.session, list(changed))
         await self.session.commit()
-        return (
+
+        # 历史回补生产入口（P1-3，§6.2/A15）：cfg.params.backfill_start（ISO 日期，如
+        # "2021-09-07"）非空时，日抓完成后用行情接口回补历史日线——冷启动回补 5 年 /
+        # 中间历史空洞补齐，均可通过普通任务或系统任务配置此参数后手动触发。
+        backfill_note = ""
+        backfill_start_raw = (getattr(cfg, "params", None) or {}).get("backfill_start")
+        if backfill_start_raw:
+            backfill_note = await self._run_backfill(itf, code_map, backfill_start_raw)
+
+        result = (
             f"收盘价抓取完成：成功批次 {success_batches}，成功行 {total_rows}，"
             f"失败批次 {failed_batches}，重算证券 {len(changed)} 只，"
             f"stale 标记 {stale_count} 行，日期 {today.isoformat()}"
         )
+        if backfill_note:
+            result += f"；{backfill_note}"
+        return result
+
+    async def _run_backfill(
+        self, itf: QuoteInterface, code_map: dict[str, str], backfill_start_raw: str
+    ) -> str:
+        """解析 backfill_start 并执行历史回补（fail fast 抛错由任务层落 FAILED）。"""
+        try:
+            start = date.fromisoformat(str(backfill_start_raw).strip())
+        except ValueError as exc:
+            raise RuntimeError(
+                f"backfill_start 非法（须 ISO 日期 YYYY-MM-DD）：{backfill_start_raw!r}"
+            ) from exc
+        if itf.access_method if False else True:
+            pass
+        provider = await self.session.get(SecuritiesDataProvider, itf.provider_id)
+        if provider is None or provider.access_method != QuoteProviderAccessMethod.SDK:
+            raise RuntimeError(
+                "历史回补要求行情接口 access_method=sdk（stock_zh_a_hist），"
+                f"当前接口 {itf.name!r} 的提供方不符"
+            )
+        master_ids = list(dict.fromkeys(code_map.values()))
+        return await backfill_historical(self.session, itf, master_ids, start)
 
 
 # --------------------------------------------------------------------------- #
@@ -243,8 +278,8 @@ async def backfill_historical(
     """用 akshare ``stock_zh_a_hist`` 回补证券历史日线，按证券独立 commit、断点续跑。
 
     - ``itf`` 须为配置好的 SDK 行情接口（endpoint=``stock_zh_a_hist``），access_method=sdk；
-    - 断点即数据本身：进度 = 该证券在 ``market_security_daily_prices`` 已存在的最大
-      ``trade_date``，已回补到 ``start_date`` 之前的证券跳过（无额外游标表）；
+    - 断点即数据本身：进度 = 该证券在 ``market_security_daily_prices`` 已存在的最早
+      ``trade_date``，起点已覆盖 ``start_date`` 的证券跳过（无额外游标表）；
     - burst≈10 只/批 + 批间冷却 60–120s + 指数退避 60/120/300s（决策 A15），每批记进度日志。
     """
     mds = MarketDataSyncService(session)
@@ -263,16 +298,18 @@ async def backfill_historical(
             if sec is None:
                 done += 1
                 continue
-            # 断点即数据本身：已有最大 trade_date ≥ start_date ⇒ 已回补，跳过
-            latest = (
+            # 断点即数据本身（P1-3）：已有最早 trade_date ≤ start_date ⇒ 起点已覆盖，跳过。
+            # 勿用 max(trade_date)——若日线任务先跑了近期数据，latest=today ≥ start_date
+            # 会把中间历史空洞的证券全部误跳过，空洞永不回填。
+            earliest = (
                 await session.execute(
                     select(MarketSecurityDailyPrice.trade_date)
                     .where(MarketSecurityDailyPrice.master_id == mid)
-                    .order_by(MarketSecurityDailyPrice.trade_date.desc())
+                    .order_by(MarketSecurityDailyPrice.trade_date.asc())
                     .limit(1)
                 )
             ).scalar_one_or_none()
-            if latest is not None and latest >= start_date:
+            if earliest is not None and earliest <= start_date:
                 done += 1
                 skipped += 1
                 continue
