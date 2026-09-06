@@ -26,9 +26,7 @@ _PAYABLE = (DividendStatus.PROPOSED, DividendStatus.PAID)
 # 异常股息率判定阈值（决策 A12）：yield<=0 或 yield>0.30 置 suspicious（小数比率）
 _SUSPICIOUS_UPPER = Decimal("0.30")
 
-_SPECIAL = "SPECIAL"
-
-# 季度报告期期末日（§9 曲线 NULL ex_dividend_date 回退锚点）：Q1→03-31、Q2→06-30、Q3→09-30、Q4→12-31
+# 季度报告期期末日（§9 曲线锚点最后回退）：Q1→03-31、Q2→06-30、Q3→09-30、Q4→12-31
 _PERIOD_END_MONTH_DAY = {1: (3, 31), 2: (6, 30), 3: (9, 30), 4: (12, 31)}
 
 
@@ -120,7 +118,8 @@ def compute_yield(
         # （即锚点所在格回溯 3 格），故锚点须为 Q4 才能覆盖上一财年 Q1–Q4。
         numerator, ref_ids = _cells(payable, latest.report_year - 1, 4)
 
-    if numerator is None or price is None:
+    if numerator is None or price is None or price <= 0:
+        # price<=0（停牌异常价/脏数据）：股息率缺失而非 0（§3.5），且不得抛 DivisionByZero
         return YieldResult(mode, numerator, None, ref_ids)
     return YieldResult(mode, numerator, numerator / price, ref_ids)
 
@@ -165,13 +164,18 @@ def implied_price(numerator_per_share: Optional[Decimal], target_ratio: Optional
 
 
 def _anchor_date(r: DividendCell) -> Optional[date]:
-    """曲线归位锚点（§9）：优先 ``ex_dividend_date``；NULL 时回退——SPECIAL 用公告日、报告期行用期末日。
+    """曲线归位锚点（§9）：``COALESCE(ex_dividend_date, announcement_date, 报告期期末日)``。
 
-    锚点为 None（SPECIAL 且无 ex_date/公告日）时该记录在任何时点均不可见。
+    - ``ex_dividend_date`` 优先（§3.4 三个日期语义）；
+    - NULL 时回退**公告日**（预案公告即可见）——保证「含预案」快照与曲线末点一致
+      （§9 一致性契约）：预案行 ex_date 恒空，若回退到报告期期末日（多在未来），
+      快照计入而曲线不可见，末点 ≠ 快照；
+    - 期末日为最后回退（公告日也缺失的数据缺失场景）；SPECIAL 行天然走公告日分支。
+    锚点为 None（三者全无）时该记录在任何时点均不可见。
     """
     if r.ex_dividend_date is not None:
         return r.ex_dividend_date
-    if r.period_type == _SPECIAL:
+    if r.announcement_date is not None:
         return r.announcement_date
     month_day = _PERIOD_END_MONTH_DAY.get(r.report_quarter)
     if month_day is None:
@@ -187,7 +191,8 @@ def compute_yield_at(
 ) -> YieldResult:
     """曲线逐点计算（§9）：输入「截至 as_of 可见的记录集 + 该日收盘价」复用 ``compute_yield``。
 
-    可见判定锚点为 ``_anchor_date``（``ex_dividend_date`` 或回退锚点）。保证曲线末点 == 快照值。
+    可见判定锚点为 ``_anchor_date``（``COALESCE(ex_dividend_date, announcement_date, 期末日)``）。
+    保证曲线末点 == 快照值：预案行（ex_date 恒空）公告即可见，与「含预案」快照同口径。
     """
     visible = [
         r for r in records if (_anchor_date(r) is not None and _anchor_date(r) <= as_of)

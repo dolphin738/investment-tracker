@@ -254,3 +254,45 @@ def test_special_uses_announcement_anchor():
     # 公告日之前不可见 → 空
     before = compute_yield_at(cells, date(2024, 12, 9), Decimal("100"), 2025)
     assert before.numerator_per_share is None
+
+
+# ───────────── 预案 NULL ex_date 的一致性（P0-5 回归守护，报告期行公告即可见） ─────────────
+def test_proposed_null_exdate_visible_after_announcement():
+    """守护 §9 锚点 COALESCE(ex, ann, 期末日)：预案行 ex_date 恒空，公告日即应可见
+    （旧实现回退报告期期末日——多在未来——导致快照计入而曲线不可见）。"""
+    cells = [
+        _cell("paid", 2025, 4, "1.0", ex="2025-05-10"),
+        _cell("prop", 2026, 4, "2.0", DividendStatus.PROPOSED, ex=None, ann="2026-03-25"),
+    ]
+    # 公告日之后（含快照基准日）可见 → 计入分子（prop 进入 TTM 窗口）
+    after = compute_yield_at(cells, date(2026, 9, 5), Decimal("20"), 2026)
+    assert after.numerator_per_share == Decimal("2.0")
+    # 公告日之前：prop 不可见，仅 paid 计入
+    before = compute_yield_at(cells, date(2026, 3, 24), Decimal("20"), 2026)
+    assert before.numerator_per_share == Decimal("1.0")
+
+
+def test_curve_end_equals_snapshot_with_proposed_null_exdate():
+    """守护 §9 一致性契约（真实场景）：预案行 ex=NULL + 公告日已过时，曲线末点 == 快照。
+    QA 实测旧实现此处快照 0.10 vs 曲线末点 0.05（假守护修复）。"""
+    cells = [
+        _cell("paid", 2025, 4, "1.0", ex="2026-05-10"),
+        _cell("prop", 2026, 4, "2.0", DividendStatus.PROPOSED, ex=None, ann="2026-03-25"),
+    ]
+    price = Decimal("20")
+    snap = compute_yield(cells, price, 2026)
+    end = compute_yield_at(cells, date(2026, 9, 5), price, 2026)  # 曲线末点（最新交易日）
+    assert snap.numerator_per_share == Decimal("2.0")
+    assert snap.dividend_yield == Decimal("0.10")
+    assert end.dividend_yield == snap.dividend_yield
+    assert end.numerator_per_share == snap.numerator_per_share
+
+
+# ───────────────────────── price<=0 防护（P1-1 回归守护，§3.5 缺失而非 0） ─────────────────────────
+def test_compute_yield_zero_and_negative_price_returns_none():
+    """守护 P1-1：price=0 / 负价返回 dividend_yield=None，不抛 DivisionByZero。"""
+    cells = [_cell("a", 2025, 4, "1.0")]
+    for bad in (Decimal("0"), Decimal("-1")):
+        res = compute_yield(cells, bad, 2026)
+        assert res.numerator_per_share == Decimal("1.0")
+        assert res.dividend_yield is None
