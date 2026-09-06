@@ -31,6 +31,7 @@ from sqlalchemy import (
     UniqueConstraint,
     false,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -122,10 +123,20 @@ class SecurityDividendYield(Base, TimestampMixin):
 
     __tablename__ = "security_dividend_yields"
     __table_args__ = (
-        # 排名主查询：股息率降序（NULL 排末尾）+ master_id 稳定 tiebreaker
-        Index("ix_dividend_yields_rank", "dividend_yield", "master_id"),
-        # 连续分红榜
-        Index("ix_dividend_yields_consecutive", "consecutive_years"),
+        # 排名主查询：股息率降序（NULL 排末尾）+ master_id 稳定 tiebreaker（§8.1 强制式，
+        # 实际落库见 0005 迁移——带 DESC NULLS LAST 的表达式索引，text() 形式与迁移一致）
+        Index(
+            "ix_dividend_yields_rank",
+            text("dividend_yield DESC NULLS LAST"),
+            text("master_id ASC"),
+        ),
+        # 连续分红榜排序（§8.3 榜二三元组）
+        Index(
+            "ix_dividend_yields_consecutive",
+            text("consecutive_years DESC NULLS LAST"),
+            text("dividend_yield DESC NULLS LAST"),
+            text("master_id ASC"),
+        ),
     )
 
     id: Mapped[str] = pk_uuid()
