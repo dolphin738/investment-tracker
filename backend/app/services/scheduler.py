@@ -26,6 +26,7 @@ import httpx
 from sqlalchemy import delete as sa_delete, func, select
 
 from app.core.config import get_settings
+from app.core.date_utils import APP_TZ
 from app.db.database import AsyncSessionLocal
 from app.models import (
     AppLog,
@@ -342,7 +343,7 @@ def _register_job(sched: Any, cfg: JobConfig) -> None:
 
     sched.add_job(
         _run_job,
-        CronTrigger.from_crontab(cfg.cron_expr),
+        CronTrigger.from_crontab(cfg.cron_expr, timezone=APP_TZ),
         args=[cfg.id, JobTriggerSource.SCHEDULED],
         id=str(cfg.id),
         replace_existing=True,
@@ -385,7 +386,7 @@ async def start_scheduler() -> None:
         return
     from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-    sched = AsyncIOScheduler()
+    sched = AsyncIOScheduler(timezone=APP_TZ)
     sched.start()
     _scheduler = sched
     await reload_schedule()
