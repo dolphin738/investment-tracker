@@ -110,6 +110,12 @@ class JobTaskType(str, enum.Enum):
     HTTP_CALLBACK = "HTTP_CALLBACK"  # HTTP 回调（普通可建）
     ACCOUNT_CLEANUP = "ACCOUNT_CLEANUP"  # 账户物理清理（系统任务，迁移种子写入）
     LOG_CLEANUP = "LOG_CLEANUP"  # 日志中心清理（系统任务，迁移种子写入）
+    # —— 股息率排名（系统任务，迁移种子写入）——
+    DIVIDEND_QUARTERLY_FETCH = "DIVIDEND_QUARTERLY_FETCH"  # 季度股息抓取（§6.1）
+    MARKET_DAILY_CLOSE_FETCH = "MARKET_DAILY_CLOSE_FETCH"  # 每日收盘价抓取（§6.2）
+    DIVIDEND_RETENTION_CLEANUP = "DIVIDEND_RETENTION_CLEANUP"  # 五年留存清理（§6.3）
+    DIVIDEND_YIELD_REBUILD = "DIVIDEND_YIELD_REBUILD"  # 全量重建（§6.4，默认禁用）
+    DIVIDEND_NOTICE_SCAN = "DIVIDEND_NOTICE_SCAN"  # 每日公告扫描+特别分红补充（§6.8）
 
 
 class JobKind(str, enum.Enum):
@@ -125,6 +131,30 @@ class JobRunStatus(str, enum.Enum):
     RUNNING = "RUNNING"
     SUCCESS = "SUCCESS"
     FAILED = "FAILED"
+
+
+class DividendYieldMode(str, enum.Enum):
+    """股息率口径：TTM（滚动 12 个月）/ LFY（最近完整财年）。§2.2。"""
+
+    TTM = "TTM"
+    LFY = "LFY"
+
+
+class DividendStatus(str, enum.Enum):
+    """分红事件生命周期状态（§3.1）：仅 PROPOSED/PAID 计入分子，REJECTED 剔除。"""
+
+    PROPOSED = "PROPOSED"  # 预案已公告
+    PAID = "PAID"  # 派息划转落地
+    REJECTED = "REJECTED"  # 预案否决/撤回
+
+
+class ReportPeriodType(str, enum.Enum):
+    """分红报告期类型（§5.1）：决定唯一键与取向解析。"""
+
+    ANNUAL = "ANNUAL"  # 年报（report_quarter==4）
+    INTERIM = "INTERIM"  # 半年报（report_quarter==2）
+    QUARTERLY = "QUARTERLY"  # 一/三季报（report_quarter∈{1,3}）
+    SPECIAL = "SPECIAL"  # 特别分红（公告驱动补充，§3.6）
 
 
 class JobTriggerSource(str, enum.Enum):

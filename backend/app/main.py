@@ -36,6 +36,7 @@ from app.modules import (
     data,
     data_transfer,
     dividend,
+    dividend_yield,
     health,
     internal,
     portfolio,
@@ -110,6 +111,7 @@ app.include_router(data.router_prices)
 app.include_router(data.router_cashbalances)
 app.include_router(data.router_snapshots)
 app.include_router(dividend.router_dividends)
+app.include_router(dividend_yield.router_dividend_yield)
 app.include_router(data_transfer.router_dt_portfolio)
 app.include_router(data_transfer.router_dt_global)
 app.include_router(preference.router)

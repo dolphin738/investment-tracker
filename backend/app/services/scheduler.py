@@ -37,7 +37,14 @@ from app.models import (
 )
 from app.models.enums import JobRunStatus, JobTaskType, JobTriggerSource
 from app.services.cleanup import CleanupService
+from app.services.dividend_notice_scan import run_dividend_notice_scan
+from app.services.dividend_sync import (
+    run_dividend_quarterly_fetch,
+    run_dividend_retention_cleanup,
+    run_dividend_yield_rebuild,
+)
 from app.services.market_data_sync import MarketDataSyncService
+from app.services.market_daily_price_sync import run_market_daily_close_fetch
 
 # 模块级唯一调度器引用，便于 shutdown 安全停止
 _scheduler: Optional[object] = None
@@ -189,13 +196,34 @@ _HANDLERS: dict[JobTaskType, Callable[[JobConfig], Any]] = {
     JobTaskType.ACCOUNT_CLEANUP: _accounts_cleanup,
     JobTaskType.LOG_CLEANUP: _log_cleanup,
     JobTaskType.HTTP_CALLBACK: _http_callback,
+    # 股息率排名采集（§6，处理器在各自服务模块，此处仅薄注册）
+    JobTaskType.DIVIDEND_QUARTERLY_FETCH: run_dividend_quarterly_fetch,
+    JobTaskType.MARKET_DAILY_CLOSE_FETCH: run_market_daily_close_fetch,
+    JobTaskType.DIVIDEND_RETENTION_CLEANUP: run_dividend_retention_cleanup,
+    JobTaskType.DIVIDEND_YIELD_REBUILD: run_dividend_yield_rebuild,
+    JobTaskType.DIVIDEND_NOTICE_SCAN: run_dividend_notice_scan,
 }
 
 
 # --------------------------------------------------------------------------- #
 # 单次执行：日志埋点 + 运行 + 落结果
 # --------------------------------------------------------------------------- #
+# 正在执行的 job_id 集合（per-job 运行锁：cron 与手动 trigger 并发去重，对齐 §6.1 防并发）
+_running_job_ids: set[str] = set()
+
+
 async def _run_job(job_id: str, source: JobTriggerSource) -> None:
+    """执行单个任务并写执行日志。外层持有 per-job 运行锁，防 cron/手动并发堆叠。"""
+    if job_id in _running_job_ids:
+        return
+    _running_job_ids.add(job_id)
+    try:
+        await _run_job_inner(job_id, source)
+    finally:
+        _running_job_ids.discard(job_id)
+
+
+async def _run_job_inner(job_id: str, source: JobTriggerSource) -> None:
     """执行单个任务并写执行日志（RUNNING → SUCCESS/FAILED）。定时与手动共用。"""
     start = datetime.now(timezone.utc)
     async with AsyncSessionLocal() as session:

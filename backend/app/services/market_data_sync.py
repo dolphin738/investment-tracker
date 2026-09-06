@@ -77,6 +77,8 @@ RETRY_BACKOFF_CAP: float = 5.0
 # 列是 String(36)（非 PG 原生 UUID 类型），故用简短数字 id，不依赖 gen_random_uuid()。
 MASTER_LIST_CAT_ID = "1"  # 证券列表（主数据拉取）
 QUOTE_CAT_ID = "2"        # 证券行情（价格行情）
+DIVIDEND_LIST_CAT_ID = "3"  # 股息列表（分红事件：东财主源 / 新浪补充源）
+NOTICE_CAT_ID = "4"        # 公司公告（公告扫描：特别分红补充）
 
 # 参数占位符（接口模板里常见的示例值，如 string / 示例 / example）。
 # 这些值并非真实业务参数，发出去会导致上游按占位符过滤（如小熊同学 keyWord=string 返回空列表），
