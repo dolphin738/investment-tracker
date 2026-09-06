@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import re
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Optional
@@ -276,7 +277,9 @@ async def backfill_historical(
                 skipped += 1
                 continue
             params = {
-                "symbol": sec.code,
+                # akshare stock_zh_a_hist 的 symbol 须为纯数字代码（如 600519），
+                # Security.code 带交易所前缀（sh600519），须剥离（P2-2，对照 notice_scan）。
+                "symbol": re.sub(r"\D", "", sec.code),
                 "start_date": start_fmt,
                 "end_date": end_fmt,
                 "adjust": "",

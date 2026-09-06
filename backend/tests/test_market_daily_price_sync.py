@@ -24,9 +24,15 @@ from app.models import (
 )
 from app.models.enums import DividendStatus, QuoteProviderAccessMethod, ReportPeriodType, SecurityType
 from app.models.interface_category import InterfaceCategory
-from app.services.market_data_sync import QUOTE_CAT_ID, _normalize_master_code, infer_exchange
+from app.services.market_data_sync import (
+    QUOTE_CAT_ID,
+    MarketDataSyncService,
+    _normalize_master_code,
+    infer_exchange,
+)
 from app.services.market_daily_price_sync import (
     MarketDailyPriceSyncService,
+    backfill_historical,
     _BACKFILL_BACKOFFS,
     _BACKFILL_BURST,
     _BACKFILL_COOLDOWN_MAX,
@@ -217,3 +223,52 @@ async def test_daily_close_fetch_mixed_dates_batch_rejected(session, monkeypatch
     rows = (await session.execute(select(MarketSecurityDailyPrice))).scalars().all()
     assert rows == []  # 混合日期批次整批跳过，停牌脏价不得写入
     assert "失败批次 1" in result
+
+
+# ───────────────────────── 回补 symbol 剥离（P2-2，§6.2） ─────────────────────────
+@pytest.mark.asyncio
+async def test_backfill_strips_exchange_prefix_from_symbol(session, monkeypatch):
+    r"""守护 P2-2：历史回补传 akshare stock_zh_a_hist 的 symbol 须为纯数字（如 600000）。
+
+    Security.code 带交易所前缀（sh600000），旧实现直接透传 sec.code 会导致上游按前缀码查无结果；
+    修复后须在组装 params 时剥离非数字字符（对照 notice_scan 的 re.sub(r"\D","",code)）。
+    """
+    # _add_master 经 _normalize_master_code 产出的 code 带 sh/sz 前缀，与线上一致
+    m = await _add_master(session, code="600000")
+    assert m.code == "sh600000"  # 前置：主数据确实带前缀
+
+    provider = SecuritiesDataProvider(
+        id=_uid(), name="akshare", access_method=QuoteProviderAccessMethod.SDK,
+        config={}, enabled=True,
+    )
+    itf = QuoteInterface(
+        id=_uid(), provider_id=provider.id, category_id=QUOTE_CAT_ID, name="东财历史",
+        endpoint="stock_zh_a_hist", http_method="GET", enabled=True, priority=1,
+        resp_code_field="代码", resp_price_field="收盘",
+        response_parse={}, params={},
+    )
+    session.add(provider)
+    await session.flush()  # 提供方先落库，接口 provider_id 外键才有归属
+    session.add(InterfaceCategory(id=QUOTE_CAT_ID, label="证券行情", system=True))
+    await session.flush()
+    session.add(itf)
+    await session.commit()
+
+    captured: dict = {}
+
+    async def _fake_sdk(self, itf_obj, params, codes):
+        # 类级 monkeypatch → mds._fetch_sdk_raw(itf, params, codes=None) 绑定实例后
+        # 依次填充 (self, itf_obj, params, codes)，缺 self 会与关键字 codes 冲突
+        captured.update(params)  # 捕获实际传给 akshare 的入参
+        # 返回中文列（_COL_HIST_DATE/_COL_HIST_CLOSE），让 _upsert_hist_rows 能落库
+        return [{"日期": "2024-01-02", "收盘": "10.50"}]
+
+    monkeypatch.setattr(MarketDataSyncService, "_fetch_sdk_raw", _fake_sdk)
+    # 退避常量归零：mock 失败时也不真实 sleep 60/120/300s（保持测试秒级）
+    monkeypatch.setattr("app.services.market_daily_price_sync._BACKFILL_BACKOFFS", (0,))
+
+    result = await backfill_historical(session, itf, [m.id], date(2024, 1, 1))
+
+    # 关键断言：symbol 必须是纯数字，交易所前缀已被剥离
+    assert captured.get("symbol") == "600000"
+    assert "历史回补完成" in result
