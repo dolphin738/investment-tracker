@@ -328,3 +328,22 @@ async def test_settings_put_interface_shape_validation(session, client):
     assert status == 200
     assert data["dividend_report_source"]["id"] == main_itf.id
     assert data["dividend_detail_source"]["id"] == detail_itf.id
+
+
+# ───────────────────────── 可排序列扩到 5 列（§8.1，P2-6） ─────────────────────────
+@pytest.mark.asyncio
+async def test_rankings_sort_by_numerator_and_mode_fixed_order(session, client):
+    """守护 §8.1：numerator_per_share/latest_price 可排序；mode 列为 TTM 优先固定序（非字典序）。"""
+    info = await register_login(client)
+    await _seed_snapshot(session, "sh600601", dividend_yield="0.08", mode=DividendYieldMode.LFY, numerator="2.0")
+    await _seed_snapshot(session, "sh600602", dividend_yield="0.07", mode=DividendYieldMode.TTM, numerator="1.0")
+    await session.commit()
+    h = auth(info["token"])
+    r = await client.get("/api/dividend-yield/rankings", params={"sort": "numerator_per_share"}, headers=h)
+    nums = [row["numerator_per_share"] for row in env(r)[2]["items"]]
+    assert Decimal(nums[0]) == Decimal("2.0")  # 分子降序
+    r = await client.get("/api/dividend-yield/rankings", params={"sort": "latest_price"}, headers=h)
+    assert env(r)[0] == 200
+    r = await client.get("/api/dividend-yield/rankings", params={"sort": "mode"}, headers=h)
+    modes = [row["mode"] for row in env(r)[2]["items"]]
+    assert modes[0] == "TTM" and modes[-1] == "LFY"  # TTM 优先固定序

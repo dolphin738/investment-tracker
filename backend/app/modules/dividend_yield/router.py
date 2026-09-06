@@ -19,7 +19,7 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, Path, Query
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import case, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.date_utils import today_app_tz
@@ -47,12 +47,20 @@ router_dividend_yield = APIRouter(
     prefix="/api/dividend-yield", tags=["dividend-yield"], route_class=EnvelopeRoute
 )
 
-# 排序白名单（B2 §8.1）：仅允许两列，均按降序 + NULLS LAST（PG DESC 默认 NULLS FIRST，
-# 漏写会让 NULL 值行顶到首页）；稳定 tiebreaker 用 master_id（分页不重不漏）
+# 排序白名单（§8.1 五列：股息率/每股分子/最新收盘价/连续年数/口径），均降序 + NULLS LAST
+# （PG DESC 默认 NULLS FIRST，漏写会让 NULL 值行顶到首页）；稳定 tiebreaker 用 master_id
+# （分页不重不漏）。口径列为固定序：TTM 优先于 LFY（非字典序）。
 _SORT_ASCENDING = (SecurityDividendYield.master_id.asc(),)
+_MODE_TTM_FIRST = case(
+    (SecurityDividendYield.mode == DividendYieldMode.TTM, 0),
+    else_=1,
+)
 _SORT_COLUMNS = {
     "dividend_yield": SecurityDividendYield.dividend_yield.desc().nulls_last(),
+    "numerator_per_share": SecurityDividendYield.numerator_per_share.desc().nulls_last(),
+    "latest_price": SecurityDividendYield.latest_price.desc().nulls_last(),
     "consecutive_years": SecurityDividendYield.consecutive_years.desc().nulls_last(),
+    "mode": _MODE_TTM_FIRST.asc(),
 }
 
 # 连续分红榜排序（§8.3 榜二）：consecutive_years DESC, dividend_yield DESC, master_id ASC
