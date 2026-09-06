@@ -59,6 +59,12 @@ def test_metadata_tables_and_enums():
         "app_logs",
         # 增量：用户级行情自动同步配置（每用户独立，替代全局 MARKET_DATA_SYNC）
         "user_quote_sync_configs",
+        # 增量：股息率排名（§5：分红事件 / 派生快照 / 全局配置 / 市场级日线 / 交易日历）
+        "security_dividends",
+        "security_dividend_yields",
+        "dividend_yield_settings",
+        "market_security_daily_prices",
+        "market_trade_calendar",
     } == tables
 
     enums = {
@@ -81,6 +87,10 @@ def test_metadata_tables_and_enums():
         "JobTaskType",
         "JobRunStatus",
         "JobTriggerSource",
+        # 增量：股息率排名原生枚举（分红状态 / 计算口径 / 报告期类型）
+        "DividendStatus",
+        "DividendYieldMode",
+        "ReportPeriodType",
     } == enums
 
     # 精度对齐 PRD 8.1

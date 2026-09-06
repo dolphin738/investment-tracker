@@ -116,8 +116,9 @@ def compute_yield(
         numerator, ref_ids = _cells(payable, latest.report_year, latest.report_quarter)
     else:
         mode = DividendYieldMode.LFY
-        # LFY：锚定最近完整财年（上一财年 Q1–Q4）
-        numerator, ref_ids = _cells(payable, latest.report_year - 1, 1)
+        # LFY：锚定最近完整财年（上一财年 Q1–Q4）。_cells 从锚点向前取满 4 格
+        # （即锚点所在格回溯 3 格），故锚点须为 Q4 才能覆盖上一财年 Q1–Q4。
+        numerator, ref_ids = _cells(payable, latest.report_year - 1, 4)
 
     if numerator is None or price is None:
         return YieldResult(mode, numerator, None, ref_ids)
