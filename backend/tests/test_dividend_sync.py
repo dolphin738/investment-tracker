@@ -397,3 +397,20 @@ async def test_update_stale_flags_insufficient_base_noop(session):
     assert flagged == 0
     row = (await session.execute(select(SecurityDividendYield))).scalars().one()
     assert row.stale is False
+
+
+@pytest.mark.asyncio
+async def test_quarterly_fetch_manual_force_bypasses_guard(session, monkeypatch):
+    """守护 P1-2（§7 冷启动）：手动触发（force=True）跳过季末 guard，进入抓取主流程。
+
+    非季末日 + force=False → 仍被 guard 拦（回归守护）；force=True → 越过 guard
+    继续执行（此处用「配置表为空」的 fail fast 证明已越过 guard，而非返回跳过串）。
+    """
+    from app.services import dividend_sync as ds
+
+    monkeypatch.setattr(ds, "today_app_tz", lambda: date(2026, 7, 15))
+    svc = DividendSyncService(session)
+    result = await svc.quarterly_fetch({})
+    assert "非季度末日" in result  # 定时触发语义不变
+    with pytest.raises(RuntimeError, match="配置表为空"):
+        await svc.quarterly_fetch({}, force=True)  # 手动触发越过 guard

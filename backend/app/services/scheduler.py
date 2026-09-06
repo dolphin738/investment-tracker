@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 from datetime import datetime, timezone
 from typing import Any, Callable, Optional
 
@@ -243,7 +244,12 @@ async def _run_job_inner(job_id: str, source: JobTriggerSource) -> None:
             handler = _HANDLERS.get(cfg.task_type)
             if handler is None:
                 raise RuntimeError(f"未注册的任务类型：{cfg.task_type}")
-            message = await handler(cfg)
+            # 感知触发源的 handler（第二参数 source，如季末 guard 对手动触发放行 P1-2）
+            # 按签名分派；其余 handler 仍单参调用，注册表契约不变
+            if len(inspect.signature(handler).parameters) >= 2:
+                message = await handler(cfg, source)
+            else:
+                message = await handler(cfg)
             log.status = JobRunStatus.SUCCESS
             log.message = message
         except Exception as exc:  # 任务异常落库为 FAILED，不中断调度器

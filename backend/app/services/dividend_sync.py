@@ -334,11 +334,17 @@ class DividendSyncService:
     # ------------------------------------------------------------------ #
     # 季度抓取（§6.1）
     # ------------------------------------------------------------------ #
-    async def quarterly_fetch(self, cfg: Any) -> str:
-        """按报告期抓取分红事件：缺失补抓 + 最近 4 期重刷；按报告期独立 commit。"""
+    async def quarterly_fetch(self, cfg: Any, *, force: bool = False) -> str:
+        """按报告期抓取分红事件：缺失补抓 + 最近 4 期重刷；按报告期独立 commit。
+
+        ``force=True``（手动触发，P1-2）：跳过季末 guard——方案 §7 冷启动要求
+        「首次上线手动 trigger 回补 5 年股息」，若 guard 对手动也生效则该路径永不可用。
+        """
         today = today_app_tz()
-        # 季末 guard（cron 只表达 28-31，真实季末日由任务内判定）
-        if not (today.month in (3, 6, 9, 12) and today.day == _last_day(today)):
+        # 季末 guard（cron 只表达 28-31，真实季末日由任务内判定）；手动触发放行
+        if not force and not (
+            today.month in (3, 6, 9, 12) and today.day == _last_day(today)
+        ):
             return f"非季度末日（{today.isoformat()}），跳过本季度股息抓取"
 
         settings = await self._settings()
@@ -566,12 +572,14 @@ class DividendSyncService:
 # --------------------------------------------------------------------------- #
 # 模块级 handler 入口（供 scheduler.py 薄注册；各自开独立会话对齐既有 handler 风格）
 # --------------------------------------------------------------------------- #
-async def run_dividend_quarterly_fetch(cfg: Any) -> str:
-    """季度股息抓取 handler。"""
+async def run_dividend_quarterly_fetch(cfg: Any, source: JobTriggerSource | None = None) -> str:
+    """季度股息抓取 handler。``source=MANUAL``（手动 trigger）跳过季末 guard（P1-2）。"""
     from app.db.database import AsyncSessionLocal
 
     async with AsyncSessionLocal() as session:
-        result = await DividendSyncService(session).quarterly_fetch(cfg)
+        result = await DividendSyncService(session).quarterly_fetch(
+            cfg, force=source == JobTriggerSource.MANUAL
+        )
         await session.commit()
     return result
 
