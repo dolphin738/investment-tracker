@@ -83,10 +83,15 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/modules/analysis/pages/NavAnalysisPage.vue'),
       },
       {
-        path: 'analysis/dividend-yield',
-        name: 'dividend-yield',
+        path: 'dividend-yield',
+        name: 'dividend-yield-ranking',
         component: () =>
-          import('@/modules/dividend-yield/pages/DividendYieldRankPage.vue'),
+          import('@/modules/dividend-yield/pages/RankingPage.vue'),
+      },
+      {
+        path: 'dividend-yield/top',
+        name: 'dividend-yield-top',
+        component: () => import('@/modules/dividend-yield/pages/TopPage.vue'),
       },
       {
         path: 'account',

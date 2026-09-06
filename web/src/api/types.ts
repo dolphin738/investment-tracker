@@ -768,8 +768,13 @@ export interface CashBalanceQuery {
 // numerator_per_share / latest_price 为每股（元）。
 // ============================================================================
 
-/** 股息率榜单排序字段（缺省按股息率降序） */
-export type DividendYieldSort = 'dividend_yield' | 'consecutive_years';
+/** 股息率榜单排序字段（§8.1 五列；缺省按股息率降序） */
+export type DividendYieldSort =
+  | 'dividend_yield'
+  | 'numerator_per_share'
+  | 'latest_price'
+  | 'consecutive_years'
+  | 'mode';
 
 /** 股息率口径：TTM=滚动 12 个月 / LFY=上个完整财年 */
 export type DividendYieldMode = 'TTM' | 'LFY';
