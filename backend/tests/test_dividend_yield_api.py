@@ -17,6 +17,7 @@ from sqlalchemy import update
 
 from app.models import (
     InterfaceCategory,
+    MarketSecurityDailyPrice,
     QuoteInterface,
     SecuritiesDataProvider,
     Security,
@@ -347,3 +348,68 @@ async def test_rankings_sort_by_numerator_and_mode_fixed_order(session, client):
     r = await client.get("/api/dividend-yield/rankings", params={"sort": "mode"}, headers=h)
     modes = [row["mode"] for row in env(r)[2]["items"]]
     assert modes[0] == "TTM" and modes[-1] == "LFY"  # TTM 优先固定序
+
+
+# ───────────────────────── 曲线 / 反推价格路由契约（§9，P0-1） ─────────────────────────
+@pytest.mark.asyncio
+async def test_curve_route_segment_order(session, client):
+    """守护 §9/P0-1：曲线路由为 /{master_id}/curve（段序：id 在前）。
+
+    同时断言前端曾写反的 /curve/{master_id} 形态 404——段序回归即拦。
+    """
+    info = await register_login(client)
+    m, _ = await _seed_snapshot(session, "sh600701")
+    from datetime import timedelta as _td
+
+    session.add(MarketSecurityDailyPrice(
+        master_id=m.id, trade_date=date.today() - _td(days=1), close=Decimal("12.5"),
+    ))
+    await session.commit()
+    h = auth(info["token"])
+
+    r = await client.get(f"/api/dividend-yield/{m.id}/curve", headers=h)
+    status, _, data, _ = env(r)
+    assert status == 200
+    assert data["master_id"] == m.id and data["code"] == "sh600701"
+    assert len(data["items"]) == 1
+    assert {"trade_date", "close", "numerator_per_share", "dividend_yield", "mode"} <= set(data["items"][0])
+
+    # 段序写反（前端历史 bug 形态）必须 404
+    wrong = await client.get(f"/api/dividend-yield/curve/{m.id}", headers=h)
+    assert wrong.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_curve_unknown_master_404(session, client):
+    """守护 §9：证券与快照均不存在 → 404。"""
+    info = await register_login(client)
+    r = await client.get(f"/api/dividend-yield/{_uid()}/curve", headers=auth(info["token"]))
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_implied_price_route_segment_order(session, client):
+    """守护 §9/P0-1：反推价格路由为 /{master_id}/implied-price；implied = 分子 / target_ratio。
+
+    同时断言段序写反形态 404。
+    """
+    info = await register_login(client)
+    m, snap = await _seed_snapshot(session, "sh600702", numerator="2.0", price="12.5")
+    await session.commit()
+    h = auth(info["token"])
+
+    r = await client.get(
+        f"/api/dividend-yield/{m.id}/implied-price",
+        params={"target_ratio": "0.04"}, headers=h,
+    )
+    status, _, data, _ = env(r)
+    assert status == 200
+    assert Decimal(data["numerator_per_share"]) == Decimal("2.0")
+    assert Decimal(data["implied_price"]) == Decimal("50")  # 2.0 / 0.04
+    assert Decimal(data["current_price"]) == Decimal("12.5")
+
+    wrong = await client.get(
+        f"/api/dividend-yield/implied-price/{m.id}",
+        params={"target_ratio": "0.04"}, headers=h,
+    )
+    assert wrong.status_code == 404

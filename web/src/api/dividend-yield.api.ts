@@ -56,7 +56,7 @@ export function getDividendYieldCurve(
   days = 365,
 ): Promise<DividendYieldCurveResponse> {
   return http.get<DividendYieldCurveResponse>(
-    `/dividend-yield/curve/${masterId}`,
+    `/dividend-yield/${masterId}/curve`,
     { params: { days } },
   );
 }
@@ -67,7 +67,7 @@ export function getDividendYieldImpliedPrice(
   targetRatio: number,
 ): Promise<ImpliedPriceResult> {
   return http.get<ImpliedPriceResult>(
-    `/dividend-yield/implied-price/${masterId}`,
+    `/dividend-yield/${masterId}/implied-price`,
     { params: { target_ratio: targetRatio } },
   );
 }
