@@ -414,3 +414,76 @@ async def test_quarterly_fetch_manual_force_bypasses_guard(session, monkeypatch)
     assert "非季度末日" in result  # 定时触发语义不变
     with pytest.raises(RuntimeError, match="配置表为空"):
         await svc.quarterly_fetch({}, force=True)  # 手动触发越过 guard
+
+
+# ───────────────────────── P2-1 东向去重 OR 语义 / P2-2 同格多行告警 ─────────────────────────
+@pytest.mark.asyncio
+async def test_eastward_dedup_or_semantics_deletes_identity_match_with_ex_date(session):
+    """守护 P2-1（§6.1 OR 语义）：SPECIAL 行 ex_date 不同但 (y,q,cash) 全等也须删除。
+
+    旧实现 ex_date 非空时只按 ex_date 匹配——三元组全等的预案行漏删（预案窗口双计）。
+    """
+    m = await _add_master(session)
+    cur = today_app_tz().year
+    # 预案行：无 ex_date，(cur, 4, 19.0) 三元组
+    sp = _div(m.id, cur, 4, "19.0", status=DividendStatus.PROPOSED,
+              ptype=ReportPeriodType.SPECIAL, ex=None)
+    session.add(sp)
+    await session.commit()
+
+    svc = DividendSyncService(session)
+    # 报告期行 ex_date=12/27 与预案行（ex=None）不同，但 (y,q,cash) 全等 → 仍须删
+    await svc._eastward_dedup(m.id, date(cur, 12, 27), cur, 4, Decimal("19.0"))
+    await session.commit()
+    left = (
+        await session.execute(select(SecurityDividend).where(SecurityDividend.master_id == m.id))
+    ).scalars().all()
+    assert left == []
+
+
+@pytest.mark.asyncio
+async def test_upsert_dividend_batch_duplicate_cell_warns(session, caplog):
+    """守护 P2-2（§12）：源返回同格多行须告警（保留末行，不静默）。"""
+    import logging
+
+    from app.models import InterfaceCategory, QuoteInterface
+    from app.models.enums import QuoteProviderAccessMethod
+    from app.models.quote_provider import SecuritiesDataProvider
+    from app.services.market_data_sync import DIVIDEND_LIST_CAT_ID
+
+    m = await _add_master(session, code="sh600001")
+    provider = SecuritiesDataProvider(
+        id=_uid(), name="东财", access_method=QuoteProviderAccessMethod.SDK,
+        config={}, enabled=True,
+    )
+    category = InterfaceCategory(id=DIVIDEND_LIST_CAT_ID, label="分红配送", system=True)
+    itf = QuoteInterface(
+        id=_uid(), provider_id=provider.id, category_id=DIVIDEND_LIST_CAT_ID,
+        name="东财-分红配送", endpoint="xxx", http_method="GET", enabled=True,
+        priority=1, resp_code_field="代码", response_parse={}, params={},
+    )
+    session.add_all([provider, category])
+    await session.flush()  # 提供方/分类先落库，接口外键才有归属
+    session.add(itf)
+    await session.commit()
+
+    cur = today_app_tz().year
+    rows = [
+        {"代码": "600001", "报告期": f"{cur}-12-31",
+         "现金分红-现金分红比例": "1.0", "方案进度": "实施分配",
+         "除权除息日": None, "股权登记日": None},
+        {"代码": "600001", "报告期": f"{cur}-12-31",
+         "现金分红-现金分红比例": "1.5", "方案进度": "实施分配",
+         "除权除息日": None, "股权登记日": None},
+    ]
+    svc = DividendSyncService(session)
+    with caplog.at_level(logging.WARNING, logger="app.services.dividend_sync"):
+        changed = await svc._upsert_dividend_batch(itf, rows, cur, 4)
+    assert set(changed) == {m.id}  # 同格两行：变更集合仍只含该 master（changed 允许重复）
+    assert any("同格多行" in rec.message for rec in caplog.records)
+    # 末行覆盖语义不变
+    row = (
+        await session.execute(select(SecurityDividend).where(SecurityDividend.master_id == m.id))
+    ).scalars().one()
+    # _parse_cash 按「10派X元」折算每股：源值 1.5 → 每股 0.15（末行覆盖）
+    assert row.cash_per_share == Decimal("0.15")

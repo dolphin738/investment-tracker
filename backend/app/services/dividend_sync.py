@@ -21,7 +21,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Optional
 
-from sqlalchemy import case, delete as sa_delete, func, select, update as sa_update
+from sqlalchemy import case, delete as sa_delete, func, or_, select, update as sa_update
 
 from app.core.date_utils import today_app_tz
 from app.models import (
@@ -429,6 +429,7 @@ class DividendSyncService:
             ).scalars().all()
             code_maps = {s.code: s.id for s in sec_rows}
         changed: list[str] = []
+        seen_cells: set[tuple[str, int, int, ReportPeriodType]] = set()  # P2-2 同格多行告警
         for r in rows:
             code_raw = r.get(itf.resp_code_field or "代码")
             if code_raw is None:
@@ -454,6 +455,14 @@ class DividendSyncService:
             rec_date = _parse_date(r.get(_COL_RECORD_DATE))
             await self._eastward_dedup(master_id, ex_date, ry, rq, cash)
             ptype = _QUARTER_PERIOD_TYPE[rq]
+            # P2-2（§12）：同格多行不得静默覆盖——告警后保留末行（与既有 upsert 语义一致）
+            cell = (master_id, ry, rq, ptype)
+            if cell in seen_cells:
+                logger.warning(
+                    "同格多行：%s %sQ%s 出现多条源行，保留末行覆盖（§12 告警）",
+                    master_id, ry, rq,
+                )
+            seen_cells.add(cell)
             existing = (
                 await self.session.execute(
                     select(SecurityDividend).where(
@@ -491,25 +500,27 @@ class DividendSyncService:
     async def _eastward_dedup(
         self, master_id: str, ex_date, year: int, quarter: int, cash: Decimal
     ) -> None:
-        """东向去重：报告期行上岗前删除同 master 的匹配 SPECIAL 行（§6.1 防预案窗口双计）。"""
+        """东向去重（§6.1，P2-1 修 OR 语义）：报告期行上岗前删除同 master 的匹配 SPECIAL 行。
+
+        匹配为 OR 语义：``ex_dividend_date == ex_date``（若已知）**或**
+        ``(report_year, report_quarter, cash_per_share)`` 全等——两查并查。
+        旧实现二选一：SPECIAL 行 ex_date 不同但三元组全等时会漏删（预案窗口双计）。
+        """
+        conds = []
         if ex_date is not None:
-            await self.session.execute(
-                sa_delete(SecurityDividend).where(
-                    SecurityDividend.master_id == master_id,
-                    SecurityDividend.period_type == ReportPeriodType.SPECIAL,
-                    SecurityDividend.ex_dividend_date == ex_date,
-                )
+            conds.append(SecurityDividend.ex_dividend_date == ex_date)
+        conds.append(
+            (SecurityDividend.report_year == year)
+            & (SecurityDividend.report_quarter == quarter)
+            & (SecurityDividend.cash_per_share == cash)
+        )
+        await self.session.execute(
+            sa_delete(SecurityDividend).where(
+                SecurityDividend.master_id == master_id,
+                SecurityDividend.period_type == ReportPeriodType.SPECIAL,
+                or_(*conds),
             )
-        else:
-            await self.session.execute(
-                sa_delete(SecurityDividend).where(
-                    SecurityDividend.master_id == master_id,
-                    SecurityDividend.period_type == ReportPeriodType.SPECIAL,
-                    SecurityDividend.report_year == year,
-                    SecurityDividend.report_quarter == quarter,
-                    SecurityDividend.cash_per_share == cash,
-                )
-            )
+        )
 
     # ------------------------------------------------------------------ #
     # 五年留存清理（§6.3）

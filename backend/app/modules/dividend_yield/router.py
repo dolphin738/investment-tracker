@@ -254,7 +254,7 @@ async def curve_dividend_yield(
     master_id: str = Path(...),
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    days: int = Query(365, ge=1),
+    days: int = Query(365, ge=1, le=3650),  # 上限 10 年（P2-3：防 days 无界拉全量日线）
 ):
     """单证券每日股息率曲线（§9 逐点现算；末点 == 快照值由纯函数保证）。"""
     sec = await db.get(Security, master_id)
