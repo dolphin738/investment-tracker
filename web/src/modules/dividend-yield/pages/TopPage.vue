@@ -246,7 +246,7 @@ function modeLabel(mode: DividendYieldMode): string {
     >
       <span class="flex items-center gap-1.5">
         <span class="inline-block h-3 w-3 rounded-sm" style="background: hsl(var(--color-up))" />
-        股息率 ≥ {{ formatPercent(thresholds.green_threshold ?? 0) }}（红）
+        税前股息率 ≥ {{ formatPercent(thresholds.green_threshold ?? 0) }}（红）
       </span>
       <span class="flex items-center gap-1.5">
         <span class="inline-block h-3 w-3 rounded-sm" style="background: hsl(var(--color-down))" />

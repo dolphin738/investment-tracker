@@ -86,7 +86,7 @@ const allTotalPages = computed(() => Math.max(1, Math.ceil(allTotal.value / allP
 
 /** 列头点击排序（§8.1 五列，均降序 + NULLS LAST；口径列 TTM 优先固定序） */
 const SORTABLE_COLUMNS: ReadonlyArray<{ key: DividendYieldSort; label: string }> = [
-  { key: 'dividend_yield', label: '股息率' },
+  { key: 'dividend_yield', label: '股息率（税前）' },
   { key: 'numerator_per_share', label: '每股分红' },
   { key: 'latest_price', label: '最新价' },
   { key: 'consecutive_years', label: '连续年数' },
@@ -292,7 +292,7 @@ function modeLabel(mode: 'TTM' | 'LFY'): string {
     >
       <span class="flex items-center gap-1.5">
         <span class="inline-block h-3 w-3 rounded-sm" style="background: hsl(var(--color-up))" />
-        股息率 ≥ {{ formatPercent(thresholds.green_threshold ?? 0) }}（红）
+        税前股息率 ≥ {{ formatPercent(thresholds.green_threshold ?? 0) }}（红）
       </span>
       <span class="flex items-center gap-1.5">
         <span class="inline-block h-3 w-3 rounded-sm" style="background: hsl(var(--color-down))" />
