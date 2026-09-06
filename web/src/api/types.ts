@@ -753,3 +753,98 @@ export interface CashBalanceQuery {
   page?: number;
   pageSize?: number;
 }
+
+// ============================================================================
+// 股息率排名 API（阶段5 · dividend-yield）
+//
+// 对应后端 /api/dividend-yield/*（相对 baseURL=/api）：
+// - GET  /dividend-yield/rank
+// - GET  /dividend-yield/top20
+// - GET  /dividend-yield/curve
+// - GET  /dividend-yield/implied-price
+// - GET  /dividend-yield/settings        （admin-only）
+// - PUT  /dividend-yield/settings        （admin-only）
+// 数值口径：dividend_yield 为小数比率（0.05 = 5%，渲染用 formatPercent 内部 ×100）；
+// numerator_per_share / latest_price 为每股（元）。
+// ============================================================================
+
+/** 股息率榜单排序字段（缺省按股息率降序） */
+export type DividendYieldSort = 'dividend_yield' | 'consecutive_years';
+
+/** 股息率口径：TTM=滚动 12 个月 / LFY=上个完整财年 */
+export type DividendYieldMode = 'TTM' | 'LFY';
+
+/** 股息率榜单行（RankItem） */
+export interface DividendYieldRankItem {
+  master_id: string;
+  code: string | null;
+  name: string | null;
+  exchange: string | null;
+  mode: DividendYieldMode;
+  dividend_yield: number | null;
+  numerator_per_share: number | null;
+  latest_price: number | null;
+  latest_trade_date: string | null;
+  consecutive_years: number | null;
+  last_dividend_year: number | null;
+  stale: boolean;
+  suspicious: boolean;
+  computed_at: string | null;
+}
+
+/** 股息率榜单分页响应 */
+export type DividendYieldRankResponse = PaginatedResponse<DividendYieldRankItem>;
+
+/** Top20 榜单响应（后端已剔除 suspicious、封顶 20） */
+export interface DividendYieldTop20Response {
+  items: DividendYieldRankItem[];
+}
+
+/** 股息率曲线数据点 */
+export interface DividendYieldCurveItem {
+  trade_date: string;
+  dividend_yield: number | null;
+  mode: DividendYieldMode;
+}
+
+/** 股息率曲线响应 */
+export interface DividendYieldCurveResponse {
+  items: DividendYieldCurveItem[];
+  master_id: string;
+  code: string | null;
+  name: string | null;
+}
+
+/** 隐含股息收益率反推价格响应 */
+export interface ImpliedPriceResult {
+  master_id: string;
+  code: string | null;
+  name: string | null;
+  numerator_per_share: number | null;
+  target_ratio: number;
+  implied_price: number | null;
+}
+
+/** 股息率设置中「已 resolve」的接口引用（读取返回对象，非 *_interface_id） */
+export interface DividendYieldSourceRef {
+  id: string;
+  name: string;
+}
+
+/** 股息率设置读取响应（GET /dividend-yield/settings · admin-only） */
+export interface DividendYieldSettingsOut {
+  green_threshold: number | null;
+  red_threshold: number | null;
+  dividend_report_source: DividendYieldSourceRef | null;
+  dividend_detail_source: DividendYieldSourceRef | null;
+  price_source: DividendYieldSourceRef | null;
+}
+
+/** 股息率设置更新请求（PUT /dividend-yield/settings · admin-only；写时用 *_interface_id 字段） */
+export interface UpdateDividendYieldSettingsDto {
+  green_threshold?: number | null;
+  red_threshold?: number | null;
+  dividend_report_source_interface_id?: string | null;
+  dividend_detail_source_interface_id?: string | null;
+  price_source_interface_id?: string | null;
+}

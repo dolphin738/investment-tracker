@@ -30,6 +30,7 @@ export const ROUTE_PATH = {
   SNAPSHOTS: '/snapshots',
   XIRR_ANALYSIS: '/analysis/xirr',
   NAV_ANALYSIS: '/analysis/nav',
+  DIVIDEND_YIELD: '/analysis/dividend-yield',
   ACCOUNT: '/account',
   SETTINGS: '/settings',
   ADMIN: '/admin',

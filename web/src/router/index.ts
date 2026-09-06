@@ -83,6 +83,12 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/modules/analysis/pages/NavAnalysisPage.vue'),
       },
       {
+        path: 'analysis/dividend-yield',
+        name: 'dividend-yield',
+        component: () =>
+          import('@/modules/dividend-yield/pages/DividendYieldRankPage.vue'),
+      },
+      {
         path: 'account',
         name: 'account',
         component: () => import('@/modules/account/pages/AccountPage.vue'),

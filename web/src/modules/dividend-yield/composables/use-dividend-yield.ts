@@ -1,0 +1,153 @@
+/**
+ * modules/dividend-yield/composables/use-dividend-yield.ts — 股息率排名 vue-query hooks
+ *
+ * 阶段5 股息率排名的数据层，供榜单页 / 设置页「股息率」TAB 复用：
+ * - useTop20(): Top20 看板（后端封顶 + 剔除 suspicious）
+ * - useRank(page,pageSize,sort,enabled): 榜单分页（按股息率 / 连续分红年数排序）
+ * - useCurve(masterId): 单证券股息率曲线（近 days 天）
+ * - useImpliedPrice(masterId,targetRatio,enabled): 目标收益率反推隐含价格
+ * - useDividendYieldSettings(enabled): 阈值 + 接口源设置（admin-only，非 admin 传 enabled=false）
+ * - useUpdateDividendYieldSettings(): 更新设置（admin-only）
+ * - useDividendYieldInterfaces(enabled): 设置页双源下拉候选接口（复用 listAllInterfaces）
+ *
+ * 参考 use-preferences.ts / use-query-data.ts 的 queryKey + enabled 语义约定。
+ */
+
+import { computed, toValue, type MaybeRefOrGetter } from 'vue';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query';
+import { toast } from '@/composables/use-toast';
+import {
+  getDividendYieldCurve,
+  getDividendYieldImpliedPrice,
+  getDividendYieldRank,
+  getDividendYieldSettings,
+  getDividendYieldTop20,
+  updateDividendYieldSettings,
+} from '@/api/dividend-yield.api';
+import { listAllInterfaces } from '@/api/quote-interface.api';
+import type {
+  DividendYieldSort,
+  UpdateDividendYieldSettingsDto,
+} from '@/api/types';
+
+/** 股息率领域 queryKey 前缀 */
+export const DIVIDEND_YIELD_KEY = ['dividend-yield'] as const;
+
+/** Top20 股息率看板（后端已剔除 suspicious、封顶 20） */
+export function useTop20() {
+  return useQuery({
+    queryKey: [...DIVIDEND_YIELD_KEY, 'top20'],
+    queryFn: () => getDividendYieldTop20(),
+    staleTime: 60 * 1000,
+  });
+}
+
+/** 股息率榜单分页（按 sort 排序） */
+export function useRank(
+  page: MaybeRefOrGetter<number>,
+  pageSize: MaybeRefOrGetter<number>,
+  sort: MaybeRefOrGetter<DividendYieldSort>,
+  enabled: MaybeRefOrGetter<boolean> = true,
+) {
+  return useQuery({
+    queryKey: computed(() => [
+      ...DIVIDEND_YIELD_KEY,
+      'rank',
+      toValue(page),
+      toValue(pageSize),
+      toValue(sort),
+    ]),
+    queryFn: () => getDividendYieldRank(toValue(page), toValue(pageSize), toValue(sort)),
+    enabled: computed(() => Boolean(toValue(enabled))),
+    staleTime: 60 * 1000,
+  });
+}
+
+/** 单证券股息率曲线（近 days 天） */
+export function useCurve(masterId: MaybeRefOrGetter<string | null>) {
+  return useQuery({
+    queryKey: computed(() => {
+      const id = toValue(masterId);
+      return [
+        ...DIVIDEND_YIELD_KEY,
+        'curve',
+        id ?? 'disabled',
+      ];
+    }),
+    queryFn: () => getDividendYieldCurve(toValue(masterId)!),
+    enabled: computed(() => Boolean(toValue(masterId))),
+    staleTime: 60 * 1000,
+  });
+}
+
+/** 按目标收益率反推隐含价格（targetRatio 为小数比率，null 时不发起） */
+export function useImpliedPrice(
+  masterId: MaybeRefOrGetter<string | null>,
+  targetRatio: MaybeRefOrGetter<number | null>,
+  enabled: MaybeRefOrGetter<boolean> = true,
+) {
+  return useQuery({
+    queryKey: computed(() => {
+      const id = toValue(masterId);
+      const ratio = toValue(targetRatio);
+      return id !== null && ratio !== null
+        ? [...DIVIDEND_YIELD_KEY, 'implied-price', id, ratio]
+        : [...DIVIDEND_YIELD_KEY, 'implied-price', 'disabled'];
+    }),
+    queryFn: () =>
+      getDividendYieldImpliedPrice(toValue(masterId)!, toValue(targetRatio)!),
+    enabled: computed(
+      () =>
+        Boolean(toValue(masterId)) &&
+        toValue(targetRatio) !== null &&
+        Boolean(toValue(enabled)),
+    ),
+    staleTime: 60 * 1000,
+  });
+}
+
+/** 股息率阈值 + 接口源设置（admin-only；非 admin 传 enabled=false 不发起） */
+export function useDividendYieldSettings(
+  enabled: MaybeRefOrGetter<boolean> = true,
+) {
+  return useQuery({
+    queryKey: [...DIVIDEND_YIELD_KEY, 'settings'],
+    queryFn: () => getDividendYieldSettings(),
+    enabled: computed(() => Boolean(toValue(enabled))),
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+/** 更新股息率设置（admin-only）；成功后失效设置与榜单查询 */
+export function useUpdateDividendYieldSettings() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: UpdateDividendYieldSettingsDto) =>
+      updateDividendYieldSettings(payload),
+    onSuccess: () => {
+      toast.success('股息率设置已保存');
+      queryClient.invalidateQueries({ queryKey: [DIVIDEND_YIELD_KEY[0], 'settings'] });
+      queryClient.invalidateQueries({ queryKey: [DIVIDEND_YIELD_KEY[0], 'top20'] });
+      queryClient.invalidateQueries({ queryKey: [DIVIDEND_YIELD_KEY[0], 'rank'] });
+    },
+  });
+}
+
+/**
+ * 设置页双源/行情源下拉候选接口（admin-only）。
+ *
+ * 复用已有 listAllInterfaces()（GET /admin/quote-providers/interfaces），
+ * 前端按 category_id 过滤后再分别供给：
+ * - 股息主源 / 补充源候选 = category_id === '3' && enabled
+ * - 行情源候选          = category_id === '2' && enabled
+ */
+export function useDividendYieldInterfaces(
+  enabled: MaybeRefOrGetter<boolean> = true,
+) {
+  return useQuery({
+    queryKey: ['admin', 'quote-providers', 'interfaces'],
+    queryFn: () => listAllInterfaces(),
+    enabled: computed(() => Boolean(toValue(enabled))),
+    staleTime: 5 * 60 * 1000,
+  });
+}

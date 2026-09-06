@@ -246,6 +246,21 @@ function buttonByText(text: string): HTMLButtonElement {
   return target;
 }
 
+/**
+ * 激活指定页签（危险操作区现位于非默认 TAB，需先切换再操作）。
+ * reka-ui TabsTrigger 在 mousedown（button=0）时切页签，故派发 mousedown 而非 click。
+ */
+async function activateTab(tabLabel: string): Promise<void> {
+  const trigger = Array.from(document.querySelectorAll('button')).find(
+    (b) => (b.textContent ?? '').trim() === tabLabel,
+  );
+  if (!trigger) throw new Error(`未找到页签「${tabLabel}」`);
+  trigger.dispatchEvent(
+    new MouseEvent('mousedown', { button: 0, bubbles: true, cancelable: true }),
+  );
+  await settle();
+}
+
 /** 向 Portal 内的 input 写入值并触发 v-model 的 input 事件 */
 async function fillInput(selector: string, value: string): Promise<void> {
   const el = document.querySelector(selector) as HTMLInputElement | null;
@@ -276,6 +291,7 @@ afterEach(() => {
 describe('SettingsPage 危险操作区（FE-SET-11/12）', () => {
   it('FE-SET-11 清空组合数据：名称不匹配禁用确认，精确匹配后才调 API', async () => {
     wrapper = await mountPage();
+    await activateTab('危险操作区');
 
     buttonByText('清空数据').click();
     await settle();
@@ -303,6 +319,7 @@ describe('SettingsPage 危险操作区（FE-SET-11/12）', () => {
 
   it('FE-SET-11 守卫边界：组合名称首尾空格按 trim 后比较', async () => {
     wrapper = await mountPage();
+    await activateTab('危险操作区');
 
     buttonByText('清空数据').click();
     await settle();
@@ -313,6 +330,7 @@ describe('SettingsPage 危险操作区（FE-SET-11/12）', () => {
 
   it('FE-SET-12 注销账户：邮箱不匹配禁用确认，精确匹配后才调 API', async () => {
     wrapper = await mountPage();
+    await activateTab('危险操作区');
 
     buttonByText('注销账户').click();
     await settle();
@@ -338,6 +356,7 @@ describe('SettingsPage 危险操作区（FE-SET-11/12）', () => {
 
   it('注销确认文案为「自助恢复」口径（PRD §7.8 硬约束：不得出现联系客服）', async () => {
     wrapper = await mountPage();
+    await activateTab('危险操作区');
 
     buttonByText('注销账户').click();
     await settle();
