@@ -439,13 +439,16 @@ function modeLabel(mode: DividendYieldMode): string {
       v-if="thresholds && (thresholds.green_threshold != null || thresholds.red_threshold != null)"
       class="flex items-center gap-4 text-xs text-muted-foreground"
     >
+      <!-- 标色语义（A 股「红涨绿跌」）：高股息率=红(--color-up)，低股息率=绿(--color-down)。
+           阈值字段名仍沿用 green_threshold/red_threshold（服务端契约不变），
+           但展示色按 A 股语义映射：≥绿色阈值→up(红)，≤红色阈值→down(绿)。 -->
       <span class="flex items-center gap-1.5">
         <span class="inline-block h-3 w-3 rounded-sm" style="background: hsl(var(--color-up))" />
-        股息率 ≥ {{ formatPercent(thresholds.green_threshold ?? 0) }}（绿）
+        股息率 ≥ {{ formatPercent(thresholds.green_threshold ?? 0) }}（红）
       </span>
       <span class="flex items-center gap-1.5">
         <span class="inline-block h-3 w-3 rounded-sm" style="background: hsl(var(--color-down))" />
-        股息率 ≤ {{ formatPercent(thresholds.red_threshold ?? 0) }}（红）
+        股息率 ≤ {{ formatPercent(thresholds.red_threshold ?? 0) }}（绿）
       </span>
       <span v-if="!isAdmin">
         （阈值由管理员在「设置 → 股息率」配置）
