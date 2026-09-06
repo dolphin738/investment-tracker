@@ -1,10 +1,10 @@
 """股息率排名 API 与配置端点（方案 §9，阶段 4）。
 
 六个端点（全部走统一信封默认）：
-- GET   /api/dividend-yield/rank         分红记录公司股息率分页排名（B2 排序白名单）
-- GET   /api/dividend-yield/top20        股息率前 20（A12 剔除 suspicious、A13 封顶 20）
-- GET   /api/dividend-yield/curve        单证券过去一年每日股息率曲线（§9 逐点现算）
-- GET   /api/dividend-yield/implied-price 反推价格（§9）
+- GET   /api/dividend-yield/rankings             分红记录公司股息率分页排名（B2 排序白名单）
+- GET   /api/dividend-yield/top20                股息率前 20（A12 剔除 suspicious、A13 封顶 20）
+- GET   /api/dividend-yield/{master_id}/curve     单证券过去一年每日股息率曲线（§9 逐点现算）
+- GET   /api/dividend-yield/{master_id}/implied-price 反推价格（§9）
 - GET   /api/dividend-yield/settings     admin 读取全局配置（§5.4）
 - PUT   /api/dividend-yield/settings     admin 更新全局配置（阈值 + 接口三重校验）
 
@@ -17,7 +17,7 @@ from datetime import timedelta
 from decimal import Decimal
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Path, Query
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -93,7 +93,7 @@ def _serialize_rank(
     }
 
 
-@router_dividend_yield.get("/rank")
+@router_dividend_yield.get("/rankings")
 async def rank_dividend_yield(
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -142,9 +142,9 @@ async def top20_dividend_yield(
     return {"items": items}
 
 
-@router_dividend_yield.get("/curve")
+@router_dividend_yield.get("/{master_id}/curve")
 async def curve_dividend_yield(
-    master_id: str,
+    master_id: str = Path(...),
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     days: int = Query(365, ge=1),
@@ -203,9 +203,9 @@ async def curve_dividend_yield(
     }
 
 
-@router_dividend_yield.get("/implied-price")
+@router_dividend_yield.get("/{master_id}/implied-price")
 async def implied_price_endpoint(
-    master_id: str,
+    master_id: str = Path(...),
     target_ratio: float = Query(..., gt=0, le=1),
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),

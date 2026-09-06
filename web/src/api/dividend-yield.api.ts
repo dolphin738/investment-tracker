@@ -2,10 +2,10 @@
  * api/dividend-yield.api.ts — 股息率排名 API
  *
  * 对应后端 /api/dividend-yield/*（http 已按信封解包 data，url 相对 baseURL=/api）：
- * - GET  /dividend-yield/rank           — 股息率榜单（分页/排序）
- * - GET  /dividend-yield/top20          — Top20 股息率看板（后端剔除 suspicious、封顶 20）
- * - GET  /dividend-yield/curve          — 单证券股息率曲线（近 days 天）
- * - GET  /dividend-yield/implied-price  — 按目标收益率反推隐含价格
+ * - GET  /dividend-yield/rankings              — 股息率榜单（分页/排序）
+ * - GET  /dividend-yield/top20                 — Top20 股息率看板（后端剔除 suspicious、封顶 20）
+ * - GET  /dividend-yield/{master_id}/curve      — 单证券股息率曲线（近 days 天）
+ * - GET  /dividend-yield/{master_id}/implied-price — 按目标收益率反推隐含价格
  * - GET  /dividend-yield/settings       — 阈值 + 三接口源设置（admin-only）
  * - PUT  /dividend-yield/settings       — 更新设置（admin-only）
  *
@@ -30,7 +30,7 @@ export function getDividendYieldRank(
   sort: DividendYieldSort = 'dividend_yield',
 ): Promise<DividendYieldRankResponse> {
   return http.get<DividendYieldRankResponse>(
-    '/dividend-yield/rank',
+    '/dividend-yield/rankings',
     { params: { page, pageSize, sort } },
   );
 }
@@ -45,9 +45,10 @@ export function getDividendYieldCurve(
   masterId: string,
   days = 365,
 ): Promise<DividendYieldCurveResponse> {
-  return http.get<DividendYieldCurveResponse>('/dividend-yield/curve', {
-    params: { master_id: masterId, days },
-  });
+  return http.get<DividendYieldCurveResponse>(
+    `/dividend-yield/curve/${masterId}`,
+    { params: { days } },
+  );
 }
 
 /** 按目标收益率反推隐含价格（target_ratio 为小数比率 0 < x <= 1） */
@@ -55,9 +56,10 @@ export function getDividendYieldImpliedPrice(
   masterId: string,
   targetRatio: number,
 ): Promise<ImpliedPriceResult> {
-  return http.get<ImpliedPriceResult>('/dividend-yield/implied-price', {
-    params: { master_id: masterId, target_ratio: targetRatio },
-  });
+  return http.get<ImpliedPriceResult>(
+    `/dividend-yield/implied-price/${masterId}`,
+    { params: { target_ratio: targetRatio } },
+  );
 }
 
 /** 股息率阈值 + 三接口源设置（admin-only） */
