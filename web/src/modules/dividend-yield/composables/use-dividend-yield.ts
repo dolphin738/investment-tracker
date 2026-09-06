@@ -23,10 +23,10 @@ import {
   getDividendYieldSettings,
   getDividendYieldTop20,
   updateDividendYieldSettings,
+  type DividendYieldRankFilters,
 } from '@/api/dividend-yield.api';
 import { listAllInterfaces } from '@/api/quote-interface.api';
 import type {
-  DividendYieldRankFilters,
   DividendYieldSort,
   UpdateDividendYieldSettingsDto,
 } from '@/api/types';
