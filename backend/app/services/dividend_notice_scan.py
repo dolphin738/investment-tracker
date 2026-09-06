@@ -107,12 +107,8 @@ class DividendNoticeScanService:
         notice_itf = notice_itfs[0]
 
         params = {"symbol": "财务报告", "date": day.strftime("%Y%m%d")}
-        try:
-            notice_rows = await self._mds._call_interface_raw(notice_itf, params, None)
-        except Exception:
-            # 继承 _mark_failure 告警链路（consecutive_failures ≥3 发站内信）
-            await self._mds._mark_failure(notice_itf)
-            raise
+        # 异常计失败（≥3 发站内信）已下沉到 _call_interface_raw（P1-4），此处不再手工接线
+        notice_rows = await self._mds._call_interface_raw(notice_itf, params, None)
 
         # 统计汇总
         stats = {

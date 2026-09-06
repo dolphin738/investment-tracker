@@ -306,3 +306,47 @@ async def test_parse_price_rows_array_missing_price_skipped():
     )
     parsed = svc._parse_price_rows(itf, [["600000", "浦发银行"]])
     assert parsed == {}
+
+
+# ───────────────────────── raw 链路告警下沉（P1-4，§6.5） ─────────────────────────
+async def test_raw_call_marks_failure_on_exception(session, monkeypatch):
+    """守护 P1-4：raw 链路异常计入 consecutive_failures，达阈值（3）发站内信并抢占 alerted。"""
+    from app.models.notification import Notification
+
+    provider, category, itfs = await _seed_provider_category(session)
+    svc = MarketDataSyncService(session)
+
+    async def _boom(self, itf_obj, params, codes):
+        raise RuntimeError("network error")
+
+    monkeypatch.setattr(MarketDataSyncService, "_fetch_https_raw", _boom)
+
+    for _ in range(3):
+        with pytest.raises(RuntimeError):
+            await svc._call_interface_raw(itfs[0], {}, ["600000"])
+
+    await session.refresh(itfs[0])
+    assert itfs[0].consecutive_failures == 3
+    assert itfs[0].alerted is True
+    notes = (
+        await session.execute(select(Notification).where(Notification.related_id == itfs[0].id))
+    ).scalars().all()
+    assert len(notes) == 1 and "连续 3 次" in notes[0].title
+
+
+async def test_raw_call_success_resets_failures(session, monkeypatch):
+    """守护 P1-4：raw 链路成功响应复位 consecutive_failures=0（业务空响应也算成功）。"""
+    provider, category, itfs = await _seed_provider_category(session)
+    svc = MarketDataSyncService(session)
+
+    async def _ok(self, itf_obj, params, codes):
+        return [{"code": "600000", "price": "10.5"}]
+
+    monkeypatch.setattr(MarketDataSyncService, "_fetch_https_raw", _ok)
+
+    rows = await svc._call_interface_raw(itfs[0], {}, ["600000"])
+    assert rows and rows[0]["code"] == "600000"
+
+    await session.refresh(itfs[0])
+    assert itfs[0].consecutive_failures == 0
+    assert itfs[0].alerted is False

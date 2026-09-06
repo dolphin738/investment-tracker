@@ -385,9 +385,26 @@ class MarketDataSyncService:
     async def _call_interface_raw(
         self, itf: QuoteInterface, params: Optional[dict[str, Any]], codes: Optional[list[str]]
     ) -> list[dict]:
-        """原始行分派：返回 ``list[dict]``（供主数据同步 / 单接口测试，使用调用方 params）。
+        """原始行分派（P1-4 告警链路统一入口）：异常计失败、成功即复位。
 
-        https 回传 resp.json() 归一化后的行；sdk 回传 DataFrame.to_dict('records')。
+        consecutive_failures ≥3 发站内信（§6.5）此前只挂在 fallback/_call_interface
+        调用侧，raw 消费者（股息主源/公告源/行情源/主数据同步）都不接线——现下沉到
+        本层，所有 raw 调用自动继承：异常 → ``_mark_failure`` 后原样抛出；
+        成功（含业务空响应）→ ``_mark_success`` 复位。
+        """
+        try:
+            rows = await self._call_interface_raw_dispatch(itf, params, codes)
+        except Exception:
+            await self._mark_failure(itf)
+            raise
+        await self._mark_success(itf.id)
+        return rows
+
+    async def _call_interface_raw_dispatch(
+        self, itf: QuoteInterface, params: Optional[dict[str, Any]], codes: Optional[list[str]]
+    ) -> list[dict]:
+        """原始行分派本体：https 回传 resp.json() 归一化后的行；sdk 回传 DataFrame 行。
+
         access_method 由所属 SecuritiesDataProvider 提供（同 _call_interface）。
         """
         provider = await self.session.get(SecuritiesDataProvider, itf.provider_id)
