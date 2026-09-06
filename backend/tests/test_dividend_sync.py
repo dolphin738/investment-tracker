@@ -206,11 +206,13 @@ async def test_retention_cleanup_report_year_boundary(session, monkeypatch):
 
     m = await _add_master(session)
     cur = today_app_tz().year
-    cutoff = cur - 5
-    # 旧 PROPOSED（report_year < cutoff，ex_date 为 None）必须被删除 —— 原 pay_date 口径下永不满足
+    cutoff = cur - 4  # 真 5 年窗口 = [cur-4, cur]，删除 report_year < cutoff
+    # 窗口外的旧 PROPOSED（report_year = cutoff-1 = cur-5）必须被删除
     session.add(_div(m.id, cutoff - 1, 4, "1.0", status=DividendStatus.PROPOSED, ex=None))
-    # 旧 REJECTED 同样被删
-    session.add(_div(m.id, cutoff - 2, 2, "1.0", status=DividendStatus.REJECTED))
+    # 旧 REJECTED（cur-5）同样被删
+    session.add(_div(m.id, cutoff - 1, 2, "1.0", status=DividendStatus.REJECTED))
+    # 边界值 cur-4（= cutoff）必须保留 —— 真 5 年而非 6 年
+    session.add(_div(m.id, cutoff, 4, "1.0", status=DividendStatus.PROPOSED, ex=None))
     # 新 PAID 保留
     session.add(_div(m.id, cur, 4, "1.0"))
     # 超 2 年的日线删除、新日线保留
@@ -226,7 +228,7 @@ async def test_retention_cleanup_report_year_boundary(session, monkeypatch):
     remaining = (
         await session.execute(select(SecurityDividend))
     ).scalars().all()
-    assert {r.report_year for r in remaining} == {cur}  # 仅新 PAID 存活
+    assert {r.report_year for r in remaining} == {cur - 4, cur}  # 边界 cur-4 保留、cur-5 删除
     prices = (
         await session.execute(select(MarketSecurityDailyPrice))
     ).scalars().all()

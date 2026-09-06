@@ -446,9 +446,11 @@ class DividendSyncService:
     # 五年留存清理（§6.3）
     # ------------------------------------------------------------------ #
     async def retention_cleanup(self, cfg: Any) -> str:
-        """按 report_year 清理 5 年前记录（含 PROPOSED/REJECTED）；日线按 trade_date 保留 2 年。"""
+        """留存清理：保留最近 _RETENTION_YEARS 个财年（窗口 [cur-_RETENTION_YEARS+1, cur]，
+        即真 5 年），删除更早的 report_year（含 PROPOSED/REJECTED）；
+        日线按 trade_date 保留 _PRICE_RETENTION_YEARS 年。"""
         today = today_app_tz()
-        cutoff = today.year - _RETENTION_YEARS
+        cutoff = today.year - _RETENTION_YEARS + 1
         doomed_masters = set(
             (
                 await self.session.execute(
