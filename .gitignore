@@ -60,9 +60,13 @@ Thumbs.db
 # Editors
 .idea/
 .vscode/
+.trae/
 
 # Local agent memory (not for repo)
 .workbuddy/
+
+# Pytest coverage artifact (generated locally)
+backend/.coverage
 
 # Local generated docs (e.g. ls snapshots)
 docs/ls/
