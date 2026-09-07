@@ -501,3 +501,44 @@ async def test_implied_price_route_segment_order(session, client):
         params={"target_ratio": "0.04"}, headers=h,
     )
     assert wrong.status_code == 404
+
+
+# ───────────────────────── 手动全量重建端点（替代系统定时任务 DIVIDEND_YIELD_REBUILD） ─────────────────────────
+@pytest.mark.asyncio
+async def test_rebuild_requires_admin(session, client):
+    """守护重建端点：普通登录用户 → 403 FORBIDDEN（admin-only，require_admin 以 DB 实时 role 为准）。"""
+    info = await register_login(client)
+    r = await client.post("/api/dividend-yield/rebuild", headers=auth(info["token"]))
+    assert r.status_code == 403, r.text
+
+
+@pytest.mark.asyncio
+async def test_rebuild_requires_auth(session, client):
+    """守护重建端点：缺令牌 → 401（统一鉴权拦截先于角色判断）。"""
+    r = await client.post("/api/dividend-yield/rebuild")
+    assert r.status_code == 401, r.text
+
+
+@pytest.mark.asyncio
+async def test_rebuild_admin_success_returns_summary(session, client):
+    """守护重建端点：admin → 200 并返回重建摘要（含受影响证券只数）。
+
+    重建在独立会话内执行并提交；验证端点编排 run_dividend_yield_rebuild
+    不抛错，且 summary 反映已 seed 的证券（反推 count 口径）。
+    """
+    admin = await _make_admin(session, client)
+    h = auth(admin["token"])
+    # seed 一只证券 + 一条分红，使重建统计非 0，校验 summary 含只数
+    m, _ = await _seed_snapshot(session, "sh600901", dividend_yield="0.08")
+    session.add(SecurityDividend(
+        master_id=m.id, report_year=date.today().year, report_quarter=4,
+        period_type=ReportPeriodType.ANNUAL,
+        cash_per_share=Decimal("1.0"), status=DividendStatus.PAID,
+    ))
+    await session.commit()
+    r = await client.post("/api/dividend-yield/rebuild", headers=h)
+    status, code, data, _ = env(r)
+    assert status == 200 and code == 0
+    assert isinstance(data["summary"], str)
+    assert data["summary"].startswith("股息率全量重建完成")
+    assert "1 只" in data["summary"]
