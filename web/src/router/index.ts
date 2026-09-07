@@ -118,6 +118,11 @@ const routes: RouteRecordRaw[] = [
         name: 'admin-logs',
         component: () => import('@/modules/admin/pages/LogCenterPage.vue'),
       },
+      {
+        path: 'global-settings',
+        name: 'admin-global-settings',
+        component: () => import('@/modules/admin/pages/GlobalSettingsPage.vue'),
+      },
     ],
   },
 

@@ -54,7 +54,7 @@ import ImportTemplateButtons from '@/modules/data-transfer/components/ImportTemp
 import ChangeEmailDialog from '@/modules/account/components/ChangeEmailDialog.vue';
 import ChangePasswordDialog from '@/modules/account/components/ChangePasswordDialog.vue';
 import EditProfileDialog from '@/modules/account/components/EditProfileDialog.vue';
-import { useAuthStore, useIsAdmin } from '@/stores/auth.store';
+import { useAuthStore } from '@/stores/auth.store';
 import { usePortfolioStore } from '@/stores/portfolio.store';
 import {
   useClearPortfolioData,
@@ -62,7 +62,6 @@ import {
 } from '@/modules/portfolio/composables/use-portfolios';
 import { useDeleteAccount } from '@/modules/account/composables/use-account';
 import { ROUTE_PATH } from '@/lib/constants';
-import PrefsDividendTab from '../components/PrefsDividendTab.vue';
 import SettingsPreferencesTab from '../components/SettingsPreferencesTab.vue';
 
 const router = useRouter();
@@ -81,8 +80,6 @@ const currentPortfolio = computed(
 // 数据管理：导入对话框开关（T05）
 const importOpen = ref(false);
 
-// 股息率配置 TAB 内容已抽至 components/PrefsDividendTab.vue（§10.4：容器只做组合）
-const isAdmin = computed(() => useIsAdmin());
 // 默认激活 TAB：偏好设置（既有测试直接 mount 后即访问偏好元素，需保证首帧可见）
 const activeTab = ref('preferences');
 
@@ -133,12 +130,11 @@ function confirmClearData(): void {
       description="管理账户与偏好设置（新建 / 编辑 / 归档 / 删除组合请前往账户页「我的组合」）"
     />
 
-    <!-- 页签：账户 / 偏好设置 / 股息率(admin) / 数据管理 / 危险操作区 -->
+    <!-- 页签：账户 / 偏好设置 / 数据管理 / 危险操作区 -->
     <Tabs v-model="activeTab" class="space-y-6">
       <TabsList>
         <TabsTrigger value="account">账户</TabsTrigger>
         <TabsTrigger value="preferences">偏好设置</TabsTrigger>
-        <TabsTrigger v-if="isAdmin" value="dividend">股息率</TabsTrigger>
         <TabsTrigger value="data">数据管理</TabsTrigger>
         <TabsTrigger value="danger">危险操作区</TabsTrigger>
       </TabsList>
@@ -222,11 +218,6 @@ function confirmClearData(): void {
       <!-- 偏好设置 -->
       <TabsContent value="preferences">
         <SettingsPreferencesTab />
-      </TabsContent>
-
-      <!-- 股息率（admin-only）：内容承载于 PrefsDividendTab（§10.4） -->
-      <TabsContent v-if="isAdmin" value="dividend">
-        <PrefsDividendTab />
       </TabsContent>
 
     <!-- 数据管理（T05 · SET-P0-03 导出 / SET-P0-04 导入 / FLOW-P1-01） -->

@@ -1,9 +1,10 @@
 <script setup lang="ts">
 /**
- * modules/settings/components/PrefsDividendTab.vue — 设置页「股息率」TAB 内容
- * （方案 §10.4：SettingsPage 只做 TAB 容器，本组件承载全部股息率配置逻辑）
+ * modules/admin/components/GlobalSettingsDividendTab.vue — 全局设置页「股息率」TAB 内容
+ * （方案 §10.4：股息率设置整体从设置页迁出，本组件承载全部股息率配置逻辑；
+ * 原 PrefsDividendTab 迁移而来，并新增「公司公告接口」可配置项 §5.4）
  *
- * 阈值 + 双源（主数据源/明细源）+ 行情源接口配置；admin-only（由父级 TAB v-if 保证，
+ * 阈值 + 主数据源/明细源 + 行情源 + 公司公告源接口配置；admin-only（由父级页面 v-if 保证，
  * 后端仍 403 兜底）。P2-8：UI 用百分数展示（如 5 = 5%），提交时转换为小数比率（§2.4）。
  */
 import { computed, reactive, ref, watch } from 'vue';
@@ -31,6 +32,7 @@ import {
   useDividendYieldSettings,
   useUpdateDividendYieldSettings,
 } from '@/modules/dividend-yield/composables/use-dividend-yield';
+import { useQuoteProviders } from '@/modules/admin/composables/use-quote-provider';
 import type { UpdateDividendYieldSettingsDto } from '@/api/types';
 
 const settingsQuery = useDividendYieldSettings(true);
@@ -40,7 +42,7 @@ const settingsMutation = useUpdateDividendYieldSettings();
 const settingsPending = computed(() => settingsMutation.isPending.value);
 const settingsError = computed(() => settingsMutation.isError.value);
 
-// 双源/行情源候选接口（复用 listAllInterfaces，前端按 category_id 过滤）
+// 四源候选接口（复用 listAllInterfaces，前端按 category_id 过滤）
 const interfacesQuery = useDividendYieldInterfaces(true);
 const category3Enabled = computed(() =>
   (interfacesQuery.data.value ?? []).filter((i) => i.category_id === '3' && i.enabled),
@@ -52,6 +54,18 @@ const dividendDetailOptions = category3Enabled;
 const priceSourceOptions = computed(() =>
   (interfacesQuery.data.value ?? []).filter((i) => i.category_id === '2' && i.enabled),
 );
+/** 公司公告源候选（category_id === '4' && enabled） */
+const announcementSourceOptions = computed(() =>
+  (interfacesQuery.data.value ?? []).filter((i) => i.category_id === '4' && i.enabled),
+);
+
+// 提供方 id → 名称：四个源下拉展示接口归属（如「东财-分红配送（东方财富）」）
+const { data: providers } = useQuoteProviders();
+const providerNameById = computed(() => {
+  const m = new Map<string, string>();
+  (providers.value ?? []).forEach((p) => m.set(p.id, p.name));
+  return m;
+});
 
 // 股息率设置本地表单：阈值以**百分数**存储（5 = 5%），提交时转小数（P2-8 / §2.4）
 const settingsForm = reactive({
@@ -60,6 +74,7 @@ const settingsForm = reactive({
   dividendReportSourceInterfaceId: '',
   dividendDetailSourceInterfaceId: '',
   priceSourceInterfaceId: '',
+  announcementSourceInterfaceId: '',
 });
 const settingsFormError = ref('');
 
@@ -75,6 +90,7 @@ watch(dividendSettings, (s) => {
   settingsForm.dividendReportSourceInterfaceId = s.dividend_report_source?.id ?? '';
   settingsForm.dividendDetailSourceInterfaceId = s.dividend_detail_source?.id ?? '';
   settingsForm.priceSourceInterfaceId = s.price_source?.id ?? '';
+  settingsForm.announcementSourceInterfaceId = s.announcement_source?.id ?? '';
 });
 
 /** 百分数字符串 → 小数比率 / null（空串视为 null；非法输入返回 undefined 触发校验错误） */
@@ -112,7 +128,9 @@ const settingsHasChanges = computed(() => {
       (s.dividend_report_source?.id ?? '') ||
     settingsForm.dividendDetailSourceInterfaceId !==
       (s.dividend_detail_source?.id ?? '') ||
-    settingsForm.priceSourceInterfaceId !== (s.price_source?.id ?? '')
+    settingsForm.priceSourceInterfaceId !== (s.price_source?.id ?? '') ||
+    settingsForm.announcementSourceInterfaceId !==
+      (s.announcement_source?.id ?? '')
   );
 });
 
@@ -132,6 +150,8 @@ function handleSaveSettings(): void {
     dividend_detail_source_interface_id:
       settingsForm.dividendDetailSourceInterfaceId || null,
     price_source_interface_id: settingsForm.priceSourceInterfaceId || null,
+    announcement_source_interface_id:
+      settingsForm.announcementSourceInterfaceId || null,
   };
   settingsMutation.mutate(payload);
 }
@@ -201,7 +221,7 @@ function handleSaveSettings(): void {
                 :key="itf.id"
                 :value="itf.id"
               >
-                {{ itf.name }}
+                {{ itf.name }}（{{ providerNameById.get(itf.provider_id) ?? '未知提供方' }}）
               </SelectItem>
             </SelectContent>
           </Select>
@@ -221,7 +241,7 @@ function handleSaveSettings(): void {
                 :key="itf.id"
                 :value="itf.id"
               >
-                {{ itf.name }}
+                {{ itf.name }}（{{ providerNameById.get(itf.provider_id) ?? '未知提供方' }}）
               </SelectItem>
             </SelectContent>
           </Select>
@@ -241,7 +261,27 @@ function handleSaveSettings(): void {
                 :key="itf.id"
                 :value="itf.id"
               >
-                {{ itf.name }}
+                {{ itf.name }}（{{ providerNameById.get(itf.provider_id) ?? '未知提供方' }}）
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        <!-- 公司公告源 -->
+        <div class="space-y-2">
+          <Label for="dy-announcement-source">公司公告接口（特别分红扫描，§6.8）</Label>
+          <Select v-model="settingsForm.announcementSourceInterfaceId">
+            <SelectTrigger id="dy-announcement-source" class="w-full">
+              <SelectValue placeholder="选择公司公告接口" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="">不设置</SelectItem>
+              <SelectItem
+                v-for="itf in announcementSourceOptions"
+                :key="itf.id"
+                :value="itf.id"
+              >
+                {{ itf.name }}（{{ providerNameById.get(itf.provider_id) ?? '未知提供方' }}）
               </SelectItem>
             </SelectContent>
           </Select>

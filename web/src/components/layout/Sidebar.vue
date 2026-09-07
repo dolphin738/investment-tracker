@@ -22,6 +22,7 @@ import {
   LineChart,
   ScrollText,
   Settings,
+  Settings2,
   Shield,
   TrendingUp,
   Percent,
@@ -68,6 +69,7 @@ const NAV_ITEMS: NavItem[] = [
       { to: ROUTE_PATH.ADMIN, label: '金融数据接口', icon: Database, roles: ['admin'] },
       { to: ROUTE_PATH.ADMIN_TASKS, label: '定时任务', icon: Clock, roles: ['admin'] },
       { to: ROUTE_PATH.ADMIN_LOGS, label: '日志中心', icon: ScrollText, roles: ['admin', 'auditor'] },
+      { to: ROUTE_PATH.ADMIN_GLOBAL_SETTINGS, label: '全局设置', icon: Settings2, roles: ['admin'] },
     ],
   },
 ];
