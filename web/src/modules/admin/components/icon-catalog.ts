@@ -108,11 +108,6 @@ export const ICON_GROUPS: IconGroup[] = [
   },
 ];
 
-/** 全部精选图标名（去重扁平集合），供「当前所选是否精选」判断复用 */
-export const CATALOG_ICON_SET: ReadonlySet<string> = new Set(
-  ICON_GROUPS.flatMap((g) => g.icons),
-);
-
 /** 关键词 → 默认图标名 的推断规则（按数组顺序命中首个） */
 const INFER_RULES: Array<{ keywords: string[]; icon: string }> = [
   { keywords: ['行情', '价格', '实时', 'quote', 'price'], icon: 'LineChart' },

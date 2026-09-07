@@ -22,11 +22,11 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { Component } from 'vue';
 import { icons } from 'lucide-vue-next';
-import { ChevronsUpDown, X } from 'lucide-vue-next';
+import { Check, ChevronsUpDown, Copy, X } from 'lucide-vue-next';
 import { SearchInput } from '@/components/ui/search-input';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { ICON_GROUPS, CATALOG_ICON_SET } from './icon-catalog';
+import { ICON_GROUPS } from './icon-catalog';
 
 const props = withDefaults(
   defineProps<{
@@ -86,6 +86,22 @@ const selectedIcon = computed<Component | null>(() => {
   if (!name) return null;
   return iconRegistry[name] ?? null;
 });
+
+// ---- 所选图标名一键复制 ----
+
+const copied = ref<boolean>(false);
+let copiedTimer: ReturnType<typeof setTimeout> | undefined;
+
+async function copySelectedName(e: MouseEvent): Promise<void> {
+  // 阻止冒泡，避免该行点击事件冒泡干扰触发器
+  e.stopPropagation();
+  const name = props.modelValue;
+  if (!name) return;
+  await navigator.clipboard.writeText(name);
+  copied.value = true;
+  if (copiedTimer) clearTimeout(copiedTimer);
+  copiedTimer = setTimeout(() => (copied.value = false), 1500);
+}
 
 function openMenu(): void {
   if (props.disabled) return;
@@ -159,6 +175,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   document.removeEventListener('pointerdown', handlePointerDownOutside, true);
   clearBlurTimer();
+  if (copiedTimer) clearTimeout(copiedTimer);
 });
 </script>
 
@@ -201,17 +218,29 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="max-h-64 overflow-y-auto rounded-md p-1">
-        <!-- 当前所选图标若不在精选目录（如历史系统分类图标），顶部单独回显以便取消 -->
+        <!-- 当前所选图标回显（始终显示），行尾提供一键复制图标名 -->
         <div
-          v-if="props.modelValue && !CATALOG_ICON_SET.has(props.modelValue)"
+          v-if="props.modelValue"
           class="mb-2 flex items-center gap-2 rounded-md bg-accent px-2 py-1.5 text-accent-foreground"
         >
           <component
             :is="iconRegistry[props.modelValue]"
             v-if="iconRegistry[props.modelValue]"
-            class="h-4 w-4"
+            class="h-4 w-4 shrink-0"
           />
-          <span class="text-xs">当前所选：{{ props.modelValue }}</span>
+          <span class="min-w-0 flex-1 truncate text-xs" :title="props.modelValue">
+            当前所选：{{ props.modelValue }}
+          </span>
+          <button
+            type="button"
+            :aria-label="copied ? '已复制图标名' : '复制图标名'"
+            :title="copied ? '已复制' : '复制图标名'"
+            class="shrink-0 rounded-sm p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            @click="copySelectedName($event)"
+          >
+            <Check v-if="copied" class="h-3.5 w-3.5 text-emerald-600" />
+            <Copy v-else class="h-3.5 w-3.5" />
+          </button>
         </div>
 
         <!-- 搜索态：扁平全量过滤 -->
