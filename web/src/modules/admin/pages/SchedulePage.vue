@@ -398,6 +398,11 @@ function statusLabel(status: string | null): string {
   if (status === 'FAILED') return '失败';
   return '未执行';
 }
+
+/** cron 单元格悬浮提示：优先展示完整中文说明，回退原始表达式 */
+function cronTitle(task: ScheduleTask): string {
+  return describeCron(task.cron_expr) ?? task.cron_expr;
+}
 </script>
 
 <template>
@@ -452,7 +457,7 @@ function statusLabel(status: string | null): string {
                     <TableHead class="w-[130px] whitespace-nowrap">类型</TableHead>
                     <TableHead class="w-[100px] whitespace-nowrap">归类</TableHead>
                     <TableHead class="w-16 whitespace-nowrap">启用</TableHead>
-                    <TableHead class="w-[120px] whitespace-nowrap">cron</TableHead>
+                    <TableHead class="w-[160px]">cron</TableHead>
                     <TableHead class="w-[180px] whitespace-nowrap">最近一次执行</TableHead>
                     <TableHead class="w-[180px] whitespace-nowrap text-right">操作</TableHead>
                   </TableRow>
@@ -477,10 +482,8 @@ function statusLabel(status: string | null): string {
                     @update:model-value="(v: boolean) => handleToggleEnabled(task, v)"
                   />
                 </TableCell>
-                <TableCell class="whitespace-nowrap align-middle">
-                  <span class="text-sm" :title="task.cron_expr">
-                    {{ describeCron(task.cron_expr) ?? task.cron_expr }}
-                  </span>
+                <TableCell class="align-middle text-sm leading-snug" :title="cronTitle(task)">
+                  {{ describeCron(task.cron_expr) ?? task.cron_expr }}
                 </TableCell>
                 <TableCell class="whitespace-nowrap align-middle">
                   <div class="flex flex-col gap-1">
@@ -555,7 +558,7 @@ function statusLabel(status: string | null): string {
                     <TableHead class="w-[130px] whitespace-nowrap">类型</TableHead>
                     <TableHead class="w-[100px] whitespace-nowrap">归类</TableHead>
                     <TableHead class="w-16 whitespace-nowrap">启用</TableHead>
-                    <TableHead class="w-[120px] whitespace-nowrap">cron</TableHead>
+                    <TableHead class="w-[160px]">cron</TableHead>
                     <TableHead class="w-[180px] whitespace-nowrap">最近一次执行</TableHead>
                     <TableHead class="w-[180px] whitespace-nowrap text-right">操作</TableHead>
                   </TableRow>
@@ -580,17 +583,15 @@ function statusLabel(status: string | null): string {
                       @update:model-value="(v: boolean) => handleToggleEnabled(task, v)"
                     />
                   </TableCell>
-                  <TableCell class="whitespace-nowrap align-middle">
-                    <span class="text-sm" :title="task.cron_expr">
-                      {{ describeCron(task.cron_expr) ?? task.cron_expr }}
+                <TableCell class="align-middle text-sm leading-snug" :title="cronTitle(task)">
+                  {{ describeCron(task.cron_expr) ?? task.cron_expr }}
+                </TableCell>
+                <TableCell class="whitespace-nowrap align-middle">
+                  <div class="flex flex-col gap-1">
+                    <span v-if="task.last_run_at" class="text-xs text-muted-foreground">
+                      {{ formatDateTime(task.last_run_at) }}
                     </span>
-                  </TableCell>
-                  <TableCell class="whitespace-nowrap align-middle">
-                    <div class="flex flex-col gap-1">
-                      <span v-if="task.last_run_at" class="text-xs text-muted-foreground">
-                        {{ formatDateTime(task.last_run_at) }}
-                      </span>
-                      <span v-else class="text-xs text-muted-foreground">从未执行</span>
+                    <span v-else class="text-xs text-muted-foreground">从未执行</span>
                       <Badge
                         v-if="task.last_run_status"
                         class="w-fit"

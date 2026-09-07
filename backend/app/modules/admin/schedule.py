@@ -204,9 +204,11 @@ async def list_tasks(
     current: CurrentUser = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> list[JobOut]:
-    """列出全部任务（含最近一次执行摘要，按创建时间升序）。"""
+    """列出全部任务（含最近一次执行摘要，按创建时间升序；同创建时间以 id 兜底保证稳定排序）。"""
     configs = (
-        await db.execute(select(JobConfig).order_by(JobConfig.created_at.asc()))
+        await db.execute(
+            select(JobConfig).order_by(JobConfig.created_at.asc(), JobConfig.id.asc())
+        )
     ).scalars().all()
     latest = await _latest_log_map(db, [c.id for c in configs])
     items: list[JobOut] = []
