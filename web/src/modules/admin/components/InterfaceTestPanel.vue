@@ -43,12 +43,15 @@ import { Textarea } from '@/components/ui/textarea';
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
 import { useQuoteInterfacesAll } from '../composables/use-quote-interface';
 import { useQuoteProviders } from '../composables/use-quote-provider';
+import { useInterfaceCategories } from '../composables/use-interface-category';
 import { useInterfaceTest } from '../composables/use-interface-test';
 import type {
   InterfaceTestResponse,
@@ -111,6 +114,7 @@ function safeStringify(v: unknown): string {
 
 const { data: interfaces } = useQuoteInterfacesAll();
 const { data: providers } = useQuoteProviders();
+const { data: categories } = useInterfaceCategories();
 const testMut = useInterfaceTest();
 
 // 提供方 id → 名称：接口下拉展示接口归属（如「A股行情（小熊同学）」）
@@ -195,6 +199,40 @@ const enabledInterfaces = computed<QuoteInterface[]>(
       const provider = (providers.value ?? []).find((p) => p.id === i.provider_id);
       return i.enabled && (provider?.enabled ?? false);
     }),
+);
+
+/**
+ * 接口下拉按所属分类分组：外层按分类 sort_order 排序，
+ * 组内接口保持 enabledInterfaces 的原有顺序；未分类（或分类已删）
+ * 的接口归入末尾「未分类」组。
+ */
+const groupedInterfaces = computed<Array<{ label: string; items: QuoteInterface[] }>>(
+  () => {
+    const ordered = [...(categories.value ?? [])].sort(
+      (a, b) => a.sort_order - b.sort_order,
+    );
+    const groups: Array<{ label: string; items: QuoteInterface[] }> = [];
+    const indexById = new Map<string, number>();
+    ordered.forEach((c) => {
+      indexById.set(c.id, groups.length);
+      groups.push({ label: c.label, items: [] });
+    });
+    for (const itf of enabledInterfaces.value) {
+      const idx =
+        itf.category_id != null ? indexById.get(itf.category_id) : undefined;
+      if (idx === undefined) {
+        let fallback = groups.find((g) => g.label === '未分类');
+        if (!fallback) {
+          fallback = { label: '未分类', items: [] };
+          groups.push(fallback);
+        }
+        fallback.items.push(itf);
+      } else {
+        groups[idx].items.push(itf);
+      }
+    }
+    return groups.filter((g) => g.items.length > 0);
+  },
 );
 
 // 切换接口时以其 params 模板初始化可编辑行
@@ -293,9 +331,12 @@ function highlightSegments(text: string, query: string): Array<{ text: string; h
             <SelectValue placeholder="选择要测试的接口（仅启用）" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem v-for="it in enabledInterfaces" :key="it.id" :value="it.id">
-              {{ it.name }}（{{ providerNameById.get(it.provider_id) ?? '未知提供方' }}）
-            </SelectItem>
+            <SelectGroup v-for="grp in groupedInterfaces" :key="grp.label">
+              <SelectLabel>{{ grp.label }}</SelectLabel>
+              <SelectItem v-for="it in grp.items" :key="it.id" :value="it.id">
+                {{ it.name }}（{{ providerNameById.get(it.provider_id) ?? '未知提供方' }}）
+              </SelectItem>
+            </SelectGroup>
           </SelectContent>
         </Select>
       </div>
