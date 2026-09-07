@@ -23,7 +23,7 @@ from app.models import (
     SecurityDividendYield,
 )
 from app.models.enums import DividendYieldMode
-from app.services.dividend_period import parse_date
+from app.core.date_utils import parse_date
 from app.services.dividend_yield import (
     compute_yield,
     consecutive_years,

@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import calendar
-import re
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Any, Optional
@@ -41,19 +40,6 @@ def parse_cash(raw: Any) -> Optional[Decimal]:
     try:
         return Decimal(str(raw).strip()) / Decimal("10")
     except (InvalidOperation, ValueError, TypeError):
-        return None
-
-
-def parse_date(raw: Any) -> Optional[date]:
-    """通用日期解析（YYYYMMDD / YYYY-MM-DD / 连字符）；解析失败返回 None 不阻断。"""
-    if raw in (None, "", "-", "nan", "None"):
-        return None
-    s = re.sub(r"[\s\-/年月]", "", str(raw).strip())
-    if len(s) < 8:
-        return None
-    try:
-        return date(int(s[:4]), int(s[4:6]), int(s[6:8]))
-    except (ValueError, TypeError):
         return None
 
 

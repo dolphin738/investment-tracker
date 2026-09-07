@@ -23,10 +23,10 @@ from app.models import (
     SecurityDividendYield,
 )
 from app.models.enums import DividendStatus, DividendYieldMode, ReportPeriodType, SecurityType
+from app.core.date_utils import parse_date
 from app.services.dividend_period import (
     back_n_quarters,
     parse_cash,
-    parse_date,
     parse_report_period,
 )
 from app.services.dividend_sync import (

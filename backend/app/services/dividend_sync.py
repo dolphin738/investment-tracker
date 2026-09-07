@@ -23,7 +23,7 @@ from sqlalchemy import (
     select,
 )
 
-from app.core.date_utils import today_app_tz
+from app.core.date_utils import parse_date, today_app_tz
 from app.models import (
     DividendYieldSettings,
     MarketSecurityDailyPrice,
@@ -47,7 +47,6 @@ from app.services.dividend_period import (
     back_n_quarters,
     last_day,
     parse_cash,
-    parse_date,
     parse_report_period,
     subtract_years,
 )

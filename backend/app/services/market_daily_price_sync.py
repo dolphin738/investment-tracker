@@ -38,7 +38,7 @@ from app.services.market_data_sync import (
     _row_get,
     infer_exchange,
 )
-from app.services.dividend_period import parse_date
+from app.core.date_utils import parse_date
 from app.services.dividend_yield_refresh import (
     is_trade_day,
     refresh_yields_for_masters,

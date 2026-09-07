@@ -25,6 +25,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.date_utils import parse_date
 from app.core.config import get_settings
 from app.core.date_utils import today_app_tz
 from app.core.enums import BusinessErrorCode
@@ -139,20 +140,6 @@ def _ext_of(filename: str | None) -> str:
 
 
 # ── 校验 / 构造预览 ──
-def _parse_date(s: str) -> date | None:
-    s = (s or "").strip()
-    if not s:
-        return None
-    try:
-        return date.fromisoformat(s)
-    except ValueError:
-        # 兼容 2024/01/01
-        try:
-            return datetime.strptime(s, "%Y/%m/%d").date()
-        except ValueError:
-            return None
-
-
 def _parse_decimal(s: str, max_scale: int = 2) -> Decimal | None:
     """解析十进制字符串；超过 max_scale 位小数视为精度非法返回 None。
 
@@ -213,7 +200,7 @@ def validate_and_build(
             pos = idx[col]
             raw = r[pos] if (pos is not None and pos < len(r)) else ""
             if kind == "date":
-                d = _parse_date(raw)
+                d = parse_date(raw)
                 if d is None:
                     row_errs.append(_err(i, col, ImportErrorCode.INVALID_DATE_FORMAT, f"{col} 日期格式无效：{raw}"))
                 else:

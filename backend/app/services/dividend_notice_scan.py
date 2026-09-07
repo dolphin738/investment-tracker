@@ -30,7 +30,7 @@ from app.models import (
     SecurityDividend,
 )
 from app.models.enums import DividendStatus, ReportPeriodType
-from app.services.dividend_period import parse_date
+from app.core.date_utils import parse_date
 from app.services.dividend_yield_refresh import refresh_yields_for_masters
 from app.services.market_data_sync import (
     DIVIDEND_LIST_CAT_ID,
