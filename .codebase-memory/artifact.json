@@ -1,11 +1,11 @@
 {
     "schema_version": 2,
-    "commit": "2b97fdbd8da5c6aa0f94c6c7d321ed57d1f887e6",
-    "indexed_at": "2026-09-07T15:35:36Z",
+    "commit": "8dc0d63c0003fa64530bf8234ce266dd65fce0f8",
+    "indexed_at": "2026-09-07T15:53:38Z",
     "project": "D-agent-AI-Coding-investment_return_tracker",
-    "nodes": 6144,
-    "edges": 21555,
+    "nodes": 6143,
+    "edges": 21552,
     "original_size": 24313856,
-    "compressed_size": 4032686,
+    "compressed_size": 4032522,
     "compression_level": 3
 }
