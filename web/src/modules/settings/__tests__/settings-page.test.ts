@@ -376,6 +376,7 @@ describe('useUpdatePreferences 同步 hook', () => {
     // 宿主组件在 setup 内调用 hook（vue-query 依赖注入上下文），暴露保存方法供触发
     const Host = defineComponent({
       name: 'PrefHost',
+      template: '<div />',
       setup() {
         const mutation = useUpdatePreferences();
         return {
