@@ -45,7 +45,7 @@ from app.services.dividend_yield import (
     to_cell,
 )
 from app.services.log import record
-from app.services.market_data_sync import DIVIDEND_LIST_CAT_ID, QUOTE_CAT_ID
+from app.services.market_data_sync import DIVIDEND_LIST_CAT_ID, QUOTE_CAT_ID, NOTICE_CAT_ID
 
 router_dividend_yield = APIRouter(
     prefix="/api/dividend-yield", tags=["dividend-yield"], route_class=EnvelopeRoute
@@ -357,6 +357,7 @@ class SettingsUpdateBody(BaseModel):
     dividend_report_source_interface_id: Optional[str] = None
     dividend_detail_source_interface_id: Optional[str] = None
     price_source_interface_id: Optional[str] = None
+    announcement_source_interface_id: Optional[str] = None
 
 
 def _interface_out(itf: Optional[QuoteInterface]) -> Optional[dict[str, Any]]:
@@ -440,6 +441,9 @@ async def _settings_out(db: AsyncSession, row: DividendYieldSettings) -> dict[st
         "price_source": _interface_out(
             await _resolve_interface(db, row.price_source_interface_id)
         ),
+        "announcement_source": _interface_out(
+            await _resolve_interface(db, row.announcement_source_interface_id)
+        ),
     }
 
 
@@ -476,6 +480,10 @@ async def put_dividend_yield_settings(
     await _validate_interface(
         db, body.price_source_interface_id, QUOTE_CAT_ID, require_per_symbol=False
     )
+    # 公告源：分类 4「公司公告」；stock_notice_report 接口 params 含 symbol → 逐只形态
+    await _validate_interface(
+        db, body.announcement_source_interface_id, NOTICE_CAT_ID, require_per_symbol=True
+    )
 
     row = await _load_settings(db)
     is_new = row.id is None  # 空默认（无持久化行）时插入，否则更新既有行
@@ -485,12 +493,14 @@ async def put_dividend_yield_settings(
         "dividend_report_source_interface_id": row.dividend_report_source_interface_id,
         "dividend_detail_source_interface_id": row.dividend_detail_source_interface_id,
         "price_source_interface_id": row.price_source_interface_id,
+        "announcement_source_interface_id": row.announcement_source_interface_id,
     }
     row.green_threshold = green
     row.red_threshold = red
     row.dividend_report_source_interface_id = body.dividend_report_source_interface_id
     row.dividend_detail_source_interface_id = body.dividend_detail_source_interface_id
     row.price_source_interface_id = body.price_source_interface_id
+    row.announcement_source_interface_id = body.announcement_source_interface_id
     row.updated_by = admin.user_id
     if is_new:
         db.add(row)
@@ -509,6 +519,7 @@ async def put_dividend_yield_settings(
                 "dividend_report_source_interface_id": body.dividend_report_source_interface_id,
                 "dividend_detail_source_interface_id": body.dividend_detail_source_interface_id,
                 "price_source_interface_id": body.price_source_interface_id,
+                "announcement_source_interface_id": body.announcement_source_interface_id,
             },
         },
         user_id=admin.user_id,

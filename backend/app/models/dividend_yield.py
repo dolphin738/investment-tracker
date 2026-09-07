@@ -209,6 +209,12 @@ class DividendYieldSettings(Base, TimestampMixin):
         ForeignKey("quote_provider_interfaces.id", ondelete="SET NULL"),
         nullable=True,
     )
+    # 公告源（分类 4，公司公告扫描 §6.8 取代原写死分类 4）
+    announcement_source_interface_id: Mapped[Optional[str]] = mapped_column(
+        String(36),
+        ForeignKey("quote_provider_interfaces.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     updated_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
 
 
