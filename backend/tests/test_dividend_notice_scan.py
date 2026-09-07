@@ -253,12 +253,12 @@ def test_sina_cash_divide_by_ten():
 
 
 # ───────────────────────── 公告源解析（§5.4 可配置化 / §6.8 接线） ─────────────────────────
-async def _seed_cat4(session, *, priority=1, enabled=True, name="沪深京 A 股公告"):
+async def _seed_cat4(session, *, priority=1, enabled=True, name="沪深京 A 股公告", provider_enabled=True):
     """分类 4「公司公告」+ 公告接口行（params 含 symbol，逐只形态）；分类行幂等。"""
     if await session.get(InterfaceCategory, NOTICE_CAT_ID) is None:
         session.add(InterfaceCategory(id=NOTICE_CAT_ID, label="公司公告", system=True))
     provider = SecuritiesDataProvider(
-        id=_uid(), name="akshare", access_method="sdk", config={}, enabled=True,
+        id=_uid(), name="akshare", access_method="sdk", config={}, enabled=provider_enabled,
     )
     session.add(provider)
     await session.flush()
@@ -317,3 +317,31 @@ async def test_resolve_notice_itf_no_candidate_fails_fast(session):
     svc = DividendNoticeScanService(session)
     with pytest.raises(RuntimeError, match="缺失或已停用"):
         await svc._resolve_notice_itf(await svc._settings())
+
+
+@pytest.mark.asyncio
+async def test_resolve_notice_itf_provider_disabled_fails_closed(session):
+    """守护 ADR-002 #1 口径：配置的公告源接口 enabled 但**提供方**已停用 → fail fast，
+    不静默回退（所有选源路径须过滤提供方 enabled，否则停用提供方被照常选用）。"""
+    itf = await _seed_cat4(session, provider_enabled=False)
+    await _seed_cat4(session, priority=1, name="备用公告接口")  # 若静默回退会选中它
+    session.add(DividendYieldSettings(
+        id=_uid(), announcement_source_interface_id=itf.id, green_threshold=0.05, red_threshold=0.03,
+    ))
+    await session.commit()
+    svc = DividendNoticeScanService(session)
+    with pytest.raises(RuntimeError, match="已停用"):
+        await svc._resolve_notice_itf(await svc._settings())
+
+
+@pytest.mark.asyncio
+async def test_resolve_detail_itf_provider_disabled_returns_none(session):
+    """补充源同口径：接口 enabled 但提供方停用 → 返回 None（记告警跳过，不逐只调用）。"""
+    itf = await _seed_cat4(session, provider_enabled=False)
+    session.add(DividendYieldSettings(
+        id=_uid(), dividend_detail_source_interface_id=itf.id, green_threshold=0.05, red_threshold=0.03,
+    ))
+    await session.commit()
+    svc = DividendNoticeScanService(session)
+    resolved = await svc._resolve_detail_itf(await svc._settings())
+    assert resolved is None

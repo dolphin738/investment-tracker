@@ -28,6 +28,7 @@ from app.core.date_utils import today_app_tz
 from app.models import (
     DividendYieldSettings,
     QuoteInterface,
+    SecuritiesDataProvider,
     Security,
     SecurityDividend,
 )
@@ -88,15 +89,26 @@ class DividendNoticeScanService:
             await self.session.execute(select(DividendYieldSettings).limit(1))
         ).scalar_one_or_none()
 
+    async def _provider_enabled(self, itf: QuoteInterface) -> bool:
+        """提供方启用校验（ADR-002 #1 修复口径：所有选源路径须过滤提供方 enabled，
+        否则停用提供方但其下接口仍 enabled 时会被照常选用）。"""
+        provider = await self.session.get(SecuritiesDataProvider, itf.provider_id)
+        return provider is not None and provider.enabled
+
     async def _resolve_detail_itf(
         self, settings: Optional[DividendYieldSettings]
     ) -> Optional[QuoteInterface]:
-        """解析补充源：存在性 + 分类 3 + enabled 三重校验；失败返回 None（记告警跳过）。"""
+        """解析补充源：存在性 + 分类 3 + 接口/提供方 enabled 校验；失败返回 None（记告警跳过）。"""
         iid = settings.dividend_detail_source_interface_id if settings else None
         if not iid:
             return None
         itf = await self.session.get(QuoteInterface, iid)
-        if itf is None or itf.category_id != DIVIDEND_LIST_CAT_ID or not itf.enabled:
+        if (
+            itf is None
+            or itf.category_id != DIVIDEND_LIST_CAT_ID
+            or not itf.enabled
+            or not await self._provider_enabled(itf)
+        ):
             return None
         return itf
 
@@ -105,16 +117,21 @@ class DividendNoticeScanService:
     ) -> QuoteInterface:
         """解析公告源（§5.4 可配置化）：优先读全局配置，未配置回退分类 4 priority 最小。
 
-        - 配置了 ``announcement_source_interface_id``：三重校验（存在性 + 分类 4 +
-          enabled），任一不符 → fail fast raise，**不静默回退**——把失效/非公告接口
-          悄悄换成其他分类 4 接口会掩盖配置错误（§5.4 fail closed 口径）。
+        - 配置了 ``announcement_source_interface_id``：校验（存在性 + 分类 4 + 接口/
+          提供方 enabled），任一不符 → fail fast raise，**不静默回退**——把失效/非公告
+          接口悄悄换成其他分类 4 接口会掩盖配置错误（§5.4 fail closed 口径）。
         - 未配置：回退分类 4 enabled 接口按 priority 升序首个（``_interfaces_for_category``
-          已按 priority 排序）；分类 4 无可用接口 → fail fast raise。
+          已按 priority 排序并连表过滤提供方 enabled）；分类 4 无可用接口 → fail fast raise。
         """
         iid = settings.announcement_source_interface_id if settings else None
         if iid:
             itf = await self.session.get(QuoteInterface, iid)
-            if itf is None or itf.category_id != NOTICE_CAT_ID or not itf.enabled:
+            if (
+                itf is None
+                or itf.category_id != NOTICE_CAT_ID
+                or not itf.enabled
+                or not await self._provider_enabled(itf)
+            ):
                 raise RuntimeError(
                     "配置的公司公告接口不存在、分类不符或已停用，fail fast 跳过本次公告扫描"
                 )
