@@ -8,12 +8,13 @@
  * label 重复时后端允许（UI 自行去重展示），此处不二次提示。
  */
 
-import { computed, reactive, watch } from 'vue';
+import { computed, reactive, ref, watch } from 'vue';
 import { Loader2 } from 'lucide-vue-next';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import InterfaceCategoryIconPicker from './InterfaceCategoryIconPicker.vue';
+import { inferDefaultIcon } from './icon-catalog';
 import {
   Dialog,
   DialogContent,
@@ -60,19 +61,41 @@ const createMut = useCreateInterfaceCategory();
 const updateMut = useUpdateInterfaceCategory();
 const form = reactive<FormState>(toForm(props.editing));
 
+/** 用户是否手动选过图标：手动选/清空后置 true，此后不再随名称自动推断覆盖 */
+const iconTouched = ref(false);
+
 // 提交中状态：新增 / 编辑任一 pending 即禁用提交按钮
 const submitting = computed(
   () => createMut.isPending.value || updateMut.isPending.value,
 );
 
-// 打开时按传入分类重置表单
+// 打开时按传入分类重置表单，并重置「手动选图标」标记
 watch(
   () => [props.open, props.editing] as const,
   ([open]) => {
-    if (open) Object.assign(form, toForm(props.editing));
+    if (open) {
+      Object.assign(form, toForm(props.editing));
+      iconTouched.value = false;
+    }
   },
   { immediate: true },
 );
+
+// 新增模式：输入分类名称时自动推测默认图标（用户未手动选过才跟随）
+watch(
+  () => form.label,
+  (label) => {
+    if (isCreate.value && !iconTouched.value) {
+      form.icon = inferDefaultIcon(label);
+    }
+  },
+);
+
+/** 图标选择器手动选/清空：标记已手动操作，停止名称自动推断覆盖 */
+function onIconPick(name: string): void {
+  form.icon = name;
+  iconTouched.value = true;
+}
 
 function handleSubmit(): void {
   if (!form.label.trim()) {
@@ -115,7 +138,7 @@ function handleSubmit(): void {
         <div class="grid grid-cols-2 gap-4">
           <div class="space-y-2">
             <Label for="cat-icon">图标</Label>
-            <InterfaceCategoryIconPicker id="cat-icon" v-model="form.icon" />
+            <InterfaceCategoryIconPicker id="cat-icon" :model-value="form.icon" @update:modelValue="onIconPick" />
           </div>
           <div class="space-y-2">
             <Label for="cat-order">排序</Label>

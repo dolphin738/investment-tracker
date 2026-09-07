@@ -26,6 +26,7 @@ import { ChevronsUpDown, X } from 'lucide-vue-next';
 import { SearchInput } from '@/components/ui/search-input';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { ICON_GROUPS, CATALOG_ICON_SET } from './icon-catalog';
 
 const props = withDefaults(
   defineProps<{
@@ -53,16 +54,30 @@ const allNames = Object.keys(iconRegistry).sort((a, b) => a.localeCompare(b));
 /** 单次面板渲染上限，避免一次性挂载上千个 SVG 造成卡顿 */
 const RENDER_LIMIT = 200;
 
-const filteredNames = computed<string[]>(() => {
+/** 是否处于搜索态（决定是否走扁平全量过滤 vs 精选分组） */
+const showFlat = computed<boolean>(() => query.value.trim().length > 0);
+
+/** 搜索态：跨全量 registry 过滤（保留上限，避免卡顿） */
+const flatMatches = computed<string[]>(() => {
   const q = query.value.trim().toLowerCase();
-  if (!q) return allNames;
-  return allNames.filter((name) => name.toLowerCase().includes(q));
+  if (!q) return [];
+  return allNames.filter((name) => name.toLowerCase().includes(q)).slice(0, RENDER_LIMIT);
 });
 
-const visibleNames = computed<string[]>(() => filteredNames.value.slice(0, RENDER_LIMIT));
+const flatTotal = computed<number>(() => {
+  const q = query.value.trim().toLowerCase();
+  if (!q) return 0;
+  return allNames.filter((name) => name.toLowerCase().includes(q)).length;
+});
 
-const isTruncated = computed<boolean>(
-  () => filteredNames.value.length > RENDER_LIMIT,
+const isTruncated = computed<boolean>(() => showFlat.value && flatTotal.value > RENDER_LIMIT);
+
+/** 非搜索态：按语义分组展示精选图标（仅保留真实存在的图标名） */
+const groupedView = computed(() =>
+  ICON_GROUPS.map((g) => ({
+    label: g.label,
+    icons: g.icons.filter((n) => iconRegistry[n]),
+  })).filter((g) => g.icons.length > 0),
 );
 
 /** 当前已选图标组件（用于触发器回显），不存在时回退 null */
@@ -185,39 +200,87 @@ onBeforeUnmount(() => {
         <SearchInput v-model="query" placeholder="搜索图标，如 list / chart" />
       </div>
 
-      <div class="grid max-h-64 grid-cols-8 gap-1 overflow-y-auto rounded-md p-1">
-        <button
-          v-for="name in visibleNames"
-          :key="name"
-          type="button"
-          :title="name"
-          :aria-label="name"
-          class="flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-          :class="
-            cn(
-              props.modelValue === name &&
-                'bg-accent text-accent-foreground ring-1 ring-ring',
-            )
-          "
-          @click="handleSelect(name)"
+      <div class="max-h-64 overflow-y-auto rounded-md p-1">
+        <!-- 当前所选图标若不在精选目录（如历史系统分类图标），顶部单独回显以便取消 -->
+        <div
+          v-if="props.modelValue && !CATALOG_ICON_SET.has(props.modelValue)"
+          class="mb-2 flex items-center gap-2 rounded-md bg-accent px-2 py-1.5 text-accent-foreground"
         >
-          <component :is="iconRegistry[name]" class="h-4 w-4" />
-        </button>
+          <component
+            :is="iconRegistry[props.modelValue]"
+            v-if="iconRegistry[props.modelValue]"
+            class="h-4 w-4"
+          />
+          <span class="text-xs">当前所选：{{ props.modelValue }}</span>
+        </div>
 
-        <p
-          v-if="visibleNames.length === 0"
-          class="col-span-8 py-6 text-center text-xs text-muted-foreground"
-        >
-          无匹配图标
-        </p>
+        <!-- 搜索态：扁平全量过滤 -->
+        <template v-if="showFlat">
+          <div class="grid grid-cols-8 gap-1">
+            <button
+              v-for="name in flatMatches"
+              :key="name"
+              type="button"
+              :title="name"
+              :aria-label="name"
+              class="flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+              :class="
+                cn(
+                  props.modelValue === name &&
+                    'bg-accent text-accent-foreground ring-1 ring-ring',
+                )
+              "
+              @click="handleSelect(name)"
+            >
+              <component :is="iconRegistry[name]" class="h-4 w-4" />
+            </button>
+          </div>
+          <p
+            v-if="flatMatches.length === 0"
+            class="py-6 text-center text-xs text-muted-foreground"
+          >
+            无匹配图标
+          </p>
+          <p
+            v-if="isTruncated"
+            class="mt-1 px-1 text-center text-xs text-muted-foreground"
+          >
+            匹配过多（{{ flatTotal }} 个），请细化搜索
+          </p>
+        </template>
+
+        <!-- 非搜索态：按语义分组展示 -->
+        <template v-else>
+          <div v-for="grp in groupedView" :key="grp.label" class="mb-2">
+            <p class="px-1 pb-1 text-xs text-muted-foreground">{{ grp.label }}</p>
+            <div class="grid grid-cols-8 gap-1">
+              <button
+                v-for="name in grp.icons"
+                :key="name"
+                type="button"
+                :title="name"
+                :aria-label="name"
+                class="flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+                :class="
+                  cn(
+                    props.modelValue === name &&
+                      'bg-accent text-accent-foreground ring-1 ring-ring',
+                  )
+                "
+                @click="handleSelect(name)"
+              >
+                <component :is="iconRegistry[name]" class="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+          <p
+            v-if="groupedView.length === 0"
+            class="py-6 text-center text-xs text-muted-foreground"
+          >
+            无可用图标
+          </p>
+        </template>
       </div>
-
-      <p
-        v-if="isTruncated"
-        class="mt-1 px-1 text-center text-xs text-muted-foreground"
-      >
-        匹配过多（{{ filteredNames.length }} 个），请细化搜索
-      </p>
     </div>
   </div>
 </template>
