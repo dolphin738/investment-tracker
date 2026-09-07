@@ -21,7 +21,15 @@ from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Optional
 
-from sqlalchemy import case, delete as sa_delete, func, or_, select, update as sa_update
+from sqlalchemy import (
+    case,
+    delete as sa_delete,
+    func,
+    or_,
+    select,
+    tuple_,
+    update as sa_update,
+)
 
 from app.core.date_utils import today_app_tz
 from app.models import (
@@ -161,46 +169,86 @@ async def refresh_yields_for_masters(session, master_ids: list[str]) -> None:
 
     - 分母 = 该证券最新不复权收盘价（``market_security_daily_prices`` 最大 trade_date）；
     - 复用纯函数 ``compute_yield``/``consecutive_years``，保证末端曲线点 == 快照（§9 一致性）；
-    - 无分红记录或价格缺失 → ``dividend_yield=None``（缺失而非 0）；``stale`` 标绿；
+    - 无分红记录或价格缺失 → ``dividend_yield=None``（缺失而非 0）；
+    - **stale 不由本函数管辖**（§7 / P2-4）：stale 是「收盘价新鲜度」标记，唯一定责于
+      ``update_stale_flags``（日线任务末按交易日历统一扫描）。此前本函数无条件
+      ``stale=False`` 会抹掉刚算出的 stale——日线流程里 ``update_stale_flags`` 先于本函数
+      执行（market_daily_price_sync.daily_close_fetch），06:00 公告扫描路径更是从不调用
+      ``update_stale_flags``，stale 一旦被抹须等次日 15:05 才恢复；故此处保持不动；
+    - 批量预取（P2-4）：分红 / 最新收盘价 / 既有快照各一次批量查询，取代逐证券 3 查的 N+1；
     - 干净执行（任一 master 失败不中断其余），调用方捕获提交。
     """
     if not master_ids:
         return
+    mids = list(dict.fromkeys(master_ids))  # 去重保留顺序
     cur_year = today_app_tz().year
-    for mid in dict.fromkeys(master_ids):  # 去重保留顺序
+
+    # ① 批量取全部相关分红记录
+    div_rows_all = (
+        await session.execute(
+            select(SecurityDividend)
+            .where(SecurityDividend.master_id.in_(mids))
+            .order_by(
+                SecurityDividend.report_year.desc(),
+                SecurityDividend.report_quarter.desc(),
+            )
+        )
+    ).scalars().all()
+    divs_by_master: dict[str, list[SecurityDividend]] = {}
+    for r in div_rows_all:
+        divs_by_master.setdefault(r.master_id, []).append(r)
+
+    # ② 批量取每证券最新收盘价：先按 master 聚合最大 trade_date，再按 (master, date) 取行
+    max_date_pairs = (
+        await session.execute(
+            select(
+                MarketSecurityDailyPrice.master_id,
+                func.max(MarketSecurityDailyPrice.trade_date),
+            )
+            .where(MarketSecurityDailyPrice.master_id.in_(mids))
+            .group_by(MarketSecurityDailyPrice.master_id)
+        )
+    ).all()
+    price_by_master: dict[str, MarketSecurityDailyPrice] = {}
+    if max_date_pairs:
+        price_rows = (
+            await session.execute(
+                select(MarketSecurityDailyPrice).where(
+                    tuple_(
+                        MarketSecurityDailyPrice.master_id,
+                        MarketSecurityDailyPrice.trade_date,
+                    ).in_([(m, d) for m, d in max_date_pairs])
+                )
+            )
+        ).scalars().all()
+        price_by_master = {p.master_id: p for p in price_rows}
+
+    # ③ 批量取既有快照
+    snap_by_master = {
+        s.master_id: s
+        for s in (
+            await session.execute(
+                select(SecurityDividendYield).where(
+                    SecurityDividendYield.master_id.in_(mids)
+                )
+            )
+        ).scalars().all()
+    }
+
+    for mid in mids:
         try:
-            div_rows = (
-                await session.execute(
-                    select(SecurityDividend)
-                    .where(SecurityDividend.master_id == mid)
-                    .order_by(
-                        SecurityDividend.report_year.desc(),
-                        SecurityDividend.report_quarter.desc(),
-                    )
-                )
-            ).scalars().all()
-            cells = [_to_cell(r) for r in div_rows]
-            price_row = (
-                await session.execute(
-                    select(MarketSecurityDailyPrice)
-                    .where(MarketSecurityDailyPrice.master_id == mid)
-                    .order_by(MarketSecurityDailyPrice.trade_date.desc())
-                    .limit(1)
-                )
-            ).scalar_one_or_none()
+            cells = [_to_cell(r) for r in divs_by_master.get(mid, [])]
+            price_row = price_by_master.get(mid)
             price = price_row.close if price_row is not None else None
             latest_trade_date = price_row.trade_date if price_row is not None else None
 
             result = compute_yield(cells, price, cur_year)
             mode = result.mode if result.ref_div_ids else DividendYieldMode.LFY
-            snapshot = (
-                await session.execute(
-                    select(SecurityDividendYield).where(SecurityDividendYield.master_id == mid)
-                )
-            ).scalar_one_or_none()
+            snapshot = snap_by_master.get(mid)
             if snapshot is None:
                 snapshot = SecurityDividendYield(master_id=mid, mode=mode)
                 session.add(snapshot)
+                snap_by_master[mid] = snapshot
             snapshot.mode = mode
             snapshot.numerator_per_share = result.numerator_per_share
             snapshot.dividend_yield = result.dividend_yield
@@ -210,7 +258,7 @@ async def refresh_yields_for_masters(session, master_ids: list[str]) -> None:
             snapshot.last_dividend_year = last_dividend_year(cells)
             snapshot.ref_div_ids = list(result.ref_div_ids) if result.ref_div_ids else None
             snapshot.suspicious = is_suspicious(result.dividend_yield)
-            snapshot.stale = False  # 本次重算成功即视为新鲜
+            # stale 保持不动：唯一定责于 update_stale_flags（§7 / P2-4），本函数不重置
             snapshot.computed_at = datetime.now(timezone.utc)
         except Exception:  # 单个证券失败不中断其余（任务级异常由 handler 汇总）
             logger.warning("股息率快照重算失败 master_id=%s，保留旧快照", mid, exc_info=True)

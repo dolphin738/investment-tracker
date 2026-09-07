@@ -487,3 +487,71 @@ async def test_upsert_dividend_batch_duplicate_cell_warns(session, caplog):
     ).scalars().one()
     # _parse_cash 按「10派X元」折算每股：源值 1.5 → 每股 0.15（末行覆盖）
     assert row.cash_per_share == Decimal("0.15")
+
+
+# ───────────────────────── P2-4：stale 定责权 / 批量预取消除 N+1 ─────────────────────────
+@pytest.mark.asyncio
+async def test_refresh_yields_preserves_stale_flag(session):
+    """守护 P2-4（§7）：refresh 不重置 stale——stale 唯一定责于 update_stale_flags。
+
+    旧实现无条件 ``stale=False``：日线流程里 ``update_stale_flags`` 先于 refresh 执行，
+    stale 刚算出即被抹；06:00 公告扫描路径从不调用 update_stale_flags，被抹后须等
+    次日 15:05 才恢复。
+    """
+    m = await _add_master(session)
+    cur = today_app_tz().year
+    session.add(_div(m.id, cur, 4, "1.0"))
+    session.add(MarketSecurityDailyPrice(
+        master_id=m.id, trade_date=date(cur, 9, 1), close=Decimal("10")))
+    # 预置 stale=True 快照，模拟「日线任务刚标记 stale → 公告扫描触发重算」
+    session.add(SecurityDividendYield(
+        master_id=m.id, mode=DividendYieldMode.LFY, stale=True))
+    await session.commit()
+
+    await refresh_yields_for_masters(session, [m.id])
+    await session.commit()
+    snap = (
+        await session.execute(
+            select(SecurityDividendYield).where(SecurityDividendYield.master_id == m.id)
+        )
+    ).scalar_one()
+    assert snap.stale is True, "refresh 抹掉了 stale（§7 定责权被侵犯）"
+    assert snap.dividend_yield == Decimal("0.1")  # 重算本身仍然生效
+
+
+@pytest.mark.asyncio
+async def test_refresh_yields_batch_preload_no_n_plus_1(session, monkeypatch):
+    """守护 P2-4：批量预取——查询次数与 master 数量无关（旧实现每证券 3 查 = N+1）。
+
+    断言「3 只证券」与「6 只证券」的 session.execute 调用次数完全相同，
+    任一侧退化为逐证券查询即失败。
+    """
+    cur = today_app_tz().year
+    masters = []
+    for i in range(6):
+        m = await _add_master(session, code=f"sh60010{i}", name=f"批量证券{i}")
+        session.add(_div(m.id, cur, 4, "1.0"))
+        session.add(MarketSecurityDailyPrice(
+            master_id=m.id, trade_date=date(cur, 9, 1), close=Decimal("10")))
+        masters.append(m)
+    await session.commit()
+
+    orig_execute = session.execute  # 取未被包装的原始绑定方法
+    counts: dict[str, int] = {}
+    for label, mids in (("3", [m.id for m in masters[:3]]),
+                        ("6", [m.id for m in masters])):
+        calls = {"n": 0}
+
+        async def _wrapped(*a, _c=calls, **kw):
+            _c["n"] += 1
+            return await orig_execute(*a, **kw)
+
+        monkeypatch.setattr(session, "execute", _wrapped)
+        await refresh_yields_for_masters(session, mids)
+        counts[label] = calls["n"]
+
+    assert counts["3"] == counts["6"], (
+        f"查询次数随 master 数增长（N+1 回归）：3 只={counts['3']}，6 只={counts['6']}"
+    )
+    # 批量结构：① 分红 ② 每 master 最大 trade_date ③ 按 (master, date) 取价 ④ 既有快照
+    assert counts["3"] == 4, f"批量预取后应仅 4 次查询，实得 {counts['3']}"
