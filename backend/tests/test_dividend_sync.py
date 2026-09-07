@@ -23,13 +23,17 @@ from app.models import (
     SecurityDividendYield,
 )
 from app.models.enums import DividendStatus, DividendYieldMode, ReportPeriodType, SecurityType
+from app.services.dividend_period import (
+    back_n_quarters,
+    parse_cash,
+    parse_date,
+    parse_report_period,
+)
 from app.services.dividend_sync import (
     DividendSyncService,
     _STATUS_MAP,
-    _back_n_quarters,
-    _parse_cash,
-    _parse_date,
-    _parse_report_period,
+)
+from app.services.dividend_yield_refresh import (
     is_trade_day,
     refresh_trade_calendar,
     refresh_yields_for_masters,
@@ -76,44 +80,44 @@ def test_status_map_exact_match_cancel_is_rejected():
     assert _STATUS_MAP.get("未识别进度", "default") == "default"
 
 
-def test_parse_date_variants_and_garbage():
+def testparse_date_variants_and_garbage():
     """守护 §6.1：日期解析支持 YYYYMMDD / YYYY-MM-DD / 带分隔连字符；脏值返回 None。"""
-    assert _parse_date("20241214") == date(2024, 12, 14)
-    assert _parse_date("2024-12-14") == date(2024, 12, 14)
-    assert _parse_date(None) is None
-    assert _parse_date("") is None
-    assert _parse_date("-") is None
-    assert _parse_date("nan") is None
-    assert _parse_date("2024-13-40") is None  # 非法月份/日
-    assert _parse_date(20241214) == date(2024, 12, 14)  # 数字下标行也兼容
+    assert parse_date("20241214") == date(2024, 12, 14)
+    assert parse_date("2024-12-14") == date(2024, 12, 14)
+    assert parse_date(None) is None
+    assert parse_date("") is None
+    assert parse_date("-") is None
+    assert parse_date("nan") is None
+    assert parse_date("2024-13-40") is None  # 非法月份/日
+    assert parse_date(20241214) == date(2024, 12, 14)  # 数字下标行也兼容
 
 
-def test_parse_cash_per_share_divide_by_ten():
+def testparse_cash_per_share_divide_by_ten():
     """守护 §6.1：'现金分红比例'（每 10 股派 X 元）→ 每股（÷10）；'-' 等脏值 None。"""
-    assert _parse_cash("25") == Decimal("2.5")
-    assert _parse_cash("0.5") == Decimal("0.05")
-    assert _parse_cash(None) is None
-    assert _parse_cash("-") is None
-    assert _parse_cash("abc") is None
+    assert parse_cash("25") == Decimal("2.5")
+    assert parse_cash("0.5") == Decimal("0.05")
+    assert parse_cash(None) is None
+    assert parse_cash("-") is None
+    assert parse_cash("abc") is None
 
 
-def test_parse_report_period_quarters():
+def testparse_report_period_quarters():
     """守护 §6.1：3331/630/0930/1231 映射到 Q1-Q4；非法报告期 None（跳行）。"""
-    assert _parse_report_period("20241231") == (2024, 4)
-    assert _parse_report_period("20240630") == (2024, 2)
-    assert _parse_report_period("20240930") == (2024, 3)
-    assert _parse_report_period(20240331) == (2024, 1)
-    assert _parse_report_period("202412") == (2024, 4)  # 长度为 6 的 YYYYMM
-    assert _parse_report_period(None) is None
-    assert _parse_report_period("xxxx") is None
-    assert _parse_report_period("20240531") is None  # 5 月不在季度末集合
+    assert parse_report_period("20241231") == (2024, 4)
+    assert parse_report_period("20240630") == (2024, 2)
+    assert parse_report_period("20240930") == (2024, 3)
+    assert parse_report_period(20240331) == (2024, 1)
+    assert parse_report_period("202412") == (2024, 4)  # 长度为 6 的 YYYYMM
+    assert parse_report_period(None) is None
+    assert parse_report_period("xxxx") is None
+    assert parse_report_period("20240531") is None  # 5 月不在季度末集合
 
 
-def test_back_n_quarters_cross_year():
+def testback_n_quarters_cross_year():
     """守护 §6.1：报告期回退 N 季跨年末尾衔接。"""
-    assert _back_n_quarters(2026, 1, 1) == (2025, 4)
-    assert _back_n_quarters(2026, 1, 4) == (2025, 1)
-    assert _back_n_quarters(2026, 4, 0) == (2026, 4)
+    assert back_n_quarters(2026, 1, 1) == (2025, 4)
+    assert back_n_quarters(2026, 1, 4) == (2025, 1)
+    assert back_n_quarters(2026, 4, 0) == (2026, 4)
 
 
 # ───────────────────────── 季末 guard（§6.1 决策 A5） ─────────────────────────
@@ -339,7 +343,7 @@ async def test_update_stale_flags_lags_3_trade_days(session):
     """守护 §7：落后基准 ≥3 个已记录交易日 → stale=True；不足 3 个交易日 → False。"""
     from datetime import datetime, timezone as tz
 
-    from app.services.dividend_sync import update_stale_flags
+    from app.services.dividend_yield_refresh import update_stale_flags
 
     d1, d2, d3, d4, d5 = (date(2026, 1, 5 + i) for i in range(5))
     for d in (d1, d2, d3, d4, d5):
@@ -378,7 +382,7 @@ async def test_update_stale_flags_insufficient_base_noop(session):
     """守护 §7 降级：日历基准不足 3 个交易日时无从判定，不动任何行。"""
     from datetime import datetime, timezone as tz
 
-    from app.services.dividend_sync import update_stale_flags
+    from app.services.dividend_yield_refresh import update_stale_flags
 
     session.add(MarketTradeCalendar(trade_date=date(2026, 1, 5)))
     m = await _add_master(session, code="sh600003")
@@ -485,7 +489,7 @@ async def test_upsert_dividend_batch_duplicate_cell_warns(session, caplog):
     row = (
         await session.execute(select(SecurityDividend).where(SecurityDividend.master_id == m.id))
     ).scalars().one()
-    # _parse_cash 按「10派X元」折算每股：源值 1.5 → 每股 0.15（末行覆盖）
+    # parse_cash 按「10派X元」折算每股：源值 1.5 → 每股 0.15（末行覆盖）
     assert row.cash_per_share == Decimal("0.15")
 
 

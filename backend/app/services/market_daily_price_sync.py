@@ -38,8 +38,8 @@ from app.services.market_data_sync import (
     _row_get,
     infer_exchange,
 )
-from app.services.dividend_sync import (
-    _parse_date,
+from app.services.dividend_period import parse_date
+from app.services.dividend_yield_refresh import (
     is_trade_day,
     refresh_yields_for_masters,
     update_stale_flags,
@@ -180,7 +180,7 @@ class MarketDailyPriceSyncService:
             # 防线二：返回日期比对（§6.2——返回日期 ≠ 今日即整批跳过，节假日/停牌防污。
             # 同批混有停牌股（返回上一交易日日期）时也必须拦下，故收紧为全等比较）
             if resp_date_field is not None:
-                dates = {_parse_date(_row_get(r, resp_date_field)) for r in rows}
+                dates = {parse_date(_row_get(r, resp_date_field)) for r in rows}
                 dates.discard(None)
                 if dates and dates != {today}:
                     logger.warning(
@@ -363,7 +363,7 @@ async def _upsert_hist_rows(session, master_id: str, rows: list[dict], source: s
         return 0
     trace: dict[date, Decimal] = {}
     for r in rows:
-        d = _parse_date(r.get(_COL_HIST_DATE))
+        d = parse_date(r.get(_COL_HIST_DATE))
         if d is None:
             continue
         raw = r.get(_COL_HIST_CLOSE)

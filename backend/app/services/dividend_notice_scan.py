@@ -30,7 +30,8 @@ from app.models import (
     SecurityDividend,
 )
 from app.models.enums import DividendStatus, ReportPeriodType
-from app.services.dividend_sync import _parse_date, refresh_yields_for_masters
+from app.services.dividend_period import parse_date
+from app.services.dividend_yield_refresh import refresh_yields_for_masters
 from app.services.market_data_sync import (
     DIVIDEND_LIST_CAT_ID,
     NOTICE_CAT_ID,
@@ -268,8 +269,8 @@ class DividendNoticeScanService:
             if cash is None:
                 continue
             progress = str(_row_get(r, _COL_SINA_PROGRESS) or "")
-            ex_date = _parse_date(_row_get(r, _COL_SINA_EXDATE))
-            ann_raw = _parse_date(_row_get(r, _COL_SINA_ANN))
+            ex_date = parse_date(_row_get(r, _COL_SINA_EXDATE))
+            ann_raw = parse_date(_row_get(r, _COL_SINA_ANN))
             # 实施判定：进度含「实施」且除权日非空（§6.8）
             is_impl = "实施" in progress and ex_date is not None
             # announcement_date = 新浪行公告日期（实施行）或公告扫描命中日（§6.8）
