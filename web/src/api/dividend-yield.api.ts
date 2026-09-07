@@ -86,3 +86,8 @@ export function updateDividendYieldSettings(
     payload,
   );
 }
+
+/** 手动全量重建股息率派生快照（admin-only；替代原系统定时任务） */
+export function rebuildDividendYield(): Promise<{ summary: string }> {
+  return http.post<{ summary: string }>('/dividend-yield/rebuild');
+}

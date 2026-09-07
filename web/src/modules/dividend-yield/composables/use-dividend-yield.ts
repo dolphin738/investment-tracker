@@ -22,6 +22,7 @@ import {
   getDividendYieldRank,
   getDividendYieldSettings,
   getDividendYieldTop20,
+  rebuildDividendYield,
   updateDividendYieldSettings,
   type DividendYieldRankFilters,
 } from '@/api/dividend-yield.api';
@@ -160,5 +161,22 @@ export function useDividendYieldInterfaces(
     queryFn: () => listAllInterfaces(),
     enabled: computed(() => Boolean(toValue(enabled))),
     staleTime: 5 * 60 * 1000,
+  });
+}
+
+/**
+ * 手动全量重建股息率派生快照（admin-only；替代原系统定时任务 DIVIDEND_YIELD_REBUILD）。
+ * 成功后失效榜单与 Top20 查询，使排名页立即反映重建结果。
+ */
+export function useRebuildDividendYield() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => rebuildDividendYield(),
+    onSuccess: (data) => {
+      toast.success(data.summary || '股息率全量重建已完成');
+      queryClient.invalidateQueries({ queryKey: [DIVIDEND_YIELD_KEY[0], 'rank'] });
+      queryClient.invalidateQueries({ queryKey: [DIVIDEND_YIELD_KEY[0], 'top20'] });
+    },
+    onError: () => toast.error('全量重建失败，请稍后重试'),
   });
 }

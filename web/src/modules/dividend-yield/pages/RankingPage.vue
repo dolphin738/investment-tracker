@@ -33,6 +33,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
+import { Button } from '@/components/ui/button';
+import { Loader2 } from 'lucide-vue-next';
 import {
   Select,
   SelectContent,
@@ -42,7 +44,7 @@ import {
 } from '@/components/ui/select';
 import { cn, formatPercent, formatCurrency } from '@/lib/utils';
 import { useIsAdmin } from '@/stores/auth.store';
-import { useRank } from '../composables/use-dividend-yield';
+import { useRank, useRebuildDividendYield } from '../composables/use-dividend-yield';
 import { useYieldThresholds } from '../composables/use-yield-thresholds';
 import SecurityDetailPanel from '../components/SecurityDetailPanel.vue';
 import type { DividendYieldSort } from '@/api/types';
@@ -115,6 +117,13 @@ function selectRow(
 function modeLabel(mode: 'TTM' | 'LFY'): string {
   return mode === 'TTM' ? 'TTM' : 'LFY';
 }
+
+/** 手动全量重建（admin-only；替代原系统定时任务） */
+const rebuild = useRebuildDividendYield();
+const rebuilding = computed(() => rebuild.isPending.value);
+function onRebuild(): void {
+  rebuild.mutate();
+}
 </script>
 
 <template>
@@ -175,6 +184,17 @@ function modeLabel(mode: 'TTM' | 'LFY'): string {
         <Switch id="dy-include-no-div" v-model="fIncludeNoDividend" />
         <Label for="dy-include-no-div" class="text-xs">显示两年无分红</Label>
       </div>
+      <Button
+        v-if="isAdmin"
+        variant="outline"
+        size="sm"
+        class="ml-auto self-end"
+        :disabled="rebuilding"
+        @click="onRebuild"
+      >
+        <Loader2 v-if="rebuilding" class="mr-1 h-4 w-4 animate-spin" />
+        全量重建
+      </Button>
     </div>
 
     <Card>
