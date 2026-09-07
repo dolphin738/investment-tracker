@@ -1,14 +1,20 @@
 /**
- * modules/account/__tests__/account-page.test.ts — 账户页验收（对齐 React account-portfolio-table.test.tsx）
+ * modules/account/__tests__/account-page.test.ts — 账户中心并入设置页后的验收
  *
- * 锁死对齐 React 版 web/src/pages/AccountPage.tsx 的行为契约：
- * 1. 四卡结构：个人信息（只读 + 跳转设置）/ 资产全景 / 数据统计 / 我的组合
+ * 账户页（/account）已整体并入设置页「账户」页签（SettingsPage.vue），本文件
+ * 宿主切换为 SettingsPage（经 ?tab=account 深链初始定位到账户 TAB），锁定原
+ * AccountPage 的行为契约：
+ * 1. 资产全景 / 数据统计 / 我的组合 / 行情自动同步 四卡齐备
  * 2. 我的组合统一表格：9 列表头 + 管理操作列（设为默认 / 编辑 / 归档 / 删除）
  * 3. 已归档组合：显示「已归档」标记，「设为默认」disabled（后端不允许归档组合为默认）
  * 4. SYS-P0-05 四态：净值 / 当年% / 更新日为 null 渲染「—」，绝不渲染成 0
  * 5. 删除是破坏性操作：点击后必须弹二次确认，确认后才落到删除 mutation
  * 6. 资产全景：组合数 / 合计总资产 / 合计净投入 / 合计浮动盈亏
  * 7. 数据统计：出入金笔数 / 证券买卖笔数 / 总资产记录天数 / 账户使用天数
+ *
+ * 原「个人信息卡只读」用例随 AccountInfoCard 一并移除：个人信息展示与安全
+ * 操作（改邮箱 / 改密码 / 编辑资料）现由设置页账户卡直接承载，卡内不再有
+ * 「只读 + 跳转」的间接层。
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -16,7 +22,7 @@ import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import { createMemoryHistory, createRouter } from 'vue-router';
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query';
-import AccountPage from '../pages/AccountPage.vue';
+import SettingsPage from '@/modules/settings/pages/SettingsPage.vue';
 import type { AccountStats, PortfolioSummary, UserPreference } from '@/api/types';
 import type { Portfolio } from '@/lib/types';
 
@@ -139,6 +145,7 @@ const apiMocks = vi.hoisted(() => ({
   setDefaultPortfolio: vi.fn(),
   clearPortfolioData: vi.fn(),
   getPreferences: vi.fn(),
+  getQuoteSync: vi.fn(),
 }));
 
 vi.mock('@/api/auth.api', () => ({
@@ -171,9 +178,44 @@ vi.mock('@/api/preference.api', () => ({
   updatePreferences: vi.fn(),
 }));
 
+vi.mock('@/api/quote-sync.api', () => ({
+  getQuoteSync: apiMocks.getQuoteSync,
+  setQuoteSync: vi.fn(),
+  triggerQuoteSync: vi.fn(),
+}));
+
 vi.mock('@/composables/use-toast', () => ({
   toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }),
 }));
+
+// ---------------------------------------------------------------------------
+// vi.mock：非账户 TAB 的宿主依赖（对话框 / 数据管理 / 偏好 TAB），仅 stub 卸负担
+// ---------------------------------------------------------------------------
+
+/** vi.mock 工厂会被提升执行，必须用函数声明（提升）而非 const（TDZ） */
+function stubComponent(name: string): () => { default: { name: string; template: string } } {
+  return () => ({
+    default: { name, template: '<div />' },
+  });
+}
+
+vi.mock('vue-router', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('vue-router')>();
+  return {
+    ...actual,
+    // 深链定位：?tab=account 使设置页初始即渲染账户 TAB（/account 重定向落地点）
+    useRoute: () => ({ query: { tab: 'account' } }),
+  };
+});
+
+vi.mock('@/modules/account/components/ChangeEmailDialog.vue', stubComponent('ChangeEmailDialogStub'));
+vi.mock('@/modules/account/components/ChangePasswordDialog.vue', stubComponent('ChangePasswordDialogStub'));
+vi.mock('@/modules/account/components/EditProfileDialog.vue', stubComponent('EditProfileDialogStub'));
+vi.mock('@/modules/data-transfer/components/ExportPanel.vue', stubComponent('ExportPanelStub'));
+vi.mock('@/modules/data-transfer/components/ImportDialog.vue', stubComponent('ImportDialogStub'));
+vi.mock('@/modules/data-transfer/components/ImportTemplateButtons.vue', stubComponent('ImportTemplateButtonsStub'));
+vi.mock('@/modules/settings/components/SettingsPreferencesTab.vue', stubComponent('SettingsPreferencesTabStub'));
 
 // ---------------------------------------------------------------------------
 // 挂载脚手架
@@ -189,7 +231,7 @@ async function settle(): Promise<void> {
   await flushPromises();
 }
 
-function mountAccountPage(): VueWrapper {
+function mountSettingsAccountTab(): VueWrapper {
   const pinia = createPinia();
   setActivePinia(pinia);
   const queryClient = new QueryClient({
@@ -200,10 +242,10 @@ function mountAccountPage(): VueWrapper {
     routes: [
       { path: '/', component: { template: '<div />' } },
       { path: '/settings', component: { template: '<div />' } },
-      { path: '/account', component: { template: '<div />' } },
+      { path: '/login', component: { template: '<div />' } },
     ],
   });
-  return mount(AccountPage, {
+  return mount(SettingsPage, {
     attachTo: document.body,
     global: {
       plugins: [[VueQueryPlugin, { queryClient }], pinia, router],
@@ -234,6 +276,7 @@ beforeEach(() => {
   ]);
   apiMocks.listPortfolios.mockResolvedValue(fixtures.portfolios);
   apiMocks.getPreferences.mockResolvedValue(fixtures.preferences);
+  apiMocks.getQuoteSync.mockResolvedValue(null);
   apiMocks.archivePortfolio.mockResolvedValue({ ok: true });
   apiMocks.deletePortfolio.mockResolvedValue({ ok: true });
   apiMocks.setDefaultPortfolio.mockResolvedValue({
@@ -248,23 +291,23 @@ afterEach(() => {
   document.body.innerHTML = '';
 });
 
-describe('AccountPage — 账户中心（对齐 React 4 卡契约）', () => {
-  it('个人信息卡只读：无编辑入口，仅「前往设置修改 →」跳转', async () => {
-    wrapper = mountAccountPage();
+describe('设置页账户 TAB — 只读聚合卡（对齐原账户页契约）', () => {
+  it('账户卡承载个人信息与安全操作（原「前往账户中心」跳转已随并入移除）', async () => {
+    wrapper = mountSettingsAccountTab();
     await settle();
 
-    expect(wrapper.text()).toContain('个人信息');
     expect(wrapper.text()).toContain('爱丽丝');
     expect(wrapper.text()).toContain('alice@example.com');
-    expect(wrapper.text()).toContain('前往设置修改 →');
-    // 卡内不得出现编辑 / 改邮箱 / 改密码入口（契约：修改在设置页）
-    expect(wrapper.text()).not.toContain('编辑资料');
-    expect(wrapper.text()).not.toContain('修改邮箱');
-    expect(wrapper.text()).not.toContain('修改密码');
+    // 原账户页个人信息卡特有的「注册时间」已并入账户卡资料明细
+    expect(wrapper.text()).toContain('注册时间');
+    // 安全操作入口齐备（原 AccountInfoCard 无编辑入口的契约随合并失效）
+    expect(wrapper.text()).toContain('编辑资料');
+    expect(wrapper.text()).toContain('修改邮箱');
+    expect(wrapper.text()).toContain('修改密码');
   });
 
   it('资产全景卡渲染四格合计（组合数 / 总资产 / 净投入 / 浮动盈亏）', async () => {
-    wrapper = mountAccountPage();
+    wrapper = mountSettingsAccountTab();
     await settle();
 
     const overview = wrapper.find('.xl\\:col-span-5');
@@ -280,10 +323,10 @@ describe('AccountPage — 账户中心（对齐 React 4 卡契约）', () => {
   });
 
   it('数据统计卡渲染六格（出入金 / 买卖笔数 / 记录天数 / 使用天数 / 起止日期）', async () => {
-    wrapper = mountAccountPage();
+    wrapper = mountSettingsAccountTab();
     await settle();
 
-    const statsCard = wrapper.find('.xl\\:col-span-4');
+    const statsCard = wrapper.find('.xl\\:col-span-7');
     expect(statsCard.text()).toContain('数据统计');
     expect(statsCard.text()).toContain('出入金笔数');
     expect(statsCard.text()).toContain('12');
@@ -298,9 +341,9 @@ describe('AccountPage — 账户中心（对齐 React 4 卡契约）', () => {
   });
 });
 
-describe('AccountPage — 「我的组合」统一表格（唯一组合管理平面）', () => {
+describe('设置页账户 TAB — 「我的组合」统一表格（唯一组合管理平面）', () => {
   it('统一表格渲染出业绩列 + 管理操作列（设为默认 / 编辑 / 归档 / 删除）', async () => {
-    wrapper = mountAccountPage();
+    wrapper = mountSettingsAccountTab();
     await settle();
 
     // 表头 9 列：业绩列与管理列同表
@@ -329,7 +372,7 @@ describe('AccountPage — 「我的组合」统一表格（唯一组合管理平
   });
 
   it('已归档组合显示「已归档」标记，且「设为默认」按钮 disabled', async () => {
-    wrapper = mountAccountPage();
+    wrapper = mountSettingsAccountTab();
     await settle();
 
     const row = await findPortfolioRow('已归档组合');
@@ -352,7 +395,7 @@ describe('AccountPage — 「我的组合」统一表格（唯一组合管理平
   });
 
   it('性能列 null 渲染为「—」而非 0（SYS-P0-05 四态）', async () => {
-    wrapper = mountAccountPage();
+    wrapper = mountSettingsAccountTab();
     await settle();
 
     const archivedRow = wrapper!
@@ -376,7 +419,7 @@ describe('AccountPage — 「我的组合」统一表格（唯一组合管理平
   });
 
   it('点击删除弹出二次确认，确认前不会调用删除 mutation', async () => {
-    wrapper = mountAccountPage();
+    wrapper = mountSettingsAccountTab();
     await settle();
 
     const activeRow = wrapper!

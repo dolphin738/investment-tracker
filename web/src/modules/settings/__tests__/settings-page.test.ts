@@ -222,6 +222,41 @@ vi.mock('@/modules/data-transfer/components/ImportTemplateButtons.vue', () => ({
   }),
 }));
 
+// 账户页并入后账户 TAB 新增的四卡：偏好用例不与其交互，stub 掉避免拉入
+// account.api / overview.api / quote-sync.api 等未 mock 的请求层
+vi.mock('@/modules/account/components/AssetOverviewCard.vue', () => ({
+  default: defineComponent({
+    name: 'AssetOverviewCardStub',
+    setup() {
+      return () => null;
+    },
+  }),
+}));
+vi.mock('@/modules/account/components/StatsOverviewCard.vue', () => ({
+  default: defineComponent({
+    name: 'StatsOverviewCardStub',
+    setup() {
+      return () => null;
+    },
+  }),
+}));
+vi.mock('@/modules/account/components/PortfolioManagementCard.vue', () => ({
+  default: defineComponent({
+    name: 'PortfolioManagementCardStub',
+    setup() {
+      return () => null;
+    },
+  }),
+}));
+vi.mock('@/modules/account/components/AutoSyncCard.vue', () => ({
+  default: defineComponent({
+    name: 'AutoSyncCardStub',
+    setup() {
+      return () => null;
+    },
+  }),
+}));
+
 // ---------------------------------------------------------------------------
 // helpers
 // ---------------------------------------------------------------------------
