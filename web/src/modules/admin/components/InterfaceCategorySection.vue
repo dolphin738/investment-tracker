@@ -7,7 +7,7 @@
  * 分类下已配置接口时删除按钮禁用（后端对两者亦有 400 保护）。
  */
 
-import { Pencil, Plus, Trash2 } from 'lucide-vue-next';
+import { Pencil, Trash2 } from 'lucide-vue-next';
 import { ref } from 'vue';
 import { Button } from '@/components/ui/button';
 import DynamicIcon from '@/components/common/DynamicIcon.vue';
@@ -90,24 +90,19 @@ function handleDeleteDialogOpenChange(open: boolean): void {
     queueMicrotask(() => (deleteId.value = null));
   }
 }
+
+/** 暴露给父页面（AdminPage），使其可在顶层 Tab 栏右侧放置「新增分类」按钮 */
+defineExpose({ openCreate });
 </script>
 
 <template>
   <Card>
     <CardHeader>
-      <div class="flex items-start justify-between gap-4">
-        <div>
-          <CardTitle class="text-base">接口分类管理</CardTitle>
-          <CardDescription>
-            分类即接口用途（如「证券列表」拉取证券主数据、「证券行情」拉取价格）；
-            可调整展示名/图标/排序，可新增分类；分类下已配置接口时不可删除
-          </CardDescription>
-        </div>
-        <Button size="sm" @click="openCreate">
-          <Plus class="mr-1 h-3.5 w-3.5" />
-          新增分类
-        </Button>
-      </div>
+      <CardTitle class="text-base">接口分类管理</CardTitle>
+      <CardDescription>
+        分类即接口用途（如「证券列表」拉取证券主数据、「证券行情」拉取价格）；
+        可调整展示名/图标/排序，可新增分类；分类下已配置接口时不可删除
+      </CardDescription>
     </CardHeader>
     <CardContent>
       <p v-if="isLoading" class="py-8 text-center text-sm text-muted-foreground">

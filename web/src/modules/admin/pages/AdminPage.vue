@@ -60,6 +60,8 @@ const active = usePersistentTab(ADMIN_MODULE_KEY, MODULES[0].key, MODULE_KEYS);
 
 /** 数据来源板块 ref：顶层「新增数据来源」按钮调用其 openCreate（对齐定时任务页 Tab 栏右侧操作） */
 const quoteProviderRef = ref<InstanceType<typeof QuoteProviderSection> | null>(null);
+/** 接口分类板块 ref：顶层「新增分类」按钮调用其 openCreate */
+const interfaceCategoryRef = ref<InstanceType<typeof InterfaceCategorySection> | null>(null);
 </script>
 
 <template>
@@ -86,11 +88,19 @@ const quoteProviderRef = ref<InstanceType<typeof QuoteProviderSection> | null>(n
             <Plus class="mr-1 h-4 w-4" />
             新增数据来源
           </Button>
+          <Button
+            v-else-if="active === 'interface-category'"
+            size="sm"
+            @click="interfaceCategoryRef?.openCreate()"
+          >
+            <Plus class="mr-1 h-4 w-4" />
+            新增分类
+          </Button>
         </div>
       </Tabs>
 
       <QuoteProviderSection v-if="active === 'quote-provider'" ref="quoteProviderRef" />
-      <InterfaceCategorySection v-else-if="active === 'interface-category'" />
+      <InterfaceCategorySection v-else-if="active === 'interface-category'" ref="interfaceCategoryRef" />
       <StockListTestSection v-else />
     </template>
   </div>
