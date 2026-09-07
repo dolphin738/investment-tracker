@@ -275,7 +275,7 @@ function handleSaveSettings(): void {
 
         <!-- 公司公告源 -->
         <div class="space-y-2">
-          <Label for="dy-announcement-source">公司公告接口（特别分红扫描，§6.8）</Label>
+          <Label for="dy-announcement-source">公司公告接口</Label>
           <Select v-model="settingsForm.announcementSourceInterfaceId">
             <SelectTrigger id="dy-announcement-source" class="w-full">
               <SelectValue placeholder="选择公司公告接口" />
