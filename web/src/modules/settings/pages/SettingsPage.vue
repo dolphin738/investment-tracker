@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * modules/settings/pages/SettingsPage.vue — 设置页
+ * modules/settings/pages/SettingsPage.vue — 个人中心（路由 /settings，原「设置页」）
  *
  * 自 React 版 web/src/pages/settings.tsx 平移，包含：
  * - 账户：用户信息摘要 + 操作入口（修改邮箱 / 修改密码 / 编辑资料 / 退出登录）
@@ -146,7 +146,7 @@ function confirmClearData(): void {
 <template>
   <div class="space-y-6">
     <PageHeader
-      title="设置"
+      title="个人中心"
       description="账户中心与偏好设置 · 组合管理在「账户」页签的「我的组合」卡完成"
     />
 
@@ -159,7 +159,7 @@ function confirmClearData(): void {
         <TabsTrigger value="danger">危险操作区</TabsTrigger>
       </TabsList>
 
-      <!-- 账户（账户中心已整体并入本页签：信息摘要 + 安全操作 + 资产/统计 + 组合管理 + 行情自动同步） -->
+      <!-- 账户（账户中心已整体并入本页签：信息摘要 + 安全操作 + 资产/统计 + 组合管理） -->
       <TabsContent value="account" class="space-y-6">
       <Card>
       <CardHeader>
@@ -238,14 +238,13 @@ function confirmClearData(): void {
 
       <!-- 我的组合：全站唯一组合管理平面（ACC-P0-04，可写），独占整行 -->
       <PortfolioManagementCard />
-
-      <!-- 行情自动同步（可写），独占整行 -->
-      <AutoSyncCard />
       </TabsContent>
 
-      <!-- 偏好设置 -->
-      <TabsContent value="preferences">
+      <!-- 偏好设置（含持仓行情同步卡） -->
+      <TabsContent value="preferences" class="space-y-6">
         <SettingsPreferencesTab />
+        <!-- 持仓行情同步（可写），独占整行 -->
+        <AutoSyncCard />
       </TabsContent>
 
     <!-- 数据管理（T05 · SET-P0-03 导出 / SET-P0-04 导入 / FLOW-P1-01） -->

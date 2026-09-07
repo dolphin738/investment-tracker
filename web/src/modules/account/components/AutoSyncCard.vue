@@ -1,8 +1,8 @@
 <script setup lang="ts">
 /**
- * modules/account/components/AutoSyncCard.vue — 行情自动同步卡（「我的组合」卡上方，整行）
+ * modules/account/components/AutoSyncCard.vue — 持仓行情同步卡（偏好设置分页，整行）
  *
- * 普通用户可设置行情自动同步：
+ * 普通用户可设置持仓行情自动同步：
  * - 启用开关（Switch）+ 周期（每日/每周/每月）+ 时间（<input type="time"> "HH:MM"）
  * - 每周额外选「星期几」(weekday)、每月额外选「几号」(day_of_month)
  * - 「保存设置」提交 PUT /api/quote-sync（非启用也允许保存；保存后后端重载调度）
@@ -137,9 +137,9 @@ function handleTrigger(): void {
 <template>
   <Card>
     <CardHeader>
-      <CardTitle class="text-base">行情自动同步</CardTitle>
+      <CardTitle class="text-base">持仓行情同步</CardTitle>
       <CardDescription>
-        设置周期后，系统将自动同步各组合的行情数据；保存后自动重新载入调度。
+        设置周期后，系统将自动同步各组合的持仓行情数据；保存后自动重新载入调度。
       </CardDescription>
     </CardHeader>
     <CardContent>

@@ -1,5 +1,5 @@
 /**
- * modules/account/composables/use-quote-sync.ts — 行情自动同步 vue-query hooks
+ * modules/account/composables/use-quote-sync.ts — 持仓行情同步 vue-query hooks
  *
  * - useQuoteSync：读取当前用户行情同步配置（queryKey 含 token，按用户隔离缓存）。
  * - useSetQuoteSync：保存配置，成功后失效并 toast 反馈。

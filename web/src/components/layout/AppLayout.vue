@@ -151,7 +151,7 @@ function handleLogout(): void {
             <DropdownMenuSeparator />
             <DropdownMenuItem @click="router.push(ROUTE_PATH.SETTINGS)">
               <Settings class="mr-2 h-4 w-4" />
-              设置
+              个人中心
             </DropdownMenuItem>
             <DropdownMenuItem @click="handleLogout">
               <LogOut class="mr-2 h-4 w-4" />

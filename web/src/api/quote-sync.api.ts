@@ -1,5 +1,5 @@
 /**
- * api/quote-sync.api.ts — 行情自动同步配置 API（账户页「行情自动同步」卡）
+ * api/quote-sync.api.ts — 持仓行情同步配置 API（偏好设置分页「持仓行情同步」卡）
  *
  * 对应后端 /api/quote-sync（http 客户端已解包信封）：
  * - GET  /quote-sync           — 当前用户行情同步配置（任意登录用户可调用）
