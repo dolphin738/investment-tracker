@@ -32,7 +32,7 @@ from app.models.enums import (
     ReportPeriodType,
     SecurityType,
 )
-from app.services.market_data_sync import DIVIDEND_LIST_CAT_ID
+from app.services.market_data_sync import DIVIDEND_LIST_CAT_ID, NOTICE_CAT_ID
 from tests.helpers import auth, env, register_login
 
 _DIVIDEND_CAT_ID = DIVIDEND_LIST_CAT_ID
@@ -266,6 +266,25 @@ async def _seed_category3_interfaces(session):
     return main_itf, detail_itf
 
 
+async def _seed_category4_interface(session, *, enabled: bool = True):
+    """分类 4「公司公告」+ 公告接口行（params 含 symbol，逐只形态），供公告源校验测试。"""
+    session.add(InterfaceCategory(id=NOTICE_CAT_ID, label="公司公告", system=True))
+    provider = SecuritiesDataProvider(
+        id=_uid(), name="akshare", access_method=QuoteProviderAccessMethod.SDK,
+        config={}, enabled=True,
+    )
+    session.add(provider)
+    await session.flush()
+    itf = QuoteInterface(
+        id=_uid(), provider_id=provider.id, category_id=NOTICE_CAT_ID,
+        name="沪深京 A 股公告", endpoint="stock_notice_report", enabled=enabled,
+        params={"symbol": "财务报告", "date": "20260907"},
+    )
+    session.add(itf)
+    await session.commit()
+    return itf
+
+
 @pytest.mark.asyncio
 async def test_settings_put_threshold_validation(session, client):
     """守护 §5.4/§12：阈值 0 < red < green <= 1，违规 400 不落库。"""
@@ -329,6 +348,75 @@ async def test_settings_put_interface_shape_validation(session, client):
     assert status == 200
     assert data["dividend_report_source"]["id"] == main_itf.id
     assert data["dividend_detail_source"]["id"] == detail_itf.id
+
+
+# ───────────────────────── 公告源可配置化（§15.3 T1 / §5.4） ─────────────────────────
+@pytest.mark.asyncio
+async def test_settings_put_announcement_source_valid(session, client):
+    """守护 §15.3 T1/§5.4：PUT 合法公告源（分类 4 + enabled + 逐只形态）→ 200，
+    响应含 announcement_source {id, name}。"""
+    admin = await _make_admin(session, client)
+    itf = await _seed_category4_interface(session)
+    h = auth(admin["token"])
+    r = await client.put(
+        "/api/dividend-yield/settings",
+        json={
+            "green_threshold": "0.05", "red_threshold": "0.03",
+            "announcement_source_interface_id": itf.id,
+        },
+        headers=h,
+    )
+    status, _, data, _ = env(r)
+    assert status == 200
+    assert data["announcement_source"] == {"id": itf.id, "name": "沪深京 A 股公告"}
+
+
+@pytest.mark.asyncio
+async def test_settings_put_announcement_source_wrong_category(session, client):
+    """守护 §15.3 T1/§5.4：公告源填分类 3 接口 → 400，message 含「分类不符」。"""
+    admin = await _make_admin(session, client)
+    main_itf, _ = await _seed_category3_interfaces(session)
+    h = auth(admin["token"])
+    r = await client.put(
+        "/api/dividend-yield/settings",
+        json={
+            "green_threshold": "0.05", "red_threshold": "0.03",
+            "announcement_source_interface_id": main_itf.id,
+        },
+        headers=h,
+    )
+    status, _, _, message = env(r)
+    assert status == 400
+    assert "分类不符" in message
+
+
+@pytest.mark.asyncio
+async def test_settings_put_announcement_source_disabled(session, client):
+    """守护 §15.3 T1/§5.4：公告源未启用 → 400（fail closed 不落库）。"""
+    admin = await _make_admin(session, client)
+    itf = await _seed_category4_interface(session, enabled=False)
+    h = auth(admin["token"])
+    r = await client.put(
+        "/api/dividend-yield/settings",
+        json={
+            "green_threshold": "0.05", "red_threshold": "0.03",
+            "announcement_source_interface_id": itf.id,
+        },
+        headers=h,
+    )
+    status, _, _, message = env(r)
+    assert status == 400
+    assert "未启用" in message
+
+
+@pytest.mark.asyncio
+async def test_settings_get_announcement_source_null_by_default(session, client):
+    """守护 §15.3 T1：GET /settings 未配置公告源时 announcement_source 为 null（契约扩展键）。"""
+    info = await register_login(client)
+    r = await client.get("/api/dividend-yield/settings", headers=auth(info["token"]))
+    status, _, data, _ = env(r)
+    assert status == 200
+    assert data["announcement_source"] is None
 
 
 # ───────────────────────── 可排序列扩到 5 列（§8.1，P2-6） ─────────────────────────
