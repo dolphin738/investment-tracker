@@ -18,7 +18,7 @@
  * - QUICK_RANGE_OPTIONS / RESOLVED 统一取自 '@/modules/query/quick-range'（唯一真相源）。
  */
 import { computed, ref } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { Loader2, Lock, LogOut, Mail, Pencil } from 'lucide-vue-next';
 import PageHeader from '@/components/common/PageHeader.vue';
 import {
@@ -54,8 +54,14 @@ import ImportTemplateButtons from '@/modules/data-transfer/components/ImportTemp
 import ChangeEmailDialog from '@/modules/account/components/ChangeEmailDialog.vue';
 import ChangePasswordDialog from '@/modules/account/components/ChangePasswordDialog.vue';
 import EditProfileDialog from '@/modules/account/components/EditProfileDialog.vue';
+import AssetOverviewCard from '@/modules/account/components/AssetOverviewCard.vue';
+import StatsOverviewCard from '@/modules/account/components/StatsOverviewCard.vue';
+import PortfolioManagementCard from '@/modules/account/components/PortfolioManagementCard.vue';
+import AutoSyncCard from '@/modules/account/components/AutoSyncCard.vue';
 import { useAuthStore } from '@/stores/auth.store';
 import { usePortfolioStore } from '@/stores/portfolio.store';
+import { useProfile } from '@/modules/auth/composables/use-auth';
+import { formatDate } from '@/lib/utils';
 import {
   useClearPortfolioData,
   usePortfolios,
@@ -65,9 +71,15 @@ import { ROUTE_PATH } from '@/lib/constants';
 import SettingsPreferencesTab from '../components/SettingsPreferencesTab.vue';
 
 const router = useRouter();
+const route = useRoute();
 const authStore = useAuthStore();
 const user = computed(() => authStore.user);
 const portfolioStore = usePortfolioStore();
+
+// 账户页并入（ACC-P0-02 口径延续）：优先 GET /auth/profile 新鲜响应（回写 auth store），
+// 回退 auth store 从 localStorage 恢复的旧缓存（旧缓存可能缺 createdAt）
+const { data: freshProfile } = useProfile();
+const currentUser = computed(() => freshProfile.value ?? user.value);
 
 // 组合列表仍需读取：偏好区「默认组合」下拉、导出面板、导入对话框、清空数据都依赖它。
 const portfoliosQuery = usePortfolios();
@@ -80,8 +92,16 @@ const currentPortfolio = computed(
 // 数据管理：导入对话框开关（T05）
 const importOpen = ref(false);
 
-// 默认激活 TAB：偏好设置（既有测试直接 mount 后即访问偏好元素，需保证首帧可见）
-const activeTab = ref('preferences');
+// 默认激活 TAB：偏好设置（既有测试直接 mount 后即访问偏好元素，需保证首帧可见）；
+// 支持 ?tab=account 等深链定位（/account 重定向落地用）
+const VALID_TABS = ['account', 'preferences', 'data', 'danger'] as const;
+const queryTab = route.query.tab;
+const initialTab =
+  typeof queryTab === 'string' &&
+  (VALID_TABS as readonly string[]).includes(queryTab)
+    ? queryTab
+    : 'preferences';
+const activeTab = ref<string>(initialTab);
 
 // 账户修改对话框显隐
 const emailDialogOpen = ref(false);
@@ -100,8 +120,8 @@ const clearDataMutation = useClearPortfolioData();
 
 /** 手机号脱敏展示 */
 const maskedPhone = computed(() =>
-  user.value?.phone
-    ? `${user.value.phone.slice(0, 3)}****${user.value.phone.slice(7)}`
+  currentUser.value?.phone
+    ? `${currentUser.value.phone.slice(0, 3)}****${currentUser.value.phone.slice(7)}`
     : '-',
 );
 
@@ -127,7 +147,7 @@ function confirmClearData(): void {
   <div class="space-y-6">
     <PageHeader
       title="设置"
-      description="管理账户与偏好设置（新建 / 编辑 / 归档 / 删除组合请前往账户页「我的组合」）"
+      description="账户中心与偏好设置 · 组合管理在「账户」页签的「我的组合」卡完成"
     />
 
     <!-- 页签：账户 / 偏好设置 / 数据管理 / 危险操作区 -->
@@ -139,50 +159,46 @@ function confirmClearData(): void {
         <TabsTrigger value="danger">危险操作区</TabsTrigger>
       </TabsList>
 
-      <!-- 账户 -->
-      <TabsContent value="account">
+      <!-- 账户（账户中心已整体并入本页签：信息摘要 + 安全操作 + 资产/统计 + 组合管理 + 行情自动同步） -->
+      <TabsContent value="account" class="space-y-6">
       <Card>
       <CardHeader>
         <CardTitle class="text-base">账户</CardTitle>
         <CardDescription>当前登录用户信息与安全设置</CardDescription>
       </CardHeader>
       <CardContent class="space-y-4">
-        <!-- 头像 + 昵称 + 邮箱 + 账户中心入口（§7.8 L1315） -->
+        <!-- 头像 + 昵称 + 邮箱 -->
         <div class="flex flex-col gap-4 sm:flex-row sm:items-center">
           <UserAvatar
             size="lg"
-            :src="user?.avatar"
-            :name="user?.name"
-            :email="user?.email ?? ''"
+            :src="currentUser?.avatar"
+            :name="currentUser?.name"
+            :email="currentUser?.email ?? ''"
           />
           <div class="min-w-0">
             <p class="truncate text-base font-medium">
-              {{ user?.name || '未设置' }}
+              {{ currentUser?.name || '未设置' }}
             </p>
             <p class="truncate text-sm text-muted-foreground">
-              {{ user?.email ?? '-' }}
+              {{ currentUser?.email ?? '-' }}
             </p>
           </div>
-          <Button
-            variant="link"
-            size="sm"
-            class="sm:ml-auto"
-            @click="router.push(ROUTE_PATH.ACCOUNT)"
-          >
-            前往账户中心 →
-          </Button>
         </div>
 
-        <!-- 资料明细 -->
-        <div class="grid grid-cols-1 gap-4 text-sm sm:grid-cols-2">
+        <!-- 资料明细（含原账户页个人信息卡特有的「注册时间」） -->
+        <div class="grid grid-cols-1 gap-4 text-sm sm:grid-cols-3">
           <div>
             <Label class="text-xs text-muted-foreground">手机号</Label>
             <p class="mt-1 font-mono">{{ maskedPhone }}</p>
           </div>
           <div>
+            <Label class="text-xs text-muted-foreground">注册时间</Label>
+            <p class="mt-1">{{ formatDate(currentUser?.createdAt) }}</p>
+          </div>
+          <div>
             <Label class="text-xs text-muted-foreground">个人简介</Label>
             <p class="mt-1 whitespace-pre-wrap break-words">
-              {{ user?.bio || '-' }}
+              {{ currentUser?.bio || '-' }}
             </p>
           </div>
         </div>
@@ -213,6 +229,18 @@ function confirmClearData(): void {
         </p>
       </CardContent>
     </Card>
+
+      <!-- 原账户页只读聚合卡（ACC-P0-03 / ACC-P0-06）：资产全景 + 数据统计 -->
+      <div class="grid grid-cols-1 gap-6 xl:grid-cols-12">
+        <AssetOverviewCard class="xl:col-span-5" />
+        <StatsOverviewCard class="xl:col-span-7" />
+      </div>
+
+      <!-- 我的组合：全站唯一组合管理平面（ACC-P0-04，可写），独占整行 -->
+      <PortfolioManagementCard />
+
+      <!-- 行情自动同步（可写），独占整行 -->
+      <AutoSyncCard />
       </TabsContent>
 
       <!-- 偏好设置 -->

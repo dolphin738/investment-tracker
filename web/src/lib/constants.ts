@@ -32,7 +32,6 @@ export const ROUTE_PATH = {
   NAV_ANALYSIS: '/analysis/nav',
   DIVIDEND_YIELD: '/dividend-yield',
   DIVIDEND_YIELD_TOP: '/dividend-yield/top',
-  ACCOUNT: '/account',
   SETTINGS: '/settings',
   ADMIN: '/admin',
   ADMIN_TASKS: '/admin/tasks',

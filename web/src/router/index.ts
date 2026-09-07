@@ -10,7 +10,7 @@
  *   /snapshots      → 历史总资产记录页（受保护）
  *   /analysis/xirr  → XIRR 分析页（受保护）
  *   /analysis/nav   → 净值分析页（受保护）
- *   /account        → 账户页（受保护）
+ *   /account        → /settings?tab=account 重定向（账户页已并入设置页）
  *   /settings       → 设置页（受保护）
  *   /admin          → 系统管理页（受保护）
  *   /transactions   → /cashflows 重定向（FLOW-P0-01 前端 301 语义）
@@ -94,9 +94,10 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/modules/dividend-yield/pages/TopPage.vue'),
       },
       {
+        // 账户页已整体并入设置页「账户」页签；旧链接 301 语义重定向，深链定位到账户 TAB
         path: 'account',
         name: 'account',
-        component: () => import('@/modules/account/pages/AccountPage.vue'),
+        redirect: { path: ROUTE_PATH.SETTINGS, query: { tab: 'account' } },
       },
       {
         path: 'settings',

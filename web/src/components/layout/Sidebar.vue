@@ -26,7 +26,6 @@ import {
   Shield,
   TrendingUp,
   Percent,
-  User,
 } from 'lucide-vue-next';
 import { ROUTE_PATH } from '@/lib/constants';
 import { cn } from '@/lib/utils';
@@ -59,7 +58,6 @@ const NAV_ITEMS: NavItem[] = [
   { to: ROUTE_PATH.XIRR_ANALYSIS, label: '收益分析', icon: TrendingUp },
   { to: ROUTE_PATH.NAV_ANALYSIS, label: '净值分析', icon: LineChart },
   { to: ROUTE_PATH.DIVIDEND_YIELD, label: '股息率排名', icon: Percent },
-  { to: ROUTE_PATH.ACCOUNT, label: '账户', icon: User },
   { to: ROUTE_PATH.SETTINGS, label: '设置', icon: Settings },
   {
     label: '系统管理',
