@@ -124,6 +124,59 @@ function modeLabel(mode: 'TTM' | 'LFY'): string {
       description="按 §8.1 过滤与排序浏览全部有分红记录公司；支持过滤态口径与阈值着色"
     />
 
+    <!-- 过滤条（§8.1）：置于榜单框外，与持仓等页统一布局 -->
+    <div class="flex flex-wrap items-end gap-4">
+      <div class="space-y-1.5">
+        <Label class="text-xs text-muted-foreground">交易所</Label>
+        <Select v-model="fExchange">
+          <SelectTrigger class="w-28">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="ALL">全部</SelectItem>
+            <SelectItem value="SH">上交所</SelectItem>
+            <SelectItem value="SZ">深交所</SelectItem>
+            <SelectItem value="BJ">北交所</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      <div class="space-y-1.5">
+        <Label class="text-xs text-muted-foreground">口径</Label>
+        <Select v-model="fMode">
+          <SelectTrigger class="w-28">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="ALL">全部</SelectItem>
+            <SelectItem value="TTM">TTM</SelectItem>
+            <SelectItem value="LFY">LFY</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      <div class="space-y-1.5">
+        <Label class="text-xs text-muted-foreground" for="dy-min-cons">
+          连续年数 ≥
+        </Label>
+        <Input
+          id="dy-min-cons"
+          v-model="fMinConsecutive"
+          type="number"
+          min="0"
+          max="5"
+          class="w-24"
+          placeholder="不限"
+        />
+      </div>
+      <div class="flex items-center gap-2 pb-1.5">
+        <Switch id="dy-include-proposed" v-model="fIncludeProposed" />
+        <Label for="dy-include-proposed" class="text-xs">含预案</Label>
+      </div>
+      <div class="flex items-center gap-2 pb-1.5">
+        <Switch id="dy-include-no-div" v-model="fIncludeNoDividend" />
+        <Label for="dy-include-no-div" class="text-xs">显示两年无分红</Label>
+      </div>
+    </div>
+
     <Card>
       <CardHeader>
         <CardTitle class="text-base">全部榜单</CardTitle>
@@ -132,59 +185,6 @@ function modeLabel(mode: 'TTM' | 'LFY'): string {
         </CardDescription>
       </CardHeader>
       <CardContent class="space-y-4">
-        <!-- 过滤条 -->
-        <div class="flex flex-wrap items-end gap-4">
-          <div class="space-y-1.5">
-            <Label class="text-xs text-muted-foreground">交易所</Label>
-            <Select v-model="fExchange">
-              <SelectTrigger class="w-28">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="ALL">全部</SelectItem>
-                <SelectItem value="SH">上交所</SelectItem>
-                <SelectItem value="SZ">深交所</SelectItem>
-                <SelectItem value="BJ">北交所</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div class="space-y-1.5">
-            <Label class="text-xs text-muted-foreground">口径</Label>
-            <Select v-model="fMode">
-              <SelectTrigger class="w-28">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="ALL">全部</SelectItem>
-                <SelectItem value="TTM">TTM</SelectItem>
-                <SelectItem value="LFY">LFY</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div class="space-y-1.5">
-            <Label class="text-xs text-muted-foreground" for="dy-min-cons">
-              连续年数 ≥
-            </Label>
-            <Input
-              id="dy-min-cons"
-              v-model="fMinConsecutive"
-              type="number"
-              min="0"
-              max="5"
-              class="w-24"
-              placeholder="不限"
-            />
-          </div>
-          <div class="flex items-center gap-2 pb-1.5">
-            <Switch id="dy-include-proposed" v-model="fIncludeProposed" />
-            <Label for="dy-include-proposed" class="text-xs">含预案</Label>
-          </div>
-          <div class="flex items-center gap-2 pb-1.5">
-            <Switch id="dy-include-no-div" v-model="fIncludeNoDividend" />
-            <Label for="dy-include-no-div" class="text-xs">显示两年无分红</Label>
-          </div>
-        </div>
-
         <TableSkeleton v-if="allRank.isLoading.value" :rows="8" :cols="6" />
         <EmptyState
           v-else-if="allItems.length === 0"
