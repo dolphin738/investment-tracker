@@ -83,15 +83,21 @@ function ratioToPercent(v: number | null): string {
   return v != null ? String(Number((v * 100).toFixed(4))) : '';
 }
 
-watch(dividendSettings, (s) => {
-  if (!s) return;
-  settingsForm.greenPercent = ratioToPercent(s.green_threshold);
-  settingsForm.redPercent = ratioToPercent(s.red_threshold);
-  settingsForm.dividendReportSourceInterfaceId = s.dividend_report_source?.id ?? '';
-  settingsForm.dividendDetailSourceInterfaceId = s.dividend_detail_source?.id ?? '';
-  settingsForm.priceSourceInterfaceId = s.price_source?.id ?? '';
-  settingsForm.announcementSourceInterfaceId = s.announcement_source?.id ?? '';
-});
+// immediate 必填：父页以 v-if 卸载非激活 TAB，vue-query 缓存命中时重挂载不再触发
+// 变更，非 immediate 的 watch 不会回填（同 SettingsPreferencesTab 已修的坑）。
+watch(
+  dividendSettings,
+  (s) => {
+    if (!s) return;
+    settingsForm.greenPercent = ratioToPercent(s.green_threshold);
+    settingsForm.redPercent = ratioToPercent(s.red_threshold);
+    settingsForm.dividendReportSourceInterfaceId = s.dividend_report_source?.id ?? '';
+    settingsForm.dividendDetailSourceInterfaceId = s.dividend_detail_source?.id ?? '';
+    settingsForm.priceSourceInterfaceId = s.price_source?.id ?? '';
+    settingsForm.announcementSourceInterfaceId = s.announcement_source?.id ?? '';
+  },
+  { immediate: true },
+);
 
 /** 百分数字符串 → 小数比率 / null（空串视为 null；非法输入返回 undefined 触发校验错误） */
 function percentToRatio(v: string): { ratio: number | null; invalid: boolean } {

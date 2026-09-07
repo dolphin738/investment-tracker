@@ -198,4 +198,24 @@ describe('GlobalSettingsDividendTab — 四源下拉与提供方名拼接（§15
 
     wrapper.unmount();
   });
+
+  it('③ 卸载重挂载（缓存命中）表单仍回填（watch immediate 守护）', async () => {
+    // 父页用 v-if 卸载非激活 TAB：mock 的 settings ref 挂载时已有值（vue-query 缓存命中态）。
+    // 非 immediate 的 watch 在重挂载时不会触发 → 表单空白、误判「有未保存的更改」。
+    wrapper = await mountTab();
+    wrapper.unmount();
+
+    wrapper = await mountTab();
+    const selects = wrapper.findAll('select');
+    // 四个数据源下拉的模型值均回填为服务端配置
+    expect((selects[0].element as HTMLSelectElement).value).toBe('i1');
+    expect((selects[1].element as HTMLSelectElement).value).toBe('i2');
+    expect((selects[2].element as HTMLSelectElement).value).toBe('i3');
+    // 阈值回填 → settingsHasChanges 为 false → 保存按钮不因假差异而启用
+    const saveBtn = wrapper.findAll('button').find((b) => b.text().includes('保存股息率设置'));
+    expect(saveBtn).toBeDefined();
+    expect(saveBtn!.attributes('disabled')).toBeDefined();
+
+    wrapper.unmount();
+  });
 });
