@@ -43,7 +43,6 @@ from app.services.dividend_notice_scan import run_dividend_notice_scan
 from app.services.dividend_sync import (
     run_dividend_quarterly_fetch,
     run_dividend_retention_cleanup,
-    run_dividend_yield_rebuild,
 )
 from app.services.market_data_sync import MarketDataSyncService
 from app.services.market_daily_price_sync import run_market_daily_close_fetch
@@ -202,7 +201,6 @@ _HANDLERS: dict[JobTaskType, Callable[[JobConfig], Any]] = {
     JobTaskType.DIVIDEND_QUARTERLY_FETCH: run_dividend_quarterly_fetch,
     JobTaskType.MARKET_DAILY_CLOSE_FETCH: run_market_daily_close_fetch,
     JobTaskType.DIVIDEND_RETENTION_CLEANUP: run_dividend_retention_cleanup,
-    JobTaskType.DIVIDEND_YIELD_REBUILD: run_dividend_yield_rebuild,
     JobTaskType.DIVIDEND_NOTICE_SCAN: run_dividend_notice_scan,
 }
 

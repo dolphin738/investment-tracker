@@ -525,3 +525,29 @@ async def put_dividend_yield_settings(
         user_id=admin.user_id,
     )
     return await _settings_out(db, row)
+
+
+# --------------------------------------------------------------------------- #
+# 手动全量重建（替代原系统定时任务 DIVIDEND_YIELD_REBUILD）
+# --------------------------------------------------------------------------- #
+@router_dividend_yield.post("/rebuild")
+async def rebuild_dividend_yield(
+    admin: CurrentUser = Depends(require_admin),
+):
+    """手动全量重建股息率派生快照（替代原系统定时任务；admin-only）。
+
+    委托 dividend_sync.run_dividend_yield_rebuild 在独立会话内执行并提交，返回重建摘要
+    并写 AppLog 审计。重建可能耗时，前端按钮以 loading 态等待返回。
+    """
+    from app.services.dividend_sync import run_dividend_yield_rebuild
+
+    summary = await run_dividend_yield_rebuild(None)
+    await record(
+        level="info",
+        scope="admin",
+        module="dividend_yield_rebuild",
+        message="股息率全量重建（手动触发）",
+        detail={"summary": summary},
+        user_id=admin.user_id,
+    )
+    return {"summary": summary}
