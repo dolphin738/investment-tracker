@@ -6,8 +6,10 @@
 ``stock_history_dividend_detail``）逐只补充金额与实施事实，写入 SPECIAL 分红行。
 
 忠实实现 §6.8，不重写行情请求：
-- 公告源 = 分类 4 enabled 接口（``_interfaces_for_category``），``symbol=财务报告`` 一级
-  分类预过滤，**不得**按公告类型列过滤；公告接口缺失/停用 → fail fast raise。
+- 公告源可配置化（§5.4/§6.8）：优先读全局配置 ``announcement_source_interface_id``
+  （存在性 + 分类 4 + enabled 三重校验，fail closed 不静默回退）；未配置时回退分类 4
+  enabled 接口按 priority 升序首个（``_interfaces_for_category``）。``symbol=财务报告``
+  一级分类预过滤，**不得**按公告类型列过滤；公告接口缺失/停用 → fail fast raise。
 - 标题正则二筛白名单 = 代码常量（``_TITLE_*_RE``），改模式须补单测。
 - 新浪逐只补充 = 复用 ``_call_interface_raw``（串行 + ``_RATE_LIMITER`` 限速）。
 - SPECIAL 写入 = 西向去重 + PROPOSED→PAID + 取消置 REJECTED + 存量复查（§6.8 双向去重）。
@@ -98,14 +100,36 @@ class DividendNoticeScanService:
             return None
         return itf
 
-    async def scan(self, cfg: Any) -> str:
-        """每日公告扫描 + 特别分红补充（§6.8 全流程）。"""
-        day = today_app_tz()
-        # 第一步：公告源 = 分类 4 enabled 接口；缺失/停用 → fail fast
+    async def _resolve_notice_itf(
+        self, settings: Optional[DividendYieldSettings]
+    ) -> QuoteInterface:
+        """解析公告源（§5.4 可配置化）：优先读全局配置，未配置回退分类 4 priority 最小。
+
+        - 配置了 ``announcement_source_interface_id``：三重校验（存在性 + 分类 4 +
+          enabled），任一不符 → fail fast raise，**不静默回退**——把失效/非公告接口
+          悄悄换成其他分类 4 接口会掩盖配置错误（§5.4 fail closed 口径）。
+        - 未配置：回退分类 4 enabled 接口按 priority 升序首个（``_interfaces_for_category``
+          已按 priority 排序）；分类 4 无可用接口 → fail fast raise。
+        """
+        iid = settings.announcement_source_interface_id if settings else None
+        if iid:
+            itf = await self.session.get(QuoteInterface, iid)
+            if itf is None or itf.category_id != NOTICE_CAT_ID or not itf.enabled:
+                raise RuntimeError(
+                    "配置的公司公告接口不存在、分类不符或已停用，fail fast 跳过本次公告扫描"
+                )
+            return itf
         notice_itfs = await self._mds._interfaces_for_category(NOTICE_CAT_ID)
         if not notice_itfs:
             raise RuntimeError("公司公告接口（分类4）缺失或已停用，fail fast 跳过本次公告扫描")
-        notice_itf = notice_itfs[0]
+        return notice_itfs[0]
+
+    async def scan(self, cfg: Any) -> str:
+        """每日公告扫描 + 特别分红补充（§6.8 全流程）。"""
+        day = today_app_tz()
+        # 第一步：公告源 = 全局配置 announcement_source_interface_id（§5.4 可配置化），
+        # 未配置回退分类 4 enabled 按 priority 升序首个；缺失/停用 → fail fast
+        notice_itf = await self._resolve_notice_itf(await self._settings())
 
         params = {"symbol": "财务报告", "date": day.strftime("%Y%m%d")}
         # 异常计失败（≥3 发站内信）已下沉到 _call_interface_raw（P1-4），此处不再手工接线

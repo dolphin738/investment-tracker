@@ -14,7 +14,14 @@ import pytest
 from sqlalchemy import select
 
 from app.core.date_utils import today_app_tz
-from app.models import QuoteInterface, Security, SecurityDividend
+from app.models import (
+    DividendYieldSettings,
+    InterfaceCategory,
+    QuoteInterface,
+    SecuritiesDataProvider,
+    Security,
+    SecurityDividend,
+)
 from app.models.enums import DividendStatus, ReportPeriodType, SecurityType
 from app.services.dividend_notice_scan import (
     DividendNoticeScanService,
@@ -243,3 +250,70 @@ def test_sina_cash_divide_by_ten():
     assert _sina_cash("-") is None
     assert _sina_cash(None) is None
     assert _sina_cash("nan") is None
+
+
+# ───────────────────────── 公告源解析（§5.4 可配置化 / §6.8 接线） ─────────────────────────
+async def _seed_cat4(session, *, priority=1, enabled=True, name="沪深京 A 股公告"):
+    """分类 4「公司公告」+ 公告接口行（params 含 symbol，逐只形态）；分类行幂等。"""
+    if await session.get(InterfaceCategory, NOTICE_CAT_ID) is None:
+        session.add(InterfaceCategory(id=NOTICE_CAT_ID, label="公司公告", system=True))
+    provider = SecuritiesDataProvider(
+        id=_uid(), name="akshare", access_method="sdk", config={}, enabled=True,
+    )
+    session.add(provider)
+    await session.flush()
+    itf = QuoteInterface(
+        id=_uid(), provider_id=provider.id, category_id=NOTICE_CAT_ID,
+        name=name, endpoint="stock_notice_report", enabled=enabled, priority=priority,
+        params={"symbol": "财务报告"},
+    )
+    session.add(itf)
+    await session.commit()
+    return itf
+
+
+@pytest.mark.asyncio
+async def test_resolve_notice_itf_uses_configured_source(session):
+    """守护 §5.4：配置了 announcement_source_interface_id → 直接使用该接口。"""
+    itf = await _seed_cat4(session, priority=2)
+    session.add(DividendYieldSettings(
+        id=_uid(), announcement_source_interface_id=itf.id, green_threshold=0.05, red_threshold=0.03,
+    ))
+    await session.commit()
+    svc = DividendNoticeScanService(session)
+    resolved = await svc._resolve_notice_itf(await svc._settings())
+    assert resolved.id == itf.id
+
+
+@pytest.mark.asyncio
+async def test_resolve_notice_itf_configured_disabled_fails_closed(session):
+    """守护 §5.4 fail closed：配置的公告源已停用 → fail fast raise，不静默回退分类 4 其他接口。"""
+    itf = await _seed_cat4(session, enabled=False)
+    await _seed_cat4(session, priority=1, name="备用公告接口")  # 若静默回退会选中它
+    session.add(DividendYieldSettings(
+        id=_uid(), announcement_source_interface_id=itf.id, green_threshold=0.05, red_threshold=0.03,
+    ))
+    await session.commit()
+    svc = DividendNoticeScanService(session)
+    with pytest.raises(RuntimeError, match="已停用"):
+        await svc._resolve_notice_itf(await svc._settings())
+
+
+@pytest.mark.asyncio
+async def test_resolve_notice_itf_unconfigured_falls_back_to_priority_min(session):
+    """守护 §11.2-7：未配置 → 回退分类 4 enabled 中 priority 最小（NULLS LAST）的接口。"""
+    high = await _seed_cat4(session, priority=10, name="高序号公告接口")
+    low = await _seed_cat4(session, priority=1, name="低序号公告接口")
+    null_p = await _seed_cat4(session, priority=None, name="无序号公告接口")
+    svc = DividendNoticeScanService(session)
+    resolved = await svc._resolve_notice_itf(await svc._settings())
+    assert resolved.id == low.id
+    assert resolved.id not in (high.id, null_p.id)
+
+
+@pytest.mark.asyncio
+async def test_resolve_notice_itf_no_candidate_fails_fast(session):
+    """守护 §6.8：未配置且分类 4 无 enabled 接口 → fail fast raise。"""
+    svc = DividendNoticeScanService(session)
+    with pytest.raises(RuntimeError, match="缺失或已停用"):
+        await svc._resolve_notice_itf(await svc._settings())
