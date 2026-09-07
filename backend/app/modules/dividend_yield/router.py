@@ -38,8 +38,12 @@ from app.models import (
 from app.models.enums import DividendStatus, DividendYieldMode
 from app.services.auth import CurrentUser, get_current_user, require_admin
 from app.services.base import paged
-from app.services.dividend_sync import _to_cell
-from app.services.dividend_yield import compute_yield, compute_yield_at, implied_price
+from app.services.dividend_yield import (
+    compute_yield,
+    compute_yield_at,
+    implied_price,
+    to_cell,
+)
 from app.services.log import record
 from app.services.market_data_sync import DIVIDEND_LIST_CAT_ID, QUOTE_CAT_ID
 
@@ -196,7 +200,7 @@ async def rank_dividend_yield(
         item = _serialize_rank(r, sec_map.get(r.master_id))
         if filtered:
             # 过滤态股息率（§8.1）：剔除 PROPOSED 后按过滤记录集现算（价格为缺失时得 None）
-            cells = [_to_cell(d) for d in payout_map.get(r.master_id, [])]
+            cells = [to_cell(d) for d in payout_map.get(r.master_id, [])]
             visible = [c for c in cells if c.status != DividendStatus.PROPOSED]
             recomputed = compute_yield(visible, r.latest_price, cur_year)
             item["dividend_yield"] = recomputed.dividend_yield
@@ -277,7 +281,7 @@ async def curve_dividend_yield(
             select(SecurityDividend).where(SecurityDividend.master_id == master_id)
         )
     ).scalars().all()
-    cells = [_to_cell(r) for r in div_rows]
+    cells = [to_cell(r) for r in div_rows]
 
     start = today_app_tz() - timedelta(days=days)
     price_rows = (

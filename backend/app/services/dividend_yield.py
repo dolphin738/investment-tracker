@@ -16,9 +16,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from app.models.enums import DividendStatus, DividendYieldMode
+
+if TYPE_CHECKING:  # 仅类型检查期引用 ORM 模型，运行期保持本模块零 IO
+    from app.models import SecurityDividend
 
 # 计入分子的状态（含预案口径）；REJECTED 一律剔除
 _PAYABLE = (DividendStatus.PROPOSED, DividendStatus.PAID)
@@ -45,6 +48,25 @@ class DividendCell:
     status: DividendStatus
     ex_dividend_date: Optional[date]
     announcement_date: Optional[date]
+
+
+def to_cell(r: SecurityDividend) -> DividendCell:
+    """ORM 行 → ``DividendCell`` 最小投影（无 IO，供快照 / 曲线 / 跨任务复用）。
+
+    原为 ``dividend_sync._to_cell`` 私有函数，被 router 跨服务导入（P2-5）。此处上提为
+    公共 API：投影逻辑与 ``DividendCell`` 同处纯函数模块，router 与 dividend_sync 共同
+    引用，消除「模块层」对「服务层」私有符号的反向依赖。
+    """
+    return DividendCell(
+        id=r.id,
+        report_year=r.report_year,
+        report_quarter=r.report_quarter,
+        period_type=r.period_type.value,
+        cash_per_share=r.cash_per_share,
+        status=r.status,
+        ex_dividend_date=r.ex_dividend_date,
+        announcement_date=r.announcement_date,
+    )
 
 
 @dataclass(frozen=True)

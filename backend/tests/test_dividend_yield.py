@@ -19,6 +19,7 @@ from app.services.dividend_yield import (
     is_suspicious,
     last_dividend_year,
     payout_records,
+    to_cell,
 )
 
 
@@ -296,3 +297,29 @@ def test_compute_yield_zero_and_negative_price_returns_none():
         res = compute_yield(cells, bad, 2026)
         assert res.numerator_per_share == Decimal("1.0")
         assert res.dividend_yield is None
+
+def test_to_cell_projects_row_to_minimal_cell():
+    """守护 P2-5：``to_cell`` 为共享公共 API（原 ``dividend_sync._to_cell`` 私有函数）。
+
+    router 与 dividend_sync 均从纯函数模块引用，消除模块层 → 服务层私有符号的反向依赖。
+    投影须与 ``DividendCell`` 字段一一对应，``period_type`` 取枚举值字符串。
+    """
+    class _Row:  # 哑行（duck typing），保持本文件零 DB 依赖
+        id = "div-1"
+        report_year = 2025
+        report_quarter = 4
+        period_type = ReportPeriodType.SPECIAL
+        cash_per_share = Decimal("1.5")
+        status = DividendStatus.PROPOSED
+        ex_dividend_date = date(2026, 3, 1)
+        announcement_date = date(2026, 2, 1)
+
+    c = to_cell(_Row())
+    assert isinstance(c, DividendCell)
+    assert c.id == "div-1"
+    assert (c.report_year, c.report_quarter) == (2025, 4)
+    assert c.period_type == ReportPeriodType.SPECIAL.value  # 枚举 → 值字符串
+    assert c.cash_per_share == Decimal("1.5")
+    assert c.status == DividendStatus.PROPOSED
+    assert c.ex_dividend_date == date(2026, 3, 1)
+    assert c.announcement_date == date(2026, 2, 1)

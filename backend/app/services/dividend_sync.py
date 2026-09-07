@@ -48,11 +48,11 @@ from app.models.enums import (
     ReportPeriodType,
 )
 from app.services.dividend_yield import (
-    DividendCell,
     compute_yield,
     consecutive_years,
     is_suspicious,
     last_dividend_year,
+    to_cell,
 )
 from app.services.market_data_sync import (
     DIVIDEND_LIST_CAT_ID,
@@ -97,20 +97,6 @@ _RETENTION_YEARS = 5
 _REFRESH_RECENT_PERIODS = 4
 # 日线留存（§6.3）：曲线只需 1 年，留 1 年余量，保留 2 年
 _PRICE_RETENTION_YEARS = 2
-
-
-def _to_cell(r: SecurityDividend) -> DividendCell:
-    """ORM 行 → 纯函数最小投影（无 IO，供快照/曲线/跨任务复用）。"""
-    return DividendCell(
-        id=r.id,
-        report_year=r.report_year,
-        report_quarter=r.report_quarter,
-        period_type=r.period_type.value,
-        cash_per_share=r.cash_per_share,
-        status=r.status,
-        ex_dividend_date=r.ex_dividend_date,
-        announcement_date=r.announcement_date,
-    )
 
 
 def _parse_report_period(raw: Any) -> Optional[tuple[int, int]]:
@@ -237,7 +223,7 @@ async def refresh_yields_for_masters(session, master_ids: list[str]) -> None:
 
     for mid in mids:
         try:
-            cells = [_to_cell(r) for r in divs_by_master.get(mid, [])]
+            cells = [to_cell(r) for r in divs_by_master.get(mid, [])]
             price_row = price_by_master.get(mid)
             price = price_row.close if price_row is not None else None
             latest_trade_date = price_row.trade_date if price_row is not None else None
