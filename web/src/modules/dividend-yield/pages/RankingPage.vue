@@ -5,7 +5,8 @@
  * 全部榜单管理视图：§8.1 过滤条（交易所/口径/连续年数下限/含预案/两年无分红，默认剔除
  * 近两年无分红）+ 列头排序（后端白名单五列，口径列 TTM 优先固定序）+ 分页 + 覆盖度计数；
  * include_proposed=false 时服务端现算「过滤态股息率」（行内 filtered 徽标）。
- * 行点击 → 详情面板（曲线 + 反推价格，与 TopPage 共用 SecurityDetailPanel）。
+ * 行点击 → 详情弹窗（曲线 + 反推价格，与 TopPage 共用 SecurityDetailPanel，
+ * 经 SecurityDetailDialog 模态包装；关闭后返回榜单列表状态）。
  * 支持 URL query 初始化过滤（§10.3 TopPage「查看全部」带 min_consecutive 跳入）。
  */
 import { computed, ref, watch } from 'vue';
@@ -46,7 +47,7 @@ import { cn, formatPercent, formatCurrency } from '@/lib/utils';
 import { useIsAdmin } from '@/stores/auth.store';
 import { useRank, useRebuildDividendYield } from '../composables/use-dividend-yield';
 import { useYieldThresholds } from '../composables/use-yield-thresholds';
-import SecurityDetailPanel from '../components/SecurityDetailPanel.vue';
+import SecurityDetailDialog from '../components/SecurityDetailDialog.vue';
 import type { DividendYieldSort } from '@/api/types';
 
 const route = useRoute();
@@ -101,7 +102,7 @@ function isSorted(col: DividendYieldSort): boolean {
   return allSort.value === col;
 }
 
-/** 行点击 → 详情面板 */
+/** 行点击 → 详情弹窗（默认不展示曲线图；关闭后清空选中返回榜单列表状态） */
 const selected = ref<{
   master_id: string;
   code: string | null;
@@ -112,6 +113,10 @@ function selectRow(
   item: { master_id: string; code: string | null; name: string | null },
 ): void {
   selected.value = { ...item };
+}
+
+function closeDetail(): void {
+  selected.value = null;
 }
 
 function modeLabel(mode: 'TTM' | 'LFY'): string {
@@ -298,12 +303,8 @@ function onRebuild(): void {
       </CardContent>
     </Card>
 
-    <!-- 证券详情面板（与 TopPage 共用） -->
-    <SecurityDetailPanel
-      v-if="selected"
-      :security="selected"
-      @close="selected = null"
-    />
+    <!-- 证券详情弹窗（行点击弹出；默认不渲染，关闭后返回榜单列表状态） -->
+    <SecurityDetailDialog :security="selected" @update:open="closeDetail" />
 
     <!-- 阈值图例（A 股「红涨绿跌」语义，字段名沿用服务端契约） -->
     <p

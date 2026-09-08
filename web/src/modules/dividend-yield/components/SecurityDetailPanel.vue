@@ -5,7 +5,7 @@
  * RankingPage / TopPage 行点击后共用：近一年股息率曲线（useCurve，缺段断开 §3.5）
  * + 目标收益率反推隐含价格（useImpliedPrice，含当前价/当前股息率对照 §9）。
  * 对应方案 §10.1 的 YieldCurveDialog + ImpliedPriceCalculator 能力聚合
- * （采用行下展开面板而非弹窗，避免 reka-ui Dialog Portal 引入不必要的渲染层级）。
+ * （RankingPage 经 SecurityDetailDialog 以模态弹窗包装本面板；TopPage 仍为行下展开）。
  */
 import { computed, ref } from 'vue';
 import type { EChartsOption } from 'echarts';
