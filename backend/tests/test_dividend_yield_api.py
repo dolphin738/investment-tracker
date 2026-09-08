@@ -13,7 +13,7 @@ from datetime import date, datetime, timezone as tz
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import update
+from sqlalchemy import select, update
 
 from app.models import (
     InterfaceCategory,
@@ -473,6 +473,69 @@ async def test_curve_unknown_master_404(session, client):
     info = await register_login(client)
     r = await client.get(f"/api/dividend-yield/{_uid()}/curve", headers=auth(info["token"]))
     assert r.status_code == 404
+
+
+# ───────────────────────── 曲线末点一致性契约（§9/§12，IC-3 收口） ─────────────────────────
+@pytest.mark.asyncio
+async def test_curve_last_point_equals_snapshot(session, client):
+    """守护 §9 一致性契约（§12 阻塞发布项）：曲线最后一个点的股息率 == 该证券快照值。
+
+    走真实派生链路：种分红 + 日线 → ``refresh_yields_for_masters`` 重算快照 →
+    GET /curve，断言末点 yield/numerator/close 与快照完全一致；同时验证
+    除权除息日之前的价格点分红不可见（yield=None，§3.5 缺失语义）。
+    """
+    info = await register_login(client)
+    m = Security(
+        id=_uid(), code="sh600800", name="证券sh600800",
+        asset_class=SecurityType.STOCK, exchange="SH",
+    )
+    session.add(m)
+    await session.flush()
+
+    cur = date.today().year
+    ex_date = date(cur, 6, 10)  # 除权除息日：之前的交易日分红不可见
+    session.add(SecurityDividend(
+        master_id=m.id, report_year=cur - 1, report_quarter=4,
+        period_type=ReportPeriodType.ANNUAL, cash_per_share=Decimal("0.5"),
+        status=DividendStatus.PAID, ex_dividend_date=ex_date,
+    ))
+    session.add_all([
+        MarketSecurityDailyPrice(master_id=m.id, trade_date=date(cur, 6, 5), close=Decimal("11.0")),
+        MarketSecurityDailyPrice(master_id=m.id, trade_date=date(cur, 6, 20), close=Decimal("10.5")),
+        MarketSecurityDailyPrice(master_id=m.id, trade_date=date(cur, 9, 1), close=Decimal("10.0")),
+    ])
+    await session.commit()
+
+    # 真实派生链路重算快照（与日线任务同一函数，§2.5/§7）
+    from app.services.dividend_yield_refresh import refresh_yields_for_masters
+
+    await refresh_yields_for_masters(session, [m.id])
+    await session.commit()
+    snap = (
+        await session.execute(
+            select(SecurityDividendYield).where(SecurityDividendYield.master_id == m.id)
+        )
+    ).scalar_one()
+    assert snap.dividend_yield is not None  # 前置：快照确有值
+
+    r = await client.get(f"/api/dividend-yield/{m.id}/curve", headers=auth(info["token"]))
+    status, _, data, _ = env(r)
+    assert status == 200
+    items = data["items"]
+    assert len(items) == 3
+
+    # 末点 == 快照（§9 硬性契约：yield / 分子 / 收盘价三对齐）
+    last = items[-1]
+    assert float(last["dividend_yield"]) == pytest.approx(float(snap.dividend_yield))
+    assert float(last["numerator_per_share"]) == pytest.approx(float(snap.numerator_per_share))
+    assert float(last["close"]) == pytest.approx(float(snap.latest_price))
+
+    # 除权除息日之前：分红不可见 → yield=None（缺失而非 0，§3.5）
+    before = [i for i in items if str(i["trade_date"]) < ex_date.isoformat()]
+    assert before and all(i["dividend_yield"] is None for i in before)
+    # 除权除息日之后：可见且有值
+    after = [i for i in items if str(i["trade_date"]) >= ex_date.isoformat()]
+    assert after and all(i["dividend_yield"] is not None for i in after)
 
 
 # ───────────────────────── 证券搜索（§10.2 反推价格选股器） ─────────────────────────
