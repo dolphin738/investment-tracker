@@ -8,14 +8,15 @@
  * 展示文本由父级经 `value` 传入（如「贵州茅台（600519）」）；用户开始输入时切换
  * 为搜索态，输入框显示键入内容。
  *
- * 实现说明：Input + 内联下拉实现（零新增依赖），功能契约与 React 版一致。
+ * 2026-09-09 交互骨架下沉至通用 ComboboxShell（审查 M-1 / 债务收口），本组件保留
+ * 远程搜索数据层（防抖 + useQuery）；顺带获得键盘导航与 ARIA（L-1）与错误态
+ * （L-2）。对外 props/emits 契约不变（DividendForm / SecurityTradeForm /
+ * HoldingsToolbar 零改动）。
  */
-
 import { computed, ref, watch } from 'vue';
 import { onUnmounted } from 'vue';
 import { useQuery } from '@tanstack/vue-query';
-import { Loader2, Search, X } from 'lucide-vue-next';
-import { Input } from '@/components/ui/input';
+import ComboboxShell from '@/components/common/ComboboxShell.vue';
 import {
   listSecurityMasters,
   type SecurityMaster,
@@ -42,8 +43,10 @@ const props = withDefaults(
   },
 );
 
-// 兼容 prop 回调与 emit 事件两种调用方式（DividendForm 用 :on-select/:on-clear，
-// SecurityTradeForm 用 @select/@clear），两者等价
+// 选中/清空统一经 emit 触发（2026-09-09 审查收口：DividendForm 绑定已从
+// :on-select/:on-clear 迁移为 @select/@clear，全调用方统一 emit 单路径——
+// 实测 :on-select（kebab key）不在 emit('select') 命中范围，且原版
+// 「props 回调 + emit」在 camel 绑定下会双触发）
 const emit = defineEmits<{
   select: [master: SecurityMaster];
   clear: [];
@@ -51,12 +54,11 @@ const emit = defineEmits<{
 
 const SEARCH_DEBOUNCE_MS = 250;
 
-const query = ref('');
-const open = ref(false);
+const rawQuery = ref('');
 const debouncedQ = ref('');
 
 // 防抖：键入 250ms 后触发搜索
-watch(query, (val) => {
+watch(rawQuery, (val) => {
   const t = setTimeout(() => {
     debouncedQ.value = val.trim();
   }, SEARCH_DEBOUNCE_MS);
@@ -69,102 +71,63 @@ onUnmounted(() => {
   if (queryTimer) clearTimeout(queryTimer);
 });
 
-const { data, isFetching } = useQuery({
+const { data, isFetching, isError } = useQuery({
   queryKey: computed(() => ['security-master', 'search', debouncedQ.value]),
   queryFn: () => listSecurityMasters({ q: debouncedQ.value, pageSize: 20 }),
-  enabled: computed(() => open.value && debouncedQ.value.length > 0),
+  enabled: computed(() => debouncedQ.value.length > 0),
   staleTime: 30 * 1000,
 });
 
 const candidates = computed(() => data.value?.items ?? []);
-const searching = computed(() => open.value && debouncedQ.value.length > 0);
 
 function handlePick(master: SecurityMaster): void {
-  props.onSelect(master);
-  query.value = '';
-  debouncedQ.value = '';
-  open.value = false;
-}
-
-// 点击候选时容器 blur 可能先触发；用 mousedown 阻止默认，保证 click 可命中
-function handleContainerMousedown(e: MouseEvent): void {
-  if ((e.target as HTMLElement).closest('[data-security-candidate]')) {
-    e.preventDefault();
-  }
-}
-
-function handleClear(): void {
-  query.value = '';
-  debouncedQ.value = '';
-  open.value = false;
-  props.onClear?.();
-  emit('clear');
+  // 统一经 emit 触发：@select（HoldingsToolbar/SecurityTradeForm）与 :on-select
+  // （DividendForm）绑定均落在同一 onSelect 槽位监听器，emit 单次调用即全覆盖
+  // （实测 emit('clear') 会调用 props.onClear 槽位——原版「props 回调 + emit」双触发是潜在 bug，一并修正）。
+  emit('select', master);
 }
 
 // 模板内使用 window / setTimeout 会在模板作用域解析为组件实例属性，故抽为具名函数
-function handleBlur(): void {
-  setTimeout(() => {
-    open.value = false;
-  }, 150);
+function handleClear(): void {
+  rawQuery.value = '';
+  debouncedQ.value = '';
+  emit('clear');
 }
 </script>
 
 <template>
-  <div class="relative" @mousedown="handleContainerMousedown">
-    <div class="relative">
-      <Search
-        class="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
-      />
-      <Input
-        :id="props.id"
-        class="pl-8 pr-8"
-        :placeholder="props.placeholder"
-        :disabled="props.disabled"
-        :model-value="searching ? query : props.value"
-        @update:model-value="(v: string | number) => { query = String(v); open = true; }"
-        @focus="() => { if (query) open = true; }"
-        @blur="handleBlur"
-      />
+  <ComboboxShell
+    :value="props.value"
+    :placeholder="props.placeholder"
+    :id="props.id"
+    :disabled="props.disabled"
+    :loading="isFetching"
+    :error="isError"
+    :candidate-count="candidates.length"
+    @search="(v: string) => (rawQuery = v)"
+    @select-index="(i: number) => handlePick(candidates[i])"
+    @clear="handleClear"
+  >
+    <template #default="{ activeIndex, optId }">
       <button
-        v-if="(searching ? query : props.value) && !props.disabled"
+        v-for="(s, i) in candidates"
+        :key="s.id"
         type="button"
-        aria-label="清除"
-        class="absolute right-2 top-1/2 -translate-y-1/2 rounded-sm p-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-        @click="handleClear"
+        data-combobox-candidate
+        :id="optId(i)"
+        role="option"
+        :aria-selected="i === activeIndex"
+        class="flex w-full items-center justify-between gap-2 rounded-sm px-3 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
+        @click="handlePick(s)"
       >
-        <X class="h-4 w-4" />
+        <span class="truncate">
+          <span class="font-medium">{{ s.name }}</span>
+          <span class="ml-2 font-mono text-xs text-muted-foreground">{{ s.code }}</span>
+        </span>
+        <span class="shrink-0 text-xs text-muted-foreground">
+          {{ [s.exchange, s.assetClass].filter(Boolean).join(' · ') || '—' }}
+        </span>
       </button>
-    </div>
-
-    <!-- 搜索下拉候选 -->
-    <div
-      v-if="searching"
-      class="absolute z-50 mt-1 max-h-72 w-full overflow-auto rounded-md border bg-popover p-1 text-popover-foreground shadow-md"
-    >
-      <div v-if="isFetching" class="flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground">
-        <Loader2 class="h-3.5 w-3.5 animate-spin" /> 搜索中…
-      </div>
-      <p v-else-if="candidates.length === 0" class="px-3 py-2 text-sm text-muted-foreground">
-        无匹配结果
-      </p>
-      <template v-else>
-        <button
-          v-for="s in candidates"
-          :key="s.id"
-          type="button"
-          data-security-candidate
-          class="flex w-full items-center justify-between gap-2 rounded-sm px-3 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
-          @click="handlePick(s)"
-        >
-          <span class="truncate">
-            <span class="font-medium">{{ s.name }}</span>
-            <span class="ml-2 font-mono text-xs text-muted-foreground">{{ s.code }}</span>
-          </span>
-          <span class="shrink-0 text-xs text-muted-foreground">
-            {{ [s.exchange, s.assetClass].filter(Boolean).join(' · ') || '—' }}
-          </span>
-        </button>
-      </template>
-    </div>
-  </div>
+    </template>
+  </ComboboxShell>
 </template>

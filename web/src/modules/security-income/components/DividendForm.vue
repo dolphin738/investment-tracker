@@ -225,8 +225,8 @@ const onSubmit = handleSubmit((values) => {
         :value="selectedSecurityLabel"
         :placeholder="secLoading ? '加载中…' : '搜索代码 / 名称 / 拼音首字母'"
         :disabled="secLoading && !securityIdRef"
-        :on-select="handleSelectMaster"
-        :on-clear="handleClearSecurity"
+        @select="handleSelectMaster"
+        @clear="handleClearSecurity"
       />
       <p v-if="errors.securityId" class="text-xs text-destructive">
         {{ errors.securityId }}
