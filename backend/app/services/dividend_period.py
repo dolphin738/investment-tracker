@@ -43,6 +43,25 @@ def parse_cash(raw: Any) -> Optional[Decimal]:
         return None
 
 
+def current_quarter(d: date) -> tuple[int, int]:
+    """当天所属报告期（2026-09-08 → (2026, 3)）。"""
+    return d.year, (d.month - 1) // 3 + 1
+
+
+def is_future_period(year: int, quarter: int, today: date) -> bool:
+    """报告期晚于「今天所属季度」 → 未来报告期（源站无数据，抓取必失败，应跳过）。
+
+    季度抓取的报告期网格按「整年 × 四季」生成，天然会包含尚未进入的期次
+    （如 2026-09 生成 2026Q4，报告期 2026-12-31）。东财对其返回 ``result=null``，
+    akshare 直接 ``data_json["result"]["pages"]`` 会抛
+    ``TypeError: 'NoneType' object is not subscriptable``。
+
+    判据取「严格晚于当前季度」而非「晚于报告期结束日」：当季（如 2026-09-08 查
+    2026Q3）源站通常已有部分披露，按结束日（09-30）判定会误伤当季已有数据。
+    """
+    return (year, quarter) > current_quarter(today)
+
+
 def back_n_quarters(year: int, quarter: int, n: int) -> tuple[int, int]:
     """从 (year, quarter) 向前回退 n 个季度（跨年末尾衔接）。"""
     q = quarter - n

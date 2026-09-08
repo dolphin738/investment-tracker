@@ -26,6 +26,8 @@ from app.models.enums import DividendStatus, DividendYieldMode, ReportPeriodType
 from app.core.date_utils import parse_date
 from app.services.dividend_period import (
     back_n_quarters,
+    current_quarter,
+    is_future_period,
     parse_cash,
     parse_report_period,
 )
@@ -142,17 +144,22 @@ async def test_pending_periods_missing_plus_recent(session):
     session.add(_div(m.id, today_app_tz().year - 1, 4, "1.0"))
     await session.commit()
 
+    today = today_app_tz()
     svc = DividendSyncService(session)
-    periods = await svc._pending_periods(today_app_tz().year)
+    periods = await svc._pending_periods(today)
     out = set(periods)
-    cur = today_app_tz().year
+    cur = today.year
     # 缺失的全量老财年格子应在列（如 cur-2 全年）
     assert (cur - 2, 1) in out and (cur - 2, 4) in out
-    # 最近 4 期重刷含当期与往前 3 季
+    # 最近 4 期重刷含当期与往前 3 季（尚未到达的未来期次不参与断言，见下方专项用例）
     for p in [(cur, 4), (cur, 3), (cur, 2), (cur, 1)]:
+        if is_future_period(p[0], p[1], today):
+            continue
         assert p in out
     # 非缺失、非最近期的既有格子不在列（cur-1 Q4 属既有）
     assert (cur - 1, 4) not in out
+    # 未来期次一律不在列（源站无数据，抓取必失败）
+    assert not [p for p in out if is_future_period(p[0], p[1], today)]
 
 
 # ───────────────────────── 派生快照重算（§2.5 / §6.4 / §9 一致性） ─────────────────────────
@@ -491,6 +498,176 @@ async def test_upsert_dividend_batch_duplicate_cell_warns(session, caplog):
     ).scalars().one()
     # parse_cash 按「10派X元」折算每股：源值 1.5 → 每股 0.15（末行覆盖）
     assert row.cash_per_share == Decimal("0.15")
+
+
+@pytest.mark.asyncio
+async def test_upsert_dividend_batch_falls_back_to_chinese_code_field(session):
+    """守护：``resp_code_field`` 配错（遗留值 'code'）时回退中文列名，不得全量跳行。
+
+    缺陷实测：配置 'code' + 源返回中文列 → 每行 ``row.get('code')`` 为 None →
+    ``mids == []`` → 「抓取上万行、0 条落库」。迁移 0009 修数据，本例守护代码侧兜底。
+    """
+    from app.models import InterfaceCategory, QuoteInterface
+    from app.models.enums import QuoteProviderAccessMethod
+    from app.models.quote_provider import SecuritiesDataProvider
+    from app.services.market_data_sync import DIVIDEND_LIST_CAT_ID
+
+    m = await _add_master(session, code="sh600001")
+    provider = SecuritiesDataProvider(
+        id=_uid(), name="东财", access_method=QuoteProviderAccessMethod.SDK,
+        config={}, enabled=True,
+    )
+    category = InterfaceCategory(id=DIVIDEND_LIST_CAT_ID, label="分红配送", system=True)
+    itf = QuoteInterface(
+        id=_uid(), provider_id=provider.id, category_id=DIVIDEND_LIST_CAT_ID,
+        name="东财-分红配送", endpoint="xxx", http_method="GET", enabled=True,
+        priority=1, resp_code_field="code", response_parse={}, params={},
+    )
+    session.add_all([provider, category])
+    await session.flush()
+    session.add(itf)
+    await session.commit()
+
+    cur = today_app_tz().year
+    rows = [{
+        "代码": "600001", "报告期": f"{cur}-12-31",
+        "现金分红-现金分红比例": "1.0", "方案进度": "实施分配",
+        "除权除息日": None, "股权登记日": None,
+    }]
+    svc = DividendSyncService(session)
+    changed = await svc._upsert_dividend_batch(itf, rows, cur, 4)
+    assert changed == [m.id]  # 回退生效：配 'code' 也能取到 '代码' 列并落库
+
+
+# ───────────────────────── 未来报告期拦截 / 零落库告警 / 失败冒泡 ─────────────────────────
+def test_is_future_period_and_current_quarter():
+    """守护：季度结束日晚于今天即未来期次；当前季度换算正确。"""
+    assert current_quarter(date(2026, 9, 8)) == (2026, 3)
+    assert current_quarter(date(2026, 12, 31)) == (2026, 4)
+    # 判据是「严格晚于当前季度」而非晚于结束日：当季（Q3）已有部分披露，不得误伤
+    assert is_future_period(2026, 3, date(2026, 9, 8)) is False
+    assert is_future_period(2026, 4, date(2026, 9, 8)) is True
+    assert is_future_period(2025, 4, date(2026, 9, 8)) is False
+    # 已进入 Q4 后，Q4 不再算未来
+    assert current_quarter(date(2026, 10, 5)) == (2026, 4)
+    assert is_future_period(2026, 4, date(2026, 10, 5)) is False
+
+
+@pytest.mark.asyncio
+async def test_pending_periods_excludes_future_period(session):
+    """守护：报告期网格不得含未来期次（东财返 result=null → akshare 抛 NoneType 崩溃）。"""
+    svc = DividendSyncService(session)
+    out = await svc._pending_periods(date(2026, 9, 8))
+    assert (2026, 4) not in out  # 报告期 2026-12-31 尚未到达
+    assert (2026, 3) in out      # 当期（09-30）仍须抓取
+    assert (2026, 2) in out
+
+
+@pytest.mark.asyncio
+async def test_quarterly_fetch_warns_and_reports_zero_upserted(session, monkeypatch, caplog):
+    """守护：抓到行却零落库须告警，且摘要同时报「抓 N / 落 M」（旧版只报抓取行数）。"""
+    import logging
+
+    from app.models import InterfaceCategory, QuoteInterface
+    from app.models.enums import QuoteProviderAccessMethod
+    from app.models.quote_provider import SecuritiesDataProvider
+    from app.services.market_data_sync import DIVIDEND_LIST_CAT_ID
+
+    provider = SecuritiesDataProvider(
+        id=_uid(), name="东财", access_method=QuoteProviderAccessMethod.SDK,
+        config={}, enabled=True,
+    )
+    category = InterfaceCategory(id=DIVIDEND_LIST_CAT_ID, label="分红配送", system=True)
+    itf = QuoteInterface(
+        id=_uid(), provider_id=provider.id, category_id=DIVIDEND_LIST_CAT_ID,
+        name="东财-分红配送", endpoint="xxx", http_method="GET", enabled=True,
+        priority=1, resp_code_field="代码", response_parse={}, params={},
+    )
+    session.add_all([provider, category])
+    await session.flush()
+    session.add(itf)
+    await session.commit()
+
+    svc = DividendSyncService(session)
+
+    class _Cfg:
+        dividend_report_source_interface_id = itf.id
+
+    async def fake_settings():
+        return _Cfg()
+
+    async def fake_resolve(_settings, _iid, _cid):
+        return itf
+
+    async def fake_periods(_today):
+        return [(2020, 1)]
+
+    async def fake_fetch(_itf, _y, _q):
+        # 代码 600999 库内无对应 master → 全部跳行，落库 0 条
+        return [{"代码": "600999", "现金分红-现金分红比例": "1.0", "方案进度": "实施分配"}]
+
+    async def no_masters(_itf, _rows):
+        return 0  # 不建主数据：模拟「代码无法匹配既有证券」
+
+    monkeypatch.setattr(svc._mds, "_upsert_masters", no_masters)
+    monkeypatch.setattr(svc, "_settings", fake_settings)
+    monkeypatch.setattr(svc, "_resolve_interface", fake_resolve)
+    monkeypatch.setattr(svc, "_pending_periods", fake_periods)
+    monkeypatch.setattr(svc, "_fetch_period", fake_fetch)
+
+    with caplog.at_level(logging.WARNING, logger="app.services.dividend_sync"):
+        result = await svc.quarterly_fetch({}, force=True)
+    assert "抓1/落0" in result
+    assert any("落库 0 条" in rec.message for rec in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_quarterly_fetch_raises_when_any_period_failed(session, monkeypatch):
+    """守护：任一报告期失败须冒泡为异常（旧版吞进 message，日志仍记 SUCCESS 误导排障）。"""
+    from app.models import InterfaceCategory, QuoteInterface
+    from app.models.enums import QuoteProviderAccessMethod
+    from app.models.quote_provider import SecuritiesDataProvider
+    from app.services.market_data_sync import DIVIDEND_LIST_CAT_ID
+
+    provider = SecuritiesDataProvider(
+        id=_uid(), name="东财", access_method=QuoteProviderAccessMethod.SDK,
+        config={}, enabled=True,
+    )
+    category = InterfaceCategory(id=DIVIDEND_LIST_CAT_ID, label="分红配送", system=True)
+    itf = QuoteInterface(
+        id=_uid(), provider_id=provider.id, category_id=DIVIDEND_LIST_CAT_ID,
+        name="东财-分红配送", endpoint="xxx", http_method="GET", enabled=True,
+        priority=1, resp_code_field="代码", response_parse={}, params={},
+    )
+    session.add_all([provider, category])
+    await session.flush()
+    session.add(itf)
+    await session.commit()
+
+    svc = DividendSyncService(session)
+
+    class _Cfg:
+        dividend_report_source_interface_id = itf.id
+
+    async def fake_settings():
+        return _Cfg()
+
+    async def fake_resolve(_settings, _iid, _cid):
+        return itf
+
+    async def fake_periods(_today):
+        return [(2020, 1)]
+
+    async def boom(_itf, _y, _q):
+        raise RuntimeError("'NoneType' object is not subscriptable")
+
+    monkeypatch.setattr(svc, "_settings", fake_settings)
+    monkeypatch.setattr(svc, "_resolve_interface", fake_resolve)
+    monkeypatch.setattr(svc, "_pending_periods", fake_periods)
+    monkeypatch.setattr(svc, "_fetch_period", boom)
+
+    with pytest.raises(RuntimeError, match="季度抓取部分失败"):
+        await svc.quarterly_fetch({}, force=True)
 
 
 # ───────────────────────── P2-4：stale 定责权 / 批量预取消除 N+1 ─────────────────────────

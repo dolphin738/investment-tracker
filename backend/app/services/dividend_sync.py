@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import date
 from decimal import Decimal
 from typing import Any, Optional
 
@@ -46,6 +47,8 @@ from app.services.market_data_sync import (
 
 from app.services.dividend_period import (
     back_n_quarters,
+    current_quarter,
+    is_future_period,
     last_day,
     parse_cash,
     parse_report_period,
@@ -78,6 +81,8 @@ _QUARTER_PERIOD_TYPE = {
 }
 
 # 东财分红配送列名（§6.1 映射；缺失列的行跳过）
+# 兜底代码列：akshare stock_fhps_em 的中文列名，接口 resp_code_field 配错时回退到此
+_FALLBACK_CODE_FIELD = "代码"
 _COL_REPORT = "报告期"
 _COL_CASH = "现金分红-现金分红比例"
 _COL_STATUS = "方案进度"
@@ -90,6 +95,22 @@ _RETENTION_YEARS = 5
 _REFRESH_RECENT_PERIODS = 4
 # 日线留存（§6.3）：曲线只需 1 年，留 1 年余量，保留 2 年
 _PRICE_RETENTION_YEARS = 2
+
+
+def _code_of(itf: QuoteInterface, row: Any) -> Any:
+    """取行内证券代码：接口配置字段优先，取不到回退东财中文列名「代码」。
+
+    防御目的：``resp_code_field`` 若配成源站实际列名之外的值（开发库曾遗留 ``'code'``），
+    ``row.get()`` 全为 ``None`` → **每一行都被跳过** → 表现为「抓取上万行、0 条落库」。
+    迁移 0009 已修正存量配置，这里做最后兜底，避免同类配置漂移再次静默吞数据。
+    """
+    for field in (itf.resp_code_field, _FALLBACK_CODE_FIELD):
+        if not field:
+            continue
+        val = row.get(field) if isinstance(row, dict) else None
+        if val is not None:
+            return val
+    return None
 
 
 class DividendSyncService:
@@ -143,10 +164,11 @@ class DividendSyncService:
         if itf is None:
             raise RuntimeError("股息主源接口缺失或被停用，fail fast 跳过本次季度抓取")
 
-        periods = await self._pending_periods(today.year)
+        periods = await self._pending_periods(today)
         if not periods:
             return "无需要补抓或重刷的报告期"
         summary = []
+        failed: list[str] = []
         changed: set[str] = set()
         for year, quarter in periods:
             try:
@@ -154,17 +176,40 @@ class DividendSyncService:
                 mids = await self._upsert_dividend_batch(itf, rows, year, quarter)
                 await self.session.commit()
                 changed.update(mids)
-                summary.append(f"{year}Q{quarter}({len(rows)})")
+                # 抓到行却零落库 = 配置错位（典型：resp_code_field 与源列名不符 → 全量跳行）。
+                # 逐期告警，避免「上万行抓取、0 条入库」全程静默。
+                if rows and not mids:
+                    logger.warning(
+                        "报告期 %sQ%s 抓取 %s 行但落库 0 条："
+                        "疑似接口 resp_code_field 配置与源返回列名不匹配",
+                        year, quarter, len(rows),
+                    )
+                # 摘要同时报「抓取行数 / 落库条数」：只报抓取行数会掩盖零落库
+                summary.append(f"{year}Q{quarter}(抓{len(rows)}/落{len(mids)})")
             except Exception as exc:  # 单报告期失败续下一期（断点即数据本身）
                 await self.session.rollback()
+                failed.append(f"{year}Q{quarter}:{exc}")
                 summary.append(f"{year}Q{quarter}失败:{exc}")
 
         await refresh_yields_for_masters(self.session, list(changed))
         await self.session.commit()
+        # 任一期次失败即冒泡：否则日志 status=SUCCESS 而 message 内含「失败」，排障被误导。
+        # 此处已按报告期独立 commit，抛出不影响成功期次的数据。
+        if failed:
+            raise RuntimeError(
+                f"季度抓取部分失败（{'|'.join(failed)}）；"
+                f"已成功期次:{';'.join(summary)};重算证券{len(changed)}只"
+            )
         return f"季度抓取完成；报告期:{';'.join(summary) or '无'};重算证券{len(changed)}只"
 
-    async def _pending_periods(self, cur_year: int) -> list[tuple[int, int]]:
-        """待抓报告期 = 缺失集合（近 5 年网格内）∪ 最近 4 期（§6.1）。"""
+    async def _pending_periods(self, today: date) -> list[tuple[int, int]]:
+        """待抓报告期 = 缺失集合（近 5 年网格内）∪ 最近 4 期（§6.1），**剔除未来期次**。
+
+        网格按「整年 × 四季」生成，天然含尚未到达的报告期（如 2026-09 生成 2026Q4）；
+        源站对其无数据且 akshare 会抛 ``TypeError: 'NoneType' object is not
+        subscriptable``（详见 ``is_future_period`` 文档串），故统一在此拦截。
+        """
+        cur_year = today.year
         existing = set(
             (
                 await self.session.execute(
@@ -174,16 +219,23 @@ class DividendSyncService:
                 )
             ).all()
         )
-        grid = [(y, q) for y in range(cur_year - 4, cur_year + 1) for q in range(1, 5)]
+        grid = [
+            (y, q)
+            for y in range(cur_year - 4, cur_year + 1)
+            for q in range(1, 5)
+            if not is_future_period(y, q, today)
+        ]
         missing = [(y, q) for y, q in grid if (y, q) not in existing]
-        latest = max(existing, default=grid[-1])
+        # 无存量时以「当前季度」为锚（原实现取 grid[-1]，会锚到未来期次）
+        latest = max(existing, default=current_quarter(today))
         recent = [back_n_quarters(*latest, n) for n in range(_REFRESH_RECENT_PERIODS)]
         out: list[tuple[int, int]] = []
         seen: set[tuple[int, int]] = set()
         for p in missing + recent:
-            if p not in seen:
-                seen.add(p)
-                out.append(p)
+            if p in seen or is_future_period(p[0], p[1], today):
+                continue
+            seen.add(p)
+            out.append(p)
         return out
 
     async def _fetch_period(self, itf: QuoteInterface, year: int, quarter: int) -> list[dict]:
@@ -205,7 +257,7 @@ class DividendSyncService:
         # 建 code → master_id 映射（Security.code 已带交易所前缀）
         codes = set()
         for r in rows:
-            raw = r.get(itf.resp_code_field or "代码")
+            raw = _code_of(itf, r)
             if raw is None:
                 continue
             codes.add(_normalize_master_code(str(raw), infer_exchange(str(raw))))
@@ -218,7 +270,7 @@ class DividendSyncService:
         changed: list[str] = []
         seen_cells: set[tuple[str, int, int, ReportPeriodType]] = set()  # P2-2 同格多行告警
         for r in rows:
-            code_raw = r.get(itf.resp_code_field or "代码")
+            code_raw = _code_of(itf, r)
             if code_raw is None:
                 continue
             code = _normalize_master_code(str(code_raw), infer_exchange(str(code_raw)))
