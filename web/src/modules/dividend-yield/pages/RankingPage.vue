@@ -5,10 +5,10 @@
  * 全部榜单管理视图：§8.1 过滤条（交易所/口径/连续年数下限/含预案/两年无分红，默认剔除
  * 近两年无分红）+ 列头排序（后端白名单五列，口径列 TTM 优先固定序）+ 分页 + 覆盖度计数；
  * include_proposed=false 时服务端现算「过滤态股息率」（行内 filtered 徽标）。
- * 卡片内双 Tab：「榜单列表」（表格 + 分页）与「反推价格」（ImpliedPriceCalculator，
- * 自曲线面板迁出的目标股息率价格推算）；Tab 用 v-show 切换，两侧状态互不干扰。
- * 榜单行点击 → 详情弹窗（曲线，与 TopPage 共用 SecurityDetailPanel，
- * 经 SecurityDetailDialog 模态包装；关闭后返回榜单列表状态）。
+ * 页面级双 Tab：「榜单列表」（改版前界面原样：过滤条 + 全部榜单卡 + 表格 + 分页）
+ * 与「反推价格」（ImpliedPriceCalculator，自曲线面板迁出）；Tab 用 v-show 切换，
+ * 两侧状态互不干扰。榜单行点击 → 详情弹窗（曲线，与 TopPage 共用
+ * SecurityDetailPanel，经 SecurityDetailDialog 模态包装；关闭后返回榜单列表状态）。
  * 支持 URL query 初始化过滤（§10.3 TopPage「查看全部」带 min_consecutive 跳入）。
  */
 import { computed, ref, watch } from 'vue';
@@ -134,7 +134,7 @@ function onRebuild(): void {
   rebuild.mutate();
 }
 
-/** 卡片内 Tab：榜单列表 / 反推价格（内容区 v-show 切换，保状态互不干扰） */
+/** 页面级 Tab：榜单列表 / 反推价格（内容区 v-show 切换，保状态互不干扰） */
 const activeTab = ref<string>('rank');
 </script>
 
@@ -145,92 +145,89 @@ const activeTab = ref<string>('rank');
       description="按 §8.1 过滤与排序浏览全部有分红记录公司；支持过滤态口径与阈值着色"
     />
 
-    <!-- 过滤条（§8.1）：置于榜单框外，与持仓等页统一布局 -->
-    <div class="flex flex-wrap items-end gap-4">
-      <div class="space-y-1.5">
-        <Label class="text-xs text-muted-foreground">交易所</Label>
-        <Select v-model="fExchange">
-          <SelectTrigger class="w-28">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="ALL">全部</SelectItem>
-            <SelectItem value="SH">上交所</SelectItem>
-            <SelectItem value="SZ">深交所</SelectItem>
-            <SelectItem value="BJ">北交所</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-      <div class="space-y-1.5">
-        <Label class="text-xs text-muted-foreground">口径</Label>
-        <Select v-model="fMode">
-          <SelectTrigger class="w-28">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="ALL">全部</SelectItem>
-            <SelectItem value="TTM">TTM</SelectItem>
-            <SelectItem value="LFY">LFY</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-      <div class="space-y-1.5">
-        <Label class="text-xs text-muted-foreground" for="dy-min-cons">
-          连续年数 ≥
-        </Label>
-        <Input
-          id="dy-min-cons"
-          v-model="fMinConsecutive"
-          type="number"
-          min="0"
-          max="5"
-          class="w-24"
-          placeholder="不限"
-        />
-      </div>
-      <div class="flex items-center gap-2 pb-1.5">
-        <Switch id="dy-include-proposed" v-model="fIncludeProposed" />
-        <Label for="dy-include-proposed" class="text-xs">含预案</Label>
-      </div>
-      <div class="flex items-center gap-2 pb-1.5">
-        <Switch id="dy-include-no-div" v-model="fIncludeNoDividend" />
-        <Label for="dy-include-no-div" class="text-xs">显示两年无分红</Label>
-      </div>
-      <Button
-        v-if="isAdmin"
-        variant="outline"
-        size="sm"
-        class="ml-auto self-end"
-        :disabled="rebuilding"
-        @click="onRebuild"
-      >
-        <Loader2 v-if="rebuilding" class="mr-1 h-4 w-4 animate-spin" />
-        全量重建
-      </Button>
-    </div>
+    <!-- Tab 页签：榜单列表 / 反推价格 -->
+    <Tabs v-model="activeTab">
+      <TabsList>
+        <TabsTrigger value="rank">榜单列表</TabsTrigger>
+        <TabsTrigger value="calc">反推价格</TabsTrigger>
+      </TabsList>
+    </Tabs>
 
-    <Card>
-      <CardHeader>
-        <CardTitle class="text-base">榜单与反推价格</CardTitle>
-        <CardDescription>
-          榜单浏览与目标股息率价格推算；行点击查看个股股息率曲线
-        </CardDescription>
-      </CardHeader>
-      <CardContent class="space-y-4">
-        <!-- Tab 页签：榜单列表 / 反推价格 -->
-        <Tabs v-model="activeTab">
-          <TabsList>
-            <TabsTrigger value="rank">榜单列表</TabsTrigger>
-            <TabsTrigger value="calc">反推价格</TabsTrigger>
-          </TabsList>
-        </Tabs>
+    <!-- Tab 1：改版前榜单界面原样（过滤条 + 全部榜单卡；v-show 保状态不因切换丢失） -->
+    <div v-show="activeTab === 'rank'" class="space-y-6">
+      <!-- 过滤条（§8.1）：置于榜单卡外，与持仓等页统一布局 -->
+      <div class="flex flex-wrap items-end gap-4">
+        <div class="space-y-1.5">
+          <Label class="text-xs text-muted-foreground">交易所</Label>
+          <Select v-model="fExchange">
+            <SelectTrigger class="w-28">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="ALL">全部</SelectItem>
+              <SelectItem value="SH">上交所</SelectItem>
+              <SelectItem value="SZ">深交所</SelectItem>
+              <SelectItem value="BJ">北交所</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div class="space-y-1.5">
+          <Label class="text-xs text-muted-foreground">口径</Label>
+          <Select v-model="fMode">
+            <SelectTrigger class="w-28">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="ALL">全部</SelectItem>
+              <SelectItem value="TTM">TTM</SelectItem>
+              <SelectItem value="LFY">LFY</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div class="space-y-1.5">
+          <Label class="text-xs text-muted-foreground" for="dy-min-cons">
+            连续年数 ≥
+          </Label>
+          <Input
+            id="dy-min-cons"
+            v-model="fMinConsecutive"
+            type="number"
+            min="0"
+            max="5"
+            class="w-24"
+            placeholder="不限"
+          />
+        </div>
+        <div class="flex items-center gap-2 pb-1.5">
+          <Switch id="dy-include-proposed" v-model="fIncludeProposed" />
+          <Label for="dy-include-proposed" class="text-xs">含预案</Label>
+        </div>
+        <div class="flex items-center gap-2 pb-1.5">
+          <Switch id="dy-include-no-div" v-model="fIncludeNoDividend" />
+          <Label for="dy-include-no-div" class="text-xs">显示两年无分红</Label>
+        </div>
+        <Button
+          v-if="isAdmin"
+          variant="outline"
+          size="sm"
+          class="ml-auto self-end"
+          :disabled="rebuilding"
+          @click="onRebuild"
+        >
+          <Loader2 v-if="rebuilding" class="mr-1 h-4 w-4 animate-spin" />
+          全量重建
+        </Button>
+      </div>
 
-        <!-- Tab 1：榜单列表（v-show 保状态：筛选/分页/排序不因切换丢失） -->
-        <div v-show="activeTab === 'rank'" class="space-y-4">
-        <p class="text-xs text-muted-foreground">
-          覆盖 {{ allTotal }} 家（当前过滤口径）；含预案口径切换时服务端现算「过滤态股息率」
-        </p>
-        <TableSkeleton v-if="allRank.isLoading.value" :rows="8" :cols="6" />
+      <Card>
+        <CardHeader>
+          <CardTitle class="text-base">全部榜单</CardTitle>
+          <CardDescription>
+            覆盖 {{ allTotal }} 家（当前过滤口径）；含预案口径切换时服务端现算「过滤态股息率」
+          </CardDescription>
+        </CardHeader>
+        <CardContent class="space-y-4">
+          <TableSkeleton v-if="allRank.isLoading.value" :rows="8" :cols="6" />
         <EmptyState
           v-else-if="allItems.length === 0"
           title="无符合条件的记录"
@@ -320,14 +317,24 @@ const activeTab = ref<string>('rank');
             @page-size-change="(s: number) => { allPageSize = s; allPage = 1; }"
           />
         </template>
-        </div>
+        </CardContent>
+      </Card>
+    </div>
 
-        <!-- Tab 2：反推价格（v-show 隐藏时保持挂载，输入与计算状态不丢失） -->
-        <div v-show="activeTab === 'calc'">
+    <!-- Tab 2：反推价格（v-show 隐藏时保持挂载，输入与计算状态不丢失） -->
+    <div v-show="activeTab === 'calc'">
+      <Card>
+        <CardHeader>
+          <CardTitle class="text-base">反推价格</CardTitle>
+          <CardDescription>
+            目标股息率价格推算：按「每股分红 ÷ 目标股息率」反推隐含价格
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
           <ImpliedPriceCalculator />
-        </div>
-      </CardContent>
-    </Card>
+        </CardContent>
+      </Card>
+    </div>
 
     <!-- 证券详情弹窗（行点击弹出；默认不渲染，关闭后返回榜单列表状态） -->
     <SecurityDetailDialog :security="selected" @update:open="closeDetail" />
