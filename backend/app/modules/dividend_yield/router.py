@@ -19,7 +19,7 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, Path, Query
 from pydantic import BaseModel
-from sqlalchemy import case, or_, select
+from sqlalchemy import case, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.date_utils import today_app_tz
@@ -251,32 +251,6 @@ async def top20_dividend_yield(
         "top": [_serialize_rank(r, sec_map.get(r.master_id)) for r in top_rows],
         "consecutive": [_serialize_rank(r, sec_map.get(r.master_id)) for r in cons_rows],
     }
-
-
-@router_dividend_yield.get("/search")
-async def search_dividend_securities(
-    q: str = Query("", max_length=64),
-    user: CurrentUser = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """按代码/名称搜索有派生快照的证券（§10.2 反推价格选股器，登录即可用）。
-
-    - 仅返回 ``security_dividend_yields`` 内证券：无快照即无分子，反推无意义；
-    - 行结构与 /rankings 一致（复用 ``_serialize_rank``），详情面板「排名」TAB 可直接渲染；
-    - ``/admin/securities/masters`` 为 admin-only，本端点补齐非 admin 的代码选股入口。
-    """
-    keyword = (q or "").strip()
-    stmt = (
-        select(SecurityDividendYield, Security)
-        .join(Security, Security.id == SecurityDividendYield.master_id)
-        .order_by(Security.code.asc())
-        .limit(20)
-    )
-    if keyword:
-        like = f"%{keyword}%"
-        stmt = stmt.where(or_(Security.code.ilike(like), Security.name.ilike(like)))
-    rows = (await db.execute(stmt)).all()
-    return {"items": [_serialize_rank(y, s) for y, s in rows]}
 
 
 @router_dividend_yield.get("/{master_id}/curve")
