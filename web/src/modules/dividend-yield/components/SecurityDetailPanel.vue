@@ -20,6 +20,10 @@ import {
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import BaseChart from '@/components/charts/BaseChart.vue';
+import {
+  buildDividendYieldCurveOption,
+} from '@/components/charts/dividend-yield-curve-chart';
+import { useChartTheme } from '@/lib/chart-theme';
 import { formatPercent } from '@/lib/utils';
 import { useCurve } from '../composables/use-dividend-yield';
 
