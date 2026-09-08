@@ -1,8 +1,8 @@
 <script setup lang="ts">
 /**
- * modules/dividend-yield/components/ImpliedPriceCalculator.vue — 目标股息率价格推算
+ * modules/dividend-yield/components/ImpliedPriceCalculator.vue — 股息价格推算
  *
- * 自 SecurityDetailPanel 迁出的「反推价格」功能独立化（参照外部模板丰富界面）：
+ * 自 SecurityDetailPanel 迁出的「反推价格」功能独立化（对外名「股息价格推算」，参照外部模板丰富界面）：
  * - 选择股票：候选 = 股息率榜单前 200 家（useRank，pageSize 上限 200）；
  *   选中后自动带出服务端口径的每股分红（榜单行 numerator_per_share，只读展示）；
  * - 目标股息率以百分比输入（如 6 = 6%），内部换算小数后仍走原服务端

@@ -4,7 +4,7 @@
  *
  * RankingPage / TopPage 行点击后共用：近一年股息率曲线（useCurve，缺段断开 §3.5）。
  * 原「目标收益率反推隐含价格」区块已迁出为独立组件 ImpliedPriceCalculator
- * （RankingPage「反推价格」Tab 承载，本面板不再包含该功能入口）。
+ * （RankingPage「股息价格推算」Tab 承载，本面板不再包含该功能入口）。
  * 对应方案 §10.1 的 YieldCurveDialog 能力聚合
  * （RankingPage 经 SecurityDetailDialog 以模态弹窗包装本面板；TopPage 仍为行下展开）。
  */

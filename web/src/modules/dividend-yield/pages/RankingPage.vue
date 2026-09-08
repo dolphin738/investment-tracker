@@ -6,7 +6,7 @@
  * 近两年无分红）+ 列头排序（后端白名单五列，口径列 TTM 优先固定序）+ 分页 + 覆盖度计数；
  * include_proposed=false 时服务端现算「过滤态股息率」（行内 filtered 徽标）。
  * 页面级双 Tab：「榜单列表」（改版前界面原样：过滤条 + 全部榜单卡 + 表格 + 分页）
- * 与「反推价格」（ImpliedPriceCalculator，自曲线面板迁出）；Tab 用 v-show 切换，
+ * 与「股息价格推算」（ImpliedPriceCalculator，自曲线面板迁出）；Tab 用 v-show 切换，
  * 两侧状态互不干扰。榜单行点击 → 详情弹窗（曲线，与 TopPage 共用
  * SecurityDetailPanel，经 SecurityDetailDialog 模态包装；关闭后返回榜单列表状态）。
  * 支持 URL query 初始化过滤（§10.3 TopPage「查看全部」带 min_consecutive 跳入）。
@@ -134,7 +134,7 @@ function onRebuild(): void {
   rebuild.mutate();
 }
 
-/** 页面级 Tab：榜单列表 / 反推价格（内容区 v-show 切换，保状态互不干扰） */
+/** 页面级 Tab：榜单列表 / 股息价格推算（内容区 v-show 切换，保状态互不干扰） */
 const activeTab = ref<string>('rank');
 </script>
 
@@ -145,11 +145,11 @@ const activeTab = ref<string>('rank');
       description="按 §8.1 过滤与排序浏览全部有分红记录公司；支持过滤态口径与阈值着色"
     />
 
-    <!-- Tab 页签：榜单列表 / 反推价格 -->
+    <!-- Tab 页签：榜单列表 / 股息价格推算 -->
     <Tabs v-model="activeTab">
       <TabsList>
         <TabsTrigger value="rank">榜单列表</TabsTrigger>
-        <TabsTrigger value="calc">反推价格</TabsTrigger>
+        <TabsTrigger value="calc">股息价格推算</TabsTrigger>
       </TabsList>
     </Tabs>
 
@@ -321,11 +321,11 @@ const activeTab = ref<string>('rank');
       </Card>
     </div>
 
-    <!-- Tab 2：反推价格（v-show 隐藏时保持挂载，输入与计算状态不丢失） -->
+    <!-- Tab 2：股息价格推算（v-show 隐藏时保持挂载，输入与计算状态不丢失） -->
     <div v-show="activeTab === 'calc'">
       <Card>
         <CardHeader>
-          <CardTitle class="text-base">反推价格</CardTitle>
+          <CardTitle class="text-base">股息价格推算</CardTitle>
           <CardDescription>
             目标股息率价格推算：按「每股分红 ÷ 目标股息率」反推隐含价格
           </CardDescription>
