@@ -3,10 +3,10 @@
  * modules/dividend-yield/components/ImpliedPriceCalculator.vue — 股息价格推算
  *
  * 自 SecurityDetailPanel 迁出的「反推价格」功能独立化（对外名「股息价格推算」，参照外部模板丰富界面）：
- * - 选择股票：SecuritySearchCombobox 搜索式选股（同持仓页，键入防抖搜索证券主数据，
- *   匹配代码 / 名称 / 拼音首字母）；证券主数据不含分红字段，每股分红在计算后
- *   由服务端 implied-price 接口带出（只读展示）；选中无分红记录的股票时结果区
- *   提示「暂无法计算」；
+ * - 选择股票：搜索式选择框（UI 形态参考持仓页 SecuritySearchCombobox：搜索图标 +
+ *   内联候选下拉 + 清空叉），候选 = 股息率榜单前 200 家（有分红记录，按股息率降序），
+ *   本地按代码 / 名称即时过滤；选中后自动带出该股每股分红（榜单行
+ *   numerator_per_share，服务端分红记录口径，只读展示）；
  * - 目标股息率以百分比输入（如 6 = 6%），内部换算小数后仍走原服务端
  *   implied-price 接口计算（保留原有逻辑与当前价/当前股息率对照）；
  * - 结果卡：每股分红 | 目标股息率 → 隐含价格大字 + 公式 + 「当前价 ≤ 隐含价时股息率 ≥ 目标」语义；
@@ -15,36 +15,72 @@
  * - 布局 grid 响应式，移动端单列堆叠。
  */
 import { computed, ref } from 'vue';
-import { Loader2 } from 'lucide-vue-next';
+import { Loader2, Search, X } from 'lucide-vue-next';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
-import SecuritySearchCombobox from '@/components/common/SecuritySearchCombobox.vue';
 import { formatCurrency, formatPercent } from '@/lib/utils';
-import { useImpliedPrice } from '../composables/use-dividend-yield';
-import type { SecurityMaster } from '@/api/security-master.api';
+import { useImpliedPrice, useRank } from '../composables/use-dividend-yield';
+import type { DividendYieldRankItem } from '@/api/types';
+import type { DividendYieldSort } from '@/api/types';
 
-// ── 选中股票（搜索式选择，同持仓页） ──
-const selected = ref<SecurityMaster | null>(null);
+// ── 股票候选：榜单前 200（有分红记录，按股息率降序） ──
+const CANDIDATE_PAGE_SIZE = 200;
+const candidatePage = ref(1);
+const candidateSort = ref<DividendYieldSort>('dividend_yield');
+const candidatesQuery = useRank(
+  candidatePage,
+  CANDIDATE_PAGE_SIZE,
+  candidateSort,
+  true,
+);
+const candidates = computed<DividendYieldRankItem[]>(
+  () => candidatesQuery.data.value?.items ?? [],
+);
+
+// ── 搜索式选择（本地过滤：代码 / 名称包含匹配，大小写不敏感） ──
+const selected = ref<DividendYieldRankItem | null>(null);
+const searchQuery = ref('');
+const searchOpen = ref(false);
+
+const searching = computed(() => searchQuery.value.trim().length > 0);
+
+const filteredCandidates = computed<DividendYieldRankItem[]>(() => {
+  const q = searchQuery.value.trim().toLowerCase();
+  if (!q) return candidates.value;
+  return candidates.value.filter(
+    (c) =>
+      (c.code ?? '').toLowerCase().includes(q) ||
+      (c.name ?? '').toLowerCase().includes(q),
+  );
+});
+
+/** 选中项回显文本（非搜索态展示） */
 const selectedLabel = computed(() =>
   selected.value
     ? `${selected.value.name || '未命名'}（${selected.value.code || '-'}）`
     : '',
 );
 
-function handleSelect(master: SecurityMaster): void {
-  selected.value = master;
+function handlePick(item: DividendYieldRankItem): void {
+  selected.value = item;
+  searchQuery.value = '';
+  searchOpen.value = false;
 }
 
 function handleClear(): void {
   selected.value = null;
+  searchQuery.value = '';
+  searchOpen.value = false;
 }
 
-/** 服务端权威每股分红（仅计算响应携带；证券主数据无分红字段） */
-const numeratorPerShare = computed<number | null>(
-  () => implied.data.value?.numerator_per_share ?? null,
-);
+/** 服务端权威每股分红（选中后优先用接口返回，回退榜单行值） */
+const numeratorPerShare = computed<number | null>(() => {
+  const fromApi = implied.data.value?.numerator_per_share;
+  if (fromApi != null) return fromApi;
+  return selected.value?.numerator_per_share ?? null;
+});
 
 // ── 目标股息率（百分比输入，内部换算小数比率） ──
 const ratioPercent = ref<string>('');
@@ -62,7 +98,7 @@ const ratioError = computed<string | null>(() => {
 
 // ── 隐含价格（服务端计算；逻辑与原 SecurityDetailPanel 反推区块一致） ──
 const implied = useImpliedPrice(
-  computed(() => selected.value?.id ?? null),
+  computed(() => selected.value?.master_id ?? null),
   validRatio,
   computed(() => selected.value != null),
 );
@@ -93,26 +129,96 @@ const quickRefs = computed(() => {
     price: n / r,
   }));
 });
+
+// 点击候选时容器 blur 可能先触发；用 mousedown 阻止默认，保证 click 可命中
+function handleContainerMousedown(e: MouseEvent): void {
+  if ((e.target as HTMLElement).closest('[data-calc-candidate]')) {
+    e.preventDefault();
+  }
+}
+
+function handleBlur(): void {
+  setTimeout(() => {
+    searchOpen.value = false;
+  }, 150);
+}
 </script>
 
 <template>
   <div class="space-y-5">
-    <!-- 选择股票（搜索式，同持仓页） -->
+    <!-- 选择股票（搜索式：候选 = 榜单前 200 有分红记录股票） -->
     <div class="space-y-1.5">
       <Label for="dy-calc-security" class="text-sm font-medium">选择股票</Label>
-      <SecuritySearchCombobox
-        id="dy-calc-security"
-        :value="selectedLabel"
-        :on-select="handleSelect"
-        :on-clear="handleClear"
-        placeholder="搜索代码 / 名称 / 拼音首字母"
-      />
+      <div class="relative" @mousedown="handleContainerMousedown">
+        <div class="relative">
+          <Search
+            class="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+          />
+          <Input
+            id="dy-calc-security"
+            class="pl-8 pr-8"
+            placeholder="搜索代码 / 名称（候选为股息率榜单前 200 家）"
+            :model-value="searching ? searchQuery : selectedLabel"
+            @update:model-value="(v: string | number) => { searchQuery = String(v); searchOpen = true; }"
+            @focus="() => { if (searchQuery) searchOpen = true; }"
+            @blur="handleBlur"
+          />
+          <button
+            v-if="(searching ? searchQuery : selectedLabel)"
+            type="button"
+            aria-label="清除"
+            class="absolute right-2 top-1/2 -translate-y-1/2 rounded-sm p-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            @click="handleClear"
+          >
+            <X class="h-4 w-4" />
+          </button>
+        </div>
+
+        <!-- 搜索下拉候选 -->
+        <div
+          v-if="searchOpen"
+          class="absolute z-50 mt-1 max-h-72 w-full overflow-auto rounded-md border bg-popover p-1 text-popover-foreground shadow-md"
+        >
+          <div
+            v-if="candidatesQuery.isLoading.value"
+            class="flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground"
+          >
+            <Loader2 class="h-3.5 w-3.5 animate-spin" /> 候选加载中…
+          </div>
+          <p
+            v-else-if="filteredCandidates.length === 0"
+            class="px-3 py-2 text-sm text-muted-foreground"
+          >
+            无匹配结果
+          </p>
+          <template v-else>
+            <button
+              v-for="c in filteredCandidates"
+              :key="c.master_id"
+              type="button"
+              data-calc-candidate
+              class="flex w-full items-center justify-between gap-2 rounded-sm px-3 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
+              @click="handlePick(c)"
+            >
+              <span class="truncate">
+                <span class="font-medium">{{ c.name || '未命名' }}</span>
+                <span class="ml-2 font-mono text-xs text-muted-foreground">
+                  {{ c.code || '-' }}
+                </span>
+              </span>
+              <span class="shrink-0 text-xs text-muted-foreground">
+                每股分红 {{ formatCurrency(c.numerator_per_share) }}
+              </span>
+            </button>
+          </template>
+        </div>
+      </div>
       <p class="text-xs text-muted-foreground">
-        搜索全市场证券；仅有分红记录的股票可完成推算
+        候选为有分红记录的股票（按股息率降序前 200 家）；选中后自动带出每股分红
       </p>
     </div>
 
-    <!-- 每股分红（计算后带出，只读） + 目标股息率 -->
+    <!-- 每股分红（选中自动带出，只读） + 目标股息率 -->
     <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
       <div class="space-y-1.5">
         <Label for="dy-calc-numerator" class="text-sm font-medium">
@@ -121,12 +227,12 @@ const quickRefs = computed(() => {
         <Input
           id="dy-calc-numerator"
           :model-value="numeratorPerShare != null ? String(numeratorPerShare) : ''"
-          placeholder="计算后自动带出"
+          placeholder="选中股票后自动带出"
           readonly
           class="bg-muted/50"
         />
         <p class="text-xs text-muted-foreground">
-          取自服务端分红记录口径，计算后自动填入
+          取自服务端分红记录口径，选中股票后自动填入
         </p>
       </div>
       <div class="space-y-1.5">
@@ -208,7 +314,7 @@ const quickRefs = computed(() => {
         </p>
       </template>
       <p v-else class="text-sm text-muted-foreground">
-        暂无法计算（该股票缺少分红记录）
+        暂无法计算（该股票缺少分红数据）
       </p>
     </div>
 
