@@ -30,6 +30,8 @@ export interface DividendYieldRankFilters {
   min_consecutive?: number;
   include_proposed?: boolean;
   include_no_dividend?: boolean;
+  /** 关键字过滤：证券代码 / 名称模糊匹配（服务端 ilike） */
+  q?: string;
 }
 
 /** 股息率榜单（分页/排序/过滤） */

@@ -11,7 +11,7 @@
  * SecurityDetailPanel，经 SecurityDetailDialog 模态包装；关闭后返回榜单列表状态）。
  * 支持 URL query 初始化过滤（§10.3 TopPage「查看全部」带 min_consecutive 跳入）。
  */
-import { computed, ref, watch } from 'vue';
+import { computed, onUnmounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import PageHeader from '@/components/common/PageHeader.vue';
 import EmptyState from '@/components/common/EmptyState.vue';
@@ -38,7 +38,7 @@ import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Loader2 } from 'lucide-vue-next';
+import { Loader2, Search, X } from 'lucide-vue-next';
 import {
   Select,
   SelectContent,
@@ -70,6 +70,27 @@ const fMinConsecutive = ref<string>(
 const fIncludeProposed = ref(true);
 const fIncludeNoDividend = ref(false);
 
+// ── 关键字搜索筛选（代码/名称模糊匹配，250ms 防抖后驱动服务端查询） ──
+const fKeywordInput = ref<string>(
+  typeof route.query.q === 'string' ? route.query.q : '',
+);
+const fKeyword = ref<string>(fKeywordInput.value);
+watch(fKeywordInput, (val) => {
+  const t = setTimeout(() => {
+    fKeyword.value = val.trim();
+  }, 250);
+  keywordTimer = t;
+});
+let keywordTimer: ReturnType<typeof setTimeout> | undefined;
+onUnmounted(() => {
+  if (keywordTimer) clearTimeout(keywordTimer);
+});
+
+function clearKeyword(): void {
+  fKeywordInput.value = '';
+  fKeyword.value = '';
+}
+
 const rankFilters = computed(() => ({
   exchange: fExchange.value === 'ALL' ? undefined : fExchange.value,
   mode: fMode.value === 'ALL' ? undefined : (fMode.value as 'TTM' | 'LFY'),
@@ -79,6 +100,7 @@ const rankFilters = computed(() => ({
       : Math.max(0, Math.floor(Number(fMinConsecutive.value))),
   include_proposed: fIncludeProposed.value,
   include_no_dividend: fIncludeNoDividend.value,
+  q: fKeyword.value.trim() === '' ? undefined : fKeyword.value.trim(),
 }));
 // 过滤条件变化后回到第一页，避免落在越界页
 watch(rankFilters, () => {
@@ -157,6 +179,29 @@ const activeTab = ref<string>('rank');
     <div v-show="activeTab === 'rank'" class="space-y-6">
       <!-- 过滤条（§8.1）：置于榜单卡外，与持仓等页统一布局 -->
       <div class="flex flex-wrap items-end gap-4">
+        <div class="relative w-56 space-y-1.5">
+          <Label class="text-xs text-muted-foreground">搜索股票</Label>
+          <div class="relative">
+            <Search
+              class="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+            />
+            <Input
+              id="dy-rank-keyword"
+              class="pl-8 pr-8"
+              v-model="fKeywordInput"
+              placeholder="代码 / 名称"
+            />
+            <button
+              v-if="fKeywordInput"
+              type="button"
+              aria-label="清除搜索"
+              class="absolute right-2 top-1/2 -translate-y-1/2 rounded-sm p-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              @click="clearKeyword"
+            >
+              <X class="h-4 w-4" />
+            </button>
+          </div>
+        </div>
         <div class="space-y-1.5">
           <Label class="text-xs text-muted-foreground">交易所</Label>
           <Select v-model="fExchange">

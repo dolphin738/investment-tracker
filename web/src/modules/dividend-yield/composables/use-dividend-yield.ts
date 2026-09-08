@@ -66,6 +66,7 @@ export function useRank(
         f.min_consecutive ?? null,
         f.include_proposed ?? true,
         f.include_no_dividend ?? false,
+        f.q ?? null,
       ];
     }),
     queryFn: () =>
