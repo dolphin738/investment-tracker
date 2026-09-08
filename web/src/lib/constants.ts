@@ -43,6 +43,17 @@ export const ROUTE_PATH = {
 // 命名风格与 invest:admin-active-module 一致（invest: 前缀 + 短横线语义）。
 export const AUTH_RETURN_KEY = 'invest:auth-return';
 
+// ===== Select 空值哨兵 =====
+/**
+ * reka-ui 的 ``<SelectItem />`` **禁止** ``value=""``（空串会在 setup 阶段抛
+ * "must have a value prop that is not an empty string"），因此「未选中 / 不设置」
+ * 一律用此哨兵表示，提交时再映射回 null。
+ *
+ * 原定义在 ``modules/query/quick-range.ts``（QUICK_RANGE_PLACEHOLDER），上移此处
+ * 作为全站单一真源；各模块不得再各自写魔法字符串。
+ */
+export const SELECT_EMPTY_VALUE = '__none__';
+
 // ===== 查询维度选项（用于 UI 下拉/Tab） =====
 export const GRANULARITY_OPTIONS = [
   { value: 'day', label: '按日' },

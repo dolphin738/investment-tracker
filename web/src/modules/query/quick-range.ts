@@ -16,7 +16,7 @@
  * 注意：口径唯一真相源 = 本文件。任何页面都不得再维护本地快捷范围副本。
  */
 
-import { toIsoDate } from '@/lib/constants';
+import { SELECT_EMPTY_VALUE, toIsoDate } from '@/lib/constants';
 
 /** 快捷范围下拉的单项（value 参与 URL/偏好持久化，禁止随意改动） */
 export interface QuickRangeOption {
@@ -113,8 +113,11 @@ export function resolveQuickRange(
  * Select 占位哨兵值。
  * reka-ui 不允许 value=""，因此「未选中任何快捷项」统一用此哨兵表示。
  * DateRangeQuickPicker 与维度切换组件共用，避免两处各写一份。
+ *
+ * 真源已上移至 ``lib/constants.ts`` 的 SELECT_EMPTY_VALUE；此处保留别名，
+ * 既有调用方（DateRangeQuickPicker）不必改动。
  */
-export const QUICK_RANGE_PLACEHOLDER = '__none__';
+export const QUICK_RANGE_PLACEHOLDER = SELECT_EMPTY_VALUE;
 
 /** 判定某个值是否命中快捷范围预设（受控回显时用） */
 export function isQuickRangeValue(

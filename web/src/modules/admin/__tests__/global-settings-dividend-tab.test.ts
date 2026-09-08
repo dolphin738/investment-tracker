@@ -19,6 +19,7 @@ import {
   type VueWrapper,
 } from '@vue/test-utils';
 import { ref, defineComponent, h } from 'vue';
+import { SELECT_EMPTY_VALUE } from '@/lib/constants';
 
 // ---------------------------------------------------------------------------
 // 测试数据（模块级共享：mock 工厂与断言共用）
@@ -134,11 +135,17 @@ function realOptions(select: DOMWrapper<Element>): DOMWrapper<Element>[] {
   return select.findAll('option').filter((o) => o.text().trim() !== '');
 }
 
-/** 接口 option（跳过「不设置」空值项与占位空 option） */
+/**
+ * 接口 option（跳过「不设置」哨兵项与占位空 option）。
+ * 哨兵取自 SELECT_EMPTY_VALUE 真源：reka-ui 禁止 value=""，写死空串会在
+ * 组件改用哨兵后误把「不设置」当成接口项（历史教训）。
+ */
 function interfaceOptions(select: DOMWrapper<Element>): DOMWrapper<Element>[] {
   return select
     .findAll('option')
-    .filter((o) => o.attributes('value') !== '' && o.text().trim() !== '');
+    .filter(
+      (o) => o.attributes('value') !== SELECT_EMPTY_VALUE && o.text().trim() !== '',
+    );
 }
 
 beforeEach(() => {
@@ -162,9 +169,12 @@ describe('GlobalSettingsDividendTab — 四源下拉与提供方名拼接（§15
       o.attributes('value'),
     );
     expect(announcementValues).toEqual(['i4']);
-    // 每个下拉都提供「不设置」空值项
+    // 每个下拉都提供「不设置」哨兵项（reka-ui 禁止 value=""，故用哨兵而非空串）
     selects.forEach((sel) => {
-      expect(realOptions(sel).some((o) => o.attributes('value') === '')).toBe(true);
+      expect(
+        realOptions(sel).some((o) => o.attributes('value') === SELECT_EMPTY_VALUE),
+      ).toBe(true);
+      expect(realOptions(sel).some((o) => o.attributes('value') === '')).toBe(false);
     });
     // 未启用（i5）与分类 3/2（i1/i2/i3）接口均不得出现在公告源下拉
     expect(announcementValues).not.toContain('i5');

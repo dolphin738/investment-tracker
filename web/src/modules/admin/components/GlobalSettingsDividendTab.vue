@@ -33,6 +33,7 @@ import {
   useUpdateDividendYieldSettings,
 } from '@/modules/dividend-yield/composables/use-dividend-yield';
 import { useQuoteProviders } from '@/modules/admin/composables/use-quote-provider';
+import { SELECT_EMPTY_VALUE } from '@/lib/constants';
 import type { UpdateDividendYieldSettingsDto } from '@/api/types';
 
 const settingsQuery = useDividendYieldSettings(true);
@@ -67,16 +68,22 @@ const providerNameById = computed(() => {
   return m;
 });
 
-// 股息率设置本地表单：阈值以**百分数**存储（5 = 5%），提交时转小数（P2-8 / §2.4）
+// 股息率设置本地表单：阈值以**百分数**存储（5 = 5%），提交时转小数（P2-8 / §2.4）。
+// 四个接口下拉的「不设置」用 SELECT_EMPTY_VALUE 表示（reka-ui 禁止 value=""）。
 const settingsForm = reactive({
   greenPercent: '',
   redPercent: '',
-  dividendReportSourceInterfaceId: '',
-  dividendDetailSourceInterfaceId: '',
-  priceSourceInterfaceId: '',
-  announcementSourceInterfaceId: '',
+  dividendReportSourceInterfaceId: SELECT_EMPTY_VALUE,
+  dividendDetailSourceInterfaceId: SELECT_EMPTY_VALUE,
+  priceSourceInterfaceId: SELECT_EMPTY_VALUE,
+  announcementSourceInterfaceId: SELECT_EMPTY_VALUE,
 });
 const settingsFormError = ref('');
+
+/** 表单下拉值 → 提交值：哨兵 / 空串一律视为「不设置」（null）。 */
+function toInterfaceIdOrNull(v: string): string | null {
+  return v === SELECT_EMPTY_VALUE ? null : v || null;
+}
 
 /** 小数比率 → 百分数字符串（0.05 → "5"） */
 function ratioToPercent(v: number | null): string {
@@ -91,10 +98,13 @@ watch(
     if (!s) return;
     settingsForm.greenPercent = ratioToPercent(s.green_threshold);
     settingsForm.redPercent = ratioToPercent(s.red_threshold);
-    settingsForm.dividendReportSourceInterfaceId = s.dividend_report_source?.id ?? '';
-    settingsForm.dividendDetailSourceInterfaceId = s.dividend_detail_source?.id ?? '';
-    settingsForm.priceSourceInterfaceId = s.price_source?.id ?? '';
-    settingsForm.announcementSourceInterfaceId = s.announcement_source?.id ?? '';
+    settingsForm.dividendReportSourceInterfaceId =
+      s.dividend_report_source?.id ?? SELECT_EMPTY_VALUE;
+    settingsForm.dividendDetailSourceInterfaceId =
+      s.dividend_detail_source?.id ?? SELECT_EMPTY_VALUE;
+    settingsForm.priceSourceInterfaceId = s.price_source?.id ?? SELECT_EMPTY_VALUE;
+    settingsForm.announcementSourceInterfaceId =
+      s.announcement_source?.id ?? SELECT_EMPTY_VALUE;
   },
   { immediate: true },
 );
@@ -131,12 +141,13 @@ const settingsHasChanges = computed(() => {
     settingsForm.greenPercent !== ratioToPercent(s.green_threshold) ||
     settingsForm.redPercent !== ratioToPercent(s.red_threshold) ||
     settingsForm.dividendReportSourceInterfaceId !==
-      (s.dividend_report_source?.id ?? '') ||
+      (s.dividend_report_source?.id ?? SELECT_EMPTY_VALUE) ||
     settingsForm.dividendDetailSourceInterfaceId !==
-      (s.dividend_detail_source?.id ?? '') ||
-    settingsForm.priceSourceInterfaceId !== (s.price_source?.id ?? '') ||
+      (s.dividend_detail_source?.id ?? SELECT_EMPTY_VALUE) ||
+    settingsForm.priceSourceInterfaceId !==
+      (s.price_source?.id ?? SELECT_EMPTY_VALUE) ||
     settingsForm.announcementSourceInterfaceId !==
-      (s.announcement_source?.id ?? '')
+      (s.announcement_source?.id ?? SELECT_EMPTY_VALUE)
   );
 });
 
@@ -151,13 +162,18 @@ function handleSaveSettings(): void {
   const payload: UpdateDividendYieldSettingsDto = {
     green_threshold: percentToRatio(settingsForm.greenPercent).ratio,
     red_threshold: percentToRatio(settingsForm.redPercent).ratio,
-    dividend_report_source_interface_id:
-      settingsForm.dividendReportSourceInterfaceId || null,
-    dividend_detail_source_interface_id:
-      settingsForm.dividendDetailSourceInterfaceId || null,
-    price_source_interface_id: settingsForm.priceSourceInterfaceId || null,
-    announcement_source_interface_id:
-      settingsForm.announcementSourceInterfaceId || null,
+    dividend_report_source_interface_id: toInterfaceIdOrNull(
+      settingsForm.dividendReportSourceInterfaceId,
+    ),
+    dividend_detail_source_interface_id: toInterfaceIdOrNull(
+      settingsForm.dividendDetailSourceInterfaceId,
+    ),
+    price_source_interface_id: toInterfaceIdOrNull(
+      settingsForm.priceSourceInterfaceId,
+    ),
+    announcement_source_interface_id: toInterfaceIdOrNull(
+      settingsForm.announcementSourceInterfaceId,
+    ),
   };
   settingsMutation.mutate(payload);
 }
@@ -221,7 +237,7 @@ function handleSaveSettings(): void {
               <SelectValue placeholder="选择股息主数据源接口" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="">不设置</SelectItem>
+              <SelectItem :value="SELECT_EMPTY_VALUE">不设置</SelectItem>
               <SelectItem
                 v-for="itf in dividendSourceOptions"
                 :key="itf.id"
@@ -241,7 +257,7 @@ function handleSaveSettings(): void {
               <SelectValue placeholder="选择股息明细源接口" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="">不设置</SelectItem>
+              <SelectItem :value="SELECT_EMPTY_VALUE">不设置</SelectItem>
               <SelectItem
                 v-for="itf in dividendDetailOptions"
                 :key="itf.id"
@@ -261,7 +277,7 @@ function handleSaveSettings(): void {
               <SelectValue placeholder="选择行情源接口" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="">不设置</SelectItem>
+              <SelectItem :value="SELECT_EMPTY_VALUE">不设置</SelectItem>
               <SelectItem
                 v-for="itf in priceSourceOptions"
                 :key="itf.id"
@@ -281,7 +297,7 @@ function handleSaveSettings(): void {
               <SelectValue placeholder="选择公司公告接口" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="">不设置</SelectItem>
+              <SelectItem :value="SELECT_EMPTY_VALUE">不设置</SelectItem>
               <SelectItem
                 v-for="itf in announcementSourceOptions"
                 :key="itf.id"
