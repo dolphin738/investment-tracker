@@ -114,4 +114,31 @@ describe('RankingPage（§10.2 管理页）', () => {
     expect(fixtures.calls[0]?.exchange).toBeUndefined();
     expect(fixtures.calls[0]?.mode).toBeUndefined();
   });
+
+  it('q 关键字过滤：250ms 防抖后驱动服务端查询（§9 rankings q 参数）', async () => {
+    const wrapper = await mountAt('/dividend-yield');
+    expect(fixtures.calls.length).toBeGreaterThan(0);
+    await wrapper.find('#dy-rank-keyword').setValue('600001');
+    // 防抖窗口内不发新请求（既有 calls 均无 q）
+    expect(fixtures.calls.every((c) => c.q === undefined)).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await flushPromises();
+    expect(fixtures.calls[fixtures.calls.length - 1]?.q).toBe('600001');
+  });
+
+  it('URL query q 初始化过滤（深链契约）', async () => {
+    await mountAt('/dividend-yield?q=茅台');
+    expect(fixtures.calls[0]?.q).toBe('茅台');
+  });
+
+  it('页面级双 Tab：两页签渲染，推算区默认 v-show 隐藏且保持挂载（切 Tab 状态不丢）', async () => {
+    const wrapper = await mountAt('/dividend-yield');
+    const triggers = wrapper.findAll('[role="tab"]');
+    expect(triggers.length).toBe(2);
+    expect(triggers[1].text()).toContain('股息价格推算');
+    // v-show 保挂载契约：推算器始终在 DOM（切 Tab 不重挂、输入/选中状态不丢）
+    const calcInput = wrapper.find('#dy-calc-security');
+    expect(calcInput.exists()).toBe(true);
+    expect(calcInput.isVisible()).toBe(false); // 初始榜单 Tab，推算区隐藏
+  });
 });

@@ -139,7 +139,7 @@ async function pickSecurity(): Promise<void> {
   // 等防抖（250ms）触发 master 搜索
   await new Promise((resolve) => setTimeout(resolve, 300));
   await settle();
-  const candidate = wrapper!.find('[data-security-candidate]');
+  const candidate = wrapper!.find('[data-combobox-candidate]');
   expect(candidate.exists()).toBe(true);
   await candidate.trigger('click');
   await settle();
