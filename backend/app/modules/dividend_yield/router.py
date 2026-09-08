@@ -19,7 +19,7 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, Path, Query
 from pydantic import BaseModel
-from sqlalchemy import case, select
+from sqlalchemy import case, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.date_utils import today_app_tz
@@ -129,15 +129,18 @@ async def rank_dividend_yield(
     min_consecutive: Optional[int] = Query(None, ge=0),
     include_proposed: bool = Query(True),
     include_no_dividend: bool = Query(False),
+    q: Optional[str] = Query(None, max_length=50),
 ):
     """股息率排名（§8.1/§9）。
 
     - NULL 股息率不进榜（§3.5）；B2 排序白名单 + ``NULLS LAST`` + master_id tiebreaker；
     - 过滤参数：``exchange``/``mode``/``min_consecutive``/``include_proposed``/``include_no_dividend``
       （默认**剔除近两年无分红**，§8.2 窗口 [cur-1, cur] 由 ``last_dividend_year`` 表达）；
+    - ``q`` 关键字过滤：按证券代码 / 名称模糊匹配（大小写不敏感，前后端统一搜索口径）；
     - ``include_proposed=false`` 时剔除 PROPOSED 后分子随之改变，按 §8.1 以过滤后记录集
       现调 §2.5 纯函数计算「过滤态股息率」，行内以 ``filtered=True`` 标注（排序仍用快照列）。
     """
+    q_kw = (q or "").strip() or None
     if sort not in _SORT_COLUMNS:
         raise BusinessException(
             code=BusinessErrorCode.VALIDATION_FAILED,
@@ -173,9 +176,13 @@ async def rank_dividend_yield(
         # §8.2：窗口 [cur-1, cur] 内无分红即剔除（last_dividend_year 为 NULL 亦剔除）
         conds.append(SecurityDividendYield.last_dividend_year.is_not(None))
         conds.append(SecurityDividendYield.last_dividend_year >= cur_year - 1)
+    if q_kw is not None:
+        # q 关键字：代码 / 名称模糊匹配（需 join Securities 主数据取 code/name）
+        like = f"%{q_kw}%"
+        conds.append(or_(Security.code.ilike(like), Security.name.ilike(like)))
 
     stmt = select(SecurityDividendYield)
-    if exchange is not None:
+    if exchange is not None or q_kw is not None:
         stmt = stmt.join(Security, Security.id == SecurityDividendYield.master_id)
     stmt = stmt.where(*conds).order_by(_SORT_COLUMNS[sort], *_SORT_ASCENDING)
 
