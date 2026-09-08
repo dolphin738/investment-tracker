@@ -542,3 +542,34 @@ async def test_rebuild_admin_success_returns_summary(session, client):
     assert isinstance(data["summary"], str)
     assert data["summary"].startswith("股息率全量重建完成")
     assert "1 只" in data["summary"]
+
+
+@pytest.mark.asyncio
+async def test_rebuild_preserves_snapshot_without_raw_source(session, client):
+    """守护重建边界（修复点）：仅存在有值快照、无原始分红/价格时，重建应保留既有派生值，
+
+    而非把有值快照覆写为 None（否则表面「0 只」实为数据丢失）。summary 计入口径改为「保留 N 只」。
+    """
+    admin = await _make_admin(session, client)
+    h = auth(admin["token"])
+    # 直接造一条有值的快照，但不造原始分红 / 价格
+    m = Security(
+        id=_uid(), code="sh600902", name="证券sh600902",
+        asset_class=SecurityType.STOCK, exchange="SH",
+    )
+    session.add(m)
+    snap = SecurityDividendYield(
+        master_id=m.id, mode=DividendYieldMode.TTM,
+        numerator_per_share=Decimal("1.0"), dividend_yield=Decimal("0.08"),
+        latest_price=Decimal("12.5"), consecutive_years=3,
+        last_dividend_year=date.today().year, computed_at=datetime.now(tz.utc),
+    )
+    session.add(snap)
+    await session.commit()
+    r = await client.post("/api/dividend-yield/rebuild", headers=h)
+    status, code, data, _ = env(r)
+    assert status == 200 and code == 0
+    assert "保留 1 只" in data["summary"]
+    # 快照值未被覆写
+    await session.refresh(snap)
+    assert snap.dividend_yield == Decimal("0.08")

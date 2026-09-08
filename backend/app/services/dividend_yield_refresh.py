@@ -35,7 +35,7 @@ from app.services.dividend_yield import (
 logger = logging.getLogger(__name__)
 
 
-async def refresh_yields_for_masters(session, master_ids: list[str]) -> None:
+async def refresh_yields_for_masters(session, master_ids: list[str]) -> tuple[int, int]:
     """对指定 master 集合重派生 ``security_dividend_yields`` 快照（§2.5/§7 变更集重算）。
 
     - 分母 = 该证券最新不复权收盘价（``market_security_daily_prices`` 最大 trade_date）；
@@ -50,9 +50,11 @@ async def refresh_yields_for_masters(session, master_ids: list[str]) -> None:
     - 干净执行（任一 master 失败不中断其余），调用方捕获提交。
     """
     if not master_ids:
-        return
+        return 0, 0
     mids = list(dict.fromkeys(master_ids))  # 去重保留顺序
     cur_year = today_app_tz().year
+    rebuilt = 0
+    preserved = 0
 
     # ① 批量取全部相关分红记录
     div_rows_all = (
@@ -113,6 +115,12 @@ async def refresh_yields_for_masters(session, master_ids: list[str]) -> None:
             price = price_row.close if price_row is not None else None
             latest_trade_date = price_row.trade_date if price_row is not None else None
 
+            # 无原始分红且无价格、且已有快照 → 保留既有派生值，避免重建把有值快照改写为
+            # None（数据丢失）。仅当存在可重算的原始数据时才覆写（§2.5/§7 变更集重算）。
+            if not cells and price is None and mid in snap_by_master:
+                preserved += 1
+                continue
+
             result = compute_yield(cells, price, cur_year)
             mode = result.mode if result.ref_div_ids else DividendYieldMode.LFY
             snapshot = snap_by_master.get(mid)
@@ -131,9 +139,12 @@ async def refresh_yields_for_masters(session, master_ids: list[str]) -> None:
             snapshot.suspicious = is_suspicious(result.dividend_yield)
             # stale 保持不动：唯一定责于 update_stale_flags（§7 / P2-4），本函数不重置
             snapshot.computed_at = datetime.now(timezone.utc)
+            rebuilt += 1
         except Exception:  # 单个证券失败不中断其余（任务级异常由 handler 汇总）
             logger.warning("股息率快照重算失败 master_id=%s，保留旧快照", mid, exc_info=True)
             continue
+
+    return rebuilt, preserved
 
 
 async def refresh_trade_calendar(session) -> None:

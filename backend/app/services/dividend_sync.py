@@ -30,6 +30,7 @@ from app.models import (
     QuoteInterface,
     Security,
     SecurityDividend,
+    SecurityDividendYield,
 )
 from app.models.enums import (
     DividendStatus,
@@ -351,7 +352,13 @@ class DividendSyncService:
     # 全量重建（§6.4，默认禁用）
     # ------------------------------------------------------------------ #
     async def yield_rebuild(self, cfg: Any) -> str:
-        """逐证券从源数据重建派生快照（§6.4 手动 trigger）。"""
+        """逐证券从源数据重建派生快照（§6.4 手动 trigger）。
+
+        枚举范围 = 原始分红(SecurityDividend) ∪ 日线价格(MarketSecurityDailyPrice)
+        ∪ 既有快照(SecurityDividendYield)。前两者为空（原始数据未采集）但仍有历史
+        快照时仍覆盖这些证券，避免「0 只」且防止 refresh 把有值快照改写为 None
+        （refresh_yields_for_masters 内部对无源数据者保留而非覆写为空）。
+        """
         all_mids = set(
             (await self.session.execute(select(SecurityDividend.master_id).distinct())).scalars().all()
         )
@@ -360,10 +367,18 @@ class DividendSyncService:
                 await self.session.execute(select(MarketSecurityDailyPrice.master_id).distinct())
             ).scalars().all()
         )
-        mids = all_mids | price_mids
-        await refresh_yields_for_masters(self.session, list(mids))
+        snap_mids = set(
+            (
+                await self.session.execute(select(SecurityDividendYield.master_id).distinct())
+            ).scalars().all()
+        )
+        mids = all_mids | price_mids | snap_mids
+        rebuilt, preserved = await refresh_yields_for_masters(self.session, list(mids))
         await self.session.commit()
-        return f"股息率全量重建完成：{len(mids)} 只证券已重建派生快照"
+        return (
+            f"股息率全量重建完成：重算 {rebuilt} 只、保留 {preserved} 只"
+            f"（共 {len(mids)} 只证券派生快照）"
+        )
 
 
 # --------------------------------------------------------------------------- #
