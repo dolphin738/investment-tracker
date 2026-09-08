@@ -14,6 +14,7 @@
 
 import { http } from '@/lib/api-client';
 import type {
+  DividendYieldRankItem,
   DividendYieldRankResponse,
   DividendYieldTop20Response,
   DividendYieldCurveResponse,
@@ -48,6 +49,16 @@ export function getDividendYieldRank(
 /** Top20 股息率看板（后端已剔除 suspicious、封顶 20） */
 export function getDividendYieldTop20(): Promise<DividendYieldTop20Response> {
   return http.get<DividendYieldTop20Response>('/dividend-yield/top20');
+}
+
+/** 按代码/名称搜索有派生快照的证券（§10.2 反推价格选股器；行结构与榜单一致） */
+export function searchDividendYieldSecurities(
+  q: string,
+): Promise<{ items: DividendYieldRankItem[] }> {
+  return http.get<{ items: DividendYieldRankItem[] }>(
+    '/dividend-yield/search',
+    { params: { q } },
+  );
 }
 
 /** 单证券股息率曲线（近 days 天） */

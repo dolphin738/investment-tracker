@@ -23,6 +23,7 @@ import {
   getDividendYieldSettings,
   getDividendYieldTop20,
   rebuildDividendYield,
+  searchDividendYieldSecurities,
   updateDividendYieldSettings,
   type DividendYieldRankFilters,
 } from '@/api/dividend-yield.api';
@@ -88,6 +89,19 @@ export function useCurve(masterId: MaybeRefOrGetter<string | null>) {
     }),
     queryFn: () => getDividendYieldCurve(toValue(masterId)!),
     enabled: computed(() => Boolean(toValue(masterId))),
+    staleTime: 60 * 1000,
+  });
+}
+
+/** 按代码/名称搜索有派生快照的证券（§10.2 反推价格选股器；q 为空返回前 20） */
+export function useSearchDividendYieldSecurities(
+  q: MaybeRefOrGetter<string>,
+  enabled: MaybeRefOrGetter<boolean> = true,
+) {
+  return useQuery({
+    queryKey: computed(() => [...DIVIDEND_YIELD_KEY, 'search', toValue(q)]),
+    queryFn: () => searchDividendYieldSecurities(toValue(q)),
+    enabled: computed(() => Boolean(toValue(enabled))),
     staleTime: 60 * 1000,
   });
 }

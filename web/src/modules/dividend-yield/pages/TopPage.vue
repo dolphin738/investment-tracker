@@ -34,7 +34,7 @@ import { useIsAdmin } from '@/stores/auth.store';
 import { useTop20 } from '../composables/use-dividend-yield';
 import { useYieldThresholds } from '../composables/use-yield-thresholds';
 import SecurityDetailPanel from '../components/SecurityDetailPanel.vue';
-import type { DividendYieldMode } from '@/api/types';
+import type { DividendYieldMode, DividendYieldRankItem } from '@/api/types';
 
 const router = useRouter();
 const { thresholds, yieldClass } = useYieldThresholds(() => useIsAdmin());
@@ -43,17 +43,11 @@ const top20 = useTop20();
 const topItems = computed(() => top20.data.value?.top ?? []);
 const consecutiveItems = computed(() => top20.data.value?.consecutive ?? []);
 
-/** 行点击 → 下方展开详情面板（曲线 + 计算器） */
-const selected = ref<{
-  master_id: string;
-  code: string | null;
-  name: string | null;
-} | null>(null);
+/** 行点击 → 下方展开详情面板（Tabs：排名/曲线/反推价格） */
+const selected = ref<DividendYieldRankItem | null>(null);
 
-function selectRow(
-  item: { master_id: string; code: string | null; name: string | null },
-): void {
-  selected.value = { ...item };
+function selectRow(item: DividendYieldRankItem): void {
+  selected.value = item;
 }
 
 /** §10.3「查看全部」出口：跳管理页并带 min_consecutive 过滤 */
@@ -232,10 +226,11 @@ function modeLabel(mode: DividendYieldMode): string {
       </Card>
     </div>
 
-    <!-- 证券详情面板（与 RankingPage 共用） -->
+    <!-- 证券详情面板（与 RankingPage 共用；Tabs：排名/曲线/反推价格） -->
     <SecurityDetailPanel
       v-if="selected"
       :security="selected"
+      :rank="selected"
       @close="selected = null"
     />
 

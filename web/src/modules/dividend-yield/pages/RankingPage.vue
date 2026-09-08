@@ -47,7 +47,7 @@ import { useIsAdmin } from '@/stores/auth.store';
 import { useRank, useRebuildDividendYield } from '../composables/use-dividend-yield';
 import { useYieldThresholds } from '../composables/use-yield-thresholds';
 import SecurityDetailPanel from '../components/SecurityDetailPanel.vue';
-import type { DividendYieldSort } from '@/api/types';
+import type { DividendYieldRankItem, DividendYieldSort } from '@/api/types';
 
 const route = useRoute();
 const isAdmin = computed(() => useIsAdmin());
@@ -101,17 +101,11 @@ function isSorted(col: DividendYieldSort): boolean {
   return allSort.value === col;
 }
 
-/** 行点击 → 详情面板 */
-const selected = ref<{
-  master_id: string;
-  code: string | null;
-  name: string | null;
-} | null>(null);
+/** 行点击 → 详情面板（携带完整榜单行供「排名」TAB 渲染） */
+const selected = ref<DividendYieldRankItem | null>(null);
 
-function selectRow(
-  item: { master_id: string; code: string | null; name: string | null },
-): void {
-  selected.value = { ...item };
+function selectRow(item: DividendYieldRankItem): void {
+  selected.value = item;
 }
 
 function modeLabel(mode: 'TTM' | 'LFY'): string {
@@ -298,10 +292,11 @@ function onRebuild(): void {
       </CardContent>
     </Card>
 
-    <!-- 证券详情面板（与 TopPage 共用） -->
+    <!-- 证券详情面板（与 TopPage 共用；Tabs：排名/曲线/反推价格） -->
     <SecurityDetailPanel
       v-if="selected"
       :security="selected"
+      :rank="selected"
       @close="selected = null"
     />
 

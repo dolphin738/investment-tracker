@@ -22,6 +22,7 @@ vi.mock('@/api/dividend-yield.api', () => ({
   getDividendYieldSettings: vi.fn(async () => null),
   getDividendYieldCurve: vi.fn(),
   getDividendYieldImpliedPrice: vi.fn(),
+  searchDividendYieldSecurities: vi.fn(async () => ({ items: [] })),
 }));
 vi.mock('@/api/quote-interface.api', () => ({
   listAllInterfaces: vi.fn(async () => []),

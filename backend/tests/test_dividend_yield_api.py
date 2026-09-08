@@ -475,6 +475,36 @@ async def test_curve_unknown_master_404(session, client):
     assert r.status_code == 404
 
 
+# ───────────────────────── 证券搜索（§10.2 反推价格选股器） ─────────────────────────
+@pytest.mark.asyncio
+async def test_search_returns_snapshot_rows(session, client):
+    """守护 §10.2：/search 仅返回有快照证券，行结构与榜单一致，代码/名称均可命中。"""
+    info = await register_login(client)
+    m, _ = await _seed_snapshot(session, "sh600036")
+    await _seed_snapshot(session, "sz000001")
+    await session.commit()
+    h = auth(info["token"])
+
+    # 代码命中
+    r = await client.get("/api/dividend-yield/search", params={"q": "600036"}, headers=h)
+    status, _, data, _ = env(r)
+    assert status == 200
+    items = data["items"]
+    assert len(items) == 1 and items[0]["master_id"] == m.id
+    assert items[0]["code"] == "sh600036" and items[0]["name"] == "证券sh600036"
+    # 行结构与 /rankings 一致（排名 TAB 直接渲染）
+    assert {"dividend_yield", "numerator_per_share", "latest_price", "consecutive_years", "mode"} <= set(items[0])
+
+    # 名称命中
+    r = await client.get("/api/dividend-yield/search", params={"q": "证券sz"}, headers=h)
+    items = env(r)[2]["items"]
+    assert {i["code"] for i in items} == {"sz000001"}
+
+    # 空关键字：返回快照全量（封顶 20）
+    r = await client.get("/api/dividend-yield/search", headers=h)
+    assert len(env(r)[2]["items"]) == 2
+
+
 @pytest.mark.asyncio
 async def test_implied_price_route_segment_order(session, client):
     """守护 §9/P0-1：反推价格路由为 /{master_id}/implied-price；implied = 分子 / target_ratio。
