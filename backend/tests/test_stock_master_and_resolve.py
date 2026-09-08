@@ -1258,6 +1258,32 @@ async def test_upsert_masters_assigns_deterministic_id_and_survives_delete_rebui
     assert id2 == master_id_for(SecurityType.STOCK, "sh600000")
 
 
+class _FakeMismatchedInterface:
+    """最小接口桩：resp_code_field 与源返回列名不匹配（复刻「新浪-分红配股」响应无代码列却配 'code'）。"""
+    name = "新浪-分红配股"
+    resp_code_field = "code"
+    resp_name_field = "name"
+    resp_exchange_field = None
+
+
+async def test_upsert_masters_warns_on_zero_output_with_rows(session, caplog):
+    """抓到行却零产出（resp_code_field 与源列名不匹配）→ 打 WARNING，杜绝静默。
+
+    决策 3 场景：新浪分红补充源响应只有中文业务列、不含代码列，若 resp_code_field
+    误配为 'code'，_prepare_master_rows 逐行取空全跳过；_upsert_masters 须以告警暴露，
+    避免「上万行抓取、0 条入库」全程静默（与 dividend_sync 逐期告警同源）。
+    """
+    svc = MarketDataSyncService(session)
+    rows = [{"代码": "600000", "名称": "浦发银行"}]  # 源站实际列名（中文），无 'code' 键
+    caplog.set_level("WARNING", logger="app.services.market_data_sync")
+    n = await svc._upsert_masters(_FakeMismatchedInterface(), rows)
+    assert n == 0
+    assert any(
+        "新浪-分红配股" in r.message and "0 条" in r.message
+        for r in caplog.records
+    )
+
+
 async def test_conflict_merge_keeps_canonical_id_stable(session):
     """冲突合并（含 asset_class=NULL 分支）后，同一 (ac, code) 的确定性 id 始终可由 master_id_for 复现。
 

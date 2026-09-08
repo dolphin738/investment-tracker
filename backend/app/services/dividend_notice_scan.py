@@ -53,6 +53,10 @@ _TITLE_CANCEL_RE = re.compile(r"取消|终止")
 _COL_NOTICE_CODE = "代码"
 _COL_NOTICE_TITLE = "公告标题"
 # 新浪分红 SDK（stock_history_dividend_detail）列名（见 akshare stock_finance_sina.py）
+# 注意：该接口**逐只查询**（代码由请求 params.symbol 传入），响应只有下列 4 个业务列
+# （公告日期/送股/转增/派息/进度/除权除息日/股权登记日/红股上市日），**不含代码列**。
+# 因此本模块解析新浪行一律走下列硬编码常量，**不读 itf.resp_code_field**——
+# 该行配置（seed 遗留 'code'）与源站无对应列，纯属历史占位，勿据此取值。
 _COL_SINA_ANN = "公告日期"
 _COL_SINA_CASH = "派息"
 _COL_SINA_PROGRESS = "进度"

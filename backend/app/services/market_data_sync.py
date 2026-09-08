@@ -21,6 +21,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 import time
 import uuid
@@ -54,6 +55,8 @@ from app.services.classification import (
     is_dropped,
 )
 from app.services.security import infer_security_type
+
+logger = logging.getLogger(__name__)
 
 # 交易所推断规则统一收敛到 app.services.classification（单一事实来源）。
 # 以下别名仅用于兼容内部调用命名与既有测试，规则逻辑不再在此处维护。
@@ -1158,6 +1161,15 @@ class MarketDataSyncService:
         （全市场万行级时由 N 次往返降为 ⌈N/1000⌉ 次）。
         """
         payload = await asyncio.to_thread(self._prepare_master_rows, itf, rows)
+        # 抓到行却零产出 = 配置错位（典型：resp_code_field 填成源站实际列名之外的值，
+        # 如「新浪-分红配股」响应无代码列却配 'code' → 逐行 row.get 取空 → 全量跳过）。
+        # 与 dividend_sync 的逐期告警同源：杜绝「上万行抓取、0 条入库」全程静默。
+        if rows and not payload:
+            logger.warning(
+                "接口「%s」返回 %s 行但可建主数据 0 条："
+                "疑似 resp_code_field=%r 与源返回列名不匹配（或源站响应不含代码列）",
+                itf.name, len(rows), itf.resp_code_field,
+            )
 
         key_list = list({(p["asset_class"], p["code"]) for p in payload})
         existing_map: dict[tuple[Any, str], Security] = {}
