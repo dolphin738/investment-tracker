@@ -21,6 +21,10 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import BaseChart from '@/components/charts/BaseChart.vue';
+import {
+  buildDividendYieldCurveOption,
+} from '@/components/charts/dividend-yield-curve-chart';
+import { useChartTheme } from '@/lib/chart-theme';
 import { formatPercent, formatCurrency } from '@/lib/utils';
 import { useCurve, useImpliedPrice } from '../composables/use-dividend-yield';
 
@@ -31,6 +35,7 @@ const props = defineProps<{
 const emit = defineEmits<{ close: [] }>();
 
 const curve = useCurve(computed(() => props.security.master_id));
+const chartTheme = useChartTheme();
 
 // 目标收益率（小数比率），反推隐含价格
 const targetRatio = ref<string>('');
@@ -51,43 +56,13 @@ const implied = useImpliedPrice(
   computed(() => props.security != null),
 );
 
-/** 近一年曲线 option（股息率 → 百分数；缺段断开，§3.5/§7 缺失语义） */
-const curveOption = computed<EChartsOption>(() => {
-  const items = curve.data.value?.items ?? [];
-  const x = items.map((i) => i.trade_date);
-  const y = items.map((i) =>
-    i.dividend_yield !== null
-      ? Number((i.dividend_yield * 100).toFixed(2))
-      : null,
-  );
-  return {
-    color: ['hsl(var(--primary))'],
-    tooltip: {
-      trigger: 'axis',
-      valueFormatter: (v) => `${v}%`,
-    },
-    grid: { left: 48, right: 16, top: 16, bottom: 24 },
-    xAxis: {
-      type: 'category',
-      data: x,
-      axisLabel: { fontSize: 10 },
-    },
-    yAxis: {
-      type: 'value',
-      axisLabel: { formatter: '{value}%' },
-    },
-    series: [
-      {
-        type: 'line',
-        data: y,
-        connectNulls: false,
-        smooth: true,
-        symbolSize: 4,
-        lineStyle: { width: 2 },
-      },
-    ],
-  };
-});
+/** 近一年曲线 option（股息率 → 百分数；缺段断开，§3.5/§7 缺失语义；配色跟随主题） */
+const curveOption = computed<EChartsOption>(() =>
+  buildDividendYieldCurveOption({
+    items: curve.data.value?.items ?? [],
+    theme: chartTheme.value,
+  }),
+);
 </script>
 
 <template>
