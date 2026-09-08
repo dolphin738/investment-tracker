@@ -5,7 +5,9 @@
  * 全部榜单管理视图：§8.1 过滤条（交易所/口径/连续年数下限/含预案/两年无分红，默认剔除
  * 近两年无分红）+ 列头排序（后端白名单五列，口径列 TTM 优先固定序）+ 分页 + 覆盖度计数；
  * include_proposed=false 时服务端现算「过滤态股息率」（行内 filtered 徽标）。
- * 行点击 → 详情弹窗（曲线 + 反推价格，与 TopPage 共用 SecurityDetailPanel，
+ * 卡片内双 Tab：「榜单列表」（表格 + 分页）与「反推价格」（ImpliedPriceCalculator，
+ * 自曲线面板迁出的目标股息率价格推算）；Tab 用 v-show 切换，两侧状态互不干扰。
+ * 榜单行点击 → 详情弹窗（曲线，与 TopPage 共用 SecurityDetailPanel，
  * 经 SecurityDetailDialog 模态包装；关闭后返回榜单列表状态）。
  * 支持 URL query 初始化过滤（§10.3 TopPage「查看全部」带 min_consecutive 跳入）。
  */
@@ -35,6 +37,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Loader2 } from 'lucide-vue-next';
 import {
   Select,
@@ -48,6 +51,7 @@ import { useIsAdmin } from '@/stores/auth.store';
 import { useRank, useRebuildDividendYield } from '../composables/use-dividend-yield';
 import { useYieldThresholds } from '../composables/use-yield-thresholds';
 import SecurityDetailDialog from '../components/SecurityDetailDialog.vue';
+import ImpliedPriceCalculator from '../components/ImpliedPriceCalculator.vue';
 import type { DividendYieldSort } from '@/api/types';
 
 const route = useRoute();
@@ -129,6 +133,9 @@ const rebuilding = computed(() => rebuild.isPending.value);
 function onRebuild(): void {
   rebuild.mutate();
 }
+
+/** 卡片内 Tab：榜单列表 / 反推价格（内容区 v-show 切换，保状态互不干扰） */
+const activeTab = ref<string>('rank');
 </script>
 
 <template>
@@ -204,12 +211,25 @@ function onRebuild(): void {
 
     <Card>
       <CardHeader>
-        <CardTitle class="text-base">全部榜单</CardTitle>
+        <CardTitle class="text-base">榜单与反推价格</CardTitle>
         <CardDescription>
-          覆盖 {{ allTotal }} 家（当前过滤口径）；含预案口径切换时服务端现算「过滤态股息率」
+          榜单浏览与目标股息率价格推算；行点击查看个股股息率曲线
         </CardDescription>
       </CardHeader>
       <CardContent class="space-y-4">
+        <!-- Tab 页签：榜单列表 / 反推价格 -->
+        <Tabs v-model="activeTab">
+          <TabsList>
+            <TabsTrigger value="rank">榜单列表</TabsTrigger>
+            <TabsTrigger value="calc">反推价格</TabsTrigger>
+          </TabsList>
+        </Tabs>
+
+        <!-- Tab 1：榜单列表（v-show 保状态：筛选/分页/排序不因切换丢失） -->
+        <div v-show="activeTab === 'rank'" class="space-y-4">
+        <p class="text-xs text-muted-foreground">
+          覆盖 {{ allTotal }} 家（当前过滤口径）；含预案口径切换时服务端现算「过滤态股息率」
+        </p>
         <TableSkeleton v-if="allRank.isLoading.value" :rows="8" :cols="6" />
         <EmptyState
           v-else-if="allItems.length === 0"
@@ -300,6 +320,12 @@ function onRebuild(): void {
             @page-size-change="(s: number) => { allPageSize = s; allPage = 1; }"
           />
         </template>
+        </div>
+
+        <!-- Tab 2：反推价格（v-show 隐藏时保持挂载，输入与计算状态不丢失） -->
+        <div v-show="activeTab === 'calc'">
+          <ImpliedPriceCalculator />
+        </div>
       </CardContent>
     </Card>
 
