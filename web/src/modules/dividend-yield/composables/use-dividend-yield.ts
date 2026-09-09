@@ -23,6 +23,7 @@ import {
   getDividendYieldSettings,
   getDividendYieldTop20,
   rebuildDividendYield,
+  backfillSpecialDividends,
   updateDividendYieldSettings,
   type DividendYieldRankFilters,
 } from '@/api/dividend-yield.api';
@@ -179,5 +180,20 @@ export function useRebuildDividendYield() {
       queryClient.invalidateQueries({ queryKey: [DIVIDEND_YIELD_KEY[0], 'top20'] });
     },
     onError: () => toast.error('全量重建失败，请稍后重试'),
+  });
+}
+
+/**
+ * 手动触发特别分红历史回补（§6.9；admin-only，冷启动一次性）。
+ * 后端为 fire-and-forget：本调用立即返回、任务在后台执行，
+ * 进度经「系统管理 - 定时任务」执行日志查看，故此处不失效榜单查询。
+ */
+export function useBackfillSpecialDividends() {
+  return useMutation({
+    mutationFn: () => backfillSpecialDividends(),
+    onSuccess: (data) => {
+      toast.success(data.message || '已触发特别分红历史回补，后台执行中');
+    },
+    onError: () => toast.error('特别分红历史回补触发失败，请稍后重试'),
   });
 }

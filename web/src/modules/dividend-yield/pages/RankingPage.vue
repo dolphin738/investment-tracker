@@ -48,7 +48,11 @@ import {
 } from '@/components/ui/select';
 import { cn, formatPercent, formatCurrency } from '@/lib/utils';
 import { useIsAdmin } from '@/stores/auth.store';
-import { useRank, useRebuildDividendYield } from '../composables/use-dividend-yield';
+import {
+  useRank,
+  useRebuildDividendYield,
+  useBackfillSpecialDividends,
+} from '../composables/use-dividend-yield';
 import { useYieldThresholds } from '../composables/use-yield-thresholds';
 import SecurityDetailDialog from '../components/SecurityDetailDialog.vue';
 import ImpliedPriceCalculator from '../components/ImpliedPriceCalculator.vue';
@@ -156,6 +160,13 @@ function onRebuild(): void {
   rebuild.mutate();
 }
 
+/** 特别分红历史回补（§6.9；admin-only，冷启动一次性；后端异步后台执行） */
+const backfill = useBackfillSpecialDividends();
+const backfilling = computed(() => backfill.isPending.value);
+function onBackfill(): void {
+  backfill.mutate();
+}
+
 /** 页面级 Tab：榜单列表 / 股息价格推算（内容区 v-show 切换，保状态互不干扰） */
 const activeTab = ref<string>('rank');
 </script>
@@ -261,6 +272,18 @@ const activeTab = ref<string>('rank');
         >
           <Loader2 v-if="rebuilding" class="mr-1 h-4 w-4 animate-spin" />
           全量重建
+        </Button>
+        <Button
+          v-if="isAdmin"
+          variant="outline"
+          size="sm"
+          class="self-end"
+          :disabled="backfilling"
+          title="冷启动一次性：补齐 5 年特别分红（须在季度抓取之后执行）"
+          @click="onBackfill"
+        >
+          <Loader2 v-if="backfilling" class="mr-1 h-4 w-4 animate-spin" />
+          特别分红回补
         </Button>
       </div>
 

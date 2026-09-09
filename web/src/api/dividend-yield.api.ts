@@ -93,3 +93,13 @@ export function updateDividendYieldSettings(
 export function rebuildDividendYield(): Promise<{ summary: string }> {
   return http.post<{ summary: string }>('/dividend-yield/rebuild');
 }
+
+/** 手动触发特别分红历史回补（§6.9；admin-only，后端异步后台执行、立即返回） */
+export function backfillSpecialDividends(): Promise<{
+  message: string;
+  job_id: string;
+}> {
+  return http.post<{ message: string; job_id: string }>(
+    '/dividend-yield/backfill-specials',
+  );
+}
