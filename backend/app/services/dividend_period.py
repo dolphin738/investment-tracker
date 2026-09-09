@@ -34,11 +34,18 @@ def parse_report_period(raw: Any) -> Optional[tuple[int, int]]:
 
 
 def parse_cash(raw: Any) -> Optional[Decimal]:
-    """'现金分红-现金分红比例'（每 10 股派 X 元）→ 每股金额（÷10）。"""
+    """'现金分红-现金分红比例'（每 10 股派 X 元）→ 每股金额（÷10）。
+
+    ``Decimal('NaN')`` 是合法构造（上游对缺失金额会返回字符串 "NaN"），须显式
+    判 ``is_nan`` 归为 None——否则 NaN 落库后经求和传播污染快照（§3.5 缺失语义）。
+    """
     if raw in (None, "", "-"):
         return None
     try:
-        return Decimal(str(raw).strip()) / Decimal("10")
+        d = Decimal(str(raw).strip())
+        if d.is_nan():
+            return None
+        return d / Decimal("10")
     except (InvalidOperation, ValueError, TypeError):
         return None
 

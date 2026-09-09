@@ -72,11 +72,18 @@ def _anchor(ann: date) -> tuple[int, int]:
 
 
 def _sina_cash(raw: Any) -> Optional[Decimal]:
-    """新浪 '派息'（每 10 股派 X 元）→ 每股金额（÷10）。"""
+    """新浪 '派息'（每 10 股派 X 元）→ 每股金额（÷10）。
+
+    ``Decimal('NaN')`` 是合法构造（上游缺失金额可能返回 "NaN"/"nan" 等形态），
+    须显式判 ``is_nan`` 归为 None，避免 NaN 落库污染快照。
+    """
     if raw in (None, "", "-", "nan", "None"):
         return None
     try:
-        return Decimal(str(raw).strip()) / Decimal("10")
+        d = Decimal(str(raw).strip())
+        if d.is_nan():
+            return None
+        return d / Decimal("10")
     except (InvalidOperation, ValueError, TypeError):
         return None
 
