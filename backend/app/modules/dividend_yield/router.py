@@ -573,3 +573,53 @@ async def rebuild_dividend_yield(
         user_id=admin.user_id,
     )
     return {"summary": summary}
+
+
+# --------------------------------------------------------------------------- #
+# 特别分红历史回补（§6.9，冷启动一次性；异步后台执行、立即返回）
+# --------------------------------------------------------------------------- #
+@router_dividend_yield.post("/backfill-specials")
+async def backfill_special_dividends(
+    admin: CurrentUser = Depends(require_admin),
+):
+    """手动触发特别分红历史回补（§6.9；admin-only）。
+
+    按 ``task_type`` 定位迁移 0011 种子的系统任务并手动 trigger。
+    ``run_task_now`` 为 fire-and-forget（``asyncio.create_task``），
+    故 12~25 分钟的长耗时**不会**造成请求超时——区别于同步等待的 ``/rebuild``。
+    进度与结果经「系统管理 - 定时任务」执行日志查看（§6.7）。
+    """
+    from fastapi import HTTPException
+
+    from app.db.database import AsyncSessionLocal
+    from app.models.enums import JobTaskType
+    from app.models.job import JobConfig
+    from app.services.scheduler import run_task_now
+
+    async with AsyncSessionLocal() as session:
+        job = (
+            await session.execute(
+                select(JobConfig).where(
+                    JobConfig.task_type == JobTaskType.DIVIDEND_SPECIAL_BACKFILL
+                )
+            )
+        ).scalar_one_or_none()
+    if job is None:
+        raise HTTPException(
+            status_code=404,
+            detail="未找到「特别分红历史回补」任务：迁移 0011 种子缺失或未执行",
+        )
+    # fire-and-forget：立即返回，任务在后台执行（scheduler.run_task_now）
+    run_task_now(job.id)
+    await record(
+        level="info",
+        scope="admin",
+        module="dividend_special_backfill",
+        message="特别分红历史回补（手动触发，异步后台执行）",
+        detail={"job_id": job.id},
+        user_id=admin.user_id,
+    )
+    return {
+        "message": "已触发特别分红历史回补，后台执行中；进度见「系统管理 - 定时任务」执行日志",
+        "job_id": job.id,
+    }
