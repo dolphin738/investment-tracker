@@ -165,7 +165,14 @@ async def rank_dividend_yield(
         )
 
     cur_year = today_app_tz().year
-    conds = [SecurityDividendYield.dividend_yield.is_not(None)]
+    # §3.5 守卫：NULL 不进榜；PG numeric NaN 亦是「缺失」（IS NOT NULL 拦不住 NaN，
+    # 2026-09-08 排查 600339 结论），一并排除。数值比较 `!= 'NaN'` 对 NULL 返回
+    # NULL（falsy），NULL 行仍由 is_not(None) 挡住，两条件叠加不冲突。
+    _NAN = Decimal("NaN")
+    conds = [
+        SecurityDividendYield.dividend_yield.is_not(None),
+        SecurityDividendYield.dividend_yield != _NAN,
+    ]
     if exchange is not None:
         conds.append(Security.exchange == exchange)
     if mode_value is not None:
@@ -231,10 +238,13 @@ async def top20_dividend_yield(
       ``consecutive_years DESC, dividend_yield DESC, master_id ASC``（§8.3）。
     """
     cur_year = today_app_tz().year
+    # §3.5 守卫：与 rank 一致，NaN 视为缺失一并排除（IS NOT NULL 拦不住 NaN）
+    _NAN = Decimal("NaN")
     top_stmt = (
         select(SecurityDividendYield)
         .where(
             SecurityDividendYield.dividend_yield.is_not(None),
+            SecurityDividendYield.dividend_yield != _NAN,
             SecurityDividendYield.suspicious.is_(False),
             SecurityDividendYield.last_dividend_year.is_not(None),
             SecurityDividendYield.last_dividend_year >= cur_year - 1,
@@ -244,7 +254,12 @@ async def top20_dividend_yield(
     )
     consecutive_stmt = (
         select(SecurityDividendYield)
-        .where(SecurityDividendYield.consecutive_years >= 2)
+        .where(
+            SecurityDividendYield.consecutive_years >= 2,
+            # 连续榜同样展示股息率列：NaN 视为缺失一并排除（与 rank/top 口径一致）
+            SecurityDividendYield.dividend_yield.is_not(None),
+            SecurityDividendYield.dividend_yield != _NAN,
+        )
         .order_by(*_CONSECUTIVE_ORDER)
         .limit(20)
     )
