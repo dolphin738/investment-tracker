@@ -39,7 +39,10 @@ from app.models import (
 )
 from app.models.enums import JobRunStatus, JobTaskType, JobTriggerSource
 from app.services.cleanup import CleanupService
-from app.services.dividend_notice_scan import run_dividend_notice_scan
+from app.services.dividend_notice_scan import (
+    run_dividend_notice_scan,
+    run_dividend_special_backfill,
+)
 from app.services.dividend_sync import (
     run_dividend_quarterly_fetch,
     run_dividend_retention_cleanup,
@@ -202,6 +205,7 @@ _HANDLERS: dict[JobTaskType, Callable[[JobConfig], Any]] = {
     JobTaskType.MARKET_DAILY_CLOSE_FETCH: run_market_daily_close_fetch,
     JobTaskType.DIVIDEND_RETENTION_CLEANUP: run_dividend_retention_cleanup,
     JobTaskType.DIVIDEND_NOTICE_SCAN: run_dividend_notice_scan,
+    JobTaskType.DIVIDEND_SPECIAL_BACKFILL: run_dividend_special_backfill,
 }
 
 

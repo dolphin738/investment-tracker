@@ -17,6 +17,7 @@
 """
 from __future__ import annotations
 
+import logging
 import re
 from datetime import date
 from decimal import Decimal, InvalidOperation
@@ -61,6 +62,11 @@ _COL_SINA_ANN = "公告日期"
 _COL_SINA_CASH = "派息"
 _COL_SINA_PROGRESS = "进度"
 _COL_SINA_EXDATE = "除权除息日"
+
+# 特别分红历史回补窗口（§6.9）：与 §6.3 留存窗口一致，保留最近 5 个财年
+_BACKFILL_YEARS = 5
+
+logger = logging.getLogger(__name__)
 
 
 def _anchor(ann: date) -> tuple[int, int]:
@@ -480,6 +486,113 @@ class DividendNoticeScanService:
             r.status = DividendStatus.REJECTED
         return len(rows)
 
+    # ------------------------------------------------------------------ #
+    # 特别分红历史回补（§6.9，冷启动一次性手动 trigger）
+    # ------------------------------------------------------------------ #
+    async def backfill_specials(self, cfg: Any) -> str:
+        """特别分红历史回补（§6.9）：遍历 security_dividends 已有 master，逐只回溯新浪历史明细。
+
+        硬约束（依附录 A.12 / A.13 实测）：
+        - **只处理「进度含实施 且 除权除息日非空」的行** → PAID。这是西向去重
+          ``ex_dividend_date`` 分支可用的前提；一旦放宽到预案行（``ex_date`` 为空），
+          普通分红会被误判为「东财缺失」而重复写入 SPECIAL，导致分子重复计数。
+        - **5 年窗口过滤**：新浪返回该证券全历史（实测茅台 2002~2026 共 24 年）。
+        - **必须在 §6.1 季度抓取之后执行**：西向去重依赖报告期行已存在。
+        """
+        today = today_app_tz()
+        cutoff_year = today.year - _BACKFILL_YEARS + 1  # 窗口 [cur-4, cur]
+
+        mids = set(
+            (
+                await self.session.execute(
+                    select(SecurityDividend.master_id)
+                    .where(SecurityDividend.period_type != ReportPeriodType.SPECIAL)
+                    .distinct()
+                )
+            ).scalars().all()
+        )
+        if not mids:
+            raise RuntimeError(
+                "特别分红历史回补须在 §6.1 季度股息抓取之后执行：当前无报告期分红行；"
+                "若继续，全部普通分红都会被判为「东财缺失」而落 SPECIAL（分子重复计数）"
+            )
+        detail = await self._resolve_detail_itf(await self._settings())
+        if detail is None:
+            raise RuntimeError("补充源（新浪历史分红明细）缺失或未启用，fail fast 跳过回补")
+        code_map = await self._master_code_map(mids)
+
+        stats = {"new": 0, "dup": 0, "window": 0, "nocash": 0, "failed": 0}
+        changed: set[str] = set()
+        for idx, mid in enumerate(sorted(mids), 1):
+            code = code_map.get(mid)
+            if not code:
+                stats["failed"] += 1
+                continue
+            try:
+                if await self._backfill_one(mid, code, detail, today, cutoff_year, stats):
+                    changed.add(mid)
+                await self.session.commit()
+            except Exception:  # 单证券失败：rollback 续下一只（§6.9 断点即数据本身）
+                await self.session.rollback()
+                stats["failed"] += 1
+            if idx % 200 == 0:
+                logger.info(
+                    "特别分红回补进度 %d/%d：新写%d 去重跳过%d 失败%d",
+                    idx, len(mids), stats["new"], stats["dup"], stats["failed"],
+                )
+
+        await refresh_yields_for_masters(self.session, list(changed))
+        await self.session.commit()
+        return (
+            f"特别分红历史回补完成：证券{len(mids)}只；SPECIAL 新写{stats['new']}；"
+            f"去重跳过{stats['dup']}；窗口外{stats['window']}；无金额{stats['nocash']}；"
+            f"失败{stats['failed']}只；重算{len(changed)}只"
+        )
+
+    async def _backfill_one(
+        self,
+        mid: str,
+        code: str,
+        detail: QuoteInterface,
+        today: date,
+        cutoff_year: int,
+        stats: dict,
+    ) -> bool:
+        """单只证券回补：解析新浪历史明细逐行写 SPECIAL；返回是否有变更。"""
+        digits = re.sub(r"\D", "", code)
+        srows = await self._mds._call_interface_raw(
+            detail, {**(detail.params or {}), "symbol": digits}, None
+        )
+        dirty = False
+        for r in srows:
+            cash = _sina_cash(_row_get(r, _COL_SINA_CASH))
+            if cash is None:
+                stats["nocash"] += 1
+                continue
+            progress = str(_row_get(r, _COL_SINA_PROGRESS) or "")
+            ex_date = parse_date(_row_get(r, _COL_SINA_EXDATE))
+            # 只认「实施」行：ex_date 非空是西向去重可用的前提（附录 A.12）
+            if "实施" not in progress or ex_date is None:
+                continue
+            ann = parse_date(_row_get(r, _COL_SINA_ANN)) or today
+            ry, rq = _anchor(ann)
+            if ry < cutoff_year:  # 5 年窗口过滤（新浪返回全历史）
+                stats["window"] += 1
+                continue
+            if await self._westward_dup(mid, ex_date, ry, rq, cash):
+                stats["dup"] += 1
+                continue
+            if await self._exists_anchor(mid, ry, rq):
+                continue
+            self.session.add(
+                self._new_special(
+                    mid, ry, rq, cash, DividendStatus.PAID, ex_date, ann, detail.name
+                )
+            )
+            stats["new"] += 1
+            dirty = True
+        return dirty
+
 
 async def run_dividend_notice_scan(cfg: Any) -> str:
     """模块级 handler：每日公告扫描 + 特别分红补充（§6.8 第 5 条系统任务）。"""
@@ -487,5 +600,15 @@ async def run_dividend_notice_scan(cfg: Any) -> str:
 
     async with AsyncSessionLocal() as session:
         result = await DividendNoticeScanService(session).scan(cfg)
+        await session.commit()
+    return result
+
+
+async def run_dividend_special_backfill(cfg: Any) -> str:
+    """模块级 handler：特别分红历史回补（§6.9，冷启动一次性手动 trigger）。"""
+    from app.db.database import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as session:
+        result = await DividendNoticeScanService(session).backfill_specials(cfg)
         await session.commit()
     return result
