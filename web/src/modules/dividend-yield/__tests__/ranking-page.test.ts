@@ -165,7 +165,7 @@ describe('RankingPage（§10.2 管理页）', () => {
     expect(wrapper.text()).not.toContain('全量重建');
   });
 
-  it('「特别分红回补」按钮：admin 可见，点击触发且成功后不失效榜单（§6.9 异步后台）', async () => {
+  it('「特别分红回补」按钮：admin 可见，二次确认后才触发（L-4 §6.9 异步后台）', async () => {
     fixtures.isAdmin = true;
     const wrapper = await mountAt('/dividend-yield');
     const btn = wrapper
@@ -174,7 +174,18 @@ describe('RankingPage（§10.2 管理页）', () => {
     expect(btn).toBeTruthy();
 
     const before = fixtures.calls.length;
+    // L-4：点击按钮仅弹出二次确认，不直接触发
     await btn!.trigger('click');
+    await flushPromises();
+
+    // 确认弹窗出现（reka-ui AlertDialog 经 Portal 渲染到 body）
+    const confirmBtn = Array.from(document.querySelectorAll('button')).find(
+      (b) => (b.textContent ?? '').includes('确认回补'),
+    );
+    expect(confirmBtn).toBeTruthy();
+    expect(fixtures.backfillCalls).toBe(0); // 未确认前不应触发
+
+    await confirmBtn!.click();
     await flushPromises();
 
     expect(fixtures.backfillCalls).toBe(1);
