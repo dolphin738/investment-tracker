@@ -652,7 +652,6 @@ async def test_rankings_excludes_numeric_nan_snapshot(session, client):
     """
     info = await register_login(client)
     h = auth(info["token"])
-    cur = date.today().year
     await _seed_snapshot(session, "sh600910", dividend_yield="0.05")  # 正常 ✓
     await _seed_snapshot(session, "sh600911", dividend_yield="NaN")  # NaN ✗
     await _seed_snapshot(session, "sh600912", dividend_yield="0.09")  # 正常 ✓
