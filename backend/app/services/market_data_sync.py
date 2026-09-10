@@ -403,6 +403,16 @@ class MarketDataSyncService:
         await self._mark_success(itf.id)
         return rows
 
+    async def call_interface_raw(
+        self, itf: QuoteInterface, params: Optional[dict[str, Any]], codes: Optional[list[str]]
+    ) -> list[dict]:
+        """公开原始行分派入口（债务收敛）：供跨服务调用方使用，内部委托 ``_call_interface_raw``。
+
+        既有跨服务代码（``dividend_notice_scan`` 等）曾直接调私有 ``_mds._call_interface_raw``，
+        现统一走本公开方法，避免跨服务依赖私有实现。
+        """
+        return await self._call_interface_raw(itf, params, codes)
+
     async def _call_interface_raw_dispatch(
         self, itf: QuoteInterface, params: Optional[dict[str, Any]], codes: Optional[list[str]]
     ) -> list[dict]:
