@@ -23,6 +23,15 @@ from app.services.portfolio import PortfolioService
 
 router = APIRouter(prefix="/api", tags=["portfolios"], route_class=EnvelopeRoute)
 
+# fire-and-forget 任务强引用（债务收敛）：未持有引用的 Task 可能被 GC 提前回收
+_BG_TASKS: set[asyncio.Task] = set()
+
+
+def _track_task(task: asyncio.Task) -> None:
+    """持有后台任务强引用，完成后自动移除（防 GC 提前回收导致协程被取消）。"""
+    _BG_TASKS.add(task)
+    task.add_done_callback(_BG_TASKS.discard)
+
 
 @router.get("/portfolios", response_model=list[PortfolioOut])
 async def list_portfolios(
@@ -112,7 +121,7 @@ async def refresh_async_portfolio_prices(
             except Exception:
                 await s.rollback()
 
-    asyncio.create_task(_bg())
+    _track_task(asyncio.create_task(_bg()))
     return {"accepted": True, "portfolio_id": portfolio_id}
 
 
