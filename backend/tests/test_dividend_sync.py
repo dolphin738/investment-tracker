@@ -103,6 +103,21 @@ def testparse_cash_per_share_divide_by_ten():
     assert parse_cash("abc") is None
 
 
+def test_parse_cash_nan_is_missing():
+    """守护 §3.5 / 迁移 0010：上游缺失金额返回 "NaN" → 归一为 None，不落库。
+
+    ``Decimal("NaN")`` 是**合法构造**（不抛 InvalidOperation），旧解析未拦导致
+    NaN 落库并污染快照分子（2026-09-08 排查 600339：359 行分红 + 121 行快照）。
+    本用例是「源头修复」的回归护栏：大小写两种形态都必须归 None。
+    """
+    # 大写形态（旧白名单只做 in (None,"","-") 判断，两种形态都会构造出 NaN）
+    assert parse_cash("NaN") is None
+    assert parse_cash("nan") is None
+    assert parse_cash(" NaN ") is None  # 带空白同样命中
+    # 反例：有效值不被误伤
+    assert parse_cash("25") == Decimal("2.5")
+
+
 def testparse_report_period_quarters():
     """守护 §6.1：3331/630/0930/1231 映射到 Q1-Q4；非法报告期 None（跳行）。"""
     assert parse_report_period("20241231") == (2024, 4)

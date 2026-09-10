@@ -17,6 +17,7 @@ from sqlalchemy import select, update
 
 from app.models import (
     InterfaceCategory,
+    JobConfig,
     MarketSecurityDailyPrice,
     QuoteInterface,
     SecuritiesDataProvider,
@@ -28,6 +29,8 @@ from app.models import (
 from app.models.enums import (
     DividendStatus,
     DividendYieldMode,
+    JobKind,
+    JobTaskType,
     QuoteProviderAccessMethod,
     ReportPeriodType,
     SecurityType,
@@ -636,3 +639,119 @@ async def test_rebuild_preserves_snapshot_without_raw_source(session, client):
     # 快照值未被覆写
     await session.refresh(snap)
     assert snap.dividend_yield == Decimal("0.08")
+
+
+# ───────────────────────── NaN 进榜守卫（§3.5 / 迁移 0010，审查 M-1） ─────────────────────────
+@pytest.mark.asyncio
+async def test_rankings_excludes_numeric_nan_snapshot(session, client):
+    """守护 §3.5：PG numeric NaN 视为「缺失」，不进榜（IS NOT NULL 拦不住 NaN）。
+
+    NaN 在 PG numeric 中**等于自身且大于所有其他值**，旧守卫 ``IS NOT NULL`` 对其失效，
+    导致 NaN 行混入榜单并在降序排序中霸占榜首、前端渲染为 "-"
+    （2026-09-08 排查 600339：121 行快照受影响）。本用例是「守卫层」回归护栏。
+    """
+    info = await register_login(client)
+    h = auth(info["token"])
+    cur = date.today().year
+    await _seed_snapshot(session, "sh600910", dividend_yield="0.05")  # 正常 ✓
+    await _seed_snapshot(session, "sh600911", dividend_yield="NaN")  # NaN ✗
+    await _seed_snapshot(session, "sh600912", dividend_yield="0.09")  # 正常 ✓
+    await session.commit()
+
+    r = await client.get("/api/dividend-yield/rankings", headers=h)
+    status, _, data, _ = env(r)
+    assert status == 200
+    codes = [row["code"] for row in data["items"]]
+    assert "sh600910" in codes and "sh600912" in codes
+    assert "sh600911" not in codes, "numeric NaN 快照不得进榜（§3.5 缺失语义）"
+    # 降序时 NaN 被视为最大值，若守卫失效它会占据首位——故断言首位是正常最大值
+    assert codes[0] == "sh600912"
+
+
+@pytest.mark.asyncio
+async def test_top20_excludes_numeric_nan_snapshot(session, client):
+    """守护 §8.2/§8.3：Top20 与连续分红榜同样排除 NaN（与 rank 同一口径）。"""
+    info = await register_login(client)
+    cur = date.today().year
+    await _seed_snapshot(session, "sh600920", dividend_yield="0.05", consecutive=3)
+    await _seed_snapshot(
+        session, "sh600921", dividend_yield="NaN", consecutive=5, suspicious=False
+    )  # NaN：即便连续年数最高也不应入榜
+    await _seed_snapshot(
+        session, "sh600922", dividend_yield="0.07", consecutive=2,
+        last_year=cur - 3,
+    )  # 连续榜候选（Top 榜因近两年无分红被剔除）
+    await session.commit()
+
+    r = await client.get("/api/dividend-yield/top20", headers=auth(info["token"]))
+    status, _, data, _ = env(r)
+    assert status == 200
+    top_codes = [row["code"] for row in data["top"]]
+    cons_codes = [row["code"] for row in data["consecutive"]]
+    assert "sh600921" not in top_codes, "NaN 不得进 Top 榜"
+    assert "sh600921" not in cons_codes, "NaN 不得进连续分红榜"
+
+
+# ───────────────────────── /backfill-specials 端点契约（§6.9，审查 M-2） ─────────────────────────
+@pytest.mark.asyncio
+async def test_backfill_specials_requires_admin(session, client):
+    """守护 §6.9：未登录 401、非 admin 403（与 /rebuild 同口径）。"""
+    # 未登录
+    r = await client.post("/api/dividend-yield/backfill-specials")
+    assert r.status_code == 401
+    # 已登录非 admin
+    info = await register_login(client)
+    r = await client.post(
+        "/api/dividend-yield/backfill-specials", headers=auth(info["token"])
+    )
+    assert r.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_backfill_specials_404_when_seed_job_missing(session, client):
+    """守护 §6.9：迁移 0011 种子任务缺失 → 404（携带可操作原因，而非静默空跑）。"""
+    admin = await _make_admin(session, client)
+    r = await client.post(
+        "/api/dividend-yield/backfill-specials", headers=auth(admin["token"])
+    )
+    assert r.status_code == 404
+    # 项目统一信封响应（code/data/message），非 FastAPI 默认 detail 字段
+    assert "0011" in r.text, "404 文案须指明迁移 0011 种子缺失，便于运维定位"
+
+
+@pytest.mark.asyncio
+async def test_backfill_specials_triggers_job_async(session, client, monkeypatch):
+    """守护 §6.9：admin 触发成功 → 200 + job_id，且**不阻塞**（fire-and-forget）。
+
+    ``run_task_now`` 被替换为空桩：真实链路会串行遍历 4609 只证券（10~25 分钟），
+    测试中绝不可真实执行；契约关注点是「定位到种子任务并触发」。
+    """
+    import app.services.scheduler as sched
+
+    triggered: list[str] = []
+    monkeypatch.setattr(
+        sched, "run_task_now", lambda job_id: triggered.append(job_id)
+    )
+    admin = await _make_admin(session, client)
+
+    # 造迁移 0011 同构的种子任务（enabled=FALSE：不自动调度，仅手动 trigger）
+    job = JobConfig(
+        id=_uid(),
+        name="特别分红历史回补",
+        task_type=JobTaskType.DIVIDEND_SPECIAL_BACKFILL,
+        kind=JobKind.SYSTEM,
+        enabled=False,
+        cron_expr="0 3 1 1 *",
+        params={},
+    )
+    session.add(job)
+    await session.commit()
+
+    r = await client.post(
+        "/api/dividend-yield/backfill-specials", headers=auth(admin["token"])
+    )
+    status, _, data, _ = env(r)
+    assert status == 200
+    assert data["job_id"] == job.id
+    assert "后台执行" in data["message"]
+    assert triggered == [job.id], "须以种子任务 id 触发，且不等待其完成"

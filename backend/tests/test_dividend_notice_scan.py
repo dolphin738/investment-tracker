@@ -252,6 +252,21 @@ def test_sina_cash_divide_by_ten():
     assert _sina_cash("nan") is None
 
 
+def test_sina_cash_nan_is_missing():
+    """守护 §3.5 / 迁移 0010：新浪 '派息' 返回 "NaN" → 归一为 None，不落库。
+
+    既有 ``test_sina_cash_divide_by_ten`` 只覆盖**小写** ``"nan"``（旧代码白名单
+    ``(..., "nan", ...)`` 已能拦）；本用例补**大写** ``"NaN"`` 与浮点 nan 形态——
+    这两类旧代码拦不住（白名单字面量不匹配），是 ``_sina_cash`` 新增 ``is_nan()``
+    分支真正修复的形态，须有护栏防回退。
+    """
+    assert _sina_cash("NaN") is None
+    assert _sina_cash("NAN") is None
+    assert _sina_cash(float("nan")) is None
+    # 反例：有效值不被误伤
+    assert _sina_cash("219.1") == Decimal("21.91")
+
+
 # ───────────────────────── 公告源解析（§5.4 可配置化 / §6.8 接线） ─────────────────────────
 async def _seed_cat4(session, *, priority=1, enabled=True, name="沪深京 A 股公告", provider_enabled=True):
     """分类 4「公司公告」+ 公告接口行（params 含 symbol，逐只形态）；分类行幂等。"""
