@@ -14,6 +14,9 @@
 - 新浪逐只补充 = 复用 ``_call_interface_raw``（串行 + ``_RATE_LIMITER`` 限速）。
 - SPECIAL 写入 = 西向去重 + PROPOSED→PAID + 取消置 REJECTED + 存量复查（§6.8 双向去重）。
 - 按证券独立 commit；单证券失败 rollback 续下一只（断点即数据本身）；变更集重算。
+  **注意**：``rollback()`` 会 expire 会话内全部 ORM 实例，故循环外解析的补充源
+  ``detail`` 在失败后必须重新解析（``_re_resolve_detail_after_rollback``），否则
+  后续证券读取 ``detail.params`` 会触发同步惰性加载 → MissingGreenlet 连锁失败。
 """
 from __future__ import annotations
 
@@ -129,6 +132,34 @@ class DividendNoticeScanService:
             return None
         return itf
 
+    async def _re_resolve_detail_after_rollback(self) -> QuoteInterface:
+        """``rollback()`` 之后重新解析补充源（§6.8/§6.9「失败续下一只」的前置条件）。
+
+        ``Session.rollback()`` 在有活动事务时会 expire 会话内**全部** ORM 实例
+        （这与 ``expire_on_commit=False`` 无关，无活动事务时为空操作不触发 expire）。
+        随之过期，下一只证券再读 ``detail.params`` / ``detail.name`` 会触发**同步**
+        惰性加载 → ``MissingGreenlet: greenlet_spawn has not been called``；该异常被
+        单证券 ``except Exception`` 吞掉计入失败 → 再次 ``rollback()`` → 其后**每一只**
+        证券连锁失败，「失败续下一只」的容错形同虚设（全量 4609 只串行时几乎必然触发）。
+
+        故失败路径必须重新解析补充源。仅在失败路径重解析（而非每只都解析），避免为
+        4609 只引入同等数量的无谓查询。
+
+        重解析为 ``None``（补充源在执行过程中被停用/删除/提供方停用）→ **fail fast
+        raise**：否则「补充源失效」会被伪装成「每只都失败」，掩盖真实原因。
+
+        Raises:
+            RuntimeError: 补充源在本次执行过程中变为不可用。
+        """
+        fresh = await self._resolve_detail_itf(await self._settings())
+        if fresh is None:
+            raise RuntimeError(
+                "补充源（新浪历史分红明细）在本次执行过程中变为不可用"
+                "（接口被停用/删除、分类不符或提供方被停用），fail fast 终止："
+                "剩余证券无法继续逐只补充"
+            )
+        return fresh
+
     async def _resolve_notice_itf(
         self, settings: Optional[DividendYieldSettings]
     ) -> QuoteInterface:
@@ -223,6 +254,13 @@ class DividendNoticeScanService:
             except Exception:  # 单证券失败：rollback 续下一只（断点即数据本身，§6.8）
                 await self.session.rollback()
                 stats["skipped"] += 1
+                # rollback() 会 expire 会话内实例 → detail 过期；须重新解析，否则下一只
+                # 在 _process_master 中读 detail.params / detail.name 会触发同步惰性加载
+                # → MissingGreenlet，把「源失效」伪装成「每只都失败」（详见
+                # ``_re_resolve_detail_after_rollback``）。补充源本就缺失（detail is None）
+                # 时无需重解析——此时 _process_master 不会触碰 detail。
+                if detail is not None:
+                    detail = await self._re_resolve_detail_after_rollback()
 
         # 完成后：仅变更集重算（§6.8 末步 / §7 变更集重算）
         await refresh_yields_for_masters(self.session, list(changed))
@@ -520,6 +558,12 @@ class DividendNoticeScanService:
         if detail is None:
             raise RuntimeError("补充源（新浪历史分红明细）缺失或未启用，fail fast 跳过回补")
         code_map = await self._master_code_map(mids)
+        # 进入逐只回补前先提交：① 释放前置只读查询占用的事务——后续是数千只证券的串行
+        # HTTP 调用，长期持有事务（idle in transaction）会阻塞 vacuum 并放大锁竞争；
+        # ② 使「单只失败 → rollback」只回滚该只自身的写入，而不把前置查询已加载的
+        # 实例一并 expire（rollback 无活动事务时为空操作，不触发 expire）。
+        # 依赖 ``expire_on_commit=False``（工程全局口径）：提交不会使 detail 过期。
+        await self.session.commit()
 
         stats = {"new": 0, "dup": 0, "window": 0, "nocash": 0, "failed": 0}
         changed: set[str] = set()
@@ -535,6 +579,11 @@ class DividendNoticeScanService:
             except Exception:  # 单证券失败：rollback 续下一只（§6.9 断点即数据本身）
                 await self.session.rollback()
                 stats["failed"] += 1
+                # rollback() 会 expire 会话内实例 → detail 过期，下一只再读
+                # detail.params 会触发同步惰性加载 → MissingGreenlet → 连锁全部计入失败。
+                # 故失败后必须重新解析补充源（仅失败路径，避免每只一次无谓查询），
+                # 源已失效则 fail fast raise（详见 ``_re_resolve_detail_after_rollback``）。
+                detail = await self._re_resolve_detail_after_rollback()
             if idx % 200 == 0:
                 logger.info(
                     "特别分红回补进度 %d/%d：新写%d 去重跳过%d 失败%d",
