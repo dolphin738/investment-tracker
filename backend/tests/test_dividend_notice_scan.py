@@ -194,7 +194,7 @@ async def test_process_master_sina_impl_matches_proposed(session):
             {"公告日期": "2022-12-15", "派息": "190", "进度": "实施", "除权除息日": "2022-12-27"},
         ]
 
-    svc._mds._call_interface_raw = _fake_sina
+    svc._mds.call_interface_raw = _fake_sina
     detail = QuoteInterface(id=_uid(), provider_id=_uid(), category_id="3", name="新浪", enabled=True)
     changed = await svc._process_master(
         m.id, m.code, detail=detail, is_candidate=False, is_cancel=False,
@@ -222,7 +222,7 @@ async def test_process_master_sina_candidate_new_special(session):
     async def _fake_sina(itf, params, codes):
         return [{"公告日期": "2022-12-14", "派息": "219.1", "进度": "预案", "除权除息日": ""}]
 
-    svc._mds._call_interface_raw = _fake_sina
+    svc._mds.call_interface_raw = _fake_sina
     detail = QuoteInterface(id=_uid(), provider_id=_uid(), category_id="3", name="新浪", enabled=True)
     day = date(2022, 12, 14)
     changed = await svc._process_master(

@@ -11,7 +11,7 @@
   enabled 接口按 priority 升序首个（``_interfaces_for_category``）。``symbol=财务报告``
   一级分类预过滤，**不得**按公告类型列过滤；公告接口缺失/停用 → fail fast raise。
 - 标题正则二筛白名单 = 代码常量（``_TITLE_*_RE``），改模式须补单测。
-- 新浪逐只补充 = 复用 ``_call_interface_raw``（串行 + ``_RATE_LIMITER`` 限速）。
+- 新浪逐只补充 = 复用 ``call_interface_raw``（串行 + ``_RATE_LIMITER`` 限速）。
 - SPECIAL 写入 = 西向去重 + PROPOSED→PAID + 取消置 REJECTED + 存量复查（§6.8 双向去重）。
 - 按证券独立 commit；单证券失败 rollback 续下一只（断点即数据本身）；变更集重算。
   **注意**：``rollback()`` 会 expire 会话内全部 ORM 实例，故循环外解析的补充源
@@ -160,6 +160,34 @@ class DividendNoticeScanService:
             )
         return fresh
 
+    async def _reresolve_detail_safe(self, idx: int, total: int) -> Optional[QuoteInterface]:
+        """失败后重解析补充源（L-3 韧性）。
+
+        区分两类失败：
+        - **真失效**：``_re_resolve_detail_after_rollback`` 抛 ``RuntimeError("…变为不可用")``
+          （补充源在执行中被停用/删除）→ 原样 raise，fail fast 终止（否则「源失效」被伪装成
+          「每只都失败」，掩盖真实原因）。
+        - **过程异常**：重解析本身抛其它异常（如 DB 瞬时抖动）→ 记日志返回 ``None``，
+          调用方据此按失败续下一只，**不终止整轮**——已提交部分保留，剩余证券在 DB 恢复后
+          经下一轮重解析自愈（避免一次抖动即前功尽弃）。
+        """
+        try:
+            return await self._re_resolve_detail_after_rollback()
+        except RuntimeError as e:
+            if "变为不可用" in str(e):
+                raise
+            logger.warning(
+                "回补/扫描第 %d/%d 只重解析补充源过程异常（按失败续下一只）：%s",
+                idx, total, e,
+            )
+            return None
+        except Exception as e:  # 过程异常兜底（DB 瞬时抖动等）
+            logger.warning(
+                "回补/扫描第 %d/%d 只重解析补充源过程异常（按失败续下一只）：%s",
+                idx, total, e,
+            )
+            return None
+
     async def _resolve_notice_itf(
         self, settings: Optional[DividendYieldSettings]
     ) -> QuoteInterface:
@@ -197,8 +225,8 @@ class DividendNoticeScanService:
         notice_itf = await self._resolve_notice_itf(await self._settings())
 
         params = {"symbol": "财务报告", "date": day.strftime("%Y%m%d")}
-        # 异常计失败（≥3 发站内信）已下沉到 _call_interface_raw（P1-4），此处不再手工接线
-        notice_rows = await self._mds._call_interface_raw(notice_itf, params, None)
+        # 异常计失败（≥3 发站内信）已下沉到 call_interface_raw（P1-4），此处不再手工接线
+        notice_rows = await self._mds.call_interface_raw(notice_itf, params, None)
 
         # 统计汇总
         stats = {
@@ -206,6 +234,7 @@ class DividendNoticeScanService:
             "hits": 0,  # 动作命中行数（候选特别分红 + 取消/终止）
             "special_new": 0,
             "special_upd": 0,
+            "anchor": 0,  # 同格已有 SPECIAL 行跳过数（不重复写，运维对账须可见）
             "skipped": 0,  # 单证券失败续下一只数
         }
         candidate_mids: set[str] = set()
@@ -238,7 +267,7 @@ class DividendNoticeScanService:
         changed: set[str] = set()
 
         # 按证券独立处理 + commit（断点即数据本身）
-        for mid in sorted(all_mids):
+        for idx, mid in enumerate(sorted(all_mids), 1):
             code = sec_code.get(mid)
             if not code:
                 continue
@@ -263,7 +292,8 @@ class DividendNoticeScanService:
                 # ``_re_resolve_detail_after_rollback``）。补充源本就缺失（detail is None）
                 # 时无需重解析——此时 _process_master 不会触碰 detail。
                 if detail is not None:
-                    detail = await self._re_resolve_detail_after_rollback()
+                    # 源已失效则 fail fast raise；过程异常（DB 抖动）记日志续下一只（L-3）
+                    detail = await self._reresolve_detail_safe(idx, len(all_mids)) or detail
 
         # 完成后：仅变更集重算（§6.8 末步 / §7 变更集重算）
         await refresh_yields_for_masters(self.session, list(changed))
@@ -272,7 +302,7 @@ class DividendNoticeScanService:
         return (
             f"公告扫描完成{note}：公告{stats['rows']}条/命中{stats['hits']}；"
             f"SPECIAL 新写{stats['special_new']}/更新{stats['special_upd']}；"
-            f"重算{len(changed)}只；失败{stats['skipped']}只"
+            f"重算{len(changed)}只；锚点跳过{stats['anchor']}；失败{stats['skipped']}只"
         )
 
     async def _master_code_map(self, mids: set[str]) -> dict[str, str]:
@@ -362,7 +392,7 @@ class DividendNoticeScanService:
 
         digits = re.sub(r"\D", "", code)
         params = {**(detail.params or {}), "symbol": digits}
-        srows = await self._mds._call_interface_raw(detail, params, None)
+        srows = await self._mds.call_interface_raw(detail, params, None)
         for r in srows:
             cash = _sina_cash(_row_get(r, _COL_SINA_CASH))
             if cash is None:
@@ -392,6 +422,7 @@ class DividendNoticeScanService:
                 else:
                     # 西向去重已过，但同格已有 SPECIAL 行（不同额）则不再重复写
                     if await self._exists_anchor(mid, ry, rq):
+                        stats["anchor"] += 1
                         continue
                     self.session.add(
                         self._new_special(mid, ry, rq, cash, DividendStatus.PAID, ex_date, ann, detail.name)
@@ -401,6 +432,7 @@ class DividendNoticeScanService:
             elif is_candidate:
                 # 新浪只作「金额 + 实施事实」源，PROPOSED 发现以公告标题为准（§6.8）
                 if await self._exists_anchor(mid, ry, rq):
+                    stats["anchor"] += 1
                     continue
                 self.session.add(
                     self._new_special(mid, ry, rq, cash, DividendStatus.PROPOSED, None, ann, detail.name)
@@ -568,7 +600,7 @@ class DividendNoticeScanService:
         # 依赖 ``expire_on_commit=False``（工程全局口径）：提交不会使 detail 过期。
         await self.session.commit()
 
-        stats = {"new": 0, "dup": 0, "window": 0, "nocash": 0, "failed": 0}
+        stats = {"new": 0, "dup": 0, "window": 0, "nocash": 0, "anchor": 0, "failed": 0}
         changed: set[str] = set()
         for idx, mid in enumerate(sorted(mids), 1):
             code = code_map.get(mid)
@@ -590,8 +622,8 @@ class DividendNoticeScanService:
                 # rollback() 会 expire 会话内实例 → detail 过期，下一只再读
                 # detail.params 会触发同步惰性加载 → MissingGreenlet → 连锁全部计入失败。
                 # 故失败后必须重新解析补充源（仅失败路径，避免每只一次无谓查询），
-                # 源已失效则 fail fast raise（详见 ``_re_resolve_detail_after_rollback``）。
-                detail = await self._re_resolve_detail_after_rollback()
+                # 源已失效则 fail fast raise；过程异常（DB 抖动）记日志续下一只（L-3）
+                detail = await self._reresolve_detail_safe(idx, len(mids)) or detail
             if idx % 200 == 0:
                 logger.info(
                     "特别分红回补进度 %d/%d：新写%d 去重跳过%d 失败%d",
@@ -603,7 +635,7 @@ class DividendNoticeScanService:
         return (
             f"特别分红历史回补完成：证券{len(mids)}只；SPECIAL 新写{stats['new']}；"
             f"去重跳过{stats['dup']}；窗口外{stats['window']}；无金额{stats['nocash']}；"
-            f"失败{stats['failed']}只；重算{len(changed)}只"
+            f"锚点跳过{stats['anchor']}；失败{stats['failed']}只；重算{len(changed)}只"
         )
 
     async def _backfill_one(
@@ -617,7 +649,7 @@ class DividendNoticeScanService:
     ) -> bool:
         """单只证券回补：解析新浪历史明细逐行写 SPECIAL；返回是否有变更。"""
         digits = re.sub(r"\D", "", code)
-        srows = await self._mds._call_interface_raw(
+        srows = await self._mds.call_interface_raw(
             detail, {**(detail.params or {}), "symbol": digits}, None
         )
         dirty = False
@@ -640,6 +672,7 @@ class DividendNoticeScanService:
                 stats["dup"] += 1
                 continue
             if await self._exists_anchor(mid, ry, rq):
+                stats["anchor"] += 1
                 continue
             self.session.add(
                 self._new_special(

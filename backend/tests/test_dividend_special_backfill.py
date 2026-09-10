@@ -7,7 +7,7 @@
 3. **西向去重不重复写**：同 ``ex_dividend_date`` 或同 ``(年,季,金额)`` → 跳过。
 4. **顺序 fail fast**：无报告期分红行 / 补充源缺失 → raise，不落任何数据。
 
-mock 风格沿用 tests/test_dividend_notice_scan.py（替换 ``svc._mds._call_interface_raw``）。
+mock 风格沿用 tests/test_dividend_notice_scan.py（替换 ``svc._mds.call_interface_raw``）。
 """
 from __future__ import annotations
 
@@ -176,7 +176,7 @@ async def _prepare(session, *, code="600519", name="贵州茅台",
 
 
 def _install_sina(svc, rows_by_symbol, calls=None, errors=None):
-    """替换 ``_call_interface_raw``：按 params.symbol 返回预置行（逐只形态）。"""
+    """替换 ``call_interface_raw``：按 params.symbol 返回预置行（逐只形态）。"""
     async def _fake(itf, params, codes):
         sym = (params or {}).get("symbol")
         if calls is not None:
@@ -185,7 +185,7 @@ def _install_sina(svc, rows_by_symbol, calls=None, errors=None):
             raise errors[sym]
         return list(rows_by_symbol.get(sym, []))
 
-    svc._mds._call_interface_raw = _fake
+    svc._mds.call_interface_raw = _fake
 
 
 def _install_scan_sources(svc, notice_rows, sina_by_symbol, errors=None):
@@ -198,11 +198,11 @@ def _install_scan_sources(svc, notice_rows, sina_by_symbol, errors=None):
             raise errors[sym]
         return list(sina_by_symbol.get(sym, []))
 
-    svc._mds._call_interface_raw = _fake
+    svc._mds.call_interface_raw = _fake
 
 
 def _new_stats() -> dict:
-    return {"new": 0, "dup": 0, "window": 0, "nocash": 0, "failed": 0}
+    return {"new": 0, "dup": 0, "window": 0, "nocash": 0, "anchor": 0, "failed": 0}
 
 
 async def _run_one(svc, master, today, rows, *, stats=None, calls=None, errors=None):
@@ -394,6 +394,7 @@ async def test_backfill_one_skips_when_anchor_cell_has_special(session):
 
     assert dirty is False
     assert stats["new"] == 0
+    assert stats["anchor"] == 1  # L-2：同格已有 SPECIAL 计入 anchor 跳过（运维对账可见）
     rows = await _specials(session, m.id)
     assert len(rows) == 1
     assert rows[0].cash_per_share == Decimal("9.9")  # 既有行未被覆写/未被冲掉
@@ -703,6 +704,60 @@ async def test_backfill_specials_fails_fast_when_source_disabled_mid_run(session
     assert await _specials(session, ok_id) == []  # 未继续把剩余证券逐只打成失败
 
 
+@pytest.mark.asyncio
+async def test_backfill_specials_continues_when_reresolve_raises_transient(session):
+    """L-3：首只失败重解析补充源时**过程异常**（非「源失效」）→ 不终止整轮，按失败续下一只。
+
+    模拟 DB 瞬时抖动：``_resolve_detail_itf`` 首次（循环前）成功，首只失败后的重解析抛
+    ``RuntimeError("…瞬时抖动…")``（过程异常，不含「变为不可用」），其后重解析恢复 →
+    后续证券仍须继续回补（已提交部分保留）。
+    """
+    cur = today_app_tz().year
+    bad = await _add_master(session, code="000001", name="异常证券",
+                            mid="00000000-0000-0000-0000-000000000001")
+    ok1 = await _add_master(session, code="600519", name="正常证券1",
+                            mid="00000000-0000-0000-0000-000000000002")
+    ok2 = await _add_master(session, code="000002", name="正常证券2",
+                            mid="00000000-0000-0000-0000-000000000003")
+    session.add(_report_row(bad.id, "2.0", cur - 1, 4))
+    session.add(_report_row(ok1.id, "1.0", cur - 1, 4))
+    session.add(_report_row(ok2.id, "3.0", cur - 1, 4))
+    await _seed_detail(session)
+    bad_id, ok1_id, ok2_id = bad.id, ok1.id, ok2.id
+
+    svc = DividendNoticeScanService(session)
+    _install_sina(
+        svc,
+        {
+            "000001": [_sina_row(f"{cur - 1}-06-10", "80", "实施", f"{cur - 1}-06-20")],
+            "600519": [_sina_row(f"{cur - 1}-06-10", "50", "实施", f"{cur - 1}-06-20")],
+            "000002": [_sina_row(f"{cur - 1}-06-10", "30", "实施", f"{cur - 1}-06-20")],
+        },
+        errors={"000001": RuntimeError("新浪接口 500")},
+    )
+    real_resolve = svc._resolve_detail_itf
+    calls = {"n": 0}
+
+    async def _resolve_then_transient_then_ok(settings):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            # 首只失败后的重解析：模拟 DB 瞬时抖动（过程异常，非「源失效」）
+            raise RuntimeError("DB 连接瞬时抖动（过程异常）")
+        return await real_resolve(settings)
+
+    svc._resolve_detail_itf = _resolve_then_transient_then_ok
+
+    # 不终止整轮：过程异常被吞，按失败续下一只
+    summary = await svc.backfill_specials(None)
+    await session.rollback()
+
+    assert "失败1只" in summary            # 仅异常证券失败
+    assert "新写2" in summary             # 后续证券在重解析恢复后继续写入
+    assert await _specials(session, bad_id) == []
+    assert len(await _specials(session, ok1_id)) == 1
+    assert len(await _specials(session, ok2_id)) == 1
+
+
 # ───────────────────────── scan() 同构容错（§6.8 与 §6.9 同一模式） ─────────────────────────
 @pytest.mark.asyncio
 async def test_scan_recovers_for_master_after_a_failed_one(session):
@@ -741,6 +796,31 @@ async def test_scan_recovers_for_master_after_a_failed_one(session):
     assert await _specials(session, bad_id) == []
 
 
+@pytest.mark.asyncio
+async def test_scan_counts_anchor_skip_in_summary(session):
+    """scan 同格已有 SPECIAL 行 → 计入 anchor 跳过并纳入摘要（L-2）。"""
+    cur = today_app_tz().year
+    m, _ = await _prepare(session)
+    # 预置同格 SPECIAL（与回补将落格相同），使 _exists_anchor 命中
+    session.add(_special_row(m.id, "9.9", cur - 1, 2,
+                             ex=date(cur - 1, 3, 1), ann=date(cur - 1, 2, 20)))
+    await session.commit()
+    await _seed_notice(session)
+    svc = DividendNoticeScanService(session)
+    notice_rows = [
+        {"代码": "600519", "公告标题": "正常证券2022年度回报股东特别分红实施公告"},
+    ]
+    _install_scan_sources(svc, notice_rows, {
+        "600519": [_sina_row(f"{cur - 1}-06-10", "50", "实施", f"{cur - 1}-06-20")],
+    })
+    summary = await svc.scan(None)
+
+    assert "锚点跳过1" in summary
+    assert "新写0" in summary  # 未重复写
+    # 未重复写：仍只有预置的那 1 行 SPECIAL
+    assert len(await _specials(session, m.id)) == 1
+
+
 # ───────────────────────── 模块级 handler 接线（§6.9 系统任务） ─────────────────────────
 @pytest.mark.asyncio
 async def test_run_dividend_special_backfill_handler_wires_service(session, monkeypatch):
@@ -752,7 +832,7 @@ async def test_run_dividend_special_backfill_handler_wires_service(session, monk
     async def _fake(self, itf, params, codes):
         return [_sina_row(f"{cur - 1}-06-10", "50", "实施", f"{cur - 1}-06-20")]
 
-    monkeypatch.setattr(MarketDataSyncService, "_call_interface_raw", _fake)
+    monkeypatch.setattr(MarketDataSyncService, "call_interface_raw", _fake)
     summary = await run_dividend_special_backfill(None)
 
     assert "特别分红历史回补完成" in summary
