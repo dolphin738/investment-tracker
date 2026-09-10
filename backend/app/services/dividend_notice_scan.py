@@ -244,15 +244,18 @@ class DividendNoticeScanService:
                 continue
             is_candidate = mid in candidate_mids
             is_cancel = mid in cancel_mids
+            # snapshot：rollback 会丢弃该只已累加的计数，须回退——
+            # 摘要须等于实际落库结果，否则运维按摘要对账会偏大。
+            snapshot = dict(stats)
             try:
-                changed.update(
-                    await self._process_master(
-                        mid, code, detail, is_candidate, is_cancel, day, stats
-                    )
+                mid_changed = await self._process_master(
+                    mid, code, detail, is_candidate, is_cancel, day, stats
                 )
                 await self.session.commit()
+                changed.update(mid_changed)  # 仅提交成功后计入变更集
             except Exception:  # 单证券失败：rollback 续下一只（断点即数据本身，§6.8）
                 await self.session.rollback()
+                stats.update(snapshot)
                 stats["skipped"] += 1
                 # rollback() 会 expire 会话内实例 → detail 过期；须重新解析，否则下一只
                 # 在 _process_master 中读 detail.params / detail.name 会触发同步惰性加载
@@ -572,12 +575,17 @@ class DividendNoticeScanService:
             if not code:
                 stats["failed"] += 1
                 continue
+            # snapshot：rollback 会丢弃该只已累加的计数，须回退——
+            # 摘要「新写N」须等于实际落库行数，否则运维按摘要对账会偏大。
+            snapshot = dict(stats)
             try:
-                if await self._backfill_one(mid, code, detail, today, cutoff_year, stats):
-                    changed.add(mid)
+                dirty = await self._backfill_one(mid, code, detail, today, cutoff_year, stats)
                 await self.session.commit()
+                if dirty:
+                    changed.add(mid)  # 仅提交成功后计入变更集（「重算N只」同口径）
             except Exception:  # 单证券失败：rollback 续下一只（§6.9 断点即数据本身）
                 await self.session.rollback()
+                stats.update(snapshot)
                 stats["failed"] += 1
                 # rollback() 会 expire 会话内实例 → detail 过期，下一只再读
                 # detail.params 会触发同步惰性加载 → MissingGreenlet → 连锁全部计入失败。
