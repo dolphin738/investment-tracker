@@ -16,8 +16,13 @@
   由 ``refresh_yields_for_masters`` 重算恢复（开发库经脚本执行；其他环境经
   「股息率全量重建」手动按钮或次日同步恢复）。
 
-Revision ID: 0009_dividend_nan_cleanup
-Revises: 0008_remove_dividend_yield_rebuild_task
+副作用（运维对账提示）：``security_dividends`` 中 PAID/PROPOSED 的 NaN 金额行被删除后，
+``consecutive_years`` / ``last_dividend_year`` 由 ``payout_records()`` 从该行推导
+（``dividend_yield.py``），**删行会改变这两个派生值**——方向上属语义纠正（NaN 金额即
+「上游缺失金额」，本不应算作「有分红」），但连续年数可能因此变少，对账时属预期。
+
+Revision ID: 0010_dividend_nan_cleanup
+Revises: 0009_fix_dividend_interface_code_fields
 """
 from typing import Sequence, Union
 
