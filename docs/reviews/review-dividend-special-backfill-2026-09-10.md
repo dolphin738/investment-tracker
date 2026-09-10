@@ -100,7 +100,7 @@ NaN 曾导致 121 行快照混入榜单并在 PG 排序中被视为最大值霸�
 
 ---
 
-### 🟢 L-1｜迁移 0010 docstring 与真实 revision 不一致
+### ✅ L-1｜迁移 0010 docstring 与真实 revision 不一致（已修复）
 
 ```python
 # backend/alembic/versions/0010_dividend_nan_cleanup.py
@@ -113,9 +113,12 @@ down_revision = "0009_fix_dividend_interface_code_fields"  # L27 ✅
 执行以 `revision`/`down_revision` 为准（无功能影响），但 docstring 是 copy-paste 遗留，
 会误导后续维护者判断迁移链。建议改齐。
 
+**✅ 修复确认（2026-09-11）**：docstring L19-20 已改为真实的
+`Revision ID: 0010_dividend_nan_cleanup` / `Revises: 0009_fix_dividend_interface_code_fields`。
+
 ---
 
-### 🟢 L-2｜`_exists_anchor` 命中跳过不计入任何 stats
+### ✅ L-2｜`_exists_anchor` 命中跳过不计入任何 stats（已修复）
 
 `dividend_notice_scan.py:394-395`：锚点格已有 SPECIAL 时 `continue`，不计入
 `new/dup/window/nocash/failed` 任何一项。
@@ -123,9 +126,13 @@ down_revision = "0009_fix_dividend_interface_code_fields"  # L27 ✅
 影响：摘要「新写 N」≠「发现的有效行数」，运维按摘要对账时该分支不可见。
 （`scan` 路径同样如此，属一致性问题而非 bug。）
 
+**✅ 修复确认（2026-09-11）**：scan/backfill 两路径 stats 新增 `anchor` 计数器，
+三处 `_exists_anchor` continue 前均 `+= 1`，两份摘要各加「锚点跳过N」；
+新增断言 `stats["anchor"] == 1`（backfill）与 `test_scan_counts_anchor_skip_in_summary`（scan）。
+
 ---
 
-### 🟢 L-3｜失败路径的重解析自身抛异常会终止整个回补
+### ✅ L-3｜失败路径的重解析自身抛异常会终止整个回补（已修复）
 
 `dividend_notice_scan.py:641-643`：`except` 块内调用 `_re_resolve_detail_after_rollback()`，
 该函数**自身若抛异常**（如 DB 瞬时故障）会直接冒泡出 `for` 循环，终止剩余全部证券。
@@ -136,9 +143,15 @@ down_revision = "0009_fix_dividend_interface_code_fields"  # L27 ✅
 **建议**：区分「解析结果 None」（真失效 → fail fast）与「解析过程抛异常」
 （可重试 N 次或计入 failed 后继续）。优先级低——触发概率不高。
 
+**✅ 修复确认（2026-09-11）**：新增 `_reresolve_detail_safe`（scan/backfill 两路径共用）——
+真失效（`RuntimeError("…变为不可用")`）原样 raise 保留 fail fast；过程异常（DB 瞬时抖动等）
+记 warning 后按失败续下一只，**不终止整轮**（下一轮重解析自愈）。既有 fail-fast 用例
+`test_backfill_specials_fails_fast_when_source_disabled_mid_run` 保持通过；
+新增 `test_backfill_specials_continues_when_reresolve_raises_transient` 守护韧性。
+
 ---
 
-### 🟢 L-4｜前端按钮无二次确认 / 无进度反馈
+### ✅ L-4｜前端按钮无二次确认 / 无进度反馈（已修复）
 
 `RankingPage.vue:276-285`：一键触发 12~25 分钟的写库操作，无确认弹窗，
 成功后仅 toast「已触发…进度见定时任务日志」。
@@ -146,9 +159,14 @@ down_revision = "0009_fix_dividend_interface_code_fields"  # L27 ✅
 与既有「全量重建」按钮行为一致（无不一致），但该操作耗时与影响面更大。
 建议至少加 confirm；进度可见性依赖用户主动跳转日志页。
 
+**✅ 修复确认（2026-09-11）**：`RankingPage.vue` 点击按钮改为弹出 AlertDialog 二次确认
+（复用项目 `components/ui/alert-dialog`，destructive 样式，文案注明 12~25 分钟写库 +
+须在季度抓取后执行 + 进度看定时任务日志）；确认后才触发 mutation。
+M-3 测试同步改为「未确认不触发 → 点确认后触发」契约（8/8 passed）。
+
 ---
 
-### 🟢 L-5｜迁移 0010 删行的副作用未记载
+### ✅ L-5｜迁移 0010 删行的副作用未记载（已修复）
 
 删除 153 行 `PAID` + 206 行 `PROPOSED` 的 NaN 分红记录后：
 `consecutive_years` / `last_dividend_year` 由 `payout_records()` 从 `security_dividends`
@@ -158,9 +176,12 @@ down_revision = "0009_fix_dividend_interface_code_fields"  # L27 ✅
 但文档仅记载「快照由 refresh 重算恢复」，未提连续年数会变——运维对账时可能困惑。
 建议在迁移 docstring 补一句副作用说明。
 
+**✅ 修复确认（2026-09-11）**：迁移 0010 docstring 已补「副作用（运维对账提示）」段，
+明确删行会改变 `consecutive_years` / `last_dividend_year` 且属语义纠正。
+
 ---
 
-### 🔧 债务（归 cleanup REP，不阻塞本次）
+### ✅ 债务（已收敛）
 
 - **跨服务调私有方法**：`dividend_notice_scan.py` 多处 `self._mds._call_interface_raw(...)`，
   跨服务调用 `MarketDataSyncService` 的私有方法。既有模式（scan 已用），新增 backfill 沿用。
@@ -168,6 +189,14 @@ down_revision = "0009_fix_dividend_interface_code_fields"  # L27 ✅
 - **`create_task` 无强引用**：`scheduler.py:442` 与 `portfolio/router.py:115` 均为
   fire-and-forget 且未保存 task 引用（Python 文档建议保存以防 GC）。
   既有模式；因 `_run_job` 已落日志，实际风险低。
+
+**✅ 收敛确认（2026-09-11）**：
+- 跨服务私有调用：`MarketDataSyncService` 新增公开 `call_interface_raw`（委托私有实现），
+  `dividend_notice_scan.py` 三处 `self._mds._call_interface_raw` 改走公开入口，
+  该模块测试 monkeypatch 同步切换（其余模块沿用私有实现，保持既有模式不动）。
+- 强引用：`scheduler.py`（`run_task_now`/`run_user_sync_now`）与
+  `portfolio/router.py` 统一经模块级 `_BG_TASKS` set + `_track_task` 持有引用，
+  done callback 自动移除。
 
 ---
 
