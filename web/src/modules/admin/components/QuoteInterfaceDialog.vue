@@ -8,12 +8,13 @@
  *   类型 / 单位来自契约端点（useResponseFieldSchema），支持按分类必填提示与一键预填
  *   （方案 §7 四层动态性）。
  * - 「响应解析」「高级设置」页签内容抽至 InterfaceResponseParseFields /
- *   InterfaceAdvancedSettings；表单模型与 payload 组装见 utils/quote-interface-form.ts；
+ *   InterfaceAdvancedSettings，一键预填区抽至 InterfacePrefillBar；
+ *   表单模型与 payload 组装见 utils/quote-interface-form.ts；
  *   映射行逻辑见 utils/response-fields.ts。
  * 不含 direction（后端落库，UI 暂不暴露）。
  */
 import { computed, reactive, ref, watch } from 'vue';
-import { Loader2, Wand2 } from 'lucide-vue-next';
+import { Loader2 } from 'lucide-vue-next';
 import { toast } from '@/composables/use-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -38,17 +39,15 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { type HttpMethod, type QuoteInterface } from '@/api/quote-interface.api';
 import { useInterfaceCategories } from '../composables/use-interface-category';
 import {
-  prefillRowsFromInterface,
   useCreateInterface,
   useResponseFieldSchema,
   useUpdateInterface,
 } from '../composables/use-quote-interface';
-import { useQuoteProviders } from '../composables/use-quote-provider';
 import InterfaceFieldMappingTable from './InterfaceFieldMappingTable.vue';
+import InterfacePrefillBar from './InterfacePrefillBar.vue';
 import InterfaceResponseParseFields from './InterfaceResponseParseFields.vue';
 import InterfaceAdvancedSettings from './InterfaceAdvancedSettings.vue';
 import {
-  collectParams,
   buildSubmitPayload,
   hasLegacyMirror,
   toForm,
@@ -93,7 +92,6 @@ watch(
   ([open]) => {
     if (open) {
       Object.assign(form, toForm(props.editing));
-      prefillWarnings.value = [];
       activeTab.value = 'basic';
     }
   },
@@ -127,55 +125,6 @@ function updateFieldRow(idx: number, patch: Partial<FormState['fieldRows'][numbe
 const missingSlots = computed(() =>
   missingRequiredSlots(form.fieldRows, fieldSchema.value ?? null, form.categoryId),
 );
-
-// —— 一键预填：编辑态走试调端点，新增态走实调预览端点（仅 SDK），统一从 raw 生成映射行 ——
-const prefillLoading = ref(false);
-const prefillWarnings = ref<string[]>([]);
-
-const { data: providers } = useQuoteProviders();
-/** 当前提供方是否 SDK 接入（新增态实调预览仅支持 SDK，后端 400 兜底） */
-const isSdkProvider = computed(
-  () =>
-    providers.value?.find((p) => p.id === props.providerId)?.access_method ===
-    'sdk',
-);
-/** 新增态预填可用性：endpoint 已填且提供方为 SDK；编辑态沿用试调路径恒可用 */
-const prefillEnabled = computed(() =>
-  props.editing ? true : Boolean(form.endpoint.trim()) && isSdkProvider.value,
-);
-/** 预填按钮禁用原因（title 提示；空串 = 可用） */
-const prefillDisabledReason = computed(() => {
-  if (props.editing) return '';
-  if (!form.endpoint.trim())
-    return '请先在基本信息填写调用路径（SDK 时为 akshare 函数名）';
-  if (!isSdkProvider.value) return 'HTTPS 提供方暂不支持实调预填，保存后可试调';
-  return '';
-});
-
-async function handlePrefill(): Promise<void> {
-  if (prefillLoading.value || !prefillEnabled.value) return;
-  prefillLoading.value = true;
-  try {
-    // 预填取数下沉 composable：编辑态走试调端点，新增态走实调预览端点（仅 SDK）
-    const pre = await prefillRowsFromInterface({
-      editingId: props.editing?.id ?? null,
-      endpoint: form.endpoint.trim(),
-      providerId: props.providerId,
-      params: collectParams(form),
-    });
-    prefillWarnings.value = pre.warnings;
-    if (pre.rows.length === 0) {
-      toast.error(pre.warnings[0] ?? '试调结果无可提取的列');
-      return;
-    }
-    form.fieldRows = pre.rows;
-    toast.success(`已按试调结果预填 ${pre.rows.length} 个字段，请人工校正后保存`);
-  } catch (e) {
-    toast.error(`预填请求异常：${(e as Error).message}`);
-  } finally {
-    prefillLoading.value = false;
-  }
-}
 
 /** 编辑态且为老数据（response_fields 为 NULL）时，展示旧 4 列只读镜像说明 */
 const legacyMirror = computed(() => hasLegacyMirror(props.editing));
@@ -318,32 +267,12 @@ function handleSubmit(): void {
             当前分类还缺少必填槽位：{{ missingSlots.join('、') }}；请为对应字段选择语义槽位后再保存
           </div>
 
-          <!-- 一键预填：编辑态先试调 / 新增态实调预览 → 生成映射 → 人工校正 -->
-          <div class="flex items-center justify-between gap-2">
-            <p class="text-xs text-muted-foreground">
-              可先在接口测试面板试调，或在此一键预填后人工校正
-            </p>
-            <Button
-              variant="outline"
-              size="sm"
-              :disabled="!prefillEnabled || prefillLoading"
-              :title="prefillDisabledReason"
-              @click="handlePrefill"
-            >
-              <Loader2 v-if="prefillLoading" class="mr-1 h-3.5 w-3.5 animate-spin" />
-              <Wand2 v-else class="mr-1 h-3.5 w-3.5" />
-              一键预填
-            </Button>
-          </div>
-          <p v-if="!props.editing && !isSdkProvider" class="text-xs text-muted-foreground">
-            HTTPS 提供方暂不支持新增态实调预填，保存后即可试调并一键预填
-          </p>
-          <p v-else-if="!props.editing" class="text-xs text-muted-foreground">
-            新增态可直接实调预填：填写调用路径（akshare 函数名）后点击一键预填
-          </p>
-          <ul v-if="prefillWarnings.length > 0" class="space-y-0.5 text-xs text-muted-foreground">
-            <li v-for="(w, i) in prefillWarnings" :key="i">- {{ w }}</li>
-          </ul>
+          <!-- 一键预填：编辑态先试调 / 新增态实调预览（SDK / HTTPS）→ 生成映射 → 人工校正 -->
+          <InterfacePrefillBar
+            :form="form"
+            :provider-id="props.providerId"
+            :editing-id="props.editing?.id ?? null"
+          />
 
           <InterfaceFieldMappingTable
             :rows="form.fieldRows"

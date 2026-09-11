@@ -278,14 +278,23 @@ export function testInterface(
 }
 
 /**
- * 新增态实调预览请求体（POST /admin/quote-interfaces/preview）：
- * endpoint 为 SDK 顶层函数名（如 stock_zh_a_spot）；params 为弹窗参数编辑器
- * 当前值（空则省略，后端按 akshare 签名默认值调用）。
+ * 新增态实调预览请求体（POST /admin/quote-interfaces/preview）。
+ * - SDK：endpoint 为 akshare 顶层函数名（如 stock_zh_a_spot）；params 为弹窗参数
+ *   编辑器当前值（空则省略，后端按 akshare 签名默认值调用）；HTTPS 专用字段被忽略。
+ * - HTTPS：endpoint 为相对 base_url 的路径（以 = 结尾为内联代码形态，如 q=）；
+ *   response_parse / http_method 取弹窗当前值，codes 为探测用测试代码（逗号分隔，
+ *   语义同接口测试面板的「代码」框；内联形态没有 codes 拿不到数据）。
  */
 export interface InterfacePreviewRequest {
   endpoint: string;
   provider_id: string;
   params?: Record<string, unknown>;
+  /** 响应解析协议（HTTPS 专用；SDK 忽略） */
+  response_parse?: Record<string, unknown>;
+  /** HTTP 方法（HTTPS 专用；不设置时后端按 GET 调用） */
+  http_method?: string | null;
+  /** 探测用测试代码（HTTPS 专用；空数组/全空白视为未填） */
+  codes?: string[];
 }
 
 /** 实调预览响应（纯预览：不写库、不计入 consecutive_failures；结构对齐后端 interface_preview） */
@@ -294,10 +303,12 @@ export interface InterfacePreviewResponse {
   status: 'success' | 'error';
   /** 调用耗时（毫秒） */
   elapsedMs: number;
-  /** 原始响应（SDK: list[dict]；失败为 null） */
+  /** 原始响应（SDK: list[dict]；HTTPS: 解析后的行；失败为 null） */
   raw: unknown;
   /** 命中行数（成功时返回） */
   rowCount?: number;
+  /** HTTPS 接口的上游状态码；SDK 接口与网络异常时为 null / 缺省 */
+  httpStatus?: number | null;
   warnings?: string[];
   error?: string;
 }
@@ -305,7 +316,8 @@ export interface InterfacePreviewResponse {
 /**
  * 新增态实调预览：POST /api/admin/quote-interfaces/preview
  *
- * 不依赖已存接口：后端按 endpoint 懒导入 akshare 实调一次回传原始行，
+ * 不依赖已存接口：后端按提供方接入方式实调一次回传原始行（SDK 懒导入 akshare；
+ * HTTPS 按 provider.base_url + endpoint 实调，复用生产同一条取数路径但不写库），
  * 供「一键预填」在新增态生成字段映射行（仅预填映射，不做 params 模板生成）。
  * 对应后端 modules/admin/router.py 的 preview_quote_interface。
  */

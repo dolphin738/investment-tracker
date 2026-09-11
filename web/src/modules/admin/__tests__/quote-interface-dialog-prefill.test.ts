@@ -5,9 +5,13 @@
  * 1. 新增态 + SDK 提供方 + endpoint 已填 → 按钮解禁，点击调 previewQuoteInterface
  *    （不依赖已存接口），成功后走 prefillRowsFromRaw 管线生成映射行（toast.success）；
  * 2. 新增态 + endpoint 未填 → 按钮禁用（title 给原因）；
- * 3. 新增态 + HTTPS 提供方 → 按钮禁用（title 说明 v1 不支持实调预填）；
+ * 3. 新增态 + HTTPS 提供方 + endpoint 已填 → 按钮解禁，请求体带
+ *    response_parse / http_method / codes（HTTPS 已支持实调预填）；
  * 4. 编辑态 → 仍走既有试调端点 testInterface，不调 previewQuoteInterface；
- * 5. 新增态探测失败（status=error）→ toast.error 透传后端中文错误消息。
+ * 5. 新增态探测失败（status=error）→ toast.error 透传后端中文错误消息；
+ * 6. 新增态 + HTTPS：探测用测试代码输入框可见，逗号分隔切分后作为 codes 传出；
+ * 7. 新增态 + SDK：不显示探测用测试代码输入框（HTTPS 专属，避免打扰）；
+ * 8. 新增态 + HTTPS 探测失败（上游 5xx）→ toast.error 透传后端中文错误消息。
  *
  * API 层与 toast 全部 mock 隔离网络；预填取数 prefillRowsFromInterface 用真实实现，
  * 同时覆盖「编辑态/新增态」双分支路由与错误转译。
@@ -251,14 +255,83 @@ describe('QuoteInterfaceDialog — 新增态一键预填（实调探测）', () 
     expect(api.previewQuoteInterface).not.toHaveBeenCalled();
   });
 
-  it('③ 新增态 + HTTPS 提供方：按钮禁用，title 说明 v1 不支持实调预填', async () => {
+  it('③ 新增态 + HTTPS 提供方：按钮解禁，请求体带 response_parse / http_method / codes', async () => {
+    api.previewQuoteInterface.mockResolvedValue({
+      ok: true,
+      status: 'success',
+      elapsedMs: 22,
+      raw: [{ code: '600519', price: '1600.00' }],
+      rowCount: 1,
+      httpStatus: 200,
+      warnings: [],
+    });
     await mountDialog({ providerId: 'p-https' });
-    await setInput('#qi-endpoint', '/api/ashare/list');
+    await setInput('#qi-endpoint', 'api/ashare/list');
     await openMappingTab();
 
     const btn = prefillButton();
-    expect(btn.disabled).toBe(true);
-    expect(btn.getAttribute('title')).toContain('HTTPS');
+    expect(btn.disabled).toBe(false);
+    btn.click();
+    await settle();
+
+    expect(api.previewQuoteInterface).toHaveBeenCalledTimes(1);
+    const body = api.previewQuoteInterface.mock.calls[0][0] as {
+      endpoint: string;
+      provider_id: string;
+      params: Record<string, unknown>;
+      response_parse?: Record<string, unknown>;
+      http_method?: string | null;
+      codes?: string[];
+    };
+    expect(body.endpoint).toBe('api/ashare/list');
+    expect(body.provider_id).toBe('p-https');
+    // 响应解析页签默认值（format=json）随请求带出，后端据此选择解析方式
+    expect(body.response_parse).toEqual({ format: 'json' });
+    // HTTP 方法未选 → null（后端按 GET 调用）
+    expect(body.http_method).toBeNull();
+    // 测试代码未填 → 不传 codes
+    expect(body.codes).toBeUndefined();
+    expect(api.testInterface).not.toHaveBeenCalled();
+    expect(toast.success).toHaveBeenCalledWith(
+      expect.stringContaining('预填 2 个字段'),
+    );
+  });
+
+  it('⑥ 新增态 + HTTPS：测试代码输入框可见，逗号分隔切分后作为 codes 传出', async () => {
+    api.previewQuoteInterface.mockResolvedValue({
+      ok: true,
+      status: 'success',
+      elapsedMs: 18,
+      raw: [{ 0: 'sh600519', 1: '1600.00' }],
+      rowCount: 1,
+      httpStatus: 200,
+      warnings: [],
+    });
+    await mountDialog({ providerId: 'p-https' });
+    // 内联形态（q=）：没有代码拿不到数据，须带 codes
+    await setInput('#qi-endpoint', 'q=');
+    await openMappingTab();
+
+    expect(document.body.querySelector('#qi-probe-codes')).not.toBeNull();
+    await setInput('#qi-probe-codes', 'sh600519, sz000001');
+    prefillButton().click();
+    await settle();
+
+    const body = api.previewQuoteInterface.mock.calls[0][0] as {
+      endpoint: string;
+      codes?: string[];
+    };
+    expect(body.endpoint).toBe('q=');
+    expect(body.codes).toEqual(['sh600519', 'sz000001']);
+  });
+
+  it('⑦ 新增态 + SDK：不显示探测用测试代码输入框（HTTPS 专属）', async () => {
+    await mountDialog({ providerId: 'p-sdk' });
+    await setInput('#qi-endpoint', 'stock_zh_a_spot');
+    await openMappingTab();
+
+    expect(document.body.querySelector('#qi-probe-codes')).toBeNull();
+    expect(prefillButton().disabled).toBe(false);
   });
 
   it('④ 编辑态：点击仍走试调端点 testInterface，不调 previewQuoteInterface', async () => {
@@ -300,6 +373,29 @@ describe('QuoteInterfaceDialog — 新增态一键预填（实调探测）', () 
     expect(api.previewQuoteInterface).toHaveBeenCalledTimes(1);
     expect(toast.error).toHaveBeenCalledWith(
       expect.stringContaining('akshare 中不存在函数 no_such_func'),
+    );
+  });
+
+  it('⑧ 新增态 + HTTPS 探测失败：toast.error 透传后端中文错误消息（上游 5xx）', async () => {
+    api.previewQuoteInterface.mockResolvedValue({
+      ok: false,
+      status: 'error',
+      elapsedMs: 9,
+      raw: null,
+      httpStatus: 503,
+      warnings: [],
+      error: '上游 5xx: 503',
+    });
+    await mountDialog({ providerId: 'p-https' });
+    await setInput('#qi-endpoint', 'api/ashare/list');
+    await openMappingTab();
+
+    prefillButton().click();
+    await settle();
+
+    expect(api.previewQuoteInterface).toHaveBeenCalledTimes(1);
+    expect(toast.error).toHaveBeenCalledWith(
+      expect.stringContaining('上游 5xx: 503'),
     );
   });
 });

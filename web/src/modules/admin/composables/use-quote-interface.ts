@@ -135,18 +135,24 @@ export function useResponseFieldSchema() {
 
 /**
  * 一键预填取数（方案 §7 第 4 层）：编辑态走试调端点（有接口 id），新增态走
- * 实调预览端点（不依赖已存接口，仅 SDK 提供方）；两条路径统一把 raw 首行
- * 转为字段映射行。仅预填字段映射，不做 params 模板生成；后端探测语义的
+ * 实调预览端点（不依赖已存接口，SDK / HTTPS 提供方均可）；两条路径统一把 raw
+ * 首行转为字段映射行。仅预填字段映射，不做 params 模板生成；后端探测语义的
  * 失败消息（status=error + error）在此转译为 Error 交调用方 toast。
  */
 export async function prefillRowsFromInterface(args: {
   /** 编辑态接口 id；null = 新增态 */
   editingId: string | null;
-  /** 新增态所需：SDK 顶层函数名与提供方 id */
+  /** 新增态所需：调用路径（SDK 为函数名 / HTTPS 为相对路径）与提供方 id */
   endpoint: string;
   providerId: string;
   /** 参数编辑器当前值（空则 {}） */
   params: Record<string, unknown>;
+  /** 新增态且 HTTPS 所需：响应解析协议（弹窗「响应解析」页签当前值） */
+  responseParse?: Record<string, unknown> | null;
+  /** 新增态且 HTTPS 所需：HTTP 方法（不设置传 null，后端按 GET 调用） */
+  httpMethod?: string | null;
+  /** 新增态且 HTTPS 所需：探测用测试代码（逗号分隔已在外层切分；空则不传） */
+  codes?: string[];
 }): Promise<{ rows: FieldMappingRow[]; warnings: string[] }> {
   const result = args.editingId
     ? await testInterface(args.editingId, { params: args.params })
@@ -154,6 +160,9 @@ export async function prefillRowsFromInterface(args: {
         endpoint: args.endpoint,
         provider_id: args.providerId,
         params: args.params,
+        response_parse: args.responseParse ?? {},
+        http_method: args.httpMethod ?? null,
+        codes: args.codes,
       });
   if (result.status !== 'success') {
     throw new Error(
