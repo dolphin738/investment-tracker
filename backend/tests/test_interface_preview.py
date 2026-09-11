@@ -5,7 +5,7 @@
   _flatten_dataframe_records）；params 为空 → 按 akshare 签名默认值调用（零 kwargs）；
 - akshare 中不存在该函数 → ok:false + 明确中文错误（不 500）；
 - akshare 未安装（ImportError）→ ok:false +「后端未安装 akshare，无法实调预览」；
-- 非 SDK 提供方 / 提供方不存在 → 400 明确中文错误；
+- 提供方不存在 / 不支持的接入方式 → 400 明确中文错误（HTTPS 已改为走探测，不再 400）；
 - 纯预览：不写库（QuoteInterface 表保持 0 行）；
 - 超时路径：直接调服务函数（小超时）→ ok:false + 超时消息。
 """
@@ -182,21 +182,32 @@ async def test_preview_akshare_not_installed(session, client, monkeypatch):
 
 
 # ───────────────────────── 端点：请求校验 400 ─────────────────────────
-async def test_preview_rejects_https_provider(session, client):
-    """HTTPS 提供方 → 400 + 明确中文错误（v1 不支持实调预览）。"""
+async def test_preview_https_provider_probes_instead_of_400(session, client):
+    """HTTPS 提供方：不再 400，改走 HTTPS 探测路径（缺 base_url → ok:false + 中文原因）。
+
+    HTTPS 的成功 / SSRF / 上游错误等完整用例见 tests/test_interface_preview_https.py。
+    """
     info = await _admin(session, client, "preview_https@example.com")
-    provider = await _seed_provider(
-        session, access_method=QuoteProviderAccessMethod.HTTPS
+    provider = SecuritiesDataProvider(
+        id=_uid(), name="HTTPS 源（未配 base_url）",
+        access_method=QuoteProviderAccessMethod.HTTPS.value,
+        config={}, enabled=True,
     )
+    session.add(provider)
+    await session.commit()
 
     r = await _post_preview(
         client,
         info["token"],
-        {"endpoint": "stock_zh_a_spot", "provider_id": provider.id},
+        {"endpoint": "api/stock/list", "provider_id": provider.id},
     )
-    status, code, _, message = env(r)
-    assert status == 400 and code != 0
-    assert "HTTPS" in (message or "")
+    status, code, data, _ = env(r)
+    assert status == 200 and code == 0
+    assert data["ok"] is False and data["status"] == "error"
+    assert "缺少 base_url" in data["error"]
+    # 纯预览：不写库（接口表保持 0 行）
+    count = await session.scalar(select(func.count()).select_from(QuoteInterface))
+    assert count == 0
 
 
 async def test_preview_unknown_provider_returns_400(session, client):

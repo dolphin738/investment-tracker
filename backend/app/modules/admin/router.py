@@ -14,7 +14,7 @@
 - GET    /api/admin/quote-providers/interfaces/{interface_id}：读取单个。
 - PATCH  /api/admin/quote-providers/interfaces/{interface_id}：局部更新。
 - DELETE /api/admin/quote-providers/interfaces/{interface_id}：删除。
-- POST   /api/admin/quote-interfaces/preview：新增态实调预览（不依赖已存接口，仅 SDK 提供方）。
+- POST   /api/admin/quote-interfaces/preview：新增态实调预览（不依赖已存接口，支持 SDK / HTTPS 提供方）。
 
 接口分类（InterfaceCategory）CRUD：
 - GET    /api/admin/interface-categories：列出全部分类（按 sort_order 升序，含各分类下接口数）。
@@ -45,7 +45,7 @@ from app.models.enums import InterfaceDirection, QuoteProviderAccessMethod
 from app.models.quote_provider import SecuritiesDataProvider
 from app.serializers import serialize_security_master
 from app.services import InterfaceCategoryService, QuoteInterfaceService
-from app.services.interface_preview import preview_sdk_interface
+from app.services.interface_preview import preview_https_interface, preview_sdk_interface
 from app.services.market_data_sync import MarketDataSyncService
 from app.services.notification import NotificationService
 from app.services.quote_provider import QuoteProviderService
@@ -646,11 +646,23 @@ class InterfaceTestRequest(BaseModel):
 
 
 class InterfacePreviewRequest(BaseModel):
-    """新增态实调预览请求体：不依赖已存接口，按 endpoint 懒导入 SDK 实调一次。"""
+    """新增态实调预览请求体：不依赖已存接口，按提供方接入方式实调一次。
 
-    endpoint: str = Field(min_length=1, description="SDK 顶层函数名（如 stock_zh_a_spot）")
+    - SDK：endpoint 为 akshare 顶层函数名（如 stock_zh_a_spot），params 透传
+      （空则按签名默认值调用）；下方 HTTPS 专用字段被忽略。
+    - HTTPS：endpoint 为相对 base_url 的路径（以 ``=`` 结尾时为内联代码形态，
+      如腾讯财经 ``q=``）；response_parse / http_method / codes 取弹窗当前值。
+    """
+
+    endpoint: str = Field(
+        min_length=1, description="SDK 顶层函数名或 HTTPS 相对路径（如 stock_zh_a_spot / q=）"
+    )
     provider_id: str
     params: dict[str, Any] = {}
+    # —— HTTPS 专用（SDK 忽略）——
+    response_parse: dict[str, Any] = {}
+    http_method: Optional[str] = None
+    codes: Optional[list[str]] = None
 
 
 class SecurityMasterDeleteBody(BaseModel):
@@ -877,17 +889,29 @@ async def preview_quote_interface(
     current: CurrentUser = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """新增态实调预览：不依赖已存接口，按 endpoint 懒导入 SDK 实调一次回传 raw。
+    """新增态实调预览：不依赖已存接口，按提供方接入方式实调一次回传 raw。
 
-    纯预览：不写库、不计入 consecutive_failures；仅支持 SDK 提供方
-    （HTTPS 接入方式 v1 不支持实调预览）。
+    纯预览：不写库、不计入 consecutive_failures；SDK 走 akshare 懒导入，
+    HTTPS 走 provider.base_url 实调（缺配置 / SSRF 拦截 / 上游错误均转
+    ok:false + 中文原因，不 500）。
     """
     provider = await db.get(SecuritiesDataProvider, body.provider_id)
     if provider is None:
         raise HTTPException(status_code=400, detail="提供方不存在，无法实调预览")
-    if provider.access_method != QuoteProviderAccessMethod.SDK.value:
-        raise HTTPException(
-            status_code=400,
-            detail="该提供方为 HTTPS 接入方式，v1 暂不支持实调预览（仅支持 SDK 提供方）",
+    access_method = provider.access_method
+    if access_method == QuoteProviderAccessMethod.SDK.value:
+        return await preview_sdk_interface(body.endpoint, body.params)
+    if access_method == QuoteProviderAccessMethod.HTTPS.value:
+        return await preview_https_interface(
+            db,
+            provider.id,
+            body.endpoint,
+            params=body.params,
+            response_parse=body.response_parse,
+            http_method=body.http_method,
+            codes=body.codes,
         )
-    return await preview_sdk_interface(body.endpoint, body.params)
+    raise HTTPException(
+        status_code=400,
+        detail=f"该提供方接入方式（{access_method}）不支持实调预览（仅支持 SDK / HTTPS）",
+    )
