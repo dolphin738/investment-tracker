@@ -207,13 +207,18 @@ JSON 示例：
 
 各 slot 的必填契约按 **4 个同步用途** 枚举（单一真相，供 §6 `SLOT_CONTRACT` 使用）：
 
-| slot | 必填用途（其余用途可选） | 当前来源 |
-| --- | --- | --- |
-| `code` | **全部 4 个用途均必填** | `resp_code_field` / `_FALLBACK_CODE_FIELD` / `_COL_NOTICE_CODE` |
-| `name` | `MASTER_LIST` | `resp_name_field` |
-| `exchange` | `MASTER_LIST`（缺失可兜底，见下） | `resp_exchange_field` |
-| `price` | `QUOTE` | `resp_price_field` |
-| `date` | `QUOTE`（日线） | `response_parse.resp_date_field` |
+| slot | 契约是否强制 | 适用用途 | 当前来源 |
+| --- | --- | --- | --- |
+| `code` | **强制必填** | 全部 4 个用途 | `resp_code_field` / `_FALLBACK_CODE_FIELD` / `_COL_NOTICE_CODE` |
+| `price` | **强制必填** | `QUOTE` | `resp_price_field` |
+| `date` | **强制必填** | `QUOTE`（日线） | `response_parse.resp_date_field` |
+| `name` | 非强制（缺省仅展示退化，不丢行） | `MASTER_LIST` | `resp_name_field` |
+| `exchange` | 非强制（缺失按代码前缀推断，F9.3） | `MASTER_LIST` | `resp_exchange_field` |
+
+> 为什么 `name` / `exchange` 不强制：二者**已有兜底**（`exchange` 按代码前缀推断、`name` 缺失仅展示层退化），
+> 若契约层也标必填，会把「缺失→推断」的既有行为改成「缺失→丢行」，属行为变更。
+> 故**契约只强制无兜底的槽**（`code` / `price` / `date`），与 §6 `SLOT_CONTRACT` 及实现 `response_fields.py:72-76` 一致。
+> 字段级 `required` 是另一回事：admin 仍可把 `exchange` 标 `required` 表达「期望有」，但那是行级过滤语义，非契约准入。
 
 **扩展 slot 必须先有消费者**——这是**有意设的约束**；否则白名单会退化成「随便填」。
 
