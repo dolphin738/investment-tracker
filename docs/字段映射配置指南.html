@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>字段映射配置指南（大白话版）</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel2:#21262d; --line:#30363d;
+    --text:#e6edf3; --muted:#8b949e; --blue:#1f6feb; --blue2:#388bfd;
+    --red:#f85149; --green:#3fb950; --yellow:#d29922;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font-family:-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,Helvetica,Arial,sans-serif;
+    line-height:1.7; font-size:15px;
+  }
+  .wrap{max-width:880px; margin:0 auto; padding:32px 20px 80px;}
+  h1{font-size:26px; margin:0 0 6px;}
+  .sub{color:var(--muted); margin-bottom:28px;}
+  h2{font-size:20px; margin:38px 0 12px; padding-left:10px; border-left:4px solid var(--blue2);}
+  h3{font-size:16px; margin:22px 0 8px; color:#c9d1d9;}
+  p{margin:10px 0;}
+  ul,ol{margin:10px 0; padding-left:22px;}
+  li{margin:6px 0;}
+  code{background:var(--panel2); padding:1px 6px; border-radius:4px; font-size:13px; color:#ffa657;}
+  table{border-collapse:collapse; width:100%; margin:14px 0; font-size:14px;}
+  th,td{border:1px solid var(--line); padding:8px 10px; text-align:left; vertical-align:top;}
+  th{background:var(--panel2); color:#c9d1d9;}
+  .card{background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px 16px; margin:16px 0;}
+  .tip{background:rgba(31,111,235,.12); border:1px solid var(--blue2); border-radius:10px; padding:12px 16px; margin:16px 0;}
+  .warn{background:rgba(248,81,73,.12); border:1px solid var(--red); border-radius:10px; padding:12px 16px; margin:16px 0;}
+  .remember{background:rgba(63,185,80,.12); border:1px solid var(--green); border-radius:10px; padding:12px 16px; margin:16px 0; font-weight:600;}
+  .fig{background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:10px; margin:20px 0; overflow-x:auto;}
+  .fig svg{display:block; max-width:100%; height:auto;}
+  .small{color:var(--muted); font-size:13px;}
+  .tag{display:inline-block; background:var(--panel2); border:1px solid var(--line); border-radius:6px; padding:1px 8px; font-size:12px; color:var(--muted); margin-right:4px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>字段映射配置指南（大白话版）</h1>
+<div class="sub">一份给"想接一个新数据源、又不想看代码"的人看的说明书 · 看完能自己配、自己试、自己排查</div>
+
+<div class="remember">
+一句话记住：字段映射就是告诉系统——「你返回的一大堆数据里，哪个字段是股票代码、哪个是价格、哪个是日期」。系统只认 5 种标准身份（叫 slot），你不用记英文，下拉选就行。
+</div>
+
+<h2>一、它到底解决什么麻烦</h2>
+<p>以前系统用 4 个写死的列（比如"代码在那列、价格在那列"）来认数据。问题是：不同的数据源返回的 JSON 长得千奇百怪，想多认一种含义，就得改列、改所有用到它的地方。</p>
+<p>字段映射把这件事变成一张<strong>可以随便增删的表</strong>：你每行写一条"从返回数据里取某个值，对应我系统里的『代码/价格/日期』等标准身份"。系统只认底下这 5 个标准身份，你填表就行，不用碰代码。</p>
+
+<div class="tip">
+在哪配？<br/>
+金融数据接口页（接口 API 来源 / 行情提供方）→ 点某个接口「编辑」→ 弹窗里有 <span class="tag">字段映射</span> 页签（配每一列怎么取）+ <span class="tag">响应解析</span> 页签（配数据源是 JSON 还是文本分隔）。
+</div>
+
+<h2>二、一行映射里，四个东西各管什么</h2>
+<p>表格里<strong>每一行</strong>就是一个"字段映射"。这一行里有四个关键东西，很多人会搞混，先记牢：</p>
+
+<table>
+<thead><tr><th>东西</th><th>大白话</th><th>举个例子</th><th>能不能不填</th></tr></thead>
+<tbody>
+<tr><td><strong>展示名</strong>（label）</td><td>给人看的"昵称"，比如"最新价"</td><td>最新价 / 证券代码</td><td>可以空，纯展示，系统不校验</td></tr>
+<tr><td><strong>逻辑名 key</strong></td><td>这行在系统内部的"身份证号"</td><td><code>price</code> / <code>latest_price</code></td><td>可以空（留空自动按身份派发）</td></tr>
+<tr><td><strong>取值路径 source</strong></td><td>"去数据哪个位置把值掏出来"的地址</td><td><code>data.last</code> / <code>code</code></td><td>不能空，保存会报错</td></tr>
+<tr><td><strong>槽位 slot</strong></td><td>这个值的"身份"（是代码？价格？日期？）</td><td><code>code</code> / <code>price</code></td><td>可以空 = 选「仅展示」，不参与同步</td></tr>
+</tbody>
+</table>
+
+<div class="card">
+<strong>打个比方（记这个就够了）：</strong><br/>
+仓库发来一箱货。<br/>
+• <code>source</code> = 去仓库<strong>哪层哪格拿货的地址</strong>；<br/>
+• <code>key</code> = 这箱货的<strong>内部编号</strong>（机器靠它认）；<br/>
+• <code>label</code> = 贴在箱子上的<strong>中文标签</strong>（人看着方便）；<br/>
+• <code>slot</code> = 这箱货的<strong>身份</strong>（是"代码"还是"价格"），决定了它该交给谁用。
+</div>
+
+<div class="fig">
+<svg viewBox="0 0 680 600" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,PingFang SC,Microsoft YaHei,Arial,sans-serif">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#8b949e"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="680" height="600" fill="#0d1117"/>
+  <text x="24" y="30" fill="#e6edf3" font-size="16" font-weight="700">图1 · 字段映射数据流 &amp; 一行四字段各管什么</text>
+
+  <!-- A 外部响应 -->
+  <rect x="225" y="46" width="230" height="50" rx="8" fill="#161b22" stroke="#30363d" stroke-width="1.5"/>
+  <text x="340" y="70" fill="#e6edf3" font-size="13" text-anchor="middle" font-weight="600">外部响应（数据源返回）</text>
+  <text x="340" y="88" fill="#8b949e" font-size="10" text-anchor="middle">JSON / 文本分隔（如腾讯财经用 ~）</text>
+  <line x1="340" y1="96" x2="340" y2="118" stroke="#8b949e" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- B 字段映射表 -->
+  <rect x="40" y="118" width="600" height="94" rx="8" fill="#161b22" stroke="#30363d" stroke-width="1.5"/>
+  <text x="56" y="138" fill="#e6edf3" font-size="12" font-weight="600">字段映射表（逐行解析）</text>
+  <line x1="160" y1="146" x2="160" y2="206" stroke="#30363d"/>
+  <line x1="280" y1="146" x2="280" y2="206" stroke="#30363d"/>
+  <line x1="400" y1="146" x2="400" y2="206" stroke="#30363d"/>
+  <line x1="520" y1="146" x2="520" y2="206" stroke="#30363d"/>
+  <text x="100" y="162" fill="#e6edf3" font-size="11" text-anchor="middle" font-weight="600">展示名</text>
+  <text x="220" y="162" fill="#e6edf3" font-size="11" text-anchor="middle" font-weight="600">逻辑名 key</text>
+  <text x="340" y="162" fill="#e6edf3" font-size="11" text-anchor="middle" font-weight="600">取值路径 source</text>
+  <text x="460" y="162" fill="#e6edf3" font-size="11" text-anchor="middle" font-weight="600">槽位 slot</text>
+  <text x="580" y="162" fill="#e6edf3" font-size="11" text-anchor="middle" font-weight="600">必填</text>
+  <text x="100" y="188" fill="#8b949e" font-size="9" text-anchor="middle">给人看·可空</text>
+  <text x="220" y="188" fill="#8b949e" font-size="9" text-anchor="middle">内部标识·唯一</text>
+  <text x="340" y="188" fill="#8b949e" font-size="9" text-anchor="middle">取值位置·≤5段</text>
+  <text x="460" y="188" fill="#8b949e" font-size="9" text-anchor="middle">5选1/仅展示</text>
+  <text x="580" y="188" fill="#8b949e" font-size="9" text-anchor="middle">缺失整行丢</text>
+  <text x="100" y="202" fill="#6e7681" font-size="8.5" text-anchor="middle">label</text>
+  <text x="220" y="202" fill="#6e7681" font-size="8.5" text-anchor="middle">key</text>
+  <text x="340" y="202" fill="#6e7681" font-size="8.5" text-anchor="middle">source</text>
+  <text x="460" y="202" fill="#6e7681" font-size="8.5" text-anchor="middle">slot</text>
+  <line x1="340" y1="212" x2="340" y2="232" stroke="#8b949e" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- C 5 slots -->
+  <g font-size="12" font-weight="600" text-anchor="middle" fill="#ffffff">
+    <rect x="40"  y="232" width="108" height="42" rx="7" fill="#1f6feb"/><text x="94"  y="258">code</text>
+    <rect x="157" y="232" width="108" height="42" rx="7" fill="#1f6feb"/><text x="211" y="258">name</text>
+    <rect x="274" y="232" width="108" height="42" rx="7" fill="#1f6feb"/><text x="328" y="258">exchange</text>
+    <rect x="391" y="232" width="108" height="42" rx="7" fill="#1f6feb"/><text x="445" y="258">price</text>
+    <rect x="508" y="232" width="108" height="42" rx="7" fill="#1f6feb"/><text x="562" y="258">date</text>
+  </g>
+  <text x="340" y="296" fill="#8b949e" font-size="10" text-anchor="middle">↑ 系统只认这 5 种身份（slot），别的写不进去</text>
+  <line x1="340" y1="296" x2="340" y2="298" stroke="#8b949e"/>
+  <line x1="340" y1="274" x2="340" y2="298" stroke="#8b949e" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- D 4 用途 -->
+  <g text-anchor="middle">
+    <rect x="40" y="298" width="138" height="54" rx="8" fill="#21262d" stroke="#388bfd" stroke-width="1.5"/>
+    <text x="109" y="320" fill="#e6edf3" font-size="11" font-weight="600">主数据（用途1）</text>
+    <text x="109" y="340" fill="#8b949e" font-size="9">必填：code</text>
+
+    <rect x="186" y="298" width="138" height="54" rx="8" fill="#21262d" stroke="#388bfd" stroke-width="1.5"/>
+    <text x="255" y="320" fill="#e6edf3" font-size="11" font-weight="600">行情（用途2）</text>
+    <text x="255" y="340" fill="#8b949e" font-size="9">必填：code·price·date</text>
+
+    <rect x="332" y="298" width="138" height="54" rx="8" fill="#21262d" stroke="#388bfd" stroke-width="1.5"/>
+    <text x="401" y="320" fill="#e6edf3" font-size="11" font-weight="600">分红（用途3）</text>
+    <text x="401" y="340" fill="#8b949e" font-size="9">必填：code</text>
+
+    <rect x="478" y="298" width="138" height="54" rx="8" fill="#21262d" stroke="#388bfd" stroke-width="1.5"/>
+    <text x="547" y="320" fill="#e6edf3" font-size="11" font-weight="600">公告（用途4）</text>
+    <text x="547" y="340" fill="#8b949e" font-size="9">必填：code</text>
+  </g>
+
+  <text x="40" y="392" fill="#8b949e" font-size="10">缺失必填身份（code / price / date）→ 同步时报错；name / exchange 系统有兜底，不强制。</text>
+  <text x="40" y="412" fill="#8b949e" font-size="10">注意：label / key / source 不参与"值交给谁用"的判断，只有 slot（身份）决定这件事。</text>
+
+  <g transform="translate(40,432)">
+    <rect x="0" y="0" width="600" height="64" rx="8" fill="#161b22" stroke="#30363d"/>
+    <text x="14" y="22" fill="#e6edf3" font-size="11" font-weight="600">一行完整写法（直接照抄改即可）：</text>
+    <text x="14" y="42" fill="#8b949e" font-size="9.5">展示名"最新价" → slot=price → source=data.last → 类型 decimal 小数位2</text>
+    <text x="14" y="58" fill="#8b949e" font-size="9.5">展示名"公告标题" → 不绑 slot（仅展示）→ source=title</text>
+  </g>
+</svg>
+</div>
+<p class="small">图1 说明：数据从外面进来，经过你填的映射表，按"身份(slot)"分流到 5 个标准槽，最后交给对应的同步用途消费。下面那张小卡是一行该怎么填。</p>
+
+<h2>三、取值路径（source）怎么写——最常见踩坑点</h2>
+<p>把接口返回的"每一行"当成一棵树，<code>source</code> 就是"从哪条路走下去把值取出来"。只有 5 种写法：</p>
+
+<table>
+<thead><tr><th>写法</th><th>意思</th><th>举例</th></tr></thead>
+<tbody>
+<tr><td><code>code</code></td><td>顶层有个叫 code 的字段</td><td>返回 <code>{"code":"600519",...}</code> 就写 <code>code</code></td></tr>
+<tr><td><code>0</code> / <code>1</code></td><td>单行是数组时取第 0 / 1 个</td><td>返回 <code>["600519","茅台"]</code>，代码写 <code>0</code>、名称写 <code>1</code></td></tr>
+<tr><td><code>a.b</code></td><td>一层层往里走</td><td>返回 <code>{"data":{"last":12.3}}</code> 写 <code>data.last</code></td></tr>
+<tr><td><code>items[0].code</code></td><td>数组里取下标用方括号（不会和上面的"字面 0"混淆）</td><td>返回 <code>{"items":[{"code":"600519"}]}</code> 写 <code>items[0].code</code></td></tr>
+<tr><td><code>a\.b</code></td><td>字段名本身带点，用反斜杠转义</td><td>akshare 列名 <code>2024.06</code> 写成 <code>2024\.06</code>（表示名叫 2024.06 的字段）</td></tr>
+</tbody>
+</table>
+<div class="tip">约束：路径最多 5 段；空了保存会报错。输入框旁边有<strong>实时红字校验</strong>，写错立刻提示。</div>
+
+<h3>一个完整例子（直接照抄改）</h3>
+<pre style="background:#161b22;border:1px solid #30363d;border-radius:8px;padding:12px;overflow-x:auto;font-size:12px;color:#c9d1d9;"><code>{"key":"code",   "label":"代码",   "slot":"code",   "source":"code",       "type":"string",  "required":true},
+{"key":"name",   "label":"名称",   "slot":"name",   "source":"name",       "type":"string"},
+{"key":"price",  "label":"最新价", "slot":"price",  "source":"data.last",  "type":"decimal", "scale":2, "unit":"yuan"},
+{"key":"date",   "label":"日期",   "slot":"date",   "source":"trade_date", "type":"date", "date_format":"%Y-%m-%d"},
+{"key":"notice_title", "label":"公告标题", "source":"title", "type":"string"}</code></pre>
+<p class="small">前 4 行绑了身份 → 参与同步；最后一行<strong>没绑身份</strong> → 只展示、不参与同步。选了 <code>decimal</code> 才出现"小数位"，选了 <code>date</code> 才出现"日期格式"。</p>
+
+<h2>四、高级区几个坑（写之前看一眼）</h2>
+<ul>
+<li><strong>逻辑名 key</strong>：小写字母开头、只能含小写字母/数字/下划线、接口内不能重名（规则 <code>^[a-z][a-z0-9_]{0,63}$</code>）。留空会自动按身份派发。注意 <code>key:"_code"</code> <span class="warn" style="display:inline;padding:2px 8px;margin:0;">不合法</span>（下划线不能开头）。</li>
+<li><code>source:"_code"</code> 是另一回事：这是"文本分隔"源（如腾讯财经）注入的特殊键（带前缀的代码），和 key 命名空间独立，别混。</li>
+<li><strong>单位</strong>：<code>none</code> / <code>yuan</code>(元) / <code>wan</code>(万) / <code>pct</code>(%)。</li>
+<li><strong>小数位</strong>：仅 decimal 有效（0~8）。</li>
+<li><strong>日期格式</strong>：仅 date 有效（如 <code>%Y-%m-%d</code>）。</li>
+</ul>
+
+<h2>五、数据源不是 JSON 怎么办（响应解析页签）</h2>
+<ul>
+<li><strong>JSON（默认）</strong>：直接按上面的 source 取。</li>
+<li><strong>文本分隔</strong>（腾讯财经用 <code>~</code>）：额外填 编码（腾讯填 <code>gbk</code>）、分隔符（<code>~</code>）、行提取正则、代码参数名（腾讯填 <code>q</code>）。</li>
+</ul>
+
+<h2>六、怎么确认配对了——去试调</h2>
+<p>先说清楚：<strong>测试面板不在"编辑接口"弹窗里</strong>。编辑弹窗只有 4 个页签（基本信息 / 字段映射 / 响应解析 / 高级设置）。试调有两个入口：</p>
+
+<h3>入口 A · 手动试调（最常用，看命中率）</h3>
+<p>位置：<strong>管理后台页 →「证券主数据 + 接口测试」板块（右栏的"接口测试"面板）</strong></p>
+<ol>
+<li>顶部下拉<strong>选接口</strong>；</li>
+<li>参数区<strong>增删 / 填写键值对</strong>（如 <code>date=20231231</code>，面板对易错参数有提示，比如报告期只收季度末 <code>0331/0630/0930/1231</code>）；</li>
+<li>"代码"框可选填测试代码（如 <code>600519,000001</code>，逗号/空格/换行分隔）；</li>
+<li>点<strong>「执行测试」按钮（带 ▶ 图标）</strong>。</li>
+</ol>
+<p>点完下方出结果：状态 / 耗时 / HTTP 码，然后是<strong>「逐槽位命中率」表</strong>——列有：槽位、字段、中文名、<strong>命中数</strong>、<strong>缺失数（红色即异常）</strong>、示例值。再往下是原始响应（可查找高亮、复制）。</p>
+<div class="tip">这个命中率表就是验证你映射对不对的地方：某身份"缺失"是红色且数字高，说明那个 slot 的 source 写错了，或返回里压根没这个字段。</div>
+
+<h3>入口 B · 一键预填（自动实调 + 生成映射）</h3>
+<p>位置：<strong>接口弹窗 →「字段映射」页签 → 底部「一键预填」按钮</strong>。它会对接口做一次<strong>真实调用</strong>，再按返回结构生成字段映射行，你人工校正后保存。</p>
+<p><strong>编辑已有接口</strong>：直接用该接口当前的参数实调一次。行为与以前一致。</p>
+<p><strong>新增接口（不必先保存）</strong>：只要填好「调用路径」并选好提供方，就能直接点预填——后端按 endpoint 实调一次，不需要先存一版占位接口。两种接入方式的行为略有不同：</p>
+<table>
+<thead><tr><th>提供方接入方式</th><th>实调行为</th><th>额外可填</th></tr></thead>
+<tbody>
+<tr><td><strong>SDK（akshare）</strong></td><td>按「调用路径」里的 akshare 函数名调用；参数区留空则按该函数的<strong>签名默认值</strong>调用，填了参数就按你填的调</td><td>——</td></tr>
+<tr><td><strong>HTTPS</strong></td><td>按「调用路径」拼到提供方配置的 <code>base_url</code> 上发起请求，并带上弹窗当前的「响应解析」设置</td><td><strong>探测用测试代码</strong>：逗号分隔（如 <code>sh600519,sz000001</code>）。调用路径以 <code>=</code> 结尾的内联形态（如腾讯财经 <code>q=</code>）必须填；否则可能拿不到数据</td></tr>
+</tbody>
+</table>
+<p><strong>按钮什么时候可点</strong>：调用路径已填 <strong>且</strong> 提供方已选（SDK / HTTPS 均可）。两个条件任一不满足，按钮置灰并提示缺什么。</p>
+<div class="tip"><strong>安全边界（可放心点）</strong>：预填是一次<strong>只读探测</strong>——不写入数据库、不计入接口失败计数、不重试也不占用限流配额；探测失败会直接告诉你原因（缺 <code>base_url</code>、地址被安全策略拦截、上游 5xx / 401、连接失败、超时等），不会污染现有同步。</div>
+<p class="small">提示：猜不出语义的列会落到「仅展示」（不参与同步），人工校正即可；探测结果只作草稿，保存前请核对。</p>
+
+<h2>七、重点：标准身份（slot）只有 5 个，超了会怎样</h2>
+<p>系统只认这 5 种身份，因为"每种身份背后都必须有一段代码来消费它"。多出来的身份没有代码接，写了也没用，所以干脆在保存时拦住。</p>
+
+<table>
+<thead><tr><th>身份 slot</th><th>含义</th><th>哪个用途必填</th></tr></thead>
+<tbody>
+<tr><td><code>code</code></td><td>证券代码</td><td>4 种用途全必填</td></tr>
+<tr><td><code>name</code></td><td>证券名称</td><td>主数据（缺失只是不展示，有兜底）</td></tr>
+<tr><td><code>exchange</code></td><td>交易所</td><td>主数据（缺失按代码前缀推断，有兜底）</td></tr>
+<tr><td><code>price</code></td><td>价格 / 收盘价</td><td>行情（硬必填）</td></tr>
+<tr><td><code>date</code></td><td>日期</td><td>行情（硬必填）</td></tr>
+</tbody>
+</table>
+
+<div class="fig">
+<svg viewBox="0 0 680 520" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,PingFang SC,Microsoft YaHei,Arial,sans-serif">
+  <defs>
+    <marker id="arrow2" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#8b949e"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="680" height="520" fill="#0d1117"/>
+  <text x="24" y="30" fill="#e6edf3" font-size="16" font-weight="700">图2 · 标准身份(slot) ↔ 4 种同步用途 契约关系</text>
+
+  <!-- 左：5 个 slot -->
+  <g font-size="12" text-anchor="middle">
+    <rect x="36" y="64"  width="120" height="48" rx="7" fill="#1f6feb"/><text x="96" y="86"  fill="#fff" font-weight="600">code</text><text x="96" y="103" fill="#c9d1d9" font-size="9">4 用途必填</text>
+    <rect x="36" y="128" width="120" height="48" rx="7" fill="#1f6feb"/><text x="96" y="150" fill="#fff" font-weight="600">name</text><text x="96" y="167" fill="#c9d1d9" font-size="9">主数据·有兜底</text>
+    <rect x="36" y="192" width="120" height="48" rx="7" fill="#1f6feb"/><text x="96" y="214" fill="#fff" font-weight="600">exchange</text><text x="96" y="231" fill="#c9d1d9" font-size="9">主数据·有兜底</text>
+    <rect x="36" y="256" width="120" height="48" rx="7" fill="#1f6feb"/><text x="96" y="278" fill="#fff" font-weight="600">price</text><text x="96" y="295" fill="#c9d1d9" font-size="9">行情必填</text>
+    <rect x="36" y="320" width="120" height="48" rx="7" fill="#1f6feb"/><text x="96" y="342" fill="#fff" font-weight="600">date</text><text x="96" y="359" fill="#c9d1d9" font-size="9">行情必填</text>
+  </g>
+
+  <!-- 连线 -->
+  <g stroke="#8b949e" stroke-width="1.3" fill="none" marker-end="url(#arrow2)">
+    <line x1="156" y1="88"  x2="424" y2="98"/>
+    <line x1="156" y1="88"  x2="424" y2="186"/>
+    <line x1="156" y1="88"  x2="424" y2="274"/>
+    <line x1="156" y1="88"  x2="424" y2="362"/>
+    <line x1="156" y1="152" x2="424" y2="98"/>
+    <line x1="156" y1="216" x2="424" y2="98"/>
+    <line x1="156" y1="280" x2="424" y2="186"/>
+    <line x1="156" y1="344" x2="424" y2="186"/>
+  </g>
+
+  <!-- 右：4 个用途 -->
+  <g text-anchor="middle">
+    <rect x="430" y="64"  width="214" height="68" rx="8" fill="#21262d" stroke="#388bfd" stroke-width="1.5"/>
+    <text x="537" y="90"  fill="#e6edf3" font-size="12" font-weight="600">主数据（用途 1）</text>
+    <text x="537" y="110" fill="#8b949e" font-size="9.5">必填 slot：code</text>
+
+    <rect x="430" y="152" width="214" height="68" rx="8" fill="#21262d" stroke="#388bfd" stroke-width="1.5"/>
+    <text x="537" y="178" fill="#e6edf3" font-size="12" font-weight="600">行情（用途 2）</text>
+    <text x="537" y="198" fill="#8b949e" font-size="9.5">必填 slot：code · price · date</text>
+
+    <rect x="430" y="240" width="214" height="68" rx="8" fill="#21262d" stroke="#388bfd" stroke-width="1.5"/>
+    <text x="537" y="266" fill="#e6edf3" font-size="12" font-weight="600">分红（用途 3）</text>
+    <text x="537" y="286" fill="#8b949e" font-size="9.5">必填 slot：code</text>
+
+    <rect x="430" y="328" width="214" height="68" rx="8" fill="#21262d" stroke="#388bfd" stroke-width="1.5"/>
+    <text x="537" y="354" fill="#e6edf3" font-size="12" font-weight="600">公告（用途 4）</text>
+    <text x="537" y="374" fill="#8b949e" font-size="9.5">必填 slot：code</text>
+  </g>
+
+  <text x="36" y="408" fill="#8b949e" font-size="10">仅展示 = 这一行 slot 留空 → 不参与同步，只在接口测试面板按 key 给人看。</text>
+
+  <rect x="36" y="424" width="608" height="64" rx="8" fill="rgba(248,81,73,.10)" stroke="#f85149" stroke-width="1.5"/>
+  <text x="52" y="448" fill="#f85149" font-size="11" font-weight="700">越界处理</text>
+  <text x="52" y="468" fill="#e6edf3" font-size="10">slot 不在 {code, name, exchange, price, date} → 保存时直接报 400「slot 非法」，配置存不进去。</text>
+  <text x="52" y="482" fill="#8b949e" font-size="9.5">想要"第 6 种数据"？把那行 slot 留空、选「仅展示」即可，既不报错也能在测试面板看到。</text>
+</svg>
+</div>
+<p class="small">图2 说明：左边 5 个身份，右边 4 种用途，连线表示"谁消费谁"。凡是标"必填"的，缺了就同步报错；标"有兜底"的不强制。底下红框是写错身份时的后果与替代方案。</p>
+
+<div class="warn">
+<strong>如果你写了第 6 种身份（比如想加个成交量 volume）：</strong><br/>
+保存会<strong>直接打回</strong>，报错类似「slot 非法（白名单：code/name/exchange/price/date）：volume」。正确做法不是硬写，而是把那一行<strong>slot 留空、选「仅展示」</strong>——这样它不参与同步，但能在测试面板里看到取数对不对。
+</div>
+
+<h2>八、老接口需要改吗</h2>
+<p><strong>不用。</strong>如果字段映射留空，系统自动用旧的 4 列（代码列、价格列等）+ 日期字段合成，行为和以前完全一致。只有<strong>新接入</strong>、或想适配复杂嵌套结构的接口，才需要配这张表。</p>
+
+<div class="remember">
+最后再记一句：配完别凭感觉，去「接口测试」面板点一下执行测试，看命中率表——哪个身份是红色缺失，就回去改那一行的 source。配错只在测试时暴露，不会悄悄污染数据。
+</div>
+
+<p class="small">本文档整理自字段映射功能的交互说明，覆盖：配置位置、展示名/key/source/slot 四者区别、source 写法、试调入口、slot 契约与越界处理。图示为说明性标注，具体字段名以下拉选项为准。</p>
+
+</div>
+</body>
+</html>
