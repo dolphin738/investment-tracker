@@ -67,6 +67,8 @@ Thumbs.db
 
 # Pytest coverage artifact (generated locally)
 backend/.coverage
+# coverage.py 并行/子进程模式产物（.coverage.<host>.<pid>.<rand>）
+backend/.coverage.*
 
 # Local generated docs (e.g. ls snapshots)
 docs/ls/
