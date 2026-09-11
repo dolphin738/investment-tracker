@@ -514,6 +514,51 @@
         }
       }
     },
+    "/api/admin/quote-interfaces/preview": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Preview Quote Interface",
+        "description": "新增态实调预览：不依赖已存接口，按提供方接入方式实调一次回传 raw。\n\n纯预览：不写库、不计入 consecutive_failures；SDK 走 akshare 懒导入，\nHTTPS 走 provider.base_url 实调（缺配置 / SSRF 拦截 / 上游错误均转\nok:false + 中文原因，不 500）。",
+        "operationId": "preview_quote_interface_api_admin_quote_interfaces_preview_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InterfacePreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ]
+      }
+    },
     "/api/admin/quote-interfaces/reorder": {
       "patch": {
         "tags": [
@@ -8299,6 +8344,64 @@
         ],
         "title": "InterfaceDirection",
         "description": "提供方接口方向（入站 / 出站）。\n\nPG 原生枚举类型名 `interface_direction`（由迁移创建）。\n业务当前仅落库使用（默认 in），UI 不暴露该字段。"
+      },
+      "InterfacePreviewRequest": {
+        "properties": {
+          "endpoint": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Endpoint",
+            "description": "SDK 顶层函数名或 HTTPS 相对路径（如 stock_zh_a_spot / q=）"
+          },
+          "provider_id": {
+            "type": "string",
+            "title": "Provider Id"
+          },
+          "params": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Params",
+            "default": {}
+          },
+          "response_parse": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Response Parse",
+            "default": {}
+          },
+          "http_method": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Http Method"
+          },
+          "codes": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Codes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "endpoint",
+          "provider_id"
+        ],
+        "title": "InterfacePreviewRequest",
+        "description": "新增态实调预览请求体：不依赖已存接口，按提供方接入方式实调一次。\n\n- SDK：endpoint 为 akshare 顶层函数名（如 stock_zh_a_spot），params 透传\n  （空则按签名默认值调用）；下方 HTTPS 专用字段被忽略。\n- HTTPS：endpoint 为相对 base_url 的路径（以 ``=`` 结尾时为内联代码形态，\n  如腾讯财经 ``q=``）；response_parse / http_method / codes 取弹窗当前值。"
       },
       "InterfaceTestRequest": {
         "properties": {

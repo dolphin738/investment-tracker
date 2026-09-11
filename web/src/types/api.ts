@@ -119,7 +119,10 @@ export interface components {
         /** Deletedcount */
         deletedCount: Record<string, number>;
       };
-    /** 前端上报的一条客户端错误。 */
+    /** 前端上报的一条客户端错误。
+
+长度钳制：客户端输入不可信，超长文本截断入库，防单条日志撑爆
+app_logs（message/trace/detail 均为无界 Text/JSON 列）。 */
     ClientLogIn: {
         /** Level */
         level?: 'error' | 'warning' | 'info';
@@ -241,6 +244,11 @@ export interface components {
         lagDays?: number | null;
         /** Label */
         label: string;
+      };
+    /** 缺口回补入参：``lookback_days`` 为回溯天数（上限 400，服务侧再钳制）。 */
+    GapBackfillBody: {
+        /** Lookback Days */
+        lookback_days?: number;
       };
     /** HTTPValidationError */
     HTTPValidationError: {
@@ -380,6 +388,26 @@ export interface components {
 PG 原生枚举类型名 `interface_direction`（由迁移创建）。
 业务当前仅落库使用（默认 in），UI 不暴露该字段。 */
     InterfaceDirection: 'in' | 'out';
+    /** 新增态实调预览请求体：不依赖已存接口，按提供方接入方式实调一次。
+
+- SDK：endpoint 为 akshare 顶层函数名（如 stock_zh_a_spot），params 透传
+  （空则按签名默认值调用）；下方 HTTPS 专用字段被忽略。
+- HTTPS：endpoint 为相对 base_url 的路径（以 ``=`` 结尾时为内联代码形态，
+  如腾讯财经 ``q=``）；response_parse / http_method / codes 取弹窗当前值。 */
+    InterfacePreviewRequest: {
+        /** SDK 顶层函数名或 HTTPS 相对路径（如 stock_zh_a_spot / q=） */
+        endpoint: string;
+        /** Provider Id */
+        provider_id: string;
+        /** Params */
+        params?: Record<string, unknown>;
+        /** Response Parse */
+        response_parse?: Record<string, unknown>;
+        /** Http Method */
+        http_method?: string | null;
+        /** Codes */
+        codes?: string[] | null;
+      };
     /** 单接口测试请求体（§5.2）：params 为经前端编辑后的完整有效参数，覆盖 itf.params。 */
     InterfaceTestRequest: {
         /** Params */
@@ -407,7 +435,7 @@ PG 原生枚举类型名 `interface_direction`（由迁移创建）。
 
 系统任务（不可追加/删除，仅可编辑）由迁移种子写入；普通任务（可增删改）在
 定时任务管理页由管理员新建。两者共用本枚举。 */
-    JobTaskType: 'MARKET_DATA_SYNC' | 'SECURITY_MASTER_SYNC' | 'HTTP_CALLBACK' | 'ACCOUNT_CLEANUP' | 'LOG_CLEANUP';
+    JobTaskType: 'MARKET_DATA_SYNC' | 'SECURITY_MASTER_SYNC' | 'HTTP_CALLBACK' | 'ACCOUNT_CLEANUP' | 'LOG_CLEANUP' | 'DIVIDEND_QUARTERLY_FETCH' | 'MARKET_DAILY_CLOSE_FETCH' | 'DIVIDEND_RETENTION_CLEANUP' | 'DIVIDEND_NOTICE_SCAN' | 'DIVIDEND_SPECIAL_BACKFILL';
     /** JobUpdate */
     JobUpdate: {
         /** Name */
@@ -789,6 +817,8 @@ PG 原生枚举类型名 `interface_direction`（由迁移创建）。
         resp_name_field?: string | null;
         /** Resp Exchange Field */
         resp_exchange_field?: string | null;
+        /** Response Fields */
+        response_fields?: Record<string, unknown>[] | null;
         /** Response Parse */
         response_parse?: Record<string, unknown> | null;
       };
@@ -832,6 +862,8 @@ PG 原生枚举类型名 `interface_direction`（由迁移创建）。
         resp_name_field?: string | null;
         /** Resp Exchange Field */
         resp_exchange_field?: string | null;
+        /** Response Fields */
+        response_fields?: Record<string, unknown>[] | null;
         /** Response Parse */
         response_parse?: Record<string, unknown> | null;
       };
@@ -968,6 +1000,21 @@ type 为可选 override；不传则读取时由代码前缀推断（infer_securi
     SecuritySide: 'BUY_SEC' | 'SELL_SEC';
     /** SecurityType */
     SecurityType: 'STOCK' | 'ON_EXCHANGE_FUND' | 'BOND' | 'OTHER' | 'HK_STOCK' | 'CONVERTIBLE_BOND' | 'INDEX' | 'OFF_EXCHANGE_FUND' | 'UNCATEGORIZED';
+    /** SettingsUpdateBody */
+    SettingsUpdateBody: {
+        /** Green Threshold */
+        green_threshold: number | string;
+        /** Red Threshold */
+        red_threshold: number | string;
+        /** Dividend Report Source Interface Id */
+        dividend_report_source_interface_id?: string | null;
+        /** Dividend Detail Source Interface Id */
+        dividend_detail_source_interface_id?: string | null;
+        /** Price Source Interface Id */
+        price_source_interface_id?: string | null;
+        /** Announcement Source Interface Id */
+        announcement_source_interface_id?: string | null;
+      };
     /** SnapshotCreateReq */
     SnapshotCreateReq: {
         /** Date */
