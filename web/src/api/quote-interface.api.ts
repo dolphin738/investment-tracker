@@ -276,3 +276,44 @@ export function testInterface(
     body,
   );
 }
+
+/**
+ * 新增态实调预览请求体（POST /admin/quote-interfaces/preview）：
+ * endpoint 为 SDK 顶层函数名（如 stock_zh_a_spot）；params 为弹窗参数编辑器
+ * 当前值（空则省略，后端按 akshare 签名默认值调用）。
+ */
+export interface InterfacePreviewRequest {
+  endpoint: string;
+  provider_id: string;
+  params?: Record<string, unknown>;
+}
+
+/** 实调预览响应（纯预览：不写库、不计入 consecutive_failures；结构对齐后端 interface_preview） */
+export interface InterfacePreviewResponse {
+  ok: boolean;
+  status: 'success' | 'error';
+  /** 调用耗时（毫秒） */
+  elapsedMs: number;
+  /** 原始响应（SDK: list[dict]；失败为 null） */
+  raw: unknown;
+  /** 命中行数（成功时返回） */
+  rowCount?: number;
+  warnings?: string[];
+  error?: string;
+}
+
+/**
+ * 新增态实调预览：POST /api/admin/quote-interfaces/preview
+ *
+ * 不依赖已存接口：后端按 endpoint 懒导入 akshare 实调一次回传原始行，
+ * 供「一键预填」在新增态生成字段映射行（仅预填映射，不做 params 模板生成）。
+ * 对应后端 modules/admin/router.py 的 preview_quote_interface。
+ */
+export function previewQuoteInterface(
+  body: InterfacePreviewRequest,
+): Promise<InterfacePreviewResponse> {
+  return http.post<InterfacePreviewResponse>(
+    '/admin/quote-interfaces/preview',
+    body,
+  );
+}

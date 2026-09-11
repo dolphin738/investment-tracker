@@ -147,13 +147,18 @@ export function toForm(edit: QuoteInterface | null): FormState {
   };
 }
 
-/** 表单 → 提交 payload（Create / Update 共用；旧 4 列随行携带以兼容后端双写） */
-export function buildSubmitPayload(form: FormState): Record<string, unknown> {
+/** 从参数模板行收集有效键值对（空 key 行跳过）——提交 payload 与一键预填共用 */
+export function collectParams(form: FormState): Record<string, unknown> {
   const parsedParams: Record<string, unknown> = {};
   form.params.forEach((r) => {
     const k = r.key.trim();
     if (k) parsedParams[k] = r.value;
   });
+  return parsedParams;
+}
+
+/** 表单 → 提交 payload（Create / Update 共用；旧 4 列随行携带以兼容后端双写） */
+export function buildSubmitPayload(form: FormState): Record<string, unknown> {
   return {
     category_id: form.categoryId.trim(),
     name: form.name.trim(),
@@ -162,7 +167,7 @@ export function buildSubmitPayload(form: FormState): Record<string, unknown> {
       form.httpMethod && form.httpMethod !== '__none__'
         ? form.httpMethod
         : null,
-    params: parsedParams,
+    params: collectParams(form),
     enabled: form.enabled,
     description: form.description.trim() || null,
     timeout: form.timeout.trim() ? Number(form.timeout) : null,

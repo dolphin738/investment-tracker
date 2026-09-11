@@ -16,13 +16,16 @@ import {
   fetchResponseFieldSchema,
   listAllInterfaces,
   listProviderInterfaces,
+  previewQuoteInterface,
   reorderQuoteInterfaces,
+  testInterface,
   updateInterface,
   type QuoteInterfaceCreate,
   type QuoteInterfaceUpdate,
   type ReorderQuoteInterfacesReq,
 } from '@/api/quote-interface.api';
 import { useIsAdmin } from '@/stores/auth.store';
+import { prefillRowsFromRaw, type FieldMappingRow } from '../utils/response-fields';
 
 /** 某提供方接口列表的 query key */
 export function quoteInterfacesKey(providerId: string): unknown[] {
@@ -128,4 +131,34 @@ export function useResponseFieldSchema() {
     enabled: isAdmin,
     staleTime: 5 * 60 * 1000,
   });
+}
+
+/**
+ * 一键预填取数（方案 §7 第 4 层）：编辑态走试调端点（有接口 id），新增态走
+ * 实调预览端点（不依赖已存接口，仅 SDK 提供方）；两条路径统一把 raw 首行
+ * 转为字段映射行。仅预填字段映射，不做 params 模板生成；后端探测语义的
+ * 失败消息（status=error + error）在此转译为 Error 交调用方 toast。
+ */
+export async function prefillRowsFromInterface(args: {
+  /** 编辑态接口 id；null = 新增态 */
+  editingId: string | null;
+  /** 新增态所需：SDK 顶层函数名与提供方 id */
+  endpoint: string;
+  providerId: string;
+  /** 参数编辑器当前值（空则 {}） */
+  params: Record<string, unknown>;
+}): Promise<{ rows: FieldMappingRow[]; warnings: string[] }> {
+  const result = args.editingId
+    ? await testInterface(args.editingId, { params: args.params })
+    : await previewQuoteInterface({
+        endpoint: args.endpoint,
+        provider_id: args.providerId,
+        params: args.params,
+      });
+  if (result.status !== 'success') {
+    throw new Error(
+      result.error ?? (args.editingId ? '试调失败' : '实调预览失败'),
+    );
+  }
+  return prefillRowsFromRaw(result.raw);
 }
