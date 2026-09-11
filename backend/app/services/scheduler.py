@@ -19,6 +19,8 @@
 from __future__ import annotations
 
 import asyncio
+
+from app.core.bg import track_task
 import inspect
 from datetime import datetime, timezone
 from typing import Any, Callable, Optional
@@ -339,7 +341,7 @@ async def _run_user_quote_sync(user_id: str) -> None:
 
 def run_user_sync_now(user_id: str) -> None:
     """用户手动立即触发自己的行情同步：直接调度 _run_user_quote_sync，不依赖全局调度器。"""
-    _track_task(asyncio.get_running_loop().create_task(_run_user_quote_sync(user_id)))
+    track_task(asyncio.get_running_loop().create_task(_run_user_quote_sync(user_id)))
 
 
 # --------------------------------------------------------------------------- #
@@ -437,21 +439,9 @@ async def reload_schedule() -> None:
             continue
 
 
-# ── fire-and-forget 任务强引用（债务收敛） ─────────────────────────────────────── #
-# Python 官方提示：未被持有引用的 Task 可能在等待期被 GC 提前回收，导致协程被取消。
-# 故所有 ``create_task`` 的 fire-and-forget 调用统一经 ``_track_task`` 持有强引用。
-_BG_TASKS: set[asyncio.Task] = set()
-
-
-def _track_task(task: asyncio.Task) -> None:
-    """持有后台任务强引用，完成后自动移除（防 GC 提前回收）。"""
-    _BG_TASKS.add(task)
-    task.add_done_callback(_BG_TASKS.discard)
-
-
 def run_task_now(job_id: str) -> None:
     """管理员手动立即执行：直接调度 _run_job，不依赖全局调度器（总开关关闭也可用）。"""
-    _track_task(
+    track_task(
         asyncio.get_running_loop().create_task(_run_job(job_id, JobTriggerSource.MANUAL))
     )
 

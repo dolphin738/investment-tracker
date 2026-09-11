@@ -22,6 +22,7 @@ from pydantic import BaseModel
 from sqlalchemy import case, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.bg import track_task
 from app.core.date_utils import today_app_tz
 from app.core.enums import BusinessErrorCode
 from app.core.envelope import EnvelopeRoute
@@ -664,7 +665,8 @@ async def backfill_daily_prices(
         async with AsyncSessionLocal() as session:
             await MarketDailyPriceSyncService(session).gap_backfill_daily(_Cfg())
 
-    asyncio.create_task(_runner())  # fire-and-forget：立即返回，后台执行
+    # 强引用持有：防止协程被 GC 提前回收（app.core.bg.track_task，全仓唯一实现）
+    track_task(asyncio.create_task(_runner()))
     await record(
         level="info",
         scope="admin",
