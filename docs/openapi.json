@@ -559,6 +559,31 @@
         ]
       }
     },
+    "/api/admin/quote-interfaces/response-field-schema": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Get Response Field Schema",
+        "description": "响应字段契约 schema（方案 §6 单源供给）：``{slots, types, units, contracts}``。\n\n前端「字段映射」页签的 slot 下拉、按分类必填提示全部由此渲染，新增 slot 只改后端一处。",
+        "operationId": "get_response_field_schema_api_admin_quote_interfaces_response_field_schema_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ]
+      }
+    },
     "/api/admin/quote-interfaces/{interface_id}/test": {
       "post": {
         "tags": [
@@ -853,7 +878,7 @@
           "admin"
         ],
         "summary": "Admin Sync All Prices",
-        "description": "管理面全量刷新（需 admin）：遍历全部组合同步实时行情并重建快照/净值。\n\n返回结构化汇总 ``{portfolios, synced, failed, errors}``。",
+        "description": "管理面全量刷新（需 admin）：遍历全部组合同步实时行情并重建快照/净值。\n\n返回结构化汇总 ``{portfolios, synced, failed, errors}``。\n性能：按组合并发执行（信号量限流 4，独立会话独立事务），替代原单请求内\n串行遍历（P 组合 × 最坏 8s 上游预算 → 分钟级请求易超时）。",
         "operationId": "admin_sync_all_prices_api_admin_quote_providers_sync_post",
         "responses": {
           "200": {
@@ -1324,7 +1349,7 @@
           "admin"
         ],
         "summary": "List Tasks",
-        "description": "列出全部任务（含最近一次执行摘要，按创建时间升序）。",
+        "description": "列出全部任务（含最近一次执行摘要，按创建时间升序；同创建时间以 id 兜底保证稳定排序）。",
         "operationId": "list_tasks_api_admin_tasks_get",
         "responses": {
           "200": {
@@ -2125,6 +2150,472 @@
         ]
       }
     },
+    "/api/dividend-yield/backfill-prices": {
+      "post": {
+        "tags": [
+          "dividend-yield"
+        ],
+        "summary": "Backfill Daily Prices",
+        "description": "触发「按交易日横截面批量回补」（§6.2 路线 A；admin-only）。\n\n与 ``/backfill-specials`` 同为 fire-and-forget：直接 ``create_task`` 后台执行、\n立即返回，故长时间运行不会造成请求超时。进度经执行日志（§6.7）查看。\n\n**能力边界**：腾讯 ``q=`` 接口只返回当前价、无历史查询能力，故本端点只能补\n「行情接口仍能返回该日收盘价」的近端缺口（某日任务失败、新增证券补历史）。\n深度历史（数月~数年）须走日抓任务的 ``backfill_start`` 参数（路线 B，逐只，多小时级）。",
+        "operationId": "backfill_daily_prices_api_dividend_yield_backfill_prices_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/GapBackfillBody"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ]
+      }
+    },
+    "/api/dividend-yield/backfill-specials": {
+      "post": {
+        "tags": [
+          "dividend-yield"
+        ],
+        "summary": "Backfill Special Dividends",
+        "description": "手动触发特别分红历史回补（§6.9；admin-only）。\n\n按 ``task_type`` 定位迁移 0011 种子的系统任务并手动 trigger。\n``run_task_now`` 为 fire-and-forget（``asyncio.create_task``），\n故 12~25 分钟的长耗时**不会**造成请求超时——区别于同步等待的 ``/rebuild``。\n进度与结果经「系统管理 - 定时任务」执行日志查看（§6.7）。",
+        "operationId": "backfill_special_dividends_api_dividend_yield_backfill_specials_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ]
+      }
+    },
+    "/api/dividend-yield/rankings": {
+      "get": {
+        "tags": [
+          "dividend-yield"
+        ],
+        "summary": "Rank Dividend Yield",
+        "description": "股息率排名（§8.1/§9）。\n\n- NULL 股息率不进榜（§3.5）；B2 排序白名单 + ``NULLS LAST`` + master_id tiebreaker；\n- 过滤参数：``exchange``/``mode``/``min_consecutive``/``include_proposed``/``include_no_dividend``\n  （默认**剔除近两年无分红**，§8.2 窗口 [cur-1, cur] 由 ``last_dividend_year`` 表达）；\n- ``q`` 关键字过滤：按证券代码 / 名称模糊匹配（大小写不敏感，前后端统一搜索口径）；\n- ``include_proposed=false`` 时剔除 PROPOSED 后分子随之改变，按 §8.1 以过滤后记录集\n  现调 §2.5 纯函数计算「过滤态股息率」，行内以 ``filtered=True`` 标注（排序仍用快照列）。",
+        "operationId": "rank_dividend_yield_api_dividend_yield_rankings_get",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 20,
+              "title": "Pagesize"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "dividend_yield",
+              "title": "Sort"
+            }
+          },
+          {
+            "name": "exchange",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Exchange"
+            }
+          },
+          {
+            "name": "mode",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Mode"
+            }
+          },
+          {
+            "name": "min_consecutive",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Min Consecutive"
+            }
+          },
+          {
+            "name": "include_proposed",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": true,
+              "title": "Include Proposed"
+            }
+          },
+          {
+            "name": "include_no_dividend",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Include No Dividend"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 50
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/dividend-yield/rebuild": {
+      "post": {
+        "tags": [
+          "dividend-yield"
+        ],
+        "summary": "Rebuild Dividend Yield",
+        "description": "手动全量重建股息率派生快照（替代原系统定时任务；admin-only）。\n\n委托 dividend_sync.run_dividend_yield_rebuild 在独立会话内执行并提交，返回重建摘要\n并写 AppLog 审计。重建可能耗时，前端按钮以 loading 态等待返回。",
+        "operationId": "rebuild_dividend_yield_api_dividend_yield_rebuild_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ]
+      }
+    },
+    "/api/dividend-yield/settings": {
+      "get": {
+        "tags": [
+          "dividend-yield"
+        ],
+        "summary": "Get Dividend Yield Settings",
+        "description": "读取全局配置（登录即可读，§9：仅 PUT 收 admin——非 admin 拿到阈值才能标色）。",
+        "operationId": "get_dividend_yield_settings_api_dividend_yield_settings_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "dividend-yield"
+        ],
+        "summary": "Put Dividend Yield Settings",
+        "description": "更新全局配置（§5.4/§6.6：非 admin 403；阈值 0<red<green<=1；接口四重校验 400 不落库；AppLog 审计）。",
+        "operationId": "put_dividend_yield_settings_api_dividend_yield_settings_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SettingsUpdateBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ]
+      }
+    },
+    "/api/dividend-yield/top20": {
+      "get": {
+        "tags": [
+          "dividend-yield"
+        ],
+        "summary": "Top20 Dividend Yield",
+        "description": "Top20 + 连续分红榜（§8.3，不分页；条数上限 20，决策 A13）。\n\n- Top20 榜：剔除 ``suspicious``（A12）与**近两年无分红**（§8.3 窗口 [cur-1, cur]，\n  避免僵尸记录污染榜单）；\n- 连续分红榜：``consecutive_years >= 2``，排序\n  ``consecutive_years DESC, dividend_yield DESC, master_id ASC``（§8.3）。",
+        "operationId": "top20_dividend_yield_api_dividend_yield_top20_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ]
+      }
+    },
+    "/api/dividend-yield/{master_id}/curve": {
+      "get": {
+        "tags": [
+          "dividend-yield"
+        ],
+        "summary": "Curve Dividend Yield",
+        "description": "单证券每日股息率曲线（§9 逐点现算；末点 == 快照值由纯函数保证）。",
+        "operationId": "curve_dividend_yield_api_dividend_yield__master_id__curve_get",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "master_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Master Id"
+            }
+          },
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 3650,
+              "minimum": 1,
+              "default": 365,
+              "title": "Days"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/dividend-yield/{master_id}/implied-price": {
+      "get": {
+        "tags": [
+          "dividend-yield"
+        ],
+        "summary": "Implied Price Endpoint",
+        "description": "反推价格（§9）：implied_price = 每股东分子 / target_ratio（小数比率）。",
+        "operationId": "implied_price_endpoint_api_dividend_yield__master_id__implied_price_get",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "master_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Master Id"
+            }
+          },
+          {
+            "name": "target_ratio",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "maximum": 1,
+              "exclusiveMinimum": 0,
+              "title": "Target Ratio"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/echo": {
       "get": {
         "tags": [
@@ -2684,6 +3175,7 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "minimum": 1,
               "default": 1,
               "title": "Page"
             }
@@ -2694,6 +3186,8 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
               "default": 20,
               "title": "Pagesize"
             }
@@ -2976,6 +3470,7 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "minimum": 1,
               "default": 1,
               "title": "Page"
             }
@@ -2986,6 +3481,8 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
               "default": 20,
               "title": "Pagesize"
             }
@@ -4609,6 +5106,7 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "minimum": 1,
               "default": 1,
               "title": "Page"
             }
@@ -4619,6 +5117,8 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
               "default": 20,
               "title": "Pagesize"
             }
@@ -4920,6 +5420,7 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "minimum": 1,
               "default": 1,
               "title": "Page"
             }
@@ -4930,6 +5431,8 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
               "default": 20,
               "title": "Pagesize"
             }
@@ -5226,6 +5729,7 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "minimum": 1,
               "default": 1,
               "title": "Page"
             }
@@ -5236,6 +5740,8 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
               "default": 20,
               "title": "Pagesize"
             }
@@ -5570,6 +6076,7 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "minimum": 1,
               "default": 1,
               "title": "Page"
             }
@@ -5580,6 +6087,8 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
               "default": 20,
               "title": "Pagesize"
             }
@@ -6873,6 +7382,7 @@
           },
           "module": {
             "type": "string",
+            "maxLength": 64,
             "title": "Module"
           },
           "message": {
@@ -6906,7 +7416,7 @@
           "message"
         ],
         "title": "ClientLogIn",
-        "description": "前端上报的一条客户端错误。"
+        "description": "前端上报的一条客户端错误。\n\n长度钳制：客户端输入不可信，超长文本截断入库，防单条日志撑爆\napp_logs（message/trace/detail 均为无界 Text/JSON 列）。"
       },
       "DividendCreateReq": {
         "properties": {
@@ -7331,6 +7841,18 @@
         ],
         "title": "FreshnessReasonOut",
         "description": "单条「数据不新鲜」原因（对齐前端 FreshnessReason）。\n\n- kind: ``PRICE`` / ``CASH``，驱动前端「去更新行情 / 去更新现金余额」按钮。\n- asOf / lagDays: 该维度最新数据日期与滞后天数（``None`` 表示缺失记录）。\n- label: 给前端展示的本地化文案。"
+      },
+      "GapBackfillBody": {
+        "properties": {
+          "lookback_days": {
+            "type": "integer",
+            "title": "Lookback Days",
+            "default": 30
+          }
+        },
+        "type": "object",
+        "title": "GapBackfillBody",
+        "description": "缺口回补入参：``lookback_days`` 为回溯天数（上限 400，服务侧再钳制）。"
       },
       "HTTPValidationError": {
         "properties": {
@@ -7875,7 +8397,12 @@
           "SECURITY_MASTER_SYNC",
           "HTTP_CALLBACK",
           "ACCOUNT_CLEANUP",
-          "LOG_CLEANUP"
+          "LOG_CLEANUP",
+          "DIVIDEND_QUARTERLY_FETCH",
+          "MARKET_DAILY_CLOSE_FETCH",
+          "DIVIDEND_RETENTION_CLEANUP",
+          "DIVIDEND_NOTICE_SCAN",
+          "DIVIDEND_SPECIAL_BACKFILL"
         ],
         "title": "JobTaskType",
         "description": "定时任务类型（统一调度器处理器注册表键 + 数据库任务类型列）。\n\n系统任务（不可追加/删除，仅可编辑）由迁移种子写入；普通任务（可增删改）在\n定时任务管理页由管理员新建。两者共用本枚举。"
@@ -8057,6 +8584,7 @@
           },
           "password": {
             "type": "string",
+            "maxLength": 128,
             "title": "Password"
           }
         },
@@ -8480,10 +9008,13 @@
         "properties": {
           "currentPassword": {
             "type": "string",
+            "maxLength": 128,
             "title": "Currentpassword"
           },
           "newPassword": {
             "type": "string",
+            "maxLength": 128,
+            "minLength": 8,
             "title": "Newpassword"
           }
         },
@@ -9253,6 +9784,21 @@
             ],
             "title": "Resp Exchange Field"
           },
+          "response_fields": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Response Fields"
+          },
           "response_parse": {
             "anyOf": [
               {
@@ -9493,6 +10039,21 @@
               }
             ],
             "title": "Resp Exchange Field"
+          },
+          "response_fields": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Response Fields"
           },
           "response_parse": {
             "anyOf": [
@@ -9747,6 +10308,7 @@
           },
           "password": {
             "type": "string",
+            "maxLength": 128,
             "minLength": 8,
             "title": "Password"
           },
@@ -9777,6 +10339,7 @@
           },
           "password": {
             "type": "string",
+            "maxLength": 128,
             "title": "Password"
           }
         },
@@ -9967,6 +10530,84 @@
           "UNCATEGORIZED"
         ],
         "title": "SecurityType"
+      },
+      "SettingsUpdateBody": {
+        "properties": {
+          "green_threshold": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              }
+            ],
+            "title": "Green Threshold"
+          },
+          "red_threshold": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              }
+            ],
+            "title": "Red Threshold"
+          },
+          "dividend_report_source_interface_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dividend Report Source Interface Id"
+          },
+          "dividend_detail_source_interface_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dividend Detail Source Interface Id"
+          },
+          "price_source_interface_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price Source Interface Id"
+          },
+          "announcement_source_interface_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Announcement Source Interface Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "green_threshold",
+          "red_threshold"
+        ],
+        "title": "SettingsUpdateBody"
       },
       "SnapshotCreateReq": {
         "properties": {

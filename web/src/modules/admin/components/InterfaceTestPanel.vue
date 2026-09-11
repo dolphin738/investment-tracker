@@ -320,7 +320,7 @@ function highlightSegments(text: string, query: string): Array<{ text: string; h
     <CardHeader>
       <CardTitle class="text-base">接口测试</CardTitle>
       <CardDescription>
-        选择接口 → 编辑参数 → 执行 → 查看原始响应与解析结果（不持久化）
+        选择接口 → 编辑参数 → 执行 → 查看原始响应与逐槽位命中率（不持久化）
       </CardDescription>
     </CardHeader>
     <CardContent class="space-y-4">
@@ -424,28 +424,50 @@ function highlightSegments(text: string, query: string): Array<{ text: string; h
 
         <p v-if="result.error" class="text-sm text-red-500">{{ result.error }}</p>
 
-        <div v-if="result.parsed && Object.keys(result.parsed).length > 0">
-          <div class="mb-1 text-xs font-medium text-muted-foreground">
-            解析结果（代码 → 价格）
+        <!-- 逐槽位命中率（fieldHits）：替代旧的 parsed 两列渲染（边界 11） -->
+        <div v-if="result.fieldHits && result.fieldHits.length > 0">
+          <div class="mb-1 flex flex-wrap items-center gap-2 text-xs font-medium text-muted-foreground">
+            <span>逐槽位命中率</span>
+            <Badge v-if="result.rowCount != null" variant="outline">
+              {{ result.rowCount }} 行
+            </Badge>
           </div>
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead class="w-1/2">代码</TableHead>
-                <TableHead>价格</TableHead>
+                <TableHead>槽位</TableHead>
+                <TableHead>字段</TableHead>
+                <TableHead>中文</TableHead>
+                <TableHead class="text-right">命中</TableHead>
+                <TableHead class="text-right">缺失</TableHead>
+                <TableHead>示例</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              <TableRow
-                v-for="[code, price] in Object.entries(result.parsed ?? {})"
-                :key="code"
-              >
-                <TableCell class="font-mono">{{ code }}</TableCell>
-                <TableCell>{{ price }}</TableCell>
+              <TableRow v-for="hit in result.fieldHits" :key="hit.key">
+                <TableCell class="font-mono">{{ hit.slot }}</TableCell>
+                <TableCell class="font-mono">{{ hit.key }}</TableCell>
+                <TableCell>{{ hit.label ?? hit.key }}</TableCell>
+                <TableCell class="text-right font-mono">{{ hit.hit }}</TableCell>
+                <TableCell
+                  class="text-right font-mono"
+                  :class="hit.missing > 0 ? 'text-red-500' : 'text-muted-foreground'"
+                >
+                  {{ hit.missing }}
+                </TableCell>
+                <TableCell class="max-w-[16rem] truncate font-mono text-xs" :title="hit.sample ?? ''">
+                  {{ hit.sample ?? '—' }}
+                </TableCell>
               </TableRow>
             </TableBody>
           </Table>
         </div>
+        <p
+          v-else-if="result.status === 'success'"
+          class="text-xs text-muted-foreground"
+        >
+          无命中率数据（接口无有效映射或取数为空）
+        </p>
 
         <div>
           <div class="mb-1 flex flex-wrap items-center justify-between gap-2">

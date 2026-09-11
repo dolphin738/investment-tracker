@@ -20,6 +20,61 @@ export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
 /** 接口方向（后端落库，UI 暂不暴露） */
 export type InterfaceDirection = 'in' | 'out';
 
+/**
+ * 响应字段映射单条（方案 §4 ResponseFieldSpec）。
+ * - key：逻辑名，^[a-z][a-z0-9_]{0,63}$，接口内唯一（首字符必须小写字母）
+ * - slot：语义槽位，闭集白名单（由契约端点下发，前端不硬编码）；缺省 = 仅展示（不参与同步）
+ * - source：取值路径，支持顶层 key / "0" 下标 / a.b 点号路径 / items[0].code 方括号 /
+ *   a\.b 转义字面点号 key（JSON 层写 "a\\.b"）；段数 ≤5
+ * - type 默认 string；scale 仅 decimal 且 0~8；unit 默认 none；date_format 仅 date
+ */
+export interface ResponseFieldSpec {
+  key: string;
+  label?: string;
+  slot?: string;
+  source: string;
+  type?: string;
+  required?: boolean;
+  scale?: number;
+  unit?: string;
+  date_format?: string;
+}
+
+/** 契约端点单条 slot 选项：value/label + 哪些同步用途分类（purpose）必填 */
+export interface ResponseFieldSlotOption {
+  value: string;
+  label: string;
+  /** 命中的分类 id（如 "1" 主数据 / "2" 行情 / "3" 分红 / "4" 公告）内该 slot 必填 */
+  requiredFor: string[];
+}
+
+/** 契约端点按分类的必填契约：required 为该分类必需的 slot 列表 */
+export interface ResponseFieldContract {
+  required: string[];
+  optional: string[];
+}
+
+/**
+ * 契约端点载荷（GET /api/admin/quote-interfaces/response-field-schema）。
+ * 前端 slot 下拉 / 按分类必填提示 / 类型 / 单位全部由此渲染（方案 §6 单源供给）。
+ */
+export interface ResponseFieldSchema {
+  slots: ResponseFieldSlotOption[];
+  types: string[];
+  units: string[];
+  contracts: Record<string, ResponseFieldContract>;
+}
+
+/** 试调返回的逐槽位命中率条目（仅统计有 slot 的字段，展示字段不出现） */
+export interface InterfaceTestFieldHit {
+  slot: string;
+  key: string;
+  label: string | null;
+  hit: number;
+  missing: number;
+  sample: string | null;
+}
+
 /** 接口（后端 QuoteInterfaceOut 经信封解包后的结构） */
 export interface QuoteInterface {
   id: string;
@@ -46,6 +101,8 @@ export interface QuoteInterface {
   resp_name_field: string | null;
   /** 响应中交易所字段（如 exchange/market）；缺失则代码前缀推断 */
   resp_exchange_field: string | null;
+  /** 响应字段映射表（P1 Expand 新增，非空时读侧以其为准；null = 历史行走旧列合成） */
+  response_fields: ResponseFieldSpec[] | null;
   /** 响应解析协议（覆盖非 JSON 文本源）：{format, encoding, sep, line_regex, code_param, code_prefix}；
    * code_prefix="auto" 时纯数字代码按交易所推断补 sh/sz/bj 前缀 */
   response_parse: Record<string, unknown> | null;
@@ -73,6 +130,8 @@ export interface QuoteInterfaceCreate {
   resp_price_field?: string | null;
   resp_name_field?: string | null;
   resp_exchange_field?: string | null;
+  /** 响应字段映射表（P1 Expand 新增；与旧 4 列并行双写，见方案 §5） */
+  response_fields?: ResponseFieldSpec[] | null;
   /** 响应解析协议（覆盖非 JSON 文本源） */
   response_parse?: Record<string, unknown> | null;
 }
@@ -95,6 +154,8 @@ export interface QuoteInterfaceUpdate {
   resp_price_field?: string | null;
   resp_name_field?: string | null;
   resp_exchange_field?: string | null;
+  /** 响应字段映射表（P1 Expand 新增；与旧 4 列并行双写，见方案 §5） */
+  response_fields?: ResponseFieldSpec[] | null;
   /** 响应解析协议（覆盖非 JSON 文本源） */
   response_parse?: Record<string, unknown> | null;
 }
@@ -182,11 +243,22 @@ export interface InterfaceTestResponse {
   elapsedMs: number;
   /** 原始响应（HTTPS: resp.json()；SDK: list[dict]） */
   raw: unknown;
-  /** 按 resp_code_field / resp_price_field 解析出的 {code → price} */
+  /** 按 resp_code_field / resp_price_field 解析出的 {code → price}（旧渲染契约，原样保留） */
   parsed: Record<string, string> | null;
+  /** 逐槽位命中率（P1 新增；仅统计有 slot 的字段，展示字段不出现） */
+  fieldHits?: InterfaceTestFieldHit[];
+  /** 命中行数（P1 新增；解析失败 / 异常时缺省） */
+  rowCount?: number;
   /** 异常信息 */
   error?: string;
   interfaceId: string;
+}
+
+/** 读取响应字段契约 schema（slot 白名单 / 类型 / 单位 / 按分类必填契约） */
+export function fetchResponseFieldSchema(): Promise<ResponseFieldSchema> {
+  return http.get<ResponseFieldSchema>(
+    '/admin/quote-interfaces/response-field-schema',
+  );
 }
 
 /**

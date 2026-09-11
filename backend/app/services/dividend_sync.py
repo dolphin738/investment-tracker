@@ -44,6 +44,10 @@ from app.services.market_data_sync import (
     _normalize_master_code,
     infer_exchange,
 )
+from app.services.response_fields import (
+    code_candidates_for,
+    resolve_fields,
+)
 
 from app.services.dividend_period import (
     back_n_quarters,
@@ -81,8 +85,8 @@ _QUARTER_PERIOD_TYPE = {
 }
 
 # 东财分红配送列名（§6.1 映射；缺失列的行跳过）
-# 兜底代码列：akshare stock_fhps_em 的中文列名，接口 resp_code_field 配错时回退到此
-_FALLBACK_CODE_FIELD = "代码"
+# 代码列兜底（akshare stock_fhps_em 的中文列名「代码」）已收敛到
+# app.services.response_fields，由 resolve_fields 的 code 槽合成时统一尝试。
 _COL_REPORT = "报告期"
 _COL_CASH = "现金分红-现金分红比例"
 _COL_STATUS = "方案进度"
@@ -98,15 +102,16 @@ _PRICE_RETENTION_YEARS = 2
 
 
 def _code_of(itf: QuoteInterface, row: Any) -> Any:
-    """取行内证券代码：接口配置字段优先，取不到回退东财中文列名「代码」。
+    """取行内证券代码（与 HEAD ``_code_of`` 逐行等价）。
 
-    防御目的：``resp_code_field`` 若配成源站实际列名之外的值（开发库曾遗留 ``'code'``），
-    ``row.get()`` 全为 ``None`` → **每一行都被跳过** → 表现为「抓取上万行、0 条落库」。
-    迁移 0009 已修正存量配置，这里做最后兜底，避免同类配置漂移再次静默吞数据。
+    HEAD 语义（``git show HEAD:`` 实证）：候选 = ``[接口配置的代码列（空值跳过）, "代码"]``，
+    且用 **dict-only** ``row.get(field)`` 取值（不解析点号路径、不取数组下标）——故此处
+    不套用统一路径 DSL，而是取 :func:`code_candidates_for` 的候选名后按 HEAD 方式 ``.get``。
+
+    候选顺序由 ``resolve_fields`` 按 ``category_id`` 确定性分派（分红用途 cat=3：配置列
+    优先且空值跳过），中文兜底列名不在本模块硬编码（护栏 ⑥）。
     """
-    for field in (itf.resp_code_field, _FALLBACK_CODE_FIELD):
-        if not field:
-            continue
+    for field in code_candidates_for(itf):
         val = row.get(field) if isinstance(row, dict) else None
         if val is not None:
             return val
@@ -176,12 +181,12 @@ class DividendSyncService:
                 mids = await self._upsert_dividend_batch(itf, rows, year, quarter)
                 await self.session.commit()
                 changed.update(mids)
-                # 抓到行却零落库 = 配置错位（典型：resp_code_field 与源列名不符 → 全量跳行）。
+                # 抓到行却零落库 = 配置错位（典型：code 槽 source 与源列名不符 → 全量跳行）。
                 # 逐期告警，避免「上万行抓取、0 条入库」全程静默。
                 if rows and not mids:
                     logger.warning(
                         "报告期 %sQ%s 抓取 %s 行但落库 0 条："
-                        "疑似接口 resp_code_field 配置与源返回列名不匹配",
+                        "疑似接口 code 槽 source 配置与源返回列名不匹配",
                         year, quarter, len(rows),
                     )
                 # 摘要同时报「抓取行数 / 落库条数」：只报抓取行数会掩盖零落库
@@ -252,6 +257,14 @@ class DividendSyncService:
         「(year, quarter, cash) 全等」的 SPECIAL 行（报告期行归属更准，胜出）。
         """
         if not rows:
+            return []
+        total = len(rows)
+        # required 槽缺失整行丢弃 + 计数（边界 6）；code 取码走 _code_of（与 HEAD 逐行等价）。
+        compiled = resolve_fields(itf)
+        rows, dropped = self._mds._filter_required_rows(itf, compiled, rows)
+        if not rows:
+            # 整批被 required 丢弃 = 无可用响应：复用既有 consecutive_failures/alerted 通道
+            await self._mds._note_required_drops(itf, dropped, total)
             return []
         await self._mds._upsert_masters(itf, rows)
         # 建 code → master_id 映射（Security.code 已带交易所前缀）

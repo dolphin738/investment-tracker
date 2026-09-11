@@ -147,3 +147,33 @@ async def test_fetch_sdk_uses_interface_endpoint_as_func_name(session, monkeypat
         "sz000001": Decimal("56.78"),
     }
     assert fake.last_kwargs.get("codes") == ["600000"]
+
+
+# ───────────────── SDK 拍平：MultiIndex 列显式拒绝（方案 §8 边界 4 / D6） ─────────────────
+class _FakePandasDF:
+    """含 to_dict("records") 的 DataFrame 替身（走 _flatten_dataframe_records 分支）。"""
+
+    def __init__(self, records: list[dict]) -> None:
+        self._records = records
+        self.empty = not records
+
+    def to_dict(self, orient: str = "records"):
+        assert orient == "records"
+        return list(self._records)
+
+
+async def test_flatten_records_rejects_multiindex_columns() -> None:
+    """MultiIndex 列（tuple key）→ 抛可读中文异常，不静默展平、不透传到 json.dumps。"""
+    from app.services.market_data_sync import _flatten_dataframe_records
+
+    df = _FakePandasDF([{("代码", "二级"): "600000", "price": "12.34"}])
+    with pytest.raises(ValueError, match="MultiIndex"):
+        _flatten_dataframe_records(df)
+
+
+async def test_flatten_records_accepts_scalar_columns() -> None:
+    """非 MultiIndex（标量列名）场景零行为影响。"""
+    from app.services.market_data_sync import _flatten_dataframe_records
+
+    df = _FakePandasDF([{"code": "600000", "price": "12.34"}])
+    assert _flatten_dataframe_records(df) == [{"code": "600000", "price": "12.34"}]

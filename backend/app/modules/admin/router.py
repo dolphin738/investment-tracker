@@ -46,6 +46,7 @@ from app.services import InterfaceCategoryService, QuoteInterfaceService
 from app.services.market_data_sync import MarketDataSyncService
 from app.services.notification import NotificationService
 from app.services.quote_provider import QuoteProviderService
+from app.services.response_fields import build_field_schema
 
 
 def _check_config(access_method: QuoteProviderAccessMethod, config: dict[str, Any]) -> None:
@@ -130,6 +131,9 @@ class QuoteInterfaceCreate(BaseModel):
     resp_price_field: Optional[str] = Field(None, max_length=64)
     resp_name_field: Optional[str] = Field(None, max_length=64)
     resp_exchange_field: Optional[str] = Field(None, max_length=64)
+    # —— 响应字段映射（P1 Expand 新增，与旧 4 列并行；见 plan-interface-response-fields）——
+    # 元素：{key, label, slot, source, type, required, scale, unit, date_format}
+    response_fields: Optional[list[dict[str, Any]]] = None
     # —— 响应解析协议（覆盖非 JSON 文本源，如腾讯财经 ~ 分隔）——
     response_parse: Optional[dict[str, Any]] = None
 
@@ -153,6 +157,7 @@ class QuoteInterfaceUpdate(BaseModel):
     resp_price_field: Optional[str] = Field(None, max_length=64)
     resp_name_field: Optional[str] = Field(None, max_length=64)
     resp_exchange_field: Optional[str] = Field(None, max_length=64)
+    response_fields: Optional[list[dict[str, Any]]] = None
     response_parse: Optional[dict[str, Any]] = None
 
 
@@ -176,6 +181,7 @@ class QuoteInterfaceOut(BaseModel):
     resp_price_field: str
     resp_name_field: Optional[str] = None
     resp_exchange_field: Optional[str] = None
+    response_fields: Optional[list[dict[str, Any]]] = None
     response_parse: Optional[dict[str, Any]] = None
     created_at: datetime
     updated_at: datetime
@@ -352,6 +358,7 @@ async def create_provider_interface(
         resp_name_field=body.resp_name_field,
         resp_exchange_field=body.resp_exchange_field,
         response_parse=body.response_parse,
+        response_fields=body.response_fields,
     )
     await db.commit()
     await db.refresh(obj)
@@ -826,6 +833,17 @@ async def admin_sync_security_masters(
     result = await MarketDataSyncService(db).sync_all_security_masters()
     await db.commit()
     return result
+
+
+@router_admin.get("/quote-interfaces/response-field-schema")
+async def get_response_field_schema(
+    current: CurrentUser = Depends(require_admin),
+) -> dict:
+    """响应字段契约 schema（方案 §6 单源供给）：``{slots, types, units, contracts}``。
+
+    前端「字段映射」页签的 slot 下拉、按分类必填提示全部由此渲染，新增 slot 只改后端一处。
+    """
+    return build_field_schema()
 
 
 @router_admin.post("/quote-interfaces/{interface_id}/test")

@@ -55,6 +55,17 @@ from app.services.classification import (
     is_dropped,
 )
 from app.services.security import infer_security_type
+from app.services.response_fields import (
+    SLOT_CODE,
+    SLOT_EXCHANGE,
+    SLOT_NAME,
+    SLOT_PRICE,
+    compute_slot_hit_rates,
+    filter_required_rows,
+    index_by_slot,
+    resolve_fields,
+)
+from app.services.response_path import row_get as _core_row_get
 
 logger = logging.getLogger(__name__)
 
@@ -256,22 +267,45 @@ def _normalize_master_code(raw: str, exchange: Optional[str] = None) -> str:
 
 
 def _row_get(row: Any, field: Optional[str]) -> Any:
-    """从行取值：dict 行按字段名；数组行按位置下标（resp_* 配置填 "0"/"1"）。
+    """从行取值（唯一收口，向后兼容）。
 
-    部分行情源（如小熊同学 /stock/all）返回 [[code, name], ...] 数组行——
-    无字段名可查，需在接口配置里把 resp_code_field/resp_name_field 填为整数下标；
-    field 非数字下标时数组行返回 None。
+    - dict 行：按字段名 / 路径取值（新增 ``a.b`` / ``items[0].code`` / ``a\\.b`` 字面含点 key）；
+    - 数组行：``field`` 为纯数字时按位置下标（小熊同学 /stock/all 的 ``[[code,name],...]``）；
+    - 歧义由显式 ``[N]`` / ``\\.`` 消除，不做「先试路径再试字面 key」的静默双策略（方案边界 1）；
+    - dict 行字面 key ``"0"`` 与数组行下标 ``0`` 语义保持现状（方案边界 2）。
+
+    实现下沉到 ``app.services.response_path.row_get``（纯逻辑、可穷举单测）。
     """
-    if row is None:
-        return None
-    if isinstance(row, dict):
-        return row.get(field)
-    if isinstance(row, (list, tuple)):
-        if field and str(field).isdigit():
-            idx = int(field)
-            return row[idx] if 0 <= idx < len(row) else None
-        return None
-    return None
+    return _core_row_get(row, field)
+
+
+# JSON/FastAPI 唯一可序列化的 key 类型（str/int/float/bool/None）——与 json.dumps 一致。
+# tuple 等复合类型会在序列化时抛 ``TypeError: keys must be str, int, float, bool or
+# None, not tuple``，且发生在**很晚**（响应序列化阶段），错误不可读。
+_JSON_SCALAR_KEY_TYPES = (str, int, float, bool, type(None))
+
+
+def _flatten_dataframe_records(df: Any) -> list[dict]:
+    """DataFrame → ``list[dict]``（列名成为顶层 key），并**显式拒绝非标量列名**。
+
+    方案 §8 边界 4：MultiIndex 列经 ``to_dict("records")`` 会产出 tuple key，一路透传到
+    ``json.dumps`` 才以 ``TypeError`` 暴露，不可读。此处拍平时即检测：出现 json 不可
+    序列化的 key（tuple 等）→ 抛**带可读中文说明**的异常，明确「MultiIndex 多层表头
+    不支持、请先展平列名后重试」。**绝不静默展平**（静默展平会掩盖列结构问题，与边界 5
+    「宁可错得明显」一致）。
+
+    对非 MultiIndex（列名为 str / int 等标量）场景**零行为影响**：与旧 ``to_dict`` 结果一致。
+    """
+    records = [dict(r) for r in df.to_dict("records")]
+    for record in records:
+        for key in record:
+            if not isinstance(key, _JSON_SCALAR_KEY_TYPES):
+                raise ValueError(
+                    "SDK 返回的 DataFrame 含非标量列名（疑似 MultiIndex 多层表头），"
+                    "当前不支持：请先将列名展平为单层字符串后重试"
+                    f"（实际列名示例：{key!r}）。"
+                )
+    return records
 
 
 def _compute_pinyin_initials(name: str) -> Optional[str]:
@@ -547,7 +581,7 @@ class MarketDataSyncService:
         - 2 个捕获组（如 ``v_(\\w+)="([^"]*)"``）：group1=变量名中的带前缀代码
           （如 ``sz000001``），group2=引号内内容 → 拆 ``sep`` 后每行注入 ``_code``，
           便于直接归一化（含市场前缀，美股等也不会丢前缀）。
-        - 1 个捕获组：仅内容，代码回退到 ``fields[idx]``（``resp_code_field`` 配下标）。
+        - 1 个捕获组：仅内容，代码回退到 ``fields[idx]``（code 槽 source 配下标）。
         - 无正则：整段按 ``sep`` 拆成单行（兜底）。
 
         批量响应（``v_aa="...";v_bb="..."``）用 ``re.finditer`` 逐段提取；``[^"]*``
@@ -618,7 +652,7 @@ class MarketDataSyncService:
             if df is None or getattr(df, "empty", False):
                 return []
             if hasattr(df, "to_dict"):
-                return [dict(r) for r in df.to_dict("records")]
+                return _flatten_dataframe_records(df)
             if hasattr(df, "iterrows"):  # 兼容非 pandas DataFrame 替身（测试）
                 return [
                     (r.to_dict() if hasattr(r, "to_dict") else dict(r))
@@ -641,13 +675,24 @@ class MarketDataSyncService:
         return self._parse_price_rows(itf, rows)
 
     def _parse_price_rows(self, itf: QuoteInterface, rows: list[Any]) -> dict[str, Decimal]:
-        """把原始行解析为 ``{code: price}``。业务空 → 返回 ``{}``（触发向下）。"""
-        code_field = itf.resp_code_field or "code"
-        price_field = itf.resp_price_field or "price"
+        """把原始行解析为 ``{code: price}``。业务空 → 返回 ``{}``（触发向下）。
+
+        code 槽禁用 F4 中文兜底（``include_legacy_code_fallback=False``），与 HEAD
+        ``_parse_price_rows`` 的「接口配置的代码列 or "code"」单候选语义逐行等价（D2）。
+        边界 3（NaN / ``pd.NA`` → ``None``）**P1 暂缓至 P2，勿视为已实现**：改造前同样
+        原样透传（此处会产出 ``Decimal('NaN')``），未把 NaN 当 0。
+        """
+        compiled = resolve_fields(itf, include_legacy_code_fallback=False)
+        # required 槽缺失整行丢弃 + 计数（边界 6）；若整批被丢 → 返回空 dict，
+        # 由既有 fallback_fetch 的「空业务数据 = 无响应」路径复用 consecutive_failures。
+        rows, _dropped = self._filter_required_rows(itf, compiled, rows)
+        fields = index_by_slot(compiled)
+        code_field = fields.get(SLOT_CODE)
+        price_field = fields.get(SLOT_PRICE)
         out: dict[str, Decimal] = {}
         for r in rows:
-            code = _row_get(r, code_field)
-            price = _row_get(r, price_field)
+            code = code_field.get(r) if code_field else None
+            price = price_field.get(r) if price_field else None
             if code is None or price is None:
                 continue
             try:
@@ -658,18 +703,55 @@ class MarketDataSyncService:
         return out
 
     def _parse_test_rows(self, itf: QuoteInterface, rows: list[Any]) -> dict[str, str]:
-        """测试端点解析：{code→price 字符串}（按 resp_code_field/resp_price_field）。"""
-        code_field = itf.resp_code_field or "code"
-        price_field = itf.resp_price_field or "price"
+        """测试端点解析：{code→price 字符串}（走 resolve_fields 的 code/price 槽）。
+
+        code 槽同样禁用 F4 中文兜底，与 HEAD ``_parse_test_rows`` 单候选语义等价（D2）；
+        试调端点**不计入** consecutive_failures（既有约定），故 required 仅计数告警。
+        """
+        compiled = resolve_fields(itf, include_legacy_code_fallback=False)
+        rows, _dropped = self._filter_required_rows(itf, compiled, rows)
+        fields = index_by_slot(compiled)
+        code_field = fields.get(SLOT_CODE)
+        price_field = fields.get(SLOT_PRICE)
         out: dict[str, str] = {}
         for r in rows:
-            code = _row_get(r, code_field)
-            price = _row_get(r, price_field)
+            code = code_field.get(r) if code_field else None
+            price = price_field.get(r) if price_field else None
             if code is None or price is None:
                 continue
             # 测试端点解析同样规范为「交易所前缀 + 数字」，与同步/价格口径一致
             out[_normalize_master_code(str(code))] = str(price)
         return out
+
+    # ------------------------------------------------------------------ #
+    # required 槽缺失 → 整行丢弃 + 计数（边界 6）
+    # ------------------------------------------------------------------ #
+    def _filter_required_rows(
+        self, itf: QuoteInterface, compiled: list[Any], rows: list[Any]
+    ) -> tuple[list[Any], int]:
+        """按 ``required=true`` 字段整行丢弃 + 计数（同步，供行循环前调用）。
+
+        返回 ``(保留行, 丢弃行数)``；丢弃数始终以 WARNING 记录（与既有「抓到行却零产出」
+        告警同源，**不新造告警通道**）。整批被丢时的失败计数由调用方经既有
+        ``_mark_failure``（``consecutive_failures`` / ``alerted``）衔接，见
+        :meth:`_note_required_drops`。
+        """
+        kept, dropped = filter_required_rows(compiled, rows)
+        if dropped:
+            logger.warning(
+                "接口「%s」因 required 字段缺失丢弃 %d/%d 行（边界 6：整行丢弃，不补默认值）",
+                getattr(itf, "name", None), dropped, len(rows),
+            )
+        return kept, dropped
+
+    async def _note_required_drops(self, itf: QuoteInterface, dropped: int, total: int) -> None:
+        """整批被 required 丢弃 = 无可用响应：计入既有 ``consecutive_failures`` 失败计数。
+
+        仅在 ``dropped == total > 0``（整批丢弃）时触发，达 ``FAILURE_THRESHOLD`` 即由既有
+        ``_mark_failure`` 抢占发站内信；不新造告警通道。接口桩无 ``id`` 时不动库。
+        """
+        if dropped > 0 and dropped >= total and getattr(itf, "id", None):
+            await self._mark_failure(itf)
 
     # ------------------------------------------------------------------ #
     # 失败计数 / 告警抢占（DB 原子）
@@ -1107,25 +1189,33 @@ class MarketDataSyncService:
 
         含交易所/资产类别推断、规范码归一与拼音首字母（pypinyin 为纯 CPU 计算，
         全市场万行级时须在 ``asyncio.to_thread`` 中执行，避免阻塞事件循环）。
+
+        code 槽禁用 F4 中文兜底（``include_legacy_code_fallback=False``），与 HEAD
+        ``_prepare_master_rows`` 的「接口配置的代码列 or "code"」单候选语义逐行等价：
+        分红/公告用途接口经本链路（``dividend_sync.query`` → ``_upsert_masters``）时
+        **不得**因中文兜底多取到行（D2）。
         """
-        code_field = itf.resp_code_field or "code"
-        name_field = itf.resp_name_field or "name"
-        exchange_field = itf.resp_exchange_field
+        compiled = resolve_fields(itf, include_legacy_code_fallback=False)
+        rows, _dropped = self._filter_required_rows(itf, compiled, rows)
+        fields = index_by_slot(compiled)
+        code_field = fields.get(SLOT_CODE)
+        name_field = fields.get(SLOT_NAME)
+        exchange_field = fields.get(SLOT_EXCHANGE)
 
         payload: list[dict[str, Any]] = []
         for r in rows:
-            code = _row_get(r, code_field)
+            code = code_field.get(r) if code_field else None
             if code is None:
                 continue
             raw_code = str(code)
-            name = _row_get(r, name_field)
+            name = name_field.get(r) if name_field else None
             name = str(name) if name is not None else raw_code
             # 丢弃类别（按 fund-classification-rules.md）：老三板/全国股转(4xxxxx)、
             # 北交所旧段(8xxxxx) 不写入 securities 主数据表，直接跳过。
             if is_dropped(raw_code, name):
                 continue
             # 交易所推断须用原始 code（如 bj920021→BJ、sh600000→SH、hk00700→HK），先于归一化
-            exchange = _row_get(r, exchange_field) if exchange_field else None
+            exchange = exchange_field.get(r) if exchange_field else None
             if not exchange:
                 exchange = infer_exchange(raw_code)
             # 存储用「交易所前缀 + 数字」：不同源（000001 / 000001.SZ / sh600000）统一规范，
@@ -1171,14 +1261,17 @@ class MarketDataSyncService:
         （全市场万行级时由 N 次往返降为 ⌈N/1000⌉ 次）。
         """
         payload = await asyncio.to_thread(self._prepare_master_rows, itf, rows)
-        # 抓到行却零产出 = 配置错位（典型：resp_code_field 填成源站实际列名之外的值，
-        # 如「新浪-分红配股」响应无代码列却配 'code' → 逐行 row.get 取空 → 全量跳过）。
+        # 抓到行却零产出 = 配置错位（典型：code 槽 source 填成源站实际列名之外的值，
+        # 如「新浪-分红配股」响应无代码列却配 'code' → 逐行取空 → 全量跳过）。
         # 与 dividend_sync 的逐期告警同源：杜绝「上万行抓取、0 条入库」全程静默。
         if rows and not payload:
+            code_field = index_by_slot(
+                resolve_fields(itf, include_legacy_code_fallback=False)
+            ).get(SLOT_CODE)
             logger.warning(
                 "接口「%s」返回 %s 行但可建主数据 0 条："
-                "疑似 resp_code_field=%r 与源返回列名不匹配（或源站响应不含代码列）",
-                itf.name, len(rows), itf.resp_code_field,
+                "疑似 code 槽 source=%r 与源返回列名不匹配（或源站响应不含代码列）",
+                itf.name, len(rows), code_field.source if code_field else None,
             )
 
         key_list = list({(p["asset_class"], p["code"]) for p in payload})
@@ -1236,6 +1329,7 @@ class MarketDataSyncService:
                 "elapsedMs": 0.0,
                 "raw": None,
                 "parsed": None,
+                "fieldHits": [],
                 "error": "接口不存在",
                 "interfaceId": interface_id,
             }
@@ -1252,12 +1346,18 @@ class MarketDataSyncService:
                 "elapsedMs": round(elapsed * 1000, 2),
                 "raw": None,
                 "parsed": None,
+                "fieldHits": [],
                 # 兜底：异常消息可能为空字符串，回退到异常类型名，避免前端显示「未知错误」
                 "error": str(exc) or type(exc).__name__,
                 "interfaceId": interface_id,
             }
         elapsed = time.perf_counter() - start
         parsed = self._parse_test_rows(itf, rows)
+        # 逐槽位命中率（方案步骤 2）：先加新字段，不拆旧 parsed（前端任务再迁移）。
+        # code 槽与 _parse_test_rows 同口径（禁用 F4 中文兜底），避免命中率与 parsed 相互矛盾。
+        field_hits = compute_slot_hit_rates(
+            resolve_fields(itf, include_legacy_code_fallback=False), rows
+        )
         return {
             "ok": True,
             "status": "success",
@@ -1265,5 +1365,7 @@ class MarketDataSyncService:
             "elapsedMs": round(elapsed * 1000, 2),
             "raw": rows,
             "parsed": parsed,
+            "fieldHits": field_hits,
+            "rowCount": len(rows),
             "interfaceId": interface_id,
         }

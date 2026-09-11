@@ -155,7 +155,7 @@ Python 类型示意：
 
 ```python
 class ResponseFieldSpec(TypedDict, total=False):
-    key: str          # 必填：逻辑名，^[a-z][a-z0-9_]{0,63}$，接口内唯一
+    key: str          # 必填：逻辑名，^[a-z][a-z0-9_]{0,63}$（首字符须为小写字母，下划线仅允许其后），接口内唯一
     label: str        # 可选：中文展示名
     slot: str         # 可选：语义槽位，闭集白名单；缺省 = 仅展示（不参与同步）
     source: str       # 必填：取值路径
@@ -170,7 +170,7 @@ class ResponseFieldSpec(TypedDict, total=False):
 
 | 属性 | 含义 | 约束 |
 | --- | --- | --- |
-| `key` | 逻辑名 | 必填，`^[a-z][a-z0-9_]{0,63}$`（**已含下划线**，故 `key:"_code"` 合法），接口内唯一；`source:"_code"` 指 text_split 注入的特殊键（边界 7），与 `key` 命名空间独立 |
+| `key` | 逻辑名 | 必填，`^[a-z][a-z0-9_]{0,63}$`（首字符须为小写字母，下划线仅允许出现在首字符之后，故合法 key 形如 `price_a`；`key:"_code"` **不**合法）；`source:"_code"` 指 text_split 注入的特殊键（边界 7），与 `key` 命名空间独立 |
 | `label` | 中文展示名 | 可选 |
 | `slot` | 语义槽位 | 可选；**闭集白名单**，缺省 = 仅展示（不参与同步） |
 | `source` | 取值路径 | 必填 |

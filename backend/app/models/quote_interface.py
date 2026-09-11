@@ -95,6 +95,18 @@ class QuoteInterface(Base, TimestampMixin):
         String(64), nullable=True,
         comment="响应中交易所字段（如 exchange/market）；缺失则代码前缀推断",
     )
+    # —— 响应字段映射（response_fields，P1 Expand 新增；与旧 4 列并行）——
+    # JSON 数组，元素结构：{key, label, slot, source, type, required, scale, unit, date_format}
+    # - key：逻辑名，^[a-z][a-z0-9_]{0,63}$，接口内唯一
+    # - slot：语义槽位（code/name/exchange/price/date 闭集白名单），缺省=仅展示、不参与同步
+    # - source：取值路径（顶层 key / a.b / items[0].code / a\.b 字面含点 key）
+    # - 无 slot 的展示条目不落库、不参与分类契约校验（方案 §5.2）
+    # 为空时读侧由旧 4 列 + response_parse.resp_date_field 确定性合成（历史兼容，非兜底）。
+    response_fields: Mapped[Optional[list[dict[str, Any]]]] = mapped_column(
+        JSON, nullable=True,
+        comment="响应字段映射：[{key,label,slot,source,type,required,scale,unit,date_format}]；"
+                "空则由旧 4 列合成（历史兼容）",
+    )
     # —— 响应解析协议（接口级，覆盖非 JSON 文本源，如腾讯财经 ~ 分隔）——
     # 结构：{format, encoding, sep, line_regex, code_param, code_prefix}
     # - format: json（默认，走 resp.json()）/ text_split（gbk 文本 + 分隔符）

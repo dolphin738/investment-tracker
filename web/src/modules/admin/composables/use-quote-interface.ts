@@ -13,6 +13,7 @@ import { toast } from '@/composables/use-toast';
 import {
   createInterface,
   deleteInterface,
+  fetchResponseFieldSchema,
   listAllInterfaces,
   listProviderInterfaces,
   reorderQuoteInterfaces,
@@ -110,5 +111,21 @@ export function useReorderInterfaces() {
       toast.success('顺序已保存');
     },
     onError: () => toast.error('调序失败，请重试'),
+  });
+}
+
+/**
+ * 响应字段契约 schema（GET /admin/quote-interfaces/response-field-schema，需管理员）。
+ *
+ * 「字段映射」表格的 slot 下拉 / 类型 / 单位 / 按分类必填提示的唯一数据源
+ * （方案 §6 单源供给）；非管理员不发起请求（后端 403）。
+ */
+export function useResponseFieldSchema() {
+  const isAdmin = useIsAdmin();
+  return useQuery({
+    queryKey: ['admin', 'quote-interfaces', 'response-field-schema'],
+    queryFn: fetchResponseFieldSchema,
+    enabled: isAdmin,
+    staleTime: 5 * 60 * 1000,
   });
 }

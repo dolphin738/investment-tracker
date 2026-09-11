@@ -20,6 +20,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.quote_interface import QuoteInterface
 from app.services.interface_category import InterfaceCategoryService
+from app.services.response_fields import (
+    check_slot_contract,
+    derive_legacy_columns,
+    fold_legacy_columns,
+    validate_response_fields,
+)
 
 # 允许被显式置 NULL（清空）的列：由模型可空性派生。
 # 目的是让「清空资产类别」等置空操作生效，同时避免把 NOT NULL 列写成 NULL
@@ -31,6 +37,69 @@ _NULLABLE_COLUMNS = frozenset(
 # line_regex 防护（P3）：长度上限 + 保存时预编译（非法正则直接 400）。
 # 运行期在 market_data_sync 侧另有线程池隔离与文本长度钳制兜底。
 _LINE_REGEX_MAX_LEN = 256
+
+# 旧 4 列：（Expand 阶段双写镜像；请求只给旧列时折成 response_fields）
+_LEGACY_FIELD_KEYS = (
+    "resp_code_field",
+    "resp_price_field",
+    "resp_name_field",
+    "resp_exchange_field",
+)
+
+
+def _raise_if_invalid(errors: list[str], prefix: str) -> None:
+    """把纯校验返回的错误列表翻译为 400（风格对齐 _validate_response_parse）。"""
+    if errors:
+        raise HTTPException(
+            status_code=400, detail=f"{prefix}：" + "；".join(errors)
+        )
+
+
+def _merge_date_mirror(
+    response_parse: Optional[dict[str, Any]], mirror: dict[str, str]
+) -> Optional[dict[str, Any]]:
+    """把 response_fields 派生的 resp_date_field 合并进 response_parse（双写镜像）。"""
+    if "resp_date_field" not in mirror:
+        return response_parse
+    merged = dict(response_parse or {})
+    merged["resp_date_field"] = mirror["resp_date_field"]
+    return merged
+
+
+def _resolve_create_fields(
+    *,
+    response_fields: Optional[list[dict[str, Any]]],
+    category_id: Optional[str],
+    resp_code_field: Optional[str],
+    resp_price_field: Optional[str],
+    resp_name_field: Optional[str],
+    resp_exchange_field: Optional[str],
+    response_parse: Optional[dict[str, Any]],
+) -> tuple[Optional[list[dict[str, Any]]], dict[str, str], Optional[dict[str, Any]]]:
+    """create 时的字段落地计算，返回 (response_fields, 旧列镜像, response_parse)。
+
+    - ``response_fields`` 显式非空 → 以其为准（静态 + 契约校验，违反 400），并派生旧列镜像；
+    - 否则若请求给了旧列 → 确定性折成 ``response_fields``（老前端兼容）；
+    - 两者都无 → ``response_fields`` 为 None（读侧走旧列合成）。
+    """
+    if response_fields:  # 显式非空（[] 视为未提供，走旧列分支）
+        _raise_if_invalid(validate_response_fields(response_fields), "response_fields 校验失败")
+        _raise_if_invalid(check_slot_contract(response_fields, category_id), "response_fields 契约不符")
+        mirror = derive_legacy_columns(response_fields)
+        return response_fields, mirror, _merge_date_mirror(response_parse, mirror)
+    if any(v for v in (resp_code_field, resp_price_field, resp_name_field, resp_exchange_field)) or (
+        response_parse or {}
+    ).get("resp_date_field"):
+        folded = fold_legacy_columns(
+            category_id=category_id,
+            resp_code_field=resp_code_field,
+            resp_price_field=resp_price_field,
+            resp_name_field=resp_name_field,
+            resp_exchange_field=resp_exchange_field,
+            response_parse=response_parse,
+        )
+        return (folded or None), {}, response_parse
+    return None, {}, response_parse
 
 
 def _validate_response_parse(rp: Optional[dict[str, Any]]) -> None:
@@ -157,6 +226,7 @@ class QuoteInterfaceService:
         resp_name_field: Optional[str] = None,
         resp_exchange_field: Optional[str] = None,
         response_parse: Optional[dict[str, Any]] = None,
+        response_fields: Optional[list[dict[str, Any]]] = None,
     ) -> QuoteInterface:
         # 写入前显式校验 category_id 指向真实存在的分类：
         # 不依赖 DB 外键报错翻译（那样会落到 500 兜底），这里主动映射成 4xx。
@@ -164,6 +234,17 @@ class QuoteInterfaceService:
         if category is None:
             raise HTTPException(status_code=400, detail="分类不存在")
         _validate_response_parse(response_parse)
+        # 字段配置落地：response_fields 优先；仅给旧列时确定性折成 response_fields（Expand 双写）。
+        rf_value, mirror, rp_value = _resolve_create_fields(
+            response_fields=response_fields,
+            category_id=category_id,
+            resp_code_field=resp_code_field,
+            resp_price_field=resp_price_field,
+            resp_name_field=resp_name_field,
+            resp_exchange_field=resp_exchange_field,
+            response_parse=response_parse,
+        )
+        _validate_response_parse(rp_value)
         # 默认优先级：落该分类末位（COALESCE(MAX(priority),-1)+1）；未分类留 NULL。
         priority = await self._next_priority(category_id)
         obj = QuoteInterface(
@@ -181,11 +262,12 @@ class QuoteInterfaceService:
             rate_limit=rate_limit,
             priority=priority,
             asset_class=asset_class,
-            resp_code_field=resp_code_field,
-            resp_price_field=resp_price_field,
-            resp_name_field=resp_name_field,
-            resp_exchange_field=resp_exchange_field,
-            response_parse=response_parse if response_parse is not None else {},
+            resp_code_field=mirror.get("resp_code_field", resp_code_field),
+            resp_price_field=mirror.get("resp_price_field", resp_price_field),
+            resp_name_field=mirror.get("resp_name_field", resp_name_field),
+            resp_exchange_field=mirror.get("resp_exchange_field", resp_exchange_field),
+            response_parse=rp_value if rp_value is not None else {},
+            response_fields=rf_value,
         )
         self.session.add(obj)
         await self.session.flush()
@@ -211,6 +293,51 @@ class QuoteInterfaceService:
             category = await InterfaceCategoryService(self.session).get_or_none(new_category_id)
             if category is None:
                 raise HTTPException(status_code=400, detail="分类不存在")
+        if "response_parse" in opts:
+            _validate_response_parse(opts["response_parse"])
+        # —— response_fields / 旧列双写（Expand 阶段）——
+        rf_explicit = "response_fields" in opts
+        legacy_cols_explicit = any(k in opts for k in _LEGACY_FIELD_KEYS)
+        target_category = opts.get("category_id", obj.category_id)
+        if rf_explicit and opts["response_fields"]:
+            fields = opts["response_fields"]
+            _raise_if_invalid(
+                validate_response_fields(fields), "response_fields 校验失败"
+            )
+            _raise_if_invalid(
+                check_slot_contract(fields, target_category), "response_fields 契约不符"
+            )
+            # 新真相优先：由其派生旧列镜像（双写；供 P1 回滚）。
+            mirror = derive_legacy_columns(fields)
+            for column, source in mirror.items():
+                if column != "resp_date_field":
+                    opts[column] = source
+            if "resp_date_field" in mirror:
+                opts["response_parse"] = _merge_date_mirror(
+                    opts.get("response_parse", obj.response_parse), mirror
+                )
+        elif legacy_cols_explicit or (
+            "response_parse" in opts and not obj.response_fields
+        ):
+            # 老前端只给旧列（或历史行仅改 response_parse.resp_date_field）：
+            # 确定性折成 response_fields 落库（旧列本身即镜像，不反向覆盖）。
+            folded = fold_legacy_columns(
+                category_id=target_category,
+                resp_code_field=opts.get("resp_code_field", obj.resp_code_field),
+                resp_price_field=opts.get("resp_price_field", obj.resp_price_field),
+                resp_name_field=opts.get("resp_name_field", obj.resp_name_field),
+                resp_exchange_field=opts.get("resp_exchange_field", obj.resp_exchange_field),
+                response_parse=opts.get("response_parse", obj.response_parse),
+            )
+            if folded:
+                opts["response_fields"] = folded
+        elif "category_id" in opts and opts["category_id"] != obj.category_id:
+            # 换同步用途：按新用途契约重校验既有 response_fields（方案边界 10）。
+            if obj.response_fields:
+                _raise_if_invalid(
+                    check_slot_contract(obj.response_fields, opts["category_id"]),
+                    "response_fields 契约不符",
+                )
         if "response_parse" in opts:
             _validate_response_parse(opts["response_parse"])
         for key, value in opts.items():

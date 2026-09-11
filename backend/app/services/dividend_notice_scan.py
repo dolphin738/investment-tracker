@@ -47,20 +47,28 @@ from app.services.market_data_sync import (
     _row_get,
     infer_exchange,
 )
+from app.services.response_fields import (
+    SLOT_CODE,
+    index_by_slot,
+    resolve_fields,
+)
 
 # —— 标题正则二筛白名单（§6.8 第二步；改模式须补单测，禁止删改关键词）——
 _TITLE_DIVIDEND_RE = re.compile(r"分红|派息|权益分派|利润分配|分配方案")
 _TITLE_SPECIAL_RE = re.compile(r"特别|中期")
 _TITLE_CANCEL_RE = re.compile(r"取消|终止")
 
-# 东财公告 SDK（stock_notice_report）重命名后的列名（见 akshare stock_notice.py）
-_COL_NOTICE_CODE = "代码"
+# 东财公告 SDK（stock_notice_report）列名（见 akshare stock_notice.py）
+# - 代码列（「代码」）已收敛到 app.services.response_fields：由 resolve_fields 的
+#   code 槽合成时统一尝试，公告行不再直接硬编码该列名。
+# - 公告标题为**展示字段**（无 slot，不参与同步契约），6 个消费点不消费其语义；
+#   此处保留历史列名作为标题二筛的取值来源（方案 §5.2）。
 _COL_NOTICE_TITLE = "公告标题"
 # 新浪分红 SDK（stock_history_dividend_detail）列名（见 akshare stock_finance_sina.py）
 # 注意：该接口**逐只查询**（代码由请求 params.symbol 传入），响应只有下列 4 个业务列
 # （公告日期/送股/转增/派息/进度/除权除息日/股权登记日/红股上市日），**不含代码列**。
-# 因此本模块解析新浪行一律走下列硬编码常量，**不读 itf.resp_code_field**——
-# 该行配置（seed 遗留 'code'）与源站无对应列，纯属历史占位，勿据此取值。
+# 因此本模块解析新浪行一律走下列硬编码常量，**不读该接口的代码槽配置**——
+# 该行配置（seed 遗留）与源站无对应列，纯属历史占位，勿据此取值。
 _COL_SINA_ANN = "公告日期"
 _COL_SINA_CASH = "派息"
 _COL_SINA_PROGRESS = "进度"
@@ -325,12 +333,21 @@ class DividendNoticeScanService:
         """
         if not rows:
             return []
+        total = len(rows)
+        # code 槽取 resolve_fields 默认：公告用途（cat=4）按 category_id 分派候选顺序
+        # = [中文列名「代码」优先, 接口配置的代码列]，与 HEAD（先取中文列名，再试
+        # 配置代码列）逐行等价；required 槽缺失整行丢弃 + 计数（边界 6）。
+        compiled = resolve_fields(itf)
+        rows, dropped = self._mds._filter_required_rows(itf, compiled, rows)
+        if not rows:
+            # 整批被 required 丢弃 = 无可用响应：复用既有 consecutive_failures/alerted 通道
+            await self._mds._note_required_drops(itf, dropped, total)
+            return []
         # 证券代码 → master_id 映射（一次建表，逐行命中）
+        code_field = index_by_slot(compiled).get(SLOT_CODE)
         codes = set()
         for r in rows:
-            raw = _row_get(r, _COL_NOTICE_CODE)
-            if raw is None:
-                raw = _row_get(r, itf.resp_code_field)
+            raw = code_field.get(r) if code_field else None
             if raw is not None:
                 codes.add(_normalize_master_code(str(raw), infer_exchange(str(raw))))
         code_map: dict[str, str] = {}
@@ -351,9 +368,7 @@ class DividendNoticeScanService:
             is_candidate = is_div and bool(_TITLE_SPECIAL_RE.search(text))
             if not (is_candidate or is_cancel):
                 continue
-            raw = _row_get(r, _COL_NOTICE_CODE)
-            if raw is None:
-                raw = _row_get(r, itf.resp_code_field)
+            raw = code_field.get(r) if code_field else None
             if raw is None:
                 continue
             code = _normalize_master_code(str(raw), infer_exchange(str(raw)))
