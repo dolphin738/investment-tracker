@@ -14,6 +14,7 @@
 - GET    /api/admin/quote-providers/interfaces/{interface_id}：读取单个。
 - PATCH  /api/admin/quote-providers/interfaces/{interface_id}：局部更新。
 - DELETE /api/admin/quote-providers/interfaces/{interface_id}：删除。
+- POST   /api/admin/quote-interfaces/preview：新增态实调预览（不依赖已存接口，仅 SDK 提供方）。
 
 接口分类（InterfaceCategory）CRUD：
 - GET    /api/admin/interface-categories：列出全部分类（按 sort_order 升序，含各分类下接口数）。
@@ -41,8 +42,10 @@ from app.services.auth import CurrentUser, get_current_user, require_admin
 from app.db.database import AsyncSessionLocal, get_db
 from app.models import Portfolio, PortfolioSecurity, Security
 from app.models.enums import InterfaceDirection, QuoteProviderAccessMethod
+from app.models.quote_provider import SecuritiesDataProvider
 from app.serializers import serialize_security_master
 from app.services import InterfaceCategoryService, QuoteInterfaceService
+from app.services.interface_preview import preview_sdk_interface
 from app.services.market_data_sync import MarketDataSyncService
 from app.services.notification import NotificationService
 from app.services.quote_provider import QuoteProviderService
@@ -642,6 +645,14 @@ class InterfaceTestRequest(BaseModel):
     codes: Optional[list[str]] = None
 
 
+class InterfacePreviewRequest(BaseModel):
+    """新增态实调预览请求体：不依赖已存接口，按 endpoint 懒导入 SDK 实调一次。"""
+
+    endpoint: str = Field(min_length=1, description="SDK 顶层函数名（如 stock_zh_a_spot）")
+    provider_id: str
+    params: dict[str, Any] = {}
+
+
 class SecurityMasterDeleteBody(BaseModel):
     """批量/单行删除证券主数据请求体。
     - ids：待删除主数据 id 列表（all=False 时必填，可含重复，后端去重）。
@@ -858,3 +869,25 @@ async def test_quote_interface(
         interface_id, body.params, body.codes
     )
     return result
+
+
+@router_admin.post("/quote-interfaces/preview")
+async def preview_quote_interface(
+    body: InterfacePreviewRequest,
+    current: CurrentUser = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """新增态实调预览：不依赖已存接口，按 endpoint 懒导入 SDK 实调一次回传 raw。
+
+    纯预览：不写库、不计入 consecutive_failures；仅支持 SDK 提供方
+    （HTTPS 接入方式 v1 不支持实调预览）。
+    """
+    provider = await db.get(SecuritiesDataProvider, body.provider_id)
+    if provider is None:
+        raise HTTPException(status_code=400, detail="提供方不存在，无法实调预览")
+    if provider.access_method != QuoteProviderAccessMethod.SDK.value:
+        raise HTTPException(
+            status_code=400,
+            detail="该提供方为 HTTPS 接入方式，v1 暂不支持实调预览（仅支持 SDK 提供方）",
+        )
+    return await preview_sdk_interface(body.endpoint, body.params)
