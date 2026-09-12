@@ -10,7 +10,8 @@
  *
  * 「历史行情回补接口」下拉留在父组件（绑定 settingsForm、参与 settings 保存），
  * 本组件仅接收其当前选择值（backfillInterfaceId）用于「回补行情缺口」按钮的禁用判断；
- * 「回补起始日期」为独立本地 ref，不参与 settings 保存，默认一年前的今天（ISO）。
+ * 「回补起始日期」绑定父组件 settingsForm（v-model:default-start-date），随设置保存、
+ * 触发回补以其为起点；在途任务存在时禁用并只读展示在途起点（改起点须先取消在途回补）。
  */
 import { computed, ref } from 'vue';
 import { Button } from '@/components/ui/button';
@@ -40,25 +41,21 @@ const props = defineProps<{
   backfillInterfaceId: string;
   /** 每日回补额度（只/天），由父组件 settingsForm 持有，本组件仅渲染输入并回传 */
   priceBackfillQuota: string;
-  /** 在途回补任务目标起始日（YYYY-MM-DD）；null/undefined = 无在途任务；
-   *  由父组件传入 dividendSettings?.price_backfill_start_date */
-  priceBackfillStartDate: string | null;
+  /** 回补起始日期配置默认值（YYYY-MM-DD）：随设置保存、触发回补以其为起点；
+   *  由父组件 settingsForm 持有，本组件仅渲染输入并 v-model 回传 */
+  priceBackfillDefaultStartDate: string;
+  /** 在途回补任务目标起始日（YYYY-MM-DD）；非空 = 有在途任务，禁用起点输入与触发；
+   *  由父组件传入 dividendSettings?.price_backfill_start_date（服务端管理，只读） */
+  priceBackfillInFlightDate: string | null;
   /** 当日已用回补额度（只）：后端已按自然日归零，用于剩余额度计算与「今日已用 X/N」 */
   priceBackfillUsedToday: number;
 }>();
 
-/** 仅回传额度输入值（v-model 风格），其余状态仍由父组件 settingsForm 统一管理 */
+/** 仅回传额度/起点输入值（v-model 风格），其余状态仍由父组件 settingsForm 统一管理 */
 const emit = defineEmits<{
   (e: 'update:priceBackfillQuota', v: string): void;
+  (e: 'update:priceBackfillDefaultStartDate', v: string): void;
 }>();
-
-/** 回补起始日期：默认一年前的今天（ISO YYYY-MM-DD） */
-function oneYearAgoIso(): string {
-  const d = new Date();
-  d.setFullYear(d.getFullYear() - 1);
-  return d.toISOString().slice(0, 10);
-}
-const backfillStartDate = ref(oneYearAgoIso());
 
 // ── 全量重建（无二次确认） ──
 const rebuild = useRebuildDividendYield();
@@ -96,10 +93,10 @@ const canBackfillPrices = computed(
   () =>
     props.backfillInterfaceId !== SELECT_EMPTY_VALUE &&
     props.backfillInterfaceId !== '' &&
-    backfillStartDate.value.trim() !== '' &&
+    props.priceBackfillDefaultStartDate.trim() !== '' &&
     // 已有在途任务 → 不可再启动（前端置灰只是 UX 层，后端 /backfill-prices 另有 400 护栏，
     // 挡多标签页/多管理员/直接 curl 的绕过）
-    !props.priceBackfillStartDate &&
+    !props.priceBackfillInFlightDate &&
     !quotaExhausted.value,
 );
 function onBackfillPrices(): void {
@@ -108,7 +105,7 @@ function onBackfillPrices(): void {
 }
 function confirmBackfillPrices(): void {
   pricesConfirmOpen.value = false;
-  backfillPrices.mutate(backfillStartDate.value);
+  backfillPrices.mutate(props.priceBackfillDefaultStartDate);
 }
 
 // ── 取消在途回补（与「在途时禁止启动」成对：只禁不给退路会把人锁死） ──
@@ -128,10 +125,10 @@ function confirmCancelPrices(): void {
   <div class="space-y-4">
     <!-- 在途回补任务状态：目标起始日非空 = 有跨日在途任务（服务端管理，前端只读展示） -->
     <p
-      v-if="priceBackfillStartDate"
+      v-if="priceBackfillInFlightDate"
       class="text-xs font-medium text-amber-600"
     >
-      回补进行中（目标起始日 {{ priceBackfillStartDate }}）：每日收盘价抓取后按额度自动续跑，全部补完自动结束
+      回补进行中（目标起始日 {{ priceBackfillInFlightDate }}）：每日收盘价抓取后按额度自动续跑，全部补完自动结束
     </p>
 
     <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -157,15 +154,23 @@ function confirmCancelPrices(): void {
       </p>
     </div>
 
-    <!-- 回补起始日期（独立本地值，不参与 settings 保存） -->
+    <!-- 回补起始日期（随设置保存；在途任务存在时禁用并只读展示在途起点，改起点须先取消） -->
     <div class="space-y-2">
       <Label for="dy-backfill-start">回补起始日期</Label>
       <Input
         id="dy-backfill-start"
-        v-model="backfillStartDate"
+        :model-value="priceBackfillDefaultStartDate"
         type="date"
         class="w-full"
+        :disabled="!!priceBackfillInFlightDate"
+        @update:model-value="(v) => emit('update:priceBackfillDefaultStartDate', String(v))"
       />
+      <p v-if="priceBackfillInFlightDate" class="text-xs text-muted-foreground">
+        回补进行中，改起点请先「取消在途回补」
+      </p>
+      <p v-else class="text-xs text-muted-foreground">
+        保存后作为下次「回补行情缺口」的起点（默认一年前）
+      </p>
     </div>
     </div>
 
@@ -200,9 +205,9 @@ function confirmCancelPrices(): void {
               '/' +
               quotaNum +
               ' 只）：额度按自然日重置，请明日再触发'
-            : priceBackfillStartDate
+            : priceBackfillInFlightDate
               ? '已有在途回补任务（起点 ' +
-                priceBackfillStartDate +
+                priceBackfillInFlightDate +
                 '）：须等其完成，或先点「取消在途回补」'
               : '启动跨日回补任务：立即处理第一批，之后每日收盘价抓取后按剩余额度自动续跑，补完自动结束；中途被熔断次日自动接着跑'
         "
@@ -212,14 +217,14 @@ function confirmCancelPrices(): void {
         {{
           quotaExhausted
             ? '今日额度已用尽'
-            : priceBackfillStartDate
+            : priceBackfillInFlightDate
               ? '回补进行中…'
               : '回补行情缺口'
         }}
       </Button>
 
       <Button
-        v-if="priceBackfillStartDate"
+        v-if="priceBackfillInFlightDate"
         variant="outline"
         :disabled="cancellingPrices"
         title="清除在途标记：正在运行的当前批次会跑完本批后停止，此后不再续跑，已补数据保留"
@@ -291,7 +296,7 @@ function confirmCancelPrices(): void {
         <AlertDialogHeader>
           <AlertDialogTitle>确认取消在途回补？</AlertDialogTitle>
           <AlertDialogDescription>
-            将清除在途标记（起点 {{ priceBackfillStartDate }}）。正在运行的当前批次会跑完本批后自然停止，此后每日收盘价抓取不再续跑；已补的数据一律保留，可随时用新起点重新触发。
+            将清除在途标记（起点 {{ priceBackfillInFlightDate }}）。正在运行的当前批次会跑完本批后自然停止，此后每日收盘价抓取不再续跑；已补的数据一律保留，可随时用新起点重新触发。
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

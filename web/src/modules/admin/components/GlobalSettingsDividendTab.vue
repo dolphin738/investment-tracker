@@ -92,12 +92,21 @@ const settingsForm = reactive({
   priceBackfillSourceInterfaceId: SELECT_EMPTY_VALUE,
   /** 每日回补额度（只/天）；按 greenPercent/redPercent 同款字符串型写法，保存时转 number（默认 1000 与后端一致） */
   priceBackfillQuota: '1000',
+  /** 回补起始日期配置默认值（YYYY-MM-DD）；随设置保存、触发回补以其为起点；默认一年前 */
+  priceBackfillStartDate: oneYearAgoIso(),
 });
 const settingsFormError = ref('');
 
 /** 表单下拉值 → 提交值：哨兵 / 空串一律视为「不设置」（null）。 */
 function toInterfaceIdOrNull(v: string): string | null {
   return v === SELECT_EMPTY_VALUE ? null : v || null;
+}
+
+/** 回补起始日期默认「一年前的今天」（ISO YYYY-MM-DD）；用户可在设置中保存偏好起点 */
+function oneYearAgoIso(): string {
+  const d = new Date();
+  d.setFullYear(d.getFullYear() - 1);
+  return d.toISOString().slice(0, 10);
 }
 
 /** 小数比率 → 百分数字符串（0.05 → "5"） */
@@ -125,6 +134,9 @@ watch(
     // 每日回补额度：服务端 null 时按后端默认 1000 兜底（与保存 payload 口径一致）
     settingsForm.priceBackfillQuota =
       s.price_backfill_quota != null ? String(s.price_backfill_quota) : '1000';
+    // 回补起始日期配置默认值：服务端 null 时回退一年前（与 settingsForm 初值口径一致，避免误报变更）
+    settingsForm.priceBackfillStartDate =
+      s.price_backfill_default_start_date ?? oneYearAgoIso();
   },
   { immediate: true },
 );
@@ -187,7 +199,10 @@ const settingsHasChanges = computed(() => {
       (s.price_backfill_source?.id ?? SELECT_EMPTY_VALUE) ||
     // 每日回补额度：服务端 null 时按后端默认 1000 兜底，与 watch 回填口径一致
     settingsForm.priceBackfillQuota !==
-      (s.price_backfill_quota != null ? String(s.price_backfill_quota) : '1000')
+      (s.price_backfill_quota != null ? String(s.price_backfill_quota) : '1000') ||
+    // 回补起始日期配置默认值：服务端 null 时回退一年前，与 watch 回填口径一致
+    settingsForm.priceBackfillStartDate !==
+      (s.price_backfill_default_start_date ?? oneYearAgoIso())
   );
 });
 
@@ -218,8 +233,12 @@ function handleSaveSettings(): void {
     price_backfill_source_interface_id: toInterfaceIdOrNull(
       settingsForm.priceBackfillSourceInterfaceId,
     ),
-    // 每日回补额度：空串 → null（用后端默认）；合法整数直接传；start_date 由服务端管理，前端不提交
+    // 每日回补额度：空串 → null（用后端默认）；合法整数直接传
     price_backfill_quota: q.value,
+    // 回补起始日期配置默认值：与在途标记解耦，随设置保存；空串 → null（用既有值）
+    price_backfill_default_start_date: settingsForm.priceBackfillStartDate
+      ? settingsForm.priceBackfillStartDate
+      : null,
   };
   settingsMutation.mutate(payload);
 }
@@ -362,7 +381,8 @@ function handleSaveSettings(): void {
           :interface-options="priceBackfillInterfaceOptions"
           v-model:interface-id="settingsForm.priceBackfillSourceInterfaceId"
           v-model:quota="settingsForm.priceBackfillQuota"
-          :start-date="dividendSettings?.price_backfill_start_date ?? null"
+          v-model:default-start-date="settingsForm.priceBackfillStartDate"
+          :in-flight-start-date="dividendSettings?.price_backfill_start_date ?? null"
           :used-today="dividendSettings?.price_backfill_used_today ?? 0"
         />
 
