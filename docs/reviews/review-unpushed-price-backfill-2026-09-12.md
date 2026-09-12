@@ -38,7 +38,7 @@
 
 ## 三、发现项
 
-### 🟡 M-1｜`/backfill-prices` 重复触发无并发护栏，且在途 `start_date` 被静默覆盖
+### 🟡 M-1｜`/backfill-prices` 重复触发无并发护栏，且在途 `start_date` 被静默覆盖— ✅ 已修复 `be84dbb` / `d34919e`
 
 - 位置：`backfill_router.py:166-176`
 - 现状：`settings.price_backfill_start_date = start` **无条件覆盖**后 commit，随即
@@ -64,7 +64,7 @@
 
 ---
 
-### 🟡 M-3｜在途回补**无取消入口**，持续失败会每天重试
+### 🟡 M-3｜在途回补**无取消入口**，持续失败会每天重试— ✅ 已修复 `be84dbb` / `d34919e`
 
 - `settings_router.py:50` 明确 `price_backfill_start_date` 不接受 PUT（服务端管理，避免状态不一致）——合理；
 - 但 `run_pending_price_backfill` **仅在「选出 0 只」时清空状态**（终态）。若数据源持续不可达，
@@ -74,7 +74,7 @@
 
 ---
 
-### 🟡 M-4｜死代码 `if itf.access_method if False else True: pass`
+### 🟡 M-4｜死代码 `if itf.access_method if False else True: pass`— ✅ 已修复 `bae4ee5`
 
 - 位置：`market_daily_price_sync.py:363-364`（`_run_backfill` 内）
 - 条件表达式恒为 `True`、分支体是 `pass`，是明显的调试/重构残留。
@@ -130,12 +130,44 @@
 | --- | --- |
 | 代码事实核对 | 逐条 `Read`/`Grep` 实测（非凭记忆） |
 | 鉴权 / 输入校验 | ✅ 三端点 admin-only；回补源三重 400 |
-| 并发与状态机 | ⚠️ M-1 重复触发 / M-2 额度绕过 / M-3 无取消入口 |
-| 代码整洁 | ⚠️ M-4 一处死代码 |
-| 本轮是否跑测试 | 否（本轮为审查，未改代码） |
+| 并发与状态机 | ✅ M-1/M-3 已修；⚠️ M-2 额度绕过仍开放（待定）|
+| 代码整洁 | ✅ M-4 已清 |
+| 全量回归（修复后） | ✅ 后端 653 passed / 3 xpassed；前端 77 文件 568 passed；ruff 全绿；vue-tsc EXIT=0 |
 
 ---
 
 **一句话**：实现质量高于平均、文档与注释密度出色，**可推送**；但「在途任务」这条状态机
 缺了并发护栏与取消入口两个口子，建议在推送前补 M-1 与 M-3，顺手删掉 M-4 的死代码；
 工作树 WIP 请先收尾同批提交，避免 0015 与 enums.py 分离。
+
+---
+
+## 六、修复记录（2026-09-12 后续）
+
+| 项 | 处理 | 提交 |
+| --- | --- | --- |
+| **M-1** 重复触发 / 覆盖 | `/backfill-prices` 在途（`start_date` 非空）→ 400，回显在途起点；前端按钮同步置灰 + 文案变「回补进行中…」+ title 说明禁用原因 | `be84dbb`、`d34919e` |
+| **M-3** 无取消入口 | 新增 `DELETE /backfill-prices`（admin-only）清在途标记；前端「取消在途回补」按钮 + 二次确认。取消与护栏成对，避免只禁不给退路 | `be84dbb`、`d34919e` |
+| **M-4** 死代码 | 删除 `_run_backfill` 内恒真空分支 | `bae4ee5` |
+| **L-1** `security_count` 估算 | 已写进 `backfill_prices` docstring（明确为估算值、可能与实际有偏差） | `be84dbb` |
+| **新增发现**：akshare 导入断言顺序依赖 | 见下 | `bae4ee5` |
+| **M-2** 每日额度可被手动绕过 | **未处理**——需先定语义（手动触发是否计入当日额度），本次未改 | — |
+
+### 修复期新增发现（**非本次改动引入**，顺带修掉）
+
+`test_market_data_sdk.py::test_module_import_does_not_import_akshare` 在全量跑失败、单独跑通过。
+根因：该用例在**同进程**断言 `"akshare" not in sys.modules`，而日线任务链路
+（`update_stale_flags` → `refresh_trade_calendar`，`dividend_yield_refresh.py:156`）会真实
+`import akshare` 并将其常驻 `sys.modules`，导致本用例**随执行顺序随机失败**。
+已改为**子进程**断言 import 期副作用，与执行顺序无关。
+
+> 这条属于路线B 提交引入的测试隔离缺陷，若不在推送前修，CI `#003` backend-test 会红。
+
+### 关键实现说明
+
+- **前端禁用不能替代后端校验**：多标签页/多管理员/直接 curl 都能绕过 UI，
+  故 400 护栏保留在后端，前端禁用只作 UX 层防误操作。
+- **触发/取消后必须失效 settings 查询**：否则 `price_backfill_start_date` 不回填，
+  按钮仍显示可点 → 用户可连点第二次（正是并发场景）。已在两个 mutation 的 onSuccess 里 invalidate。
+- **取消的能力边界**（已写进 docstring）：仅清标记，**不中断正在运行的当前批次**，
+  该批次会跑完本批（≤ quota）后自然停止，此后不再续跑，已补数据保留。
