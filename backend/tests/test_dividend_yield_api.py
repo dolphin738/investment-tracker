@@ -8,6 +8,7 @@ settings 阈值校验与接口四重校验 400（§5.4）、非 admin 403。
 """
 from __future__ import annotations
 
+import asyncio
 import uuid
 from datetime import date, datetime, timezone as tz
 from decimal import Decimal
@@ -35,7 +36,7 @@ from app.models.enums import (
     ReportPeriodType,
     SecurityType,
 )
-from app.services.market_data_sync import DIVIDEND_LIST_CAT_ID, NOTICE_CAT_ID
+from app.services.market_data_sync import DIVIDEND_LIST_CAT_ID, NOTICE_CAT_ID, QUOTE_CAT_ID
 from tests.helpers import auth, env, register_login
 
 _DIVIDEND_CAT_ID = DIVIDEND_LIST_CAT_ID
@@ -754,3 +755,149 @@ async def test_backfill_specials_triggers_job_async(session, client, monkeypatch
     assert data["job_id"] == job.id
     assert "后台执行" in data["message"]
     assert triggered == [job.id], "须以种子任务 id 触发，且不等待其完成"
+
+
+# ───────────────────────── /backfill-prices 端点契约（路线 B，决策 A15） ─────────────────────────
+async def _seed_category2_interface(
+    session, *, access_method: str, params: dict | None = None, enabled: bool = True
+):
+    """分类 2「证券行情」接口行，供历史行情回补源校验测试。
+
+    access_method 由提供方决定：sdk 对应路线 B 合法；非 sdk（如 https）触发拒绝。
+    """
+    session.add(InterfaceCategory(id=QUOTE_CAT_ID, label="证券行情", system=True))
+    provider = SecuritiesDataProvider(
+        id=_uid(), name="akshare", access_method=access_method,
+        config={}, enabled=True,
+    )
+    session.add(provider)
+    await session.flush()
+    itf = QuoteInterface(
+        id=_uid(), provider_id=provider.id, category_id=QUOTE_CAT_ID,
+        name="东财-历史行情", endpoint="stock_zh_a_hist", enabled=enabled,
+        params=params if params is not None else {"date": "20231231"},
+    )
+    session.add(itf)
+    await session.commit()
+    return itf
+
+
+@pytest.mark.asyncio
+async def test_backfill_prices_requires_admin(session, client):
+    """守护 /backfill-prices：未登录 401、已登录非 admin 403（与 /rebuild 同口径）。"""
+    # 未登录
+    r = await client.post(
+        "/api/dividend-yield/backfill-prices", json={"start_date": "2021-01-01"}
+    )
+    assert r.status_code == 401
+    # 已登录非 admin
+    info = await register_login(client)
+    r = await client.post(
+        "/api/dividend-yield/backfill-prices",
+        json={"start_date": "2021-01-01"}, headers=auth(info["token"]),
+    )
+    assert r.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_backfill_prices_requires_configured_source(session, client):
+    """守护 /backfill-prices：未配置历史行情回补接口 → 400（VALIDATION_FAILED）。"""
+    admin = await _make_admin(session, client)
+    h = auth(admin["token"])
+    r = await client.post(
+        "/api/dividend-yield/backfill-prices",
+        json={"start_date": "2021-01-01"}, headers=h,
+    )
+    status, _, _, message = env(r)
+    assert status == 400
+    assert "未配置" in message
+
+
+@pytest.mark.asyncio
+async def test_backfill_prices_rejects_non_sdk_provider(session, client):
+    """守护 /backfill-prices：配置了回补接口但提供方接入方式非 sdk → 400。
+
+    PUT 仅校验分类/启用/调用形态（不校验接入方式），故可成功配置非 sdk 接口；
+    运行时 /backfill-prices 须 fail closed 拒绝（路线 B 硬要求 access_method=sdk）。
+    """
+    admin = await _make_admin(session, client)
+    h = auth(admin["token"])
+    itf = await _seed_category2_interface(session, access_method="https")
+    # 配置回补源（PUT 通过：分类 2 + 按报告期全量形态）
+    r = await client.put(
+        "/api/dividend-yield/settings",
+        json={
+            "green_threshold": "0.05", "red_threshold": "0.03",
+            "price_backfill_source_interface_id": itf.id,
+        },
+        headers=h,
+    )
+    assert r.status_code == 200
+    # 触发回补：非 sdk → 400
+    r = await client.post(
+        "/api/dividend-yield/backfill-prices",
+        json={"start_date": "2021-01-01"}, headers=h,
+    )
+    status, _, _, message = env(r)
+    assert status == 400
+    assert "sdk" in message
+
+
+@pytest.mark.asyncio
+async def test_backfill_prices_triggers_async_when_configured(session, client, monkeypatch):
+    """守护 /backfill-prices：admin 配置 sdk 接口后触发成功 → 200 + security_count，
+    且 fire-and-forget 任务被触发（不阻塞，monkeypatch backfill_historical 为即时桩）。"""
+    import app.services.market_daily_price_sync as mds
+
+    captured: list[tuple] = []
+
+    async def _noop(session, itf, master_ids, start_date):
+        captured.append((itf.id, list(master_ids), start_date))
+        return "noop"
+
+    monkeypatch.setattr(mds, "backfill_historical", _noop)
+
+    admin = await _make_admin(session, client)
+    h = auth(admin["token"])
+    itf = await _seed_category2_interface(session, access_method=QuoteProviderAccessMethod.SDK)
+    # 配置回补源（PUT 通过）
+    r = await client.put(
+        "/api/dividend-yield/settings",
+        json={
+            "green_threshold": "0.05", "red_threshold": "0.03",
+            "price_backfill_source_interface_id": itf.id,
+        },
+        headers=h,
+    )
+    assert r.status_code == 200
+    # 造一只待回补证券（security_dividends 去重 master_id）
+    m = Security(
+        id=_uid(), code="sh600999", name="证券sh600999",
+        asset_class=SecurityType.STOCK, exchange="SH",
+    )
+    session.add(m)
+    session.add(SecurityDividend(
+        master_id=m.id, report_year=date.today().year, report_quarter=4,
+        period_type=ReportPeriodType.ANNUAL,
+        cash_per_share=Decimal("1.0"), status=DividendStatus.PAID,
+    ))
+    await session.commit()
+
+    r = await client.post(
+        "/api/dividend-yield/backfill-prices",
+        json={"start_date": "2021-01-01"}, headers=h,
+    )
+    status, _, data, _ = env(r)
+    assert status == 200
+    assert data["security_count"] == 1
+    assert data["start_date"] == "2021-01-01"
+    assert "后台执行" in data["message"]
+    assert "价格回补" in data["message"] or "行情回补" in data["message"]
+
+    # 等待 fire-and-forget 任务执行（持有强引用，不阻塞请求但须真正被调度）
+    for _ in range(50):
+        if captured:
+            break
+        await asyncio.sleep(0.01)
+    assert captured, "fire-and-forget 任务须被触发并执行"
+    assert captured[0][1] == [m.id]

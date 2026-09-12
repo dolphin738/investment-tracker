@@ -215,6 +215,13 @@ class DividendYieldSettings(Base, TimestampMixin):
         ForeignKey("quote_provider_interfaces.id", ondelete="SET NULL"),
         nullable=True,
     )
+    # 历史行情回补源（分类 2，证券行情；路线 B akshare stock_zh_a_hist 历史日线回补，
+    # 决策 A15，全池慢速，须接入方式 sdk）
+    price_backfill_source_interface_id: Mapped[Optional[str]] = mapped_column(
+        String(36),
+        ForeignKey("quote_provider_interfaces.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     updated_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
 
 

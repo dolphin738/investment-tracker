@@ -13,7 +13,9 @@
 """
 from __future__ import annotations
 
-from datetime import timedelta
+import asyncio
+import logging
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any, Optional
 
@@ -31,11 +33,16 @@ from app.models import (
     DividendYieldSettings,
     MarketSecurityDailyPrice,
     QuoteInterface,
+    SecuritiesDataProvider,
     Security,
     SecurityDividend,
     SecurityDividendYield,
 )
-from app.models.enums import DividendStatus, DividendYieldMode
+from app.models.enums import (
+    DividendStatus,
+    DividendYieldMode,
+    QuoteProviderAccessMethod,
+)
 from app.services.auth import CurrentUser, get_current_user, require_admin
 from app.services.base import paged
 from app.services.dividend_yield import (
@@ -46,10 +53,13 @@ from app.services.dividend_yield import (
 )
 from app.services.log import record
 from app.services.market_data_sync import DIVIDEND_LIST_CAT_ID, QUOTE_CAT_ID, NOTICE_CAT_ID
+from app.core.bg import track_task
 
 router_dividend_yield = APIRouter(
     prefix="/api/dividend-yield", tags=["dividend-yield"], route_class=EnvelopeRoute
 )
+
+logger = logging.getLogger(__name__)
 
 # 排序白名单（§8.1 五列：股息率/每股分子/最新收盘价/连续年数/口径），均降序 + NULLS LAST
 # （PG DESC 默认 NULLS FIRST，漏写会让 NULL 值行顶到首页）；稳定 tiebreaker 用 master_id
@@ -380,6 +390,7 @@ class SettingsUpdateBody(BaseModel):
     dividend_detail_source_interface_id: Optional[str] = None
     price_source_interface_id: Optional[str] = None
     announcement_source_interface_id: Optional[str] = None
+    price_backfill_source_interface_id: Optional[str] = None
 
 
 def _interface_out(itf: Optional[QuoteInterface]) -> Optional[dict[str, Any]]:
@@ -466,6 +477,9 @@ async def _settings_out(db: AsyncSession, row: DividendYieldSettings) -> dict[st
         "announcement_source": _interface_out(
             await _resolve_interface(db, row.announcement_source_interface_id)
         ),
+        "price_backfill_source": _interface_out(
+            await _resolve_interface(db, row.price_backfill_source_interface_id)
+        ),
     }
 
 
@@ -506,6 +520,10 @@ async def put_dividend_yield_settings(
     await _validate_interface(
         db, body.announcement_source_interface_id, NOTICE_CAT_ID, require_per_symbol=True
     )
+    # 历史行情回补源：分类 2「证券行情」；路线 B 须按报告期全量形态（params 无 symbol）
+    await _validate_interface(
+        db, body.price_backfill_source_interface_id, QUOTE_CAT_ID, require_per_symbol=False
+    )
 
     row = await _load_settings(db)
     is_new = row.id is None  # 空默认（无持久化行）时插入，否则更新既有行
@@ -516,6 +534,7 @@ async def put_dividend_yield_settings(
         "dividend_detail_source_interface_id": row.dividend_detail_source_interface_id,
         "price_source_interface_id": row.price_source_interface_id,
         "announcement_source_interface_id": row.announcement_source_interface_id,
+        "price_backfill_source_interface_id": row.price_backfill_source_interface_id,
     }
     row.green_threshold = green
     row.red_threshold = red
@@ -523,6 +542,7 @@ async def put_dividend_yield_settings(
     row.dividend_detail_source_interface_id = body.dividend_detail_source_interface_id
     row.price_source_interface_id = body.price_source_interface_id
     row.announcement_source_interface_id = body.announcement_source_interface_id
+    row.price_backfill_source_interface_id = body.price_backfill_source_interface_id
     row.updated_by = admin.user_id
     if is_new:
         db.add(row)
@@ -542,6 +562,7 @@ async def put_dividend_yield_settings(
                 "dividend_detail_source_interface_id": body.dividend_detail_source_interface_id,
                 "price_source_interface_id": body.price_source_interface_id,
                 "announcement_source_interface_id": body.announcement_source_interface_id,
+                "price_backfill_source_interface_id": body.price_backfill_source_interface_id,
             },
         },
         user_id=admin.user_id,
@@ -622,4 +643,102 @@ async def backfill_special_dividends(
     return {
         "message": "已触发特别分红历史回补，后台执行中；进度见「系统管理 - 定时任务」执行日志",
         "job_id": job.id,
+    }
+
+
+# --------------------------------------------------------------------------- #
+# 历史行情回补（路线 B，§6.2 决策 A15；异步后台执行、立即返回）
+# --------------------------------------------------------------------------- #
+class BackfillPricesBody(BaseModel):
+    """回补请求体：起点日期（ISO YYYY-MM-DD，必填）。"""
+
+    start_date: date
+
+
+async def _run_price_backfill(
+    interface_id: str, master_ids: list[str], start: date
+) -> None:
+    """后台执行历史行情回补（独立会话，fire-and-forget）。
+
+    接口在请求级会话内已校验存在与 access_method=sdk，此处再取一次以绑定到
+    任务独立会话（请求会话不可跨协程复用）。
+    """
+    from app.db.database import AsyncSessionLocal
+    from app.services.market_daily_price_sync import backfill_historical
+
+    async with AsyncSessionLocal() as session:
+        itf = await session.get(QuoteInterface, interface_id)
+        if itf is None:
+            logger.warning("历史行情回补接口 %s 不存在，跳过", interface_id)
+            return
+        await backfill_historical(session, itf, master_ids, start)
+
+
+@router_dividend_yield.post("/backfill-prices")
+async def backfill_prices(
+    body: BackfillPricesBody,
+    admin: CurrentUser = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """手动触发历史行情回补（路线 B；admin-only，fire-and-forget）。
+
+    读 ``dividend_yield_settings.price_backfill_source_interface_id`` 作为回补接口；
+    未配置或接口非 sdk 接入方式时 fail closed 400 不触发。待回补证券集合 =
+    ``security_dividends`` 去重 ``master_id``（路线 B 仅需 master_id 列表）。
+    回补长耗时（全池约 11.6 小时），故异步后台执行、立即返回，进度见应用日志。
+    """
+    settings = await _load_settings(db)
+    interface_id = settings.price_backfill_source_interface_id
+    if not interface_id:
+        raise BusinessException(
+            code=BusinessErrorCode.VALIDATION_FAILED,
+            message="未配置历史行情回补接口，请先在全局设置中配置 price_backfill_source",
+            status_code=400,
+        )
+    itf = await db.get(QuoteInterface, interface_id)
+    if itf is None:
+        raise BusinessException(
+            code=BusinessErrorCode.VALIDATION_FAILED,
+            message="历史行情回补接口不存在",
+            status_code=400,
+        )
+    provider = await db.get(SecuritiesDataProvider, itf.provider_id)
+    if provider is None or provider.access_method != QuoteProviderAccessMethod.SDK:
+        raise BusinessException(
+            code=BusinessErrorCode.VALIDATION_FAILED,
+            message=(
+                "历史行情回补接口接入方式须为 sdk（akshare stock_zh_a_hist），"
+                f"当前接口 {itf.name!r} 的提供方接入方式为 "
+                f"{provider.access_method if provider else '未知'}"
+            ),
+            status_code=400,
+        )
+    # 待回补证券集合：security_dividends 去重 master_id（路线 B 只需 master_id 列表）
+    master_ids = list(
+        set(
+            (
+                await db.execute(select(SecurityDividend.master_id).distinct())
+            ).scalars().all()
+        )
+    )
+    start = body.start_date
+    # fire-and-forget：独立会话内执行，立即返回不阻塞请求（持有强引用防 GC 回收）
+    track_task(asyncio.create_task(_run_price_backfill(interface_id, master_ids, start)))
+    await record(
+        level="info",
+        scope="admin",
+        module="dividend_price_backfill",
+        message="历史行情回补（手动触发，异步后台执行）",
+        detail={
+            "start_date": start.isoformat(),
+            "security_count": len(master_ids),
+            "interface_id": interface_id,
+            "interface_name": itf.name,
+        },
+        user_id=admin.user_id,
+    )
+    return {
+        "message": "历史行情回补已触发，后台执行中；进度见应用日志",
+        "start_date": start.isoformat(),
+        "security_count": len(master_ids),
     }
