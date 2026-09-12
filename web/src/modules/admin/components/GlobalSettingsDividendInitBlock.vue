@@ -34,7 +34,20 @@ import {
   useBackfillDividendPrices,
 } from '@/modules/dividend-yield/composables/use-dividend-yield';
 
-const props = defineProps<{ backfillInterfaceId: string }>();
+const props = defineProps<{
+  /** 历史行情回补接口当前选择值（父组件 settingsForm 持有，用于「回补行情缺口」禁用判断） */
+  backfillInterfaceId: string;
+  /** 每日回补额度（只/天），由父组件 settingsForm 持有，本组件仅渲染输入并回传 */
+  priceBackfillQuota: string;
+  /** 在途回补任务目标起始日（YYYY-MM-DD）；null/undefined = 无在途任务；
+   *  由父组件传入 dividendSettings?.price_backfill_start_date */
+  priceBackfillStartDate: string | null;
+}>();
+
+/** 仅回传额度输入值（v-model 风格），其余状态仍由父组件 settingsForm 统一管理 */
+const emit = defineEmits<{
+  (e: 'update:priceBackfillQuota', v: string): void;
+}>();
 
 /** 回补起始日期：默认一年前的今天（ISO YYYY-MM-DD） */
 function oneYearAgoIso(): string {
@@ -85,6 +98,30 @@ function confirmBackfillPrices(): void {
 
 <template>
   <div class="space-y-4">
+    <!-- 在途回补任务状态：目标起始日非空 = 有跨日在途任务（服务端管理，前端只读展示） -->
+    <p
+      v-if="priceBackfillStartDate"
+      class="text-xs font-medium text-amber-600"
+    >
+      回补进行中（目标起始日 {{ priceBackfillStartDate }}）：每日收盘价抓取后按额度自动续跑，全部补完自动结束
+    </p>
+
+    <!-- 每日回补额度（只/天）：参与父组件 settings 保存，本组件仅渲染输入并回传 -->
+    <div class="space-y-2">
+      <Label for="dy-price-backfill-quota">每日回补额度（只/天）</Label>
+      <Input
+        id="dy-price-backfill-quota"
+        :model-value="priceBackfillQuota"
+        type="number"
+        min="1"
+        max="2000"
+        @update:model-value="(v) => emit('update:priceBackfillQuota', String(v))"
+      />
+      <p class="text-xs text-muted-foreground">
+        每日收盘价抓取后按该额度自动续跑，补完自动停止
+      </p>
+    </div>
+
     <!-- 回补起始日期（独立本地值，不参与 settings 保存） -->
     <div class="space-y-2">
       <Label for="dy-backfill-start">回补起始日期</Label>
@@ -120,7 +157,7 @@ function confirmBackfillPrices(): void {
       <Button
         variant="outline"
         :disabled="!canBackfillPrices || backfillingPrices"
-        title="逐只回补历史日线（akshare），受接口限速约束"
+        title="启动跨日回补任务：立即处理第一批，之后每日收盘价抓取后按额度自动续跑，补完自动结束；中途被熔断次日自动接着跑"
         @click="onBackfillPrices"
       >
         <Loader2 v-if="backfillingPrices" class="mr-2 h-4 w-4 animate-spin" />
@@ -161,9 +198,9 @@ function confirmBackfillPrices(): void {
     >
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>确认触发历史行情缺口回补？</AlertDialogTitle>
+          <AlertDialogTitle>确认启动跨日行情回补任务？</AlertDialogTitle>
           <AlertDialogDescription>
-            将逐只回补历史日线（akshare），受接口限速约束，全量约需数小时，可断点续跑；进度见应用日志。
+            将启动跨日回补任务：立即处理第一批，之后每日收盘价抓取后按额度自动续跑，全部补完自动结束。受数据源限速与日请求量限制，全量约需数天。
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

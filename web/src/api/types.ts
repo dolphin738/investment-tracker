@@ -854,6 +854,10 @@ export interface DividendYieldSettingsOut {
   announcement_source: DividendYieldSourceRef | null;
   /** 历史行情回补接口（初始化块；未配置为 null） */
   price_backfill_source: DividendYieldSourceRef | null;
+  /** 每日回补额度（只/天）；后端默认 1000；不提交 price_backfill_start_date */
+  price_backfill_quota: number | null;
+  /** 在途回补任务目标起始日（YYYY-MM-DD）；非空 = 有在途回补任务 */
+  price_backfill_start_date: string | null;
 }
 
 /** 股息率设置更新请求（PUT /dividend-yield/settings · admin-only；写时用 *_interface_id 字段） */
@@ -867,4 +871,7 @@ export interface UpdateDividendYieldSettingsDto {
   announcement_source_interface_id?: string | null;
   /** 历史行情回补接口（初始化块；null = 不设置） */
   price_backfill_source_interface_id?: string | null;
+  /** 每日回补额度（只/天）；后端校验 1..2000 整数，越界返回 400；
+   *  ⚠️ price_backfill_start_date 由服务端管理，前端不提交 */
+  price_backfill_quota?: number | null;
 }

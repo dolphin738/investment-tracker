@@ -83,6 +83,8 @@ const settingsForm = reactive({
   priceSourceInterfaceId: SELECT_EMPTY_VALUE,
   announcementSourceInterfaceId: SELECT_EMPTY_VALUE,
   priceBackfillSourceInterfaceId: SELECT_EMPTY_VALUE,
+  /** 每日回补额度（只/天）；按 greenPercent/redPercent 同款字符串型写法，保存时转 number（默认 1000 与后端一致） */
+  priceBackfillQuota: '1000',
 });
 const settingsFormError = ref('');
 
@@ -113,6 +115,9 @@ watch(
       s.announcement_source?.id ?? SELECT_EMPTY_VALUE;
     settingsForm.priceBackfillSourceInterfaceId =
       s.price_backfill_source?.id ?? SELECT_EMPTY_VALUE;
+    // 每日回补额度：服务端 null 时按后端默认 1000 兜底（与保存 payload 口径一致）
+    settingsForm.priceBackfillQuota =
+      s.price_backfill_quota != null ? String(s.price_backfill_quota) : '1000';
   },
   { immediate: true },
 );
@@ -126,6 +131,15 @@ function percentToRatio(v: string): { ratio: number | null; invalid: boolean } {
   return { ratio: n / 100, invalid: false };
 }
 
+/** 每日回补额度字符串 → number | null（空串视为 null；非整数返回 invalid 触发校验错误） */
+function quotaToValue(v: string): { value: number | null; invalid: boolean } {
+  const t = v.trim();
+  if (t === '') return { value: null, invalid: false };
+  const n = Number(t);
+  if (!Number.isInteger(n)) return { value: null, invalid: true };
+  return { value: n, invalid: false };
+}
+
 /** 阈值前置校验（后端也会 400：0 < red < green <= 1，即百分数 0 < red% < green% <= 100） */
 function validateSettings(): string | null {
   const green = percentToRatio(settingsForm.greenPercent);
@@ -137,6 +151,12 @@ function validateSettings(): string | null {
   if (red.ratio !== null && red.ratio > 1) return '红色阈值须不大于 100（%）';
   if (red.ratio !== null && green.ratio !== null && red.ratio >= green.ratio) {
     return '红色阈值须小于绿色阈值';
+  }
+  // 每日回补额度（只/天）：后端校验 1..2000 整数，越界返回 400；空串视为 null（用后端默认）
+  const q = quotaToValue(settingsForm.priceBackfillQuota);
+  if (q.invalid) return '每日回补额度须为整数';
+  if (q.value !== null && (q.value < 1 || q.value > 2000)) {
+    return '每日回补额度须为 1 到 2000 之间的整数';
   }
   return null;
 }
@@ -157,7 +177,10 @@ const settingsHasChanges = computed(() => {
     settingsForm.announcementSourceInterfaceId !==
       (s.announcement_source?.id ?? SELECT_EMPTY_VALUE) ||
     settingsForm.priceBackfillSourceInterfaceId !==
-      (s.price_backfill_source?.id ?? SELECT_EMPTY_VALUE)
+      (s.price_backfill_source?.id ?? SELECT_EMPTY_VALUE) ||
+    // 每日回补额度：服务端 null 时按后端默认 1000 兜底，与 watch 回填口径一致
+    settingsForm.priceBackfillQuota !==
+      (s.price_backfill_quota != null ? String(s.price_backfill_quota) : '1000')
   );
 });
 
@@ -169,6 +192,7 @@ function handleSaveSettings(): void {
     return;
   }
   settingsFormError.value = '';
+  const q = quotaToValue(settingsForm.priceBackfillQuota);
   const payload: UpdateDividendYieldSettingsDto = {
     green_threshold: percentToRatio(settingsForm.greenPercent).ratio,
     red_threshold: percentToRatio(settingsForm.redPercent).ratio,
@@ -187,6 +211,8 @@ function handleSaveSettings(): void {
     price_backfill_source_interface_id: toInterfaceIdOrNull(
       settingsForm.priceBackfillSourceInterfaceId,
     ),
+    // 每日回补额度：空串 → null（用后端默认）；合法整数直接传；start_date 由服务端管理，前端不提交
+    price_backfill_quota: q.value,
   };
   settingsMutation.mutate(payload);
 }
@@ -353,6 +379,9 @@ function handleSaveSettings(): void {
 
           <GlobalSettingsDividendInitBlock
             :backfill-interface-id="settingsForm.priceBackfillSourceInterfaceId"
+            :price-backfill-quota="settingsForm.priceBackfillQuota"
+            :price-backfill-start-date="dividendSettings?.price_backfill_start_date ?? null"
+            @update:price-backfill-quota="(v) => (settingsForm.priceBackfillQuota = v)"
           />
         </div>
 

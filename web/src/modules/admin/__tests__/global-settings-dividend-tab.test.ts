@@ -20,6 +20,7 @@ import {
 } from '@vue/test-utils';
 import { ref, defineComponent, h } from 'vue';
 import { SELECT_EMPTY_VALUE } from '@/lib/constants';
+import type { DividendYieldSettingsOut } from '@/api/types';
 
 // ---------------------------------------------------------------------------
 // 测试数据（模块级共享：mock 工厂与断言共用）
@@ -39,13 +40,18 @@ const providers = vi.hoisted(() => [
   { id: 'p2', name: '新浪财经' },
 ]);
 
-const settings = vi.hoisted(() => ({
+const settings = vi.hoisted<DividendYieldSettingsOut>(() => ({
   green_threshold: 0.05,
   red_threshold: 0.03,
   dividend_report_source: { id: 'i1', name: '东财-分红配送' },
   dividend_detail_source: { id: 'i2', name: '新浪-分红配股' },
   price_source: { id: 'i3', name: '腾讯财经-A股行情' },
   announcement_source: null,
+  price_backfill_source: null,
+  // 在途回补任务目标起始日（YYYY-MM-DD）；null = 无在途任务
+  price_backfill_start_date: null,
+  // 每日回补额度（只/天）；后端默认 1000
+  price_backfill_quota: null,
 }));
 
 const mutateSpy = vi.hoisted(() => vi.fn());
@@ -165,6 +171,9 @@ function interfaceOptions(select: DOMWrapper<Element>): DOMWrapper<Element>[] {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // 隔离在途状态 / 额度字段，避免污染其他用例（共享 hoisted settings 对象可变）
+  settings.price_backfill_start_date = null;
+  settings.price_backfill_quota = null;
 });
 
 describe('GlobalSettingsDividendTab — 四源下拉与提供方名拼接（§15.3 T2）', () => {
@@ -240,6 +249,43 @@ describe('GlobalSettingsDividendTab — 四源下拉与提供方名拼接（§15
     const saveBtn = wrapper.findAll('button').find((b) => b.text().includes('保存股息率设置'));
     expect(saveBtn).toBeDefined();
     expect(saveBtn!.attributes('disabled')).toBeDefined();
+
+    wrapper.unmount();
+  });
+
+  it('④ 每日回补额度越界（2001）点击保存不调用 update 且显示中文错误', async () => {
+    // 新增的「每日回补额度」是 number input（非 Select），下拉数量仍为 5
+    wrapper = await mountTab();
+    const selects = wrapper.findAll('select');
+    expect(selects).toHaveLength(5);
+
+    const quotaInput = wrapper.find('input#dy-price-backfill-quota');
+    expect(quotaInput.exists()).toBe(true);
+    await quotaInput.setValue('2001');
+    await flushPromises();
+
+    const saveBtn = wrapper
+      .findAll('button')
+      .find((b) => b.text().includes('保存股息率设置'))!;
+    await saveBtn.trigger('click');
+    await flushPromises();
+
+    // 越界：前端拦截，不提交 PUT，并展示中文错误
+    expect(mutateSpy).not.toHaveBeenCalled();
+    expect(wrapper.text()).toContain('每日回补额度须为 1 到 2000 之间的整数');
+
+    wrapper.unmount();
+  });
+
+  it('⑤ price_backfill_start_date 非空时渲染「回补进行中」在途状态文案', async () => {
+    // 模拟后端返回在途任务（price_backfill_start_date 非空）
+    settings.price_backfill_start_date = '2025-07-01';
+    wrapper = await mountTab();
+
+    const text = wrapper.text();
+    expect(text).toContain('回补进行中');
+    expect(text).toContain('2025-07-01');
+    expect(text).toContain('每日收盘价抓取后按额度自动续跑');
 
     wrapper.unmount();
   });
