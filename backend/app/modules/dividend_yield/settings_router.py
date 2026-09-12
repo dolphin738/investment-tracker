@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+from datetime import date
 from decimal import Decimal
 from typing import Any, Optional
 
@@ -48,8 +49,11 @@ class SettingsUpdateBody(BaseModel):
     announcement_source_interface_id: Optional[str] = None
     price_backfill_source_interface_id: Optional[str] = None
     # 每日回补额度（只/天）：1..2000，越界 PUT 400。为 None 表示不改（保留既有值）。
-    # 注意：price_backfill_start_date 不接受 PUT 设置（由触发/完成流程服务端管理，避免状态不一致）。
+    # 注意：price_backfill_start_date（在途标记）不接受 PUT 设置（由触发/完成流程服务端管理，避免状态不一致）。
     price_backfill_quota: Optional[int] = None
+    # 回补起始日期「配置默认值」（YYYY-MM-DD）：与在途标记解耦，PUT 可写、可保存。
+    # 为 None 表示不改（保留既有值）；触发回补（POST /backfill-prices）以本值为起点。
+    price_backfill_default_start_date: Optional[date] = None
 
 
 def _interface_out(itf: Optional[QuoteInterface]) -> Optional[dict[str, Any]]:
@@ -179,6 +183,12 @@ async def _settings_out(db: AsyncSession, row: DividendYieldSettings) -> dict[st
             if row.price_backfill_start_date is not None
             else None
         ),
+        # 回补起始日期配置默认值（可保存）：与在途标记解耦，前端设置页据此回填输入框
+        "price_backfill_default_start_date": (
+            row.price_backfill_default_start_date.isoformat()
+            if row.price_backfill_default_start_date is not None
+            else None
+        ),
         # 当日已用额度：前端据此展示「今日已用 X/N」并在用尽时禁用触发按钮。
         # 这里回传**当日有效值**（记账日不是今天则视为 0），避免前端重复实现跨日重置。
         "price_backfill_used_today": (
@@ -249,6 +259,11 @@ async def put_dividend_yield_settings(
         "announcement_source_interface_id": row.announcement_source_interface_id,
         "price_backfill_source_interface_id": row.price_backfill_source_interface_id,
         "price_backfill_quota": row.price_backfill_quota,
+        "price_backfill_default_start_date": (
+            row.price_backfill_default_start_date.isoformat()
+            if row.price_backfill_default_start_date is not None
+            else None
+        ),
     }
     row.green_threshold = green
     row.red_threshold = red
@@ -260,6 +275,9 @@ async def put_dividend_yield_settings(
     # 仅当请求体显式给出额度时才覆盖（None = 不改）；before 已记录旧值供审计
     if body.price_backfill_quota is not None:
         row.price_backfill_quota = body.price_backfill_quota
+    # 回补起始日期配置默认值：与额度同口径（None = 不改），与在途标记解耦
+    if body.price_backfill_default_start_date is not None:
+        row.price_backfill_default_start_date = body.price_backfill_default_start_date
     row.updated_by = admin.user_id
     if is_new:
         db.add(row)
@@ -279,9 +297,14 @@ async def put_dividend_yield_settings(
                 "dividend_detail_source_interface_id": body.dividend_detail_source_interface_id,
                 "price_source_interface_id": body.price_source_interface_id,
                 "announcement_source_interface_id": body.announcement_source_interface_id,
-                "price_backfill_source_interface_id": body.price_backfill_source_interface_id,
-                "price_backfill_quota": row.price_backfill_quota,
-            },
+            "price_backfill_source_interface_id": body.price_backfill_source_interface_id,
+            "price_backfill_quota": row.price_backfill_quota,
+            "price_backfill_default_start_date": (
+                row.price_backfill_default_start_date.isoformat()
+                if row.price_backfill_default_start_date is not None
+                else None
+            ),
+        },
         },
         user_id=admin.user_id,
     )

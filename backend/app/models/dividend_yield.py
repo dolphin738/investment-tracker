@@ -231,6 +231,11 @@ class DividendYieldSettings(Base, TimestampMixin):
     # 服务端管理（POST /backfill-prices 写入、补完清空），PUT 不接受设置以免状态不一致；
     # 全部证券覆盖后由每日批次清空，任务结束、此后不再跑。
     price_backfill_start_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    # 回补起始日期「配置默认值」（YYYY-MM-DD）：与在途标记 price_backfill_start_date 解耦。
+    # 用户可在全局设置中保存偏好的回补起点；触发回补（POST /backfill-prices）以本值为起点、
+    # 写入在途标记 price_backfill_start_date。本列为纯配置（PUT 可写），不参与在途标记逻辑，
+    # 修复「回补起始日期更改后无法保存」——此前该输入框是纯前端本地 ref、不进 PUT，改了等于没存。
+    price_backfill_default_start_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     # 当日记账（额度按**自然日**消耗，跨日自动重置）：
     # - last_run_date：最近一次执行回补的自然日；不等于今天则把 used_today 归零；
     # - used_today：今日已处理只数，按「本批实际处理只数」累加（**成败都计**——

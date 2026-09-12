@@ -858,6 +858,9 @@ export interface DividendYieldSettingsOut {
   price_backfill_quota: number | null;
   /** 在途回补任务目标起始日（YYYY-MM-DD）；非空 = 有在途回补任务 */
   price_backfill_start_date: string | null;
+  /** 回补起始日期配置默认值（YYYY-MM-DD）：用户保存的偏好回补起点，触发回补以其为起点；
+   *  与在途标记 price_backfill_start_date 解耦；null = 未设置（前端回退一年前） */
+  price_backfill_default_start_date: string | null;
   /** 当日已用回补额度（只）；后端回传的是**当日有效值**（跨日已归零），
    *  前端无需自己判断跨日重置，直接用于「今日已用 X/N」与额度用尽时禁用触发 */
   price_backfill_used_today: number;
@@ -875,6 +878,9 @@ export interface UpdateDividendYieldSettingsDto {
   /** 历史行情回补接口（初始化块；null = 不设置） */
   price_backfill_source_interface_id?: string | null;
   /** 每日回补额度（只/天）；后端校验 1..2000 整数，越界返回 400；
-   *  ⚠️ price_backfill_start_date 由服务端管理，前端不提交 */
+   *  ⚠️ price_backfill_start_date（在途标记）由服务端管理，前端不提交 */
   price_backfill_quota?: number | null;
+  /** 回补起始日期配置默认值（YYYY-MM-DD）；与在途标记解耦，PUT 可写、随设置保存；
+   *  触发回补（POST /backfill-prices）以本值为起点；空串/不传 = 不改（保留既有值） */
+  price_backfill_default_start_date?: string | null;
 }

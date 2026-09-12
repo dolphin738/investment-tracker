@@ -28,8 +28,10 @@ const props = defineProps<{
   interfaceId: string;
   /** 每日回补额度（字符串型，与父组件 settingsForm 口径一致） */
   quota: string;
-  /** 在途回补任务目标起始日，直接透传给 InitBlock */
-  startDate: string | null;
+  /** 回补起始日期配置默认值（可保存；v-model 回传父组件 settingsForm，触发回补以其为起点） */
+  defaultStartDate: string;
+  /** 在途回补任务目标起始日（只读，服务端管理）；非空 = 有在途任务，禁用起点输入与触发 */
+  inFlightStartDate: string | null;
   /** 当日已用回补额度（只），直接透传给 InitBlock（用于剩余额度与「今日已用 X/N」） */
   usedToday: number;
 }>();
@@ -37,6 +39,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'update:interfaceId', v: string): void;
   (e: 'update:quota', v: string): void;
+  (e: 'update:defaultStartDate', v: string): void;
 }>();
 </script>
 
@@ -75,9 +78,11 @@ const emit = defineEmits<{
     <GlobalSettingsDividendInitBlock
       :backfill-interface-id="interfaceId"
       :price-backfill-quota="quota"
-      :price-backfill-start-date="startDate"
+      :price-backfill-default-start-date="defaultStartDate"
+      :price-backfill-in-flight-date="inFlightStartDate"
       :price-backfill-used-today="usedToday"
       @update:price-backfill-quota="(v) => emit('update:quota', v)"
+      @update:price-backfill-default-start-date="(v) => emit('update:defaultStartDate', v)"
     />
   </div>
 </template>
