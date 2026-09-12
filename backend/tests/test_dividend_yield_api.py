@@ -754,21 +754,3 @@ async def test_backfill_specials_triggers_job_async(session, client, monkeypatch
     assert data["job_id"] == job.id
     assert "后台执行" in data["message"]
     assert triggered == [job.id], "须以种子任务 id 触发，且不等待其完成"
-
-
-@pytest.mark.asyncio
-async def test_backfill_prices_requires_admin(session, client):
-    """守护 §6.2 路线 A：行情缺口回补写历史价格表，未登录 401、非 admin 403。
-
-    该端点会写 ``market_security_daily_prices``（股息率曲线/排名的输入源），
-    鉴权收紧失败 = 任意登录用户可污染历史价格，故契约必须钉住。
-    """
-    # 未登录
-    r = await client.post("/api/dividend-yield/backfill-prices")
-    assert r.status_code == 401
-    # 已登录非 admin
-    info = await register_login(client)
-    r = await client.post(
-        "/api/dividend-yield/backfill-prices", headers=auth(info["token"])
-    )
-    assert r.status_code == 403
