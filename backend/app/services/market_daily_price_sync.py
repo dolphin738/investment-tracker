@@ -360,8 +360,6 @@ class MarketDailyPriceSyncService:
             raise RuntimeError(
                 f"backfill_start 非法（须 ISO 日期 YYYY-MM-DD）：{backfill_start_raw!r}"
             ) from exc
-        if itf.access_method if False else True:
-            pass
         provider = await self.session.get(SecuritiesDataProvider, itf.provider_id)
         if provider is None or provider.access_method != QuoteProviderAccessMethod.SDK:
             raise RuntimeError(

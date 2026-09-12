@@ -89,8 +89,30 @@ async def test_module_import_does_not_import_akshare():
     MarketDataSyncService，造成「类身份分裂」：本文件与路由层各自绑定的类不是同一对象，
     monkeypatch 打在旧类上、路由实例化新类而失效（表现为接口测试真发网络请求）。
     懒导入保证 akshare 仅在 _fetch_sdk 函数体内 import，模块加载期零副作用。
+
+    **为何改为子进程断言**：原实现直接查本进程的 ``sys.modules``，但同进程内其它用例
+    （日线任务链路 → ``update_stale_flags`` → ``refresh_trade_calendar``）会真实
+    ``import akshare`` 并把 ``'akshare'`` 永久留在 sys.modules，造成本用例
+    **随执行顺序随机失败**（单独跑通过、全量跑失败）。子进程隔离后，断言的才是
+    真正的「import 期副作用」，与执行顺序无关。
     """
-    assert "akshare" not in sys.modules
+    import subprocess
+    from pathlib import Path
+
+    code = (
+        "import sys; import app.services.market_data_sync; "
+        "sys.exit(0 if 'akshare' not in sys.modules else 1)"
+    )
+    proc = subprocess.run(  # noqa: S603 固定 argv、无 shell
+        [sys.executable, "-c", code],
+        cwd=str(Path(__file__).resolve().parents[1]),
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0, (
+        "导入 app.services.market_data_sync 触发了 akshare 导入（懒导入被破坏）\n"
+        f"stdout: {proc.stdout}\nstderr: {proc.stderr[-800:]}"
+    )
 
 
 async def test_fetch_sdk_parses_dataframe(session, monkeypatch):
