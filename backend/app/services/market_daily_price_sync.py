@@ -57,6 +57,10 @@ _BACKFILL_BURST = 10
 _BACKFILL_COOLDOWN_MIN = 60.0
 _BACKFILL_COOLDOWN_MAX = 120.0
 _BACKFILL_BACKOFFS = (60, 120, 300)  # 指数退避重试间隔（秒），依次用尽即放弃该证券
+# 单只回补请求的兜底超时上界（秒）。实库「东财-历史行情」接口 timeout 列为 NULL，
+# _fetch_sdk_raw 内部 wait_for(timeout=None) 即不设超时，单只卡死会无限拖住整轮回补；
+# 此层是回补自己的兜底上界，超时后由 except Exception 退避重试，让循环继续推进。
+_BACKFILL_FETCH_TIMEOUT = 60.0
 
 # stock_zh_a_hist 返回中文列名（§6.2 行解析）
 _COL_HIST_DATE = "日期"
@@ -357,7 +361,9 @@ async def backfill_historical(
     - ``itf`` 须为配置好的 SDK 行情接口（endpoint=``stock_zh_a_hist``），access_method=sdk；
     - 断点即数据本身：进度 = 该证券在 ``market_security_daily_prices`` 已存在的最早
       ``trade_date``，起点已覆盖 ``start_date`` 的证券跳过（无额外游标表）；
-    - burst≈10 只/批 + 批间冷却 60–120s + 指数退避 60/120/300s（决策 A15），每批记进度日志。
+    - burst≈10 只/批 + 批间冷却 60–120s + 指数退避 60/120/300s（决策 A15），每批记进度日志；
+    - 单只回补请求另有兜底超时上界 ``_BACKFILL_FETCH_TIMEOUT``（秒），防止接口 timeout=NULL
+      时单只卡死无限拖住整轮回补（超时由退避重试分支接住）。
     """
     mds = MarketDataSyncService(session)
     today = today_app_tz()
@@ -402,7 +408,14 @@ async def backfill_historical(
             succeeded = False
             for attempt, wait in enumerate(_BACKFILL_BACKOFFS, start=1):
                 try:
-                    rows = await mds._fetch_sdk_raw(itf, params, codes=None)
+                    # 外包单只兜底超时上界：_fetch_sdk_raw 实库可能因接口 timeout=NULL
+                    # 而不设超时；此处统一锁上界，超时走下方 except 退避重试。
+                    # 诚实局限：内部 asyncio.to_thread 无法真正取消已启动线程，超时
+                    # 只是让回补循环继续推进，底层 HTTP 请求可能仍在后台跑完。
+                    rows = await asyncio.wait_for(
+                        mds._fetch_sdk_raw(itf, params, codes=None),
+                        timeout=_BACKFILL_FETCH_TIMEOUT,
+                    )
                 except Exception as exc:  # noqa: BLE001  退避重试
                     logger.warning(
                         "回补 %s 第 %d/%d 次失败 %s，%ds 后重试",

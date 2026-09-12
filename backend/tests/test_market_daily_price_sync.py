@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import uuid
 from datetime import date
 from decimal import Decimal
@@ -438,3 +439,56 @@ async def test_daily_close_fetch_backfill_entry_runs_hist_backfill(session, monk
     dates = {r.trade_date for r in rows}
     assert today in dates          # 日抓正常写入当日
     assert date(2024, 1, 2) in dates  # 回补写入历史行
+
+
+# ───────────────────────── 回补单只超时上界（B 修复，_BACKFILL_FETCH_TIMEOUT） ─────────────────────────
+@pytest.mark.asyncio
+async def test_backfill_single_fetch_timeout_marks_failed_and_proceeds(session, monkeypatch):
+    """守护 B 修复：单只 _fetch_sdk_raw 卡死（永远 sleep）应被 _BACKFILL_FETCH_TIMEOUT
+    兜底超时，由 except Exception 退避重试后计为失败，整轮回补不卡死。"""
+    m = await _add_master(session, code="600003")
+    provider = SecuritiesDataProvider(
+        id=_uid(), name="akshare", access_method=QuoteProviderAccessMethod.SDK,
+        config={}, enabled=True,
+    )
+    itf = QuoteInterface(
+        id=_uid(), provider_id=provider.id, category_id=QUOTE_CAT_ID, name="东财历史",
+        endpoint="stock_zh_a_hist", http_method="GET", enabled=True, priority=1,
+        resp_code_field="代码", resp_price_field="收盘", response_parse={}, params={},
+    )
+    session.add(provider)
+    await session.flush()
+    session.add(InterfaceCategory(id=QUOTE_CAT_ID, label="证券行情", system=True))
+    await session.flush()
+    session.add(itf)
+    await session.commit()
+
+    async def _fake_sdk_sleep_forever(self, itf_obj, params, codes):
+        # 模拟单只请求底层 HTTP 卡死：永不返回，逼出 _BACKFILL_FETCH_TIMEOUT
+        await asyncio.sleep(9999)
+        return []
+
+    monkeypatch.setattr(MarketDataSyncService, "_fetch_sdk_raw", _fake_sdk_sleep_forever)
+    # 超时上界压到极小，避免测试真实等待 60s
+    monkeypatch.setattr(
+        "app.services.market_daily_price_sync._BACKFILL_FETCH_TIMEOUT", 0.05
+    )
+    # 退避常量归零：超时后重试不真实 sleep 60/120/300s（保持测试秒级）
+    monkeypatch.setattr(
+        "app.services.market_daily_price_sync._BACKFILL_BACKOFFS", (0,)
+    )
+    monkeypatch.setattr(
+        "app.services.market_daily_price_sync._BACKFILL_COOLDOWN_MIN", 0
+    )
+    monkeypatch.setattr(
+        "app.services.market_daily_price_sync._BACKFILL_COOLDOWN_MAX", 0
+    )
+
+    result = await backfill_historical(session, itf, [m.id], date(2024, 1, 1))
+
+    # 关键：超时经 except Exception 退避重试后，该证券被计为失败、整轮不卡死并正常收尾
+    assert "历史回补完成" in result
+    assert "失败 1 只" in result
+    # 卡死的证券不应落任何历史行
+    rows = (await session.execute(select(MarketSecurityDailyPrice))).scalars().all()
+    assert all(r.master_id != m.id for r in rows)
