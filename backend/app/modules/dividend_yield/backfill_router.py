@@ -13,7 +13,6 @@ from datetime import date
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.bg import track_task
@@ -63,50 +62,38 @@ async def rebuild_dividend_yield(
 # --------------------------------------------------------------------------- #
 # 特别分红历史回补（§6.9，冷启动一次性；异步后台执行、立即返回）
 # --------------------------------------------------------------------------- #
+async def _run_special_backfill() -> None:
+    """后台执行特别分红历史回补（独立会话，fire-and-forget，与 /backfill-prices 同款）。
+
+    直接复用 services 的 ``run_dividend_special_backfill(None)``（内部自建会话），
+    此处仅包裹为后台任务并持有强引用防 GC 回收。按钮版取代了原系统定时任务，
+    故不再依赖迁移 0011 种子的系统任务行。
+    """
+    from app.services.dividend_notice_scan import run_dividend_special_backfill
+
+    await run_dividend_special_backfill(None)
+
+
 @router_backfill.post("/backfill-specials")
 async def backfill_special_dividends(
     admin: CurrentUser = Depends(require_admin),
 ):
     """手动触发特别分红历史回补（§6.9；admin-only）。
 
-    按 ``task_type`` 定位迁移 0011 种子的系统任务并手动 trigger。
-    ``run_task_now`` 为 fire-and-forget（``asyncio.create_task``），
-    故 12~25 分钟的长耗时**不会**造成请求超时——区别于同步等待的 ``/rebuild``。
-    进度与结果经「系统管理 - 定时任务」执行日志查看（§6.7）。
+    直接 fire-and-forget 调起服务函数（不再依赖迁移 0011 种子的系统任务），
+    长耗时（12~25 分钟）不阻塞请求；进度与结果经应用日志查看。
     """
-    from fastapi import HTTPException
-
-    from app.db.database import AsyncSessionLocal
-    from app.models.enums import JobTaskType
-    from app.models.job import JobConfig
-    from app.services.scheduler import run_task_now
-
-    async with AsyncSessionLocal() as session:
-        job = (
-            await session.execute(
-                select(JobConfig).where(
-                    JobConfig.task_type == JobTaskType.DIVIDEND_SPECIAL_BACKFILL
-                )
-            )
-        ).scalar_one_or_none()
-    if job is None:
-        raise HTTPException(
-            status_code=404,
-            detail="未找到「特别分红历史回补」任务：迁移 0011 种子缺失或未执行",
-        )
-    # fire-and-forget：立即返回，任务在后台执行（scheduler.run_task_now）
-    run_task_now(job.id)
+    # fire-and-forget：立即返回，任务在后台执行
+    track_task(asyncio.create_task(_run_special_backfill()))
     await record(
         level="info",
         scope="admin",
         module="dividend_special_backfill",
         message="特别分红历史回补（手动触发，异步后台执行）",
-        detail={"job_id": job.id},
         user_id=admin.user_id,
     )
     return {
-        "message": "已触发特别分红历史回补，后台执行中；进度见「系统管理 - 定时任务」执行日志",
-        "job_id": job.id,
+        "message": "已触发特别分红历史回补，后台执行中；进度见应用日志",
     }
 
 
@@ -149,8 +136,29 @@ async def backfill_prices(
     不由 PUT 设置（服务端管理，避免状态不一致）。回补长耗时，故异步后台执行、立即返回，
     进度见应用日志。响应 ``security_count`` 语义改为「本批将处理的只数」（≤ 每日额度，
     不再是全池数）。
+
+    **在途护栏（M-1）**：已有在途任务（``price_backfill_start_date`` 非空）时拒绝再次启动。
+    前端会把按钮置灰，但那只是 UX 层——多标签页/多管理员/直接 curl 都能绕过，
+    故本校验是唯一真正的护栏。取消请走 ``DELETE /backfill-prices``。
+
+    **响应 ``security_count`` 为估算值**：本批名单在请求会话内算出，后台任务用独立会话
+    重新选取，两者非原子，极端情况下与实际处理只数可能有偏差。
     """
     settings = await load_settings(db)
+    # 在途护栏（M-1）：已有在途任务则拒绝再次启动。
+    # 两个并发任务会各自 SELECT 出**同一批**待补证券（回补长耗时，批完成前这些
+    # 证券仍是「未覆盖」且 ORDER BY master_id 确定）→ 同一批被请求两次、配额翻倍。
+    if settings.price_backfill_start_date is not None:
+        raise BusinessException(
+            code=BusinessErrorCode.VALIDATION_FAILED,
+            message=(
+                "已有在途回补任务（起点 "
+                f"{settings.price_backfill_start_date.isoformat()}），"
+                "请先等待其完成，或先取消（DELETE /api/dividend-yield/backfill-prices）"
+                "后再启动新的回补"
+            ),
+            status_code=400,
+        )
     interface_id = settings.price_backfill_source_interface_id
     if not interface_id:
         raise BusinessException(
@@ -206,4 +214,52 @@ async def backfill_prices(
         "start_date": start.isoformat(),
         "security_count": len(pending),
         "quota": quota,
+    }
+
+# --------------------------------------------------------------------------- #
+# 取消在途的历史行情回补（在途标记服务端管理，须留退路）
+# --------------------------------------------------------------------------- #
+@router_backfill.delete("/backfill-prices")
+async def cancel_price_backfill(
+    admin: CurrentUser = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """取消在途的历史行情回补（admin-only）：清空 ``price_backfill_start_date``。
+
+    为什么需要本端点：在途标记由服务端管理（PUT /settings 不接受该字段），
+    而 ``run_pending_price_backfill`` 仅在「选出 0 只」时才自动清标记。
+    若数据源持续不可达，熔断会每天触发却永远清不掉标记 → 任务无限期在途、
+    每天白烧额度，而 admin 无任何 API 手段停止（只能直接改库）。
+
+    有了取消，「已有在途任务」的 400 与前端置灰才不会把人锁死，形成闭环：
+    进行中 → 取消 → 重新填起点触发。
+
+    **能力边界（诚实说明）**：本端点仅清标记，**不中断正在运行的后台批次**——
+    当前批次会跑完本批（≤ quota 只）后自然停止，此后每日收盘价抓取不再续跑。
+    已写入的日线行一律保留（upsert 幂等，重跑自动跳过已覆盖证券）。
+    """
+    settings = await load_settings(db)
+    if settings.price_backfill_start_date is None:
+        raise BusinessException(
+            code=BusinessErrorCode.VALIDATION_FAILED,
+            message="当前无在途回补任务，无需取消",
+            status_code=400,
+        )
+    cancelled = settings.price_backfill_start_date
+    settings.price_backfill_start_date = None
+    await db.commit()
+    await record(
+        level="info",
+        scope="admin",
+        module="dividend_price_backfill",
+        message="取消在途行情回补（已清 price_backfill_start_date）",
+        detail={"cancelled_start_date": cancelled.isoformat()},
+        user_id=admin.user_id,
+    )
+    return {
+        "message": (
+            f"已取消在途回补任务（原起点 {cancelled.isoformat()}）；"
+            "正在运行的当前批次会跑完本批后停止，此后不再续跑，已补数据保留"
+        ),
+        "cancelled_start_date": cancelled.isoformat(),
     }
