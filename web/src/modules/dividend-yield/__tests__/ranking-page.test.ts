@@ -19,8 +19,6 @@ const fixtures = vi.hoisted(() => ({
   total: 0,
   /** 记录「特别分红回补」触发次数 */
   backfillCalls: 0,
-  /** 记录「回补行情缺口」触发次数 */
-  priceBackfillCalls: 0,
   /** 当前用户是否 admin（驱动「全量重建 / 特别分红回补」按钮显隐） */
   isAdmin: false,
 }));
@@ -67,10 +65,6 @@ vi.mock('@/api/dividend-yield.api', () => ({
     fixtures.backfillCalls += 1;
     return { message: '已触发特别分红历史回补，后台执行中', job_id: 'job-1' };
   }),
-  backfillDailyPrices: vi.fn(async () => {
-    fixtures.priceBackfillCalls += 1;
-    return { message: '已触发回补行情缺口（回溯 30 天），后台执行中' };
-  }),
 }));
 vi.mock('@/api/quote-interface.api', () => ({
   listAllInterfaces: vi.fn(async () => []),
@@ -89,7 +83,6 @@ describe('RankingPage（§10.2 管理页）', () => {
     fixtures.calls = [];
     fixtures.total = 1;
     fixtures.backfillCalls = 0;
-    fixtures.priceBackfillCalls = 0;
     fixtures.isAdmin = false;
     pinia = createPinia();
     setActivePinia(pinia);
@@ -199,42 +192,4 @@ describe('RankingPage（§10.2 管理页）', () => {
     // 后端 fire-and-forget：本页不等待回补完成，故不应额外重拉榜单
     expect(fixtures.calls.length).toBe(before);
   });
-
-  it('「回补行情缺口」按钮：非 admin 不渲染（§6.2 路线 A，admin-only）', async () => {
-    fixtures.isAdmin = false;
-    const wrapper = await mountAt('/dividend-yield');
-    expect(wrapper.text()).not.toContain('回补行情缺口');
-  });
-
-  it('「回补行情缺口」按钮：admin 可见，二次确认后才触发（§6.2 异步后台）', async () => {
-    fixtures.isAdmin = true;
-    const wrapper = await mountAt('/dividend-yield');
-    const btn = wrapper
-      .findAll('button')
-      .find((b) => b.text().includes('回补行情缺口'));
-    expect(btn).toBeTruthy();
-
-    const before = fixtures.calls.length;
-    await btn!.trigger('click');
-    await flushPromises();
-
-    // 两个回补弹窗的确认按钮文案同为「确认回补」，须按标题限定范围避免误命中
-    const dialog = Array.from(document.querySelectorAll('[role="alertdialog"]')).find((el) =>
-      (el.textContent ?? '').includes('确认回补行情缺口？'),
-    );
-    expect(dialog).toBeTruthy();
-    const confirmBtn = Array.from(dialog!.querySelectorAll('button')).find((b) =>
-      (b.textContent ?? '').includes('确认回补'),
-    );
-    expect(confirmBtn).toBeTruthy();
-    expect(fixtures.priceBackfillCalls).toBe(0); // 未确认前不得触发（写历史价，误点代价高）
-
-    await confirmBtn!.click();
-    await flushPromises();
-
-    expect(fixtures.priceBackfillCalls).toBe(1);
-    // 后端 fire-and-forget：本页不等待回补完成，故不应额外重拉榜单
-    expect(fixtures.calls.length).toBe(before);
-  });
 });
-
