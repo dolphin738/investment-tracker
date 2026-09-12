@@ -62,7 +62,6 @@ import {
   useRank,
   useRebuildDividendYield,
   useBackfillSpecialDividends,
-  useBackfillDividendPrices,
 } from '../composables/use-dividend-yield';
 import { useYieldThresholds } from '../composables/use-yield-thresholds';
 import SecurityDetailDialog from '../components/SecurityDetailDialog.vue';
@@ -183,18 +182,6 @@ function confirmBackfill(): void {
   backfill.mutate();
 }
 
-/** 行情缺口回补（admin-only；按交易日横截面批量回补；后端异步后台执行） */
-const priceBackfill = useBackfillDividendPrices();
-const priceBackfilling = computed(() => priceBackfill.isPending.value);
-const priceBackfillConfirmOpen = ref(false);
-function onPriceBackfill(): void {
-  priceBackfillConfirmOpen.value = true;
-}
-function confirmPriceBackfill(): void {
-  priceBackfillConfirmOpen.value = false;
-  priceBackfill.mutate();
-}
-
 /** 页面级 Tab：榜单列表 / 股息价格推算（内容区 v-show 切换，保状态互不干扰） */
 const activeTab = ref<string>('rank');
 </script>
@@ -313,18 +300,6 @@ const activeTab = ref<string>('rank');
           <Loader2 v-if="backfilling" class="mr-1 h-4 w-4 animate-spin" />
           特别分红回补
         </Button>
-        <Button
-          v-if="isAdmin"
-          variant="outline"
-          size="sm"
-          class="self-end"
-          :disabled="priceBackfilling"
-          title="补最近交易日的行情缺口（行情接口无历史查询能力，无法补深度历史）"
-          @click="onPriceBackfill"
-        >
-          <Loader2 v-if="priceBackfilling" class="mr-1 h-4 w-4 animate-spin" />
-          回补行情缺口
-        </Button>
       </div>
 
       <AlertDialog
@@ -346,32 +321,6 @@ const activeTab = ref<string>('rank');
               @click="confirmBackfill"
             >
               <Loader2 v-if="backfilling" class="mr-2 h-4 w-4 animate-spin" />
-              确认回补
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      <!-- 行情缺口回补确认（与特别分红回补同构；描述强调行情接口的能力边界） -->
-      <AlertDialog
-        :open="priceBackfillConfirmOpen"
-        @update:open="(o) => !o && (priceBackfillConfirmOpen = false)"
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>确认回补行情缺口？</AlertDialogTitle>
-            <AlertDialogDescription>
-              将批量补抓最近交易日缺失的收盘价（约 6 次请求/交易日）。注意：行情接口只返回当前价、无历史查询能力，因此只能补最近几日的缺口；更早的历史缺失须走「每日收盘价抓取」任务的 backfill_start 参数（逐只回补，耗时数小时）。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel :disabled="priceBackfilling">取消</AlertDialogCancel>
-            <AlertDialogAction
-              :disabled="priceBackfilling"
-              class="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              @click="confirmPriceBackfill"
-            >
-              <Loader2 v-if="priceBackfilling" class="mr-2 h-4 w-4 animate-spin" />
               确认回补
             </AlertDialogAction>
           </AlertDialogFooter>

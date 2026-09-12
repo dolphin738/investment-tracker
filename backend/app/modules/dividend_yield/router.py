@@ -22,7 +22,6 @@ from pydantic import BaseModel
 from sqlalchemy import case, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.bg import track_task
 from app.core.date_utils import today_app_tz
 from app.core.enums import BusinessErrorCode
 from app.core.envelope import EnvelopeRoute
@@ -623,62 +622,4 @@ async def backfill_special_dividends(
     return {
         "message": "已触发特别分红历史回补，后台执行中；进度见「系统管理 - 定时任务」执行日志",
         "job_id": job.id,
-    }
-
-
-# --------------------------------------------------------------------------- #
-# 行情缺口回补（§6.2 路线 A；admin-only，异步后台执行、立即返回）
-# --------------------------------------------------------------------------- #
-class GapBackfillBody(BaseModel):
-    """缺口回补入参：``lookback_days`` 为回溯天数（上限 400，服务侧再钳制）。"""
-
-    lookback_days: int = 30
-
-
-@router_dividend_yield.post("/backfill-prices")
-async def backfill_daily_prices(
-    body: GapBackfillBody | None = None,
-    admin: CurrentUser = Depends(require_admin),
-):
-    """触发「按交易日横截面批量回补」（§6.2 路线 A；admin-only）。
-
-    与 ``/backfill-specials`` 同为 fire-and-forget：直接 ``create_task`` 后台执行、
-    立即返回，故长时间运行不会造成请求超时。进度经执行日志（§6.7）查看。
-
-    **能力边界**：腾讯 ``q=`` 接口只返回当前价、无历史查询能力，故本端点只能补
-    「行情接口仍能返回该日收盘价」的近端缺口（某日任务失败、新增证券补历史）。
-    深度历史（数月~数年）须走日抓任务的 ``backfill_start`` 参数（路线 B，逐只，多小时级）。
-    """
-    import asyncio
-
-    from app.db.database import AsyncSessionLocal
-    from app.services.market_daily_price_sync import MarketDailyPriceSyncService
-
-    days = max(1, min((body.lookback_days if body else 30), 400))
-
-    class _Cfg:
-        """轻量 cfg 壳：handler 只读 ``params``，无需 JobConfig 实例。"""
-
-        params = {"lookback_days": days}
-
-    async def _runner() -> None:
-        async with AsyncSessionLocal() as session:
-            await MarketDailyPriceSyncService(session).gap_backfill_daily(_Cfg())
-
-    # 强引用持有：防止协程被 GC 提前回收（app.core.bg.track_task，全仓唯一实现）
-    track_task(asyncio.create_task(_runner()))
-    await record(
-        level="info",
-        scope="admin",
-        module="dividend_price_backfill",
-        message="行情缺口回补（手动触发，异步后台执行）",
-        detail={"lookback_days": days},
-        user_id=admin.user_id,
-    )
-    return {
-        "message": (
-            f"已触发行情缺口回补（回溯 {days} 天），后台执行中；"
-            "注：行情接口无历史查询能力，仅能补最近交易日缺口"
-        ),
-        "lookback_days": days,
     }

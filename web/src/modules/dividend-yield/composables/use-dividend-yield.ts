@@ -24,7 +24,6 @@ import {
   getDividendYieldTop20,
   rebuildDividendYield,
   backfillSpecialDividends,
-  backfillDailyPrices,
   updateDividendYieldSettings,
   type DividendYieldRankFilters,
 } from '@/api/dividend-yield.api';
@@ -196,20 +195,5 @@ export function useBackfillSpecialDividends() {
       toast.success(data.message || '已触发特别分红历史回补，后台执行中');
     },
     onError: () => toast.error('特别分红历史回补触发失败，请稍后重试'),
-  });
-}
-
-/**
- * 手动触发按交易日横截面批量回补行情缺口（admin-only）。
- * 后端为 fire-and-forget：本调用立即返回、回补在后台按交易日逐日执行，
- * 故此处不失效榜单查询（回补完成后由榜单自身 staleTime 或手动刷新体现）。
- */
-export function useBackfillDividendPrices() {
-  return useMutation({
-    mutationFn: () => backfillDailyPrices(),
-    onSuccess: (data) => {
-      toast.success(data.message || '已触发行情缺口回补，后台执行中');
-    },
-    onError: () => toast.error('行情缺口回补触发失败，请稍后重试'),
   });
 }

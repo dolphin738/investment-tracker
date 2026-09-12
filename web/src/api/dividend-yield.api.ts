@@ -103,24 +103,3 @@ export function backfillSpecialDividends(): Promise<{
     '/dividend-yield/backfill-specials',
   );
 }
-
-/** 回补行情缺口结果（后端异步后台执行、立即返回） */
-export interface BackfillPricesResult {
-  message: string;
-  lookback_days: number;
-}
-
-/**
- * 手动触发按交易日横截面批量回补行情缺口（admin-only）。
- *
- * 后端为 fire-and-forget：请求立即返回，实际回补在后台按交易日逐日跑。
- * 受行情接口无历史查询能力所限，仅能回补最近 lookbackDays 个交易日的缺口。
- */
-export function backfillDailyPrices(
-  lookbackDays = 30,
-): Promise<BackfillPricesResult> {
-  return http.post<BackfillPricesResult>(
-    '/dividend-yield/backfill-prices',
-    { lookback_days: lookbackDays },
-  );
-}

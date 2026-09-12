@@ -4,17 +4,8 @@
   幂等 upsert 到 ``market_security_daily_prices``。复用 ``market_data_sync`` 既有
   ``_call_interface_raw`` / ``_row_get`` / ``_normalize_master_code`` / 告警链路，不重写请求。
   双防线防节假日/停牌污（决策 A9）：交易日历校验（主）+ 返回日期比对（备）。
-- ``gap_backfill_daily``（路线 A，横截面批量）：对**已存档但有缺口**的历史交易日逐日批量补抓，
-  每交易日仅 6 次 HTTP（800 只/批），与逐只路线相比把「1 天数据」的成本从 O(证券数) 降到 O(1)。
-  **腾讯 ``q=`` 无历史查询能力**，故本方法只能补「行情接口仍可返回该日收盘价」的近端缺口。
-- ``backfill_historical``（路线 B，逐只）：历史日线回补（akshare ``stock_zh_a_hist``，决策 A15），
+- ``backfill_historical``：历史日线回补（akshare ``stock_zh_a_hist``，决策 A15），
   单独方法供复用，本阶段不注册为任务默认调用（防日线任务无限拉历史）。断点即数据本身。
-  **深度回补（数月~数年）只能走本路线**，但其耗时受 A15 冷却约束为多小时级。
-
-两条路线的关键差异（附录 A.11）：路线 A 的每个交易日数据独立取自该日响应，
-路线 B 是「全历史一次取回、每行 close 均为该日真实值」（两路线每行取值都正确）；
-差异在于**分母口径**——快照 ``latest_price`` 恒取最新交易日，故部分回补时早期点的
-曲线股息率（分母=当日价、分子=截至当日可见分红）与快照口径存在系统性差异，属预期。
 
 组装 handler ``run_market_daily_close_fetch`` 供 scheduler 注册（独立会话）。
 """
@@ -28,7 +19,7 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Optional
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 
 from app.core.date_utils import today_app_tz
 from app.models import (
@@ -66,15 +57,6 @@ _BACKFILL_BURST = 10
 _BACKFILL_COOLDOWN_MIN = 60.0
 _BACKFILL_COOLDOWN_MAX = 120.0
 _BACKFILL_BACKOFFS = (60, 120, 300)  # 指数退避重试间隔（秒），依次用尽即放弃该证券
-
-# 路线 A 横截面批量回补常量（附录 A.11 增补）：
-# - 单日分批沿用 ``max_codes_per_request``（腾讯实测上限 900，保守取 800）；
-# - 并发上限：接口 ``rate_limit=10/min`` 已由 ``_RATE_LIMITER`` 串行化请求节奏，
-#   此处的并发只用于重叠「请求等待 + 解析」的往返时间，不提高实际请求速率。
-#   取 4 是保守值：既让节流等待期不空转，又不放大失败批次的瞬时并发。
-_GAP_FETCH_CONCURRENCY = 4
-# 单次调用最多回补的交易日数（防误配一次拉爆；244 ≈ 一年）
-_GAP_MAX_DAYS = 400
 
 # stock_zh_a_hist 返回中文列名（§6.2 行解析）
 _COL_HIST_DATE = "日期"
@@ -363,140 +345,6 @@ class MarketDailyPriceSyncService:
         master_ids = list(dict.fromkeys(code_map.values()))
         return await backfill_historical(self.session, itf, master_ids, start)
 
-    # ------------------------------------------------------------------ #
-    # 路线 A：按交易日横截面批量回补（§6.2 缺口自愈）
-    # ------------------------------------------------------------------ #
-    async def _gap_dates(self, lookback_days: int) -> list[date]:
-        """枚举待回补交易日：**已存档日期中、缺少「全池覆盖」的那些**。
-
-        设计依据（为什么不是「按日历枚举所有工作日」）：
-
-        1. **腾讯 ``q=`` 无历史查询能力**——请求不带日期、响应只有当前价，
-           故任意一次调用拿到的是「此刻的价」。回补某日 = 当天 15:05 之后那一次抓取。
-           因此**能补的日期集合 ≡ 该日曾成功抓过（已存档）**，日历枚举出的、从未跑过
-           的日期**无法据此补回**（只能走路线 B 逐只历史接口）。
-        2. 因此「缺口」定义为：已存档日期 D 上，缺行/价格为空/价格非正 的证券。
-           据此枚举可保证：**只对已知可补的日期发请求**，不浪费限速配额。
-
-        排除今日：今日由 ``daily_close_fetch`` 自己抓，避免重复请求。
-        日历为空时降级用日线表已存档日期（决策 A9 降级语义，与 ``update_stale_flags`` 一致）。
-        """
-        today = today_app_tz()
-        floor = today - timedelta(days=lookback_days)
-        # 全池规模：以 security_dividends 去重 master 为准（与 _code_map 同口径）
-        pool_size = (
-            await self.session.execute(
-                select(func.count(func.distinct(SecurityDividend.master_id)))
-            )
-        ).scalar_one()
-        # 各已存档日期的覆盖数（区间内、排除今日）
-        rows = (
-            await self.session.execute(
-                select(
-                    MarketSecurityDailyPrice.trade_date,
-                    func.count(MarketSecurityDailyPrice.master_id),
-                )
-                .where(
-                    MarketSecurityDailyPrice.trade_date >= floor,
-                    MarketSecurityDailyPrice.trade_date < today,
-                    MarketSecurityDailyPrice.close > 0,
-                )
-                .group_by(MarketSecurityDailyPrice.trade_date)
-                .order_by(MarketSecurityDailyPrice.trade_date.asc())
-            )
-        ).all()
-        # 覆盖不足全池 → 视为缺口日（阈值取 99%：容忍停牌/退市等永久缺失，
-        # 避免这些证券让每个日期都判为缺口而反复重拉）
-        threshold = int(pool_size * 0.99)
-        return [d for d, n in rows if n < threshold]
-
-
-    async def gap_backfill_daily(self, cfg: Any) -> str:
-        """按交易日横截面批量回补缺口（路线 A，§6.2）。
-
-        **能力边界（必须在 UI/文档同步，勿误用）**：腾讯 ``q=`` 接口只返回当前价，
-        没有历史查询能力，故本方法**只能补「行情接口仍能返回该日收盘价」的近端缺口**，
-        即最近数个交易日的缺行（如某日任务失败、新增证券补历史）。深度历史
-        （数月~数年）仍须走 ``backfill_historical``（路线 B，多小时级）。
-
-        并发模型：接口 ``rate_limit=10/min`` 由 ``_RATE_LIMITER`` 串行化请求节奏，
-        此处 ``_GAP_FETCH_CONCURRENCY`` 仅用于重叠「节流等待 + 网络往返 + 解析」，
-        不提高实际请求速率——故不会因并发触发源站限流。
-
-        每日独立 commit：单日失败不回滚其他日（断点即数据本身，重跑幂等）。
-        """
-        settings = await self._settings()
-        if settings is None:
-            raise RuntimeError("股息率配置表为空，无法执行行情缺口回补")
-        itf = await self._resolve_quote_interface(settings)
-        if itf is None:
-            raise RuntimeError("行情源接口缺失或被停用，fail fast 跳过行情缺口回补")
-
-        provider = await self.session.get(SecuritiesDataProvider, itf.provider_id)
-        access_method = provider.access_method if provider is not None else None
-        if access_method != QuoteProviderAccessMethod.HTTPS:
-            raise RuntimeError(
-                "行情缺口回补要求行情接口 access_method=https（按日横截面批量），"
-                f"当前接口 {itf.name!r} 的接入方式为 {access_method!r}；"
-                "深度历史回补请改用 backfill_start 参数（路线 B，逐只 sdk 历史接口）"
-            )
-        # 自愈前提：接口须能返回「日期」字段，否则无法识别响应是否为当日有效数据
-        if SLOT_DATE not in index_by_slot(resolve_fields(itf)):
-            raise RuntimeError(
-                f"行情接口 {itf.name!r} 未配置日期槽（slot=date），"
-                "无法校验返回数据时效，拒绝回补（避免把陈旧价写进历史日期）"
-            )
-
-        code_map = await self._code_map()
-        if not code_map:
-            return "security_dividends 无证券，跳过行情缺口回补"
-
-        params = getattr(cfg, "params", None) or {}
-        lookback = int(params.get("lookback_days", 30) or 30)
-        lookback = max(1, min(lookback, _GAP_MAX_DAYS))
-
-        dates = await self._gap_dates(lookback)
-        if not dates:
-            return f"近 {lookback} 天无缺口，无需回补（已存档日期覆盖完整）"
-
-        stats: dict[str, int] = {"ok": 0, "fail": 0, "rows": 0}
-        changed: set[str] = set()
-        sem = asyncio.Semaphore(_GAP_FETCH_CONCURRENCY)
-
-        async def _one_day(d: date) -> tuple[date, int, int, int, set[str]]:
-            """单日回补（受信号量限流）；异常不外抛，由调用方汇总。"""
-            async with sem:
-                try:
-                    ch, ok, fail, n = await self._write_one_day(
-                        itf, code_map, d, expect_date=False
-                    )
-                    return d, ok, fail, n, ch
-                except Exception:  # noqa: BLE001  单日失败不中断其余日期
-                    logger.warning("回补 %s 失败，跳过该日", d.isoformat(), exc_info=True)
-                    return d, 0, 1, 0, set()
-
-        results = await asyncio.gather(*(_one_day(d) for d in dates))
-        for d, ok, fail, n, ch in results:
-            if ok > 0 and fail == 0:
-                stats["ok"] += 1
-                stats["rows"] += n
-                changed |= ch
-            else:
-                stats["fail"] += 1
-        await self.session.commit()
-
-        # 回补后重算派生快照：新补的价格行可能改变 latest_trade_date / latest_price
-        if changed:
-            await refresh_yields_for_masters(self.session, list(changed))
-            await update_stale_flags(self.session)
-            await self.session.commit()
-
-        return (
-            f"行情缺口回补完成：扫描近 {lookback} 天，缺口 {len(dates)} 个交易日 → "
-            f"成功 {stats['ok']}、失败 {stats['fail']}，写入 {stats['rows']} 行，"
-            f"重算 {len(changed)} 只证券"
-        )
-
 
 # --------------------------------------------------------------------------- #
 # 历史日线回补（§6.2 末段 / 决策 A15）——单独方法供复用，不注册为任务默认调用
@@ -650,13 +498,4 @@ async def run_market_daily_close_fetch(cfg: Any) -> str:
 
     async with AsyncSessionLocal() as session:
         result = await MarketDailyPriceSyncService(session).daily_close_fetch(cfg)
-    return result
-
-
-async def run_market_daily_gap_backfill(cfg: Any) -> str:
-    """行情缺口回补 handler（路线 A，admin 手动触发；参数 ``lookback_days`` 默认 30）。"""
-    from app.db.database import AsyncSessionLocal
-
-    async with AsyncSessionLocal() as session:
-        result = await MarketDailyPriceSyncService(session).gap_backfill_daily(cfg)
     return result
