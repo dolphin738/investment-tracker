@@ -111,6 +111,12 @@ export interface BackfillPricesResult {
   security_count: number;
 }
 
+/** 取消在途回补的响应 */
+export interface CancelPriceBackfillResult {
+  message: string;
+  cancelled_start_date: string;
+}
+
 /** 手动触发历史行情缺口回补（初始化块；admin-only，后端异步后台执行、立即返回） */
 export function backfillDailyPrices(
   startDate: string,
@@ -118,4 +124,9 @@ export function backfillDailyPrices(
   return http.post<BackfillPricesResult>('/dividend-yield/backfill-prices', {
     start_date: startDate,
   });
+}
+
+/** 取消在途的历史行情回补（admin-only；清 price_backfill_start_date，唯一 API 退路） */
+export function cancelPriceBackfill(): Promise<CancelPriceBackfillResult> {
+  return http.delete<CancelPriceBackfillResult>('/dividend-yield/backfill-prices');
 }

@@ -55,6 +55,7 @@ const settings = vi.hoisted<DividendYieldSettingsOut>(() => ({
 }));
 
 const mutateSpy = vi.hoisted(() => vi.fn());
+const cancelPriceBackfillSpy = vi.hoisted(() => vi.fn());
 
 vi.mock('@/modules/dividend-yield/composables/use-dividend-yield', () => ({
   useDividendYieldSettings: () => ({
@@ -83,6 +84,11 @@ vi.mock('@/modules/dividend-yield/composables/use-dividend-yield', () => ({
     isPending: ref(false),
     isError: ref(false),
     mutate: vi.fn(),
+  }),
+  useCancelPriceBackfill: () => ({
+    isPending: ref(false),
+    isError: ref(false),
+    mutate: cancelPriceBackfillSpy,
   }),
 }));
 
@@ -286,6 +292,54 @@ describe('GlobalSettingsDividendTab — 四源下拉与提供方名拼接（§15
     expect(text).toContain('回补进行中');
     expect(text).toContain('2025-07-01');
     expect(text).toContain('每日收盘价抓取后按额度自动续跑');
+
+    wrapper.unmount();
+  });
+
+  it('⑥ 在途任务时「回补行情缺口」按钮置灰并显示进行中，且出现「取消在途回补」（M-1 前端护栏）', async () => {
+    settings.price_backfill_start_date = '2025-07-01';
+    wrapper = await mountTab();
+
+    const btn = wrapper
+      .findAll('button')
+      .find((b) => b.text().includes('回补进行中'));
+    expect(btn).toBeTruthy();
+    expect(btn!.attributes('disabled')).toBeDefined(); // 置灰：不可再启动
+    // 禁用原因写在 title 上，避免用户以为是坏了
+    expect(btn!.attributes('title') ?? '').toContain('已有在途回补任务');
+
+    const cancelBtn = wrapper
+      .findAll('button')
+      .find((b) => b.text().includes('取消在途回补'));
+    expect(cancelBtn).toBeTruthy(); // 有退路，不会把人锁死
+
+    wrapper.unmount();
+  });
+
+  it('⑦ 「取消在途回补」需二次确认后才触发（与启动同构）', async () => {
+    settings.price_backfill_start_date = '2025-07-01';
+    wrapper = await mountTab();
+
+    const cancelBtn = wrapper
+      .findAll('button')
+      .find((b) => b.text().includes('取消在途回补'));
+    await cancelBtn!.trigger('click');
+    await flushPromises();
+
+    // 两个确认弹窗的确认按钮文案不同（确认回补 / 确认取消），按标题限定范围
+    const dialog = Array.from(document.querySelectorAll('[role="alertdialog"]')).find(
+      (el) => (el.textContent ?? '').includes('确认取消在途回补？'),
+    );
+    expect(dialog).toBeTruthy();
+    const confirmBtn = Array.from(dialog!.querySelectorAll('button')).find((b) =>
+      (b.textContent ?? '').includes('确认取消'),
+    );
+    expect(confirmBtn).toBeTruthy();
+    expect(cancelPriceBackfillSpy).not.toHaveBeenCalled(); // 未确认前不得触发
+
+    await confirmBtn!.click();
+    await flushPromises();
+    expect(cancelPriceBackfillSpy).toHaveBeenCalledTimes(1);
 
     wrapper.unmount();
   });

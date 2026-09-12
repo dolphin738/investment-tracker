@@ -32,6 +32,7 @@ import {
   useRebuildDividendYield,
   useBackfillSpecialDividends,
   useBackfillDividendPrices,
+  useCancelPriceBackfill,
 } from '@/modules/dividend-yield/composables/use-dividend-yield';
 
 const props = defineProps<{
@@ -84,7 +85,10 @@ const canBackfillPrices = computed(
   () =>
     props.backfillInterfaceId !== SELECT_EMPTY_VALUE &&
     props.backfillInterfaceId !== '' &&
-    backfillStartDate.value.trim() !== '',
+    backfillStartDate.value.trim() !== '' &&
+    // 已有在途任务 → 不可再启动（前端置灰只是 UX 层，后端 /backfill-prices 另有 400 护栏，
+    // 挡多标签页/多管理员/直接 curl 的绕过）
+    !props.priceBackfillStartDate,
 );
 function onBackfillPrices(): void {
   if (!canBackfillPrices.value) return;
@@ -93,6 +97,18 @@ function onBackfillPrices(): void {
 function confirmBackfillPrices(): void {
   pricesConfirmOpen.value = false;
   backfillPrices.mutate(backfillStartDate.value);
+}
+
+// ── 取消在途回补（与「在途时禁止启动」成对：只禁不给退路会把人锁死） ──
+const cancelPrices = useCancelPriceBackfill();
+const cancellingPrices = computed(() => cancelPrices.isPending.value);
+const cancelPricesConfirmOpen = ref(false);
+function onCancelPrices(): void {
+  cancelPricesConfirmOpen.value = true;
+}
+function confirmCancelPrices(): void {
+  cancelPricesConfirmOpen.value = false;
+  cancelPrices.mutate();
 }
 </script>
 
@@ -106,8 +122,9 @@ function confirmBackfillPrices(): void {
       回补进行中（目标起始日 {{ priceBackfillStartDate }}）：每日收盘价抓取后按额度自动续跑，全部补完自动结束
     </p>
 
-    <!-- 每日回补额度（只/天）：参与父组件 settings 保存，本组件仅渲染输入并回传 -->
-    <div class="space-y-2">
+    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <!-- 每日回补额度（只/天）：参与父组件 settings 保存，本组件仅渲染输入并回传 -->
+      <div class="space-y-2">
       <Label for="dy-price-backfill-quota">每日回补额度（只/天）</Label>
       <Input
         id="dy-price-backfill-quota"
@@ -131,6 +148,7 @@ function confirmBackfillPrices(): void {
         type="date"
         class="w-full"
       />
+    </div>
     </div>
 
     <!-- 三个初始化按钮（均带 loading 态与 disabled 联动） -->
@@ -157,11 +175,28 @@ function confirmBackfillPrices(): void {
       <Button
         variant="outline"
         :disabled="!canBackfillPrices || backfillingPrices"
-        title="启动跨日回补任务：立即处理第一批，之后每日收盘价抓取后按额度自动续跑，补完自动结束；中途被熔断次日自动接着跑"
+        :title="
+          priceBackfillStartDate
+            ? '已有在途回补任务（起点 ' +
+              priceBackfillStartDate +
+              '）：须等其完成，或先点「取消在途回补」'
+            : '启动跨日回补任务：立即处理第一批，之后每日收盘价抓取后按额度自动续跑，补完自动结束；中途被熔断次日自动接着跑'
+        "
         @click="onBackfillPrices"
       >
         <Loader2 v-if="backfillingPrices" class="mr-2 h-4 w-4 animate-spin" />
-        回补行情缺口
+        {{ priceBackfillStartDate ? '回补进行中…' : '回补行情缺口' }}
+      </Button>
+
+      <Button
+        v-if="priceBackfillStartDate"
+        variant="outline"
+        :disabled="cancellingPrices"
+        title="清除在途标记：正在运行的当前批次会跑完本批后停止，此后不再续跑，已补数据保留"
+        @click="onCancelPrices"
+      >
+        <Loader2 v-if="cancellingPrices" class="mr-2 h-4 w-4 animate-spin" />
+        取消在途回补
       </Button>
     </div>
 
@@ -212,6 +247,32 @@ function confirmBackfillPrices(): void {
           >
             <Loader2 v-if="backfillingPrices" class="mr-2 h-4 w-4 animate-spin" />
             确认回补
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+
+    <!-- 取消在途回补二次确认（与启动同构；说明能力边界：不中断当前批次） -->
+    <AlertDialog
+      :open="cancelPricesConfirmOpen"
+      @update:open="(o) => !o && (cancelPricesConfirmOpen = false)"
+    >
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>确认取消在途回补？</AlertDialogTitle>
+          <AlertDialogDescription>
+            将清除在途标记（起点 {{ priceBackfillStartDate }}）。正在运行的当前批次会跑完本批后自然停止，此后每日收盘价抓取不再续跑；已补的数据一律保留，可随时用新起点重新触发。
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel :disabled="cancellingPrices">取消</AlertDialogCancel>
+          <AlertDialogAction
+            :disabled="cancellingPrices"
+            class="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            @click="confirmCancelPrices"
+          >
+            <Loader2 v-if="cancellingPrices" class="mr-2 h-4 w-4 animate-spin" />
+            确认取消
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
