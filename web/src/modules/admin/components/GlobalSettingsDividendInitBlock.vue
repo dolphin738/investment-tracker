@@ -43,6 +43,8 @@ const props = defineProps<{
   /** 在途回补任务目标起始日（YYYY-MM-DD）；null/undefined = 无在途任务；
    *  由父组件传入 dividendSettings?.price_backfill_start_date */
   priceBackfillStartDate: string | null;
+  /** 当日已用回补额度（只）：后端已按自然日归零，用于剩余额度计算与「今日已用 X/N」 */
+  priceBackfillUsedToday: number;
 }>();
 
 /** 仅回传额度输入值（v-model 风格），其余状态仍由父组件 settingsForm 统一管理 */
@@ -81,6 +83,15 @@ function confirmBackfill(): void {
 const backfillPrices = useBackfillDividendPrices();
 const backfillingPrices = computed(() => backfillPrices.isPending.value);
 const pricesConfirmOpen = ref(false);
+/** 每日额度（数值）：父组件持有的是字符串输入值，此处取数值用于剩余额度计算 */
+const quotaNum = computed(() => Number(props.priceBackfillQuota) || 0);
+/** 当日剩余额度：额度按**自然日**消耗，任何触发方式共享同一份额度 */
+const quotaRemaining = computed(() =>
+  Math.max(0, quotaNum.value - props.priceBackfillUsedToday),
+);
+/** 当日额度已用尽 → 触发会 400，故按钮置灰并说明 */
+const quotaExhausted = computed(() => quotaNum.value > 0 && quotaRemaining.value <= 0);
+
 const canBackfillPrices = computed(
   () =>
     props.backfillInterfaceId !== SELECT_EMPTY_VALUE &&
@@ -88,7 +99,8 @@ const canBackfillPrices = computed(
     backfillStartDate.value.trim() !== '' &&
     // 已有在途任务 → 不可再启动（前端置灰只是 UX 层，后端 /backfill-prices 另有 400 护栏，
     // 挡多标签页/多管理员/直接 curl 的绕过）
-    !props.priceBackfillStartDate,
+    !props.priceBackfillStartDate &&
+    !quotaExhausted.value,
 );
 function onBackfillPrices(): void {
   if (!canBackfillPrices.value) return;
@@ -137,6 +149,12 @@ function confirmCancelPrices(): void {
       <p class="text-xs text-muted-foreground">
         每日收盘价抓取后按该额度自动续跑，补完自动停止
       </p>
+      <p
+        v-if="quotaNum > 0"
+        class="text-xs font-medium text-muted-foreground"
+      >
+        今日已用 {{ priceBackfillUsedToday }} / {{ quotaNum }} 只（额度按自然日重置）
+      </p>
     </div>
 
     <!-- 回补起始日期（独立本地值，不参与 settings 保存） -->
@@ -176,16 +194,28 @@ function confirmCancelPrices(): void {
         variant="outline"
         :disabled="!canBackfillPrices || backfillingPrices"
         :title="
-          priceBackfillStartDate
-            ? '已有在途回补任务（起点 ' +
-              priceBackfillStartDate +
-              '）：须等其完成，或先点「取消在途回补」'
-            : '启动跨日回补任务：立即处理第一批，之后每日收盘价抓取后按额度自动续跑，补完自动结束；中途被熔断次日自动接着跑'
+          quotaExhausted
+            ? '今日回补额度已用尽（已用 ' +
+              priceBackfillUsedToday +
+              '/' +
+              quotaNum +
+              ' 只）：额度按自然日重置，请明日再触发'
+            : priceBackfillStartDate
+              ? '已有在途回补任务（起点 ' +
+                priceBackfillStartDate +
+                '）：须等其完成，或先点「取消在途回补」'
+              : '启动跨日回补任务：立即处理第一批，之后每日收盘价抓取后按剩余额度自动续跑，补完自动结束；中途被熔断次日自动接着跑'
         "
         @click="onBackfillPrices"
       >
         <Loader2 v-if="backfillingPrices" class="mr-2 h-4 w-4 animate-spin" />
-        {{ priceBackfillStartDate ? '回补进行中…' : '回补行情缺口' }}
+        {{
+          quotaExhausted
+            ? '今日额度已用尽'
+            : priceBackfillStartDate
+              ? '回补进行中…'
+              : '回补行情缺口'
+        }}
       </Button>
 
       <Button

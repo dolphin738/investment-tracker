@@ -858,6 +858,9 @@ export interface DividendYieldSettingsOut {
   price_backfill_quota: number | null;
   /** 在途回补任务目标起始日（YYYY-MM-DD）；非空 = 有在途回补任务 */
   price_backfill_start_date: string | null;
+  /** 当日已用回补额度（只）；后端回传的是**当日有效值**（跨日已归零），
+   *  前端无需自己判断跨日重置，直接用于「今日已用 X/N」与额度用尽时禁用触发 */
+  price_backfill_used_today: number;
 }
 
 /** 股息率设置更新请求（PUT /dividend-yield/settings · admin-only；写时用 *_interface_id 字段） */

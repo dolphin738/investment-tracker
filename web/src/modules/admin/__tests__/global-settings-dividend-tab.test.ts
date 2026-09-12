@@ -52,6 +52,8 @@ const settings = vi.hoisted<DividendYieldSettingsOut>(() => ({
   price_backfill_start_date: null,
   // 每日回补额度（只/天）；后端默认 1000
   price_backfill_quota: null,
+  // 当日已用额度（只）；后端回传当日有效值（跨日已归零）
+  price_backfill_used_today: 0,
 }));
 
 const mutateSpy = vi.hoisted(() => vi.fn());
@@ -180,6 +182,7 @@ beforeEach(() => {
   // 隔离在途状态 / 额度字段，避免污染其他用例（共享 hoisted settings 对象可变）
   settings.price_backfill_start_date = null;
   settings.price_backfill_quota = null;
+  settings.price_backfill_used_today = 0;
 });
 
 describe('GlobalSettingsDividendTab — 四源下拉与提供方名拼接（§15.3 T2）', () => {
@@ -340,6 +343,22 @@ describe('GlobalSettingsDividendTab — 四源下拉与提供方名拼接（§15
     await confirmBtn!.click();
     await flushPromises();
     expect(cancelPriceBackfillSpy).toHaveBeenCalledTimes(1);
+
+    wrapper.unmount();
+  });
+
+  it('⑧ 当日额度用尽 → 按钮置灰显示「今日额度已用尽」并展示已用/总额（M-2）', async () => {
+    // 额度 quota=null → 表单兜底 1000；已用 1000 → 剩余 0
+    settings.price_backfill_used_today = 1000;
+    wrapper = await mountTab();
+
+    const btn = wrapper
+      .findAll('button')
+      .find((b) => b.text().includes('今日额度已用尽'));
+    expect(btn).toBeTruthy();
+    expect(btn!.attributes('disabled')).toBeDefined(); // 触发必然 400，故置灰
+    expect(btn!.attributes('title') ?? '').toContain('额度已用尽');
+    expect(wrapper.text()).toContain('今日已用 1000 / 1000');
 
     wrapper.unmount();
   });

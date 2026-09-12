@@ -30,6 +30,8 @@ const props = defineProps<{
   quota: string;
   /** 在途回补任务目标起始日，直接透传给 InitBlock */
   startDate: string | null;
+  /** 当日已用回补额度（只），直接透传给 InitBlock（用于剩余额度与「今日已用 X/N」） */
+  usedToday: number;
 }>();
 
 const emit = defineEmits<{
@@ -74,6 +76,7 @@ const emit = defineEmits<{
       :backfill-interface-id="interfaceId"
       :price-backfill-quota="quota"
       :price-backfill-start-date="startDate"
+      :price-backfill-used-today="usedToday"
       @update:price-backfill-quota="(v) => emit('update:quota', v)"
     />
   </div>

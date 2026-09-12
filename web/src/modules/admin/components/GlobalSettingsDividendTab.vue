@@ -275,8 +275,9 @@ function handleSaveSettings(): void {
           阈值以百分数输入（5 = 5%）；校验规则：0 &lt; 红色 &lt; 绿色 ≤ 100%
         </p>
 
-        <!-- 股息主源 -->
-        <div class="space-y-2">
+        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <!-- 股息主源 -->
+          <div class="space-y-2">
           <Label for="dy-report-source">股息主数据源接口（按报告期全量）</Label>
           <Select v-model="settingsForm.dividendReportSourceInterfaceId">
             <SelectTrigger id="dy-report-source" class="w-full">
@@ -353,6 +354,7 @@ function handleSaveSettings(): void {
               </SelectItem>
             </SelectContent>
           </Select>
+          </div>
         </div>
 
         <!-- 初始化（冷启动 / 数据修复用手工动作）：整块抽至 GlobalSettingsDividendInitSection -->
@@ -361,6 +363,7 @@ function handleSaveSettings(): void {
           v-model:interface-id="settingsForm.priceBackfillSourceInterfaceId"
           v-model:quota="settingsForm.priceBackfillQuota"
           :start-date="dividendSettings?.price_backfill_start_date ?? null"
+          :used-today="dividendSettings?.price_backfill_used_today ?? 0"
         />
 
         <p v-if="settingsFormError" class="text-xs text-red-500">
