@@ -591,7 +591,11 @@ async def run_pending_price_backfill(session) -> str:
        任务，直接返回提示、**不发任何请求**（no-op，不破坏每日收盘价抓取）。
     2. 解析回补接口（settings.price_backfill_source_interface_id + 分类 2 + enabled +
        sdk）；接口缺失/停用/非 sdk → 抛 RuntimeError（中文，fail fast）。
-    3. 一条 SQL 精确选出本批待补证券（未覆盖的，限每日额度 quota；quota 为 None 兜底 1000）。
+    3. 一条 SQL 精确选出本批待补证券（未覆盖的，**限当日剩余额度**；
+       quota 为 None 兜底 1000）。额度按**自然日**消耗：任何方式/原因触发的执行都
+       记入 ``price_backfill_used_today``（按本批实际处理只数，成败都计），
+       跨日（``price_backfill_last_run_date`` ≠ 今天）自动归零；同日再次执行只能在
+       ``remaining = quota - used_today`` 范围内取批，余额 ≤ 0 则当日不再发起请求。
     4. 若选出 0 只 → 判定补完：清空 ``price_backfill_start_date`` 并 commit，返回
        「已结束」提示、**不发任何请求**（终态，避免无限循环白烧配额）。
     5. 否则调用 ``backfill_historical`` 跑本批，返回其摘要（加前缀注明本批只数/额度）。
@@ -600,14 +604,31 @@ async def run_pending_price_backfill(session) -> str:
     为什么用「一条 SQL 精确定位未覆盖」而不是逐只判定——见 ``_select_pending_backfill_masters``
     文档串：① 每日批次可精确知晓「还有无剩余」以决定清状态；② 避免每天扫全池 4609 次。
     """
+    # 行锁：当日额度是共享资源，手动触发与每日续跑可能并发，
+    # 加锁避免两者同时读到 used_today=0 而各自跑满额度（同日双花）。
     settings = (
-        await session.execute(select(DividendYieldSettings).limit(1))
+        await session.execute(
+            select(DividendYieldSettings).limit(1).with_for_update()
+        )
     ).scalar_one_or_none()
     if settings is None or settings.price_backfill_start_date is None:
         return "无在途回补任务（price_backfill_start_date 为空），本次不发起请求"
 
     start_date = settings.price_backfill_start_date
     quota = settings.price_backfill_quota if settings.price_backfill_quota is not None else 1000
+
+    # 当日记账：额度按**自然日**消耗，跨日自动重置；同日只在剩余额度内取批。
+    today = today_app_tz()
+    if settings.price_backfill_last_run_date != today:
+        settings.price_backfill_last_run_date = today
+        settings.price_backfill_used_today = 0
+    remaining = quota - (settings.price_backfill_used_today or 0)
+    if remaining <= 0:
+        await session.commit()  # 落「今日已重置」的记账
+        return (
+            f"今日回补额度已用尽（{quota} 只/天），本次不发起请求；"
+            "明日自动续跑（额度按自然日重置）"
+        )
 
     # 解析回补接口：price_backfill_source_interface_id + 分类 2 + enabled + sdk（fail fast）
     interface_id = settings.price_backfill_source_interface_id
@@ -630,7 +651,7 @@ async def run_pending_price_backfill(session) -> str:
         )
 
     # 一条 SQL 精确选出未覆盖证券（待回补 = 不存在 trade_date <= start_date 的日线行）
-    pending = await _select_pending_backfill_masters(session, start_date, quota)
+    pending = await _select_pending_backfill_masters(session, start_date, remaining)
     if not pending:
         # 全部已覆盖 → 补完，清空在途状态（终态），此后不再跑
         settings.price_backfill_start_date = None
@@ -638,7 +659,15 @@ async def run_pending_price_backfill(session) -> str:
         return "回补已完成：全部证券均已覆盖，在途回补任务已结束"
 
     batch_note = await backfill_historical(session, itf, pending, start_date)
-    return f"在途回补本批 {len(pending)} 只（额度 {quota}）：{batch_note}"
+    # 成败都计入当日已用：数据源抖动时若失败不计，反复重试会把当天额度刷爆
+    settings.price_backfill_used_today = (
+        settings.price_backfill_used_today or 0
+    ) + len(pending)
+    await session.commit()
+    return (
+        f"在途回补本批 {len(pending)} 只（今日剩余额度 {remaining}，"
+        f"已用 {settings.price_backfill_used_today}/{quota}）：{batch_note}"
+    )
 
 
 # --------------------------------------------------------------------------- #

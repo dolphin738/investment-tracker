@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.bg import track_task
+from app.core.date_utils import today_app_tz
 from app.core.enums import BusinessErrorCode
 from app.core.envelope import EnvelopeRoute
 from app.core.exceptions import BusinessException
@@ -137,6 +138,10 @@ async def backfill_prices(
     进度见应用日志。响应 ``security_count`` 语义改为「本批将处理的只数」（≤ 每日额度，
     不再是全池数）。
 
+    **额度按自然日消耗**：同日的手动触发与每日「收盘价抓取」续跑共享 ``price_backfill_quota``，
+    已用只数记在 ``price_backfill_used_today``（跨日自动归零）。余额 ≤ 0 时本端点 400，
+    避免触发一个注定空跑的批次。
+
     **在途护栏（M-1）**：已有在途任务（``price_backfill_start_date`` 非空）时拒绝再次启动。
     前端会把按钮置灰，但那只是 UX 层——多标签页/多管理员/直接 curl 都能绕过，
     故本校验是唯一真正的护栏。取消请走 ``DELETE /backfill-prices``。
@@ -184,14 +189,33 @@ async def backfill_prices(
             ),
             status_code=400,
         )
-    # 启动在途任务：写入起点日期并落库（此后每日收盘价抓取会按额度续跑）
+    # 当日剩余额度：额度按**自然日**消耗，同日的手动触发与每日续跑共享同一份额度，
+    # 故触发前先算余额（放在写 start_date 之前，避免余额为 0 时留下无效在途状态）
+    quota = settings.price_backfill_quota if settings.price_backfill_quota is not None else 1000
+    today = today_app_tz()
+    used_today = (
+        settings.price_backfill_used_today
+        if settings.price_backfill_last_run_date == today
+        else 0
+    ) or 0
+    remaining = quota - used_today
+    if remaining <= 0:
+        raise BusinessException(
+            code=BusinessErrorCode.VALIDATION_FAILED,
+            message=(
+                f"今日回补额度已用尽（{quota} 只/天，已用 {used_today} 只），"
+                "本次不发起请求；请明日再触发（额度按自然日重置）"
+            ),
+            status_code=400,
+        )
+
+    # 启动在途任务：写入起点日期并落库（此后每日收盘价抓取按剩余额度续跑）
     start = body.start_date
     settings.price_backfill_start_date = start
     await db.commit()
 
-    # 本批将处理的只数（精确选出未覆盖，限每日额度），用于响应语义
-    quota = settings.price_backfill_quota if settings.price_backfill_quota is not None else 1000
-    pending = await _select_pending_backfill_masters(db, start, quota)
+    # 本批将处理的只数（精确选出未覆盖，限当日剩余额度），用于响应语义
+    pending = await _select_pending_backfill_masters(db, start, remaining)
 
     # fire-and-forget：独立会话内跑首批（持有强引用防 GC 回收）
     track_task(asyncio.create_task(_run_price_backfill()))
@@ -203,6 +227,7 @@ async def backfill_prices(
         detail={
             "start_date": start.isoformat(),
             "quota": quota,
+            "remaining_quota": remaining,
             "security_count": len(pending),
             "interface_id": interface_id,
             "interface_name": itf.name,
@@ -214,6 +239,7 @@ async def backfill_prices(
         "start_date": start.isoformat(),
         "security_count": len(pending),
         "quota": quota,
+        "remaining_quota": remaining,
     }
 
 # --------------------------------------------------------------------------- #

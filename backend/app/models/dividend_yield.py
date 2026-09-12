@@ -231,6 +231,15 @@ class DividendYieldSettings(Base, TimestampMixin):
     # 服务端管理（POST /backfill-prices 写入、补完清空），PUT 不接受设置以免状态不一致；
     # 全部证券覆盖后由每日批次清空，任务结束、此后不再跑。
     price_backfill_start_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    # 当日记账（额度按**自然日**消耗，跨日自动重置）：
+    # - last_run_date：最近一次执行回补的自然日；不等于今天则把 used_today 归零；
+    # - used_today：今日已处理只数，按「本批实际处理只数」累加（**成败都计**——
+    #   数据源抖动时若失败不计，反复重试会把当天额度刷爆）；
+    # 同日再次执行只在 remaining = quota - used_today 范围内取批，余额为 0 则当日不再发请求。
+    price_backfill_last_run_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    price_backfill_used_today: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
     updated_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
 
 
