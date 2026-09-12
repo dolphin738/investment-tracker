@@ -18,6 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums import BusinessErrorCode
+from app.core.date_utils import today_app_tz
 from app.core.envelope import EnvelopeRoute
 from app.core.exceptions import BusinessException
 from app.db.database import get_db
@@ -177,6 +178,13 @@ async def _settings_out(db: AsyncSession, row: DividendYieldSettings) -> dict[st
             row.price_backfill_start_date.isoformat()
             if row.price_backfill_start_date is not None
             else None
+        ),
+        # 当日已用额度：前端据此展示「今日已用 X/N」并在用尽时禁用触发按钮。
+        # 这里回传**当日有效值**（记账日不是今天则视为 0），避免前端重复实现跨日重置。
+        "price_backfill_used_today": (
+            row.price_backfill_used_today
+            if row.price_backfill_last_run_date == today_app_tz()
+            else 0
         ),
     }
 
