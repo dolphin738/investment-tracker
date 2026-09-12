@@ -492,3 +492,122 @@ async def test_backfill_single_fetch_timeout_marks_failed_and_proceeds(session, 
     # 卡死的证券不应落任何历史行
     rows = (await session.execute(select(MarketSecurityDailyPrice))).scalars().all()
     assert all(r.master_id != m.id for r in rows)
+
+
+# ───────────────────────── 回补连续失败熔断（_BACKFILL_FAILURE_BREAKER） ─────────────────────────
+@pytest.mark.asyncio
+async def test_backfill_failure_breaker_aborts_at_threshold(session, monkeypatch):
+    """连续失败达到阈值即熔断：提前抛出 RuntimeError，且只处理了阈值只（不空转全池）。
+
+    还原真实故障场景：数据源 push2his.eastmoney.com 对本机 IP 定向拒连，单只立即失败。
+    阈值压到 3，准备 10 只待回补证券——断言第 3 只失败后即刻中止、仅处理 3 只。
+    """
+    masters = [await _add_master(session, code=f"600{100 + i}") for i in range(10)]
+    itf = await _seed_sdk_quote_source(session)
+    await session.commit()
+
+    calls: list[str] = []
+
+    async def _fake_sdk_always_fail(self, itf_obj, params, codes):
+        calls.append(params["symbol"])  # 记录实际发请求的证券
+        raise RuntimeError("数据源定向拒连（模拟 push2his.eastmoney.com 拒连）")
+
+    monkeypatch.setattr(MarketDataSyncService, "_fetch_sdk_raw", _fake_sdk_always_fail)
+    # 退避常量归零：失败立即计为失败，不真实 sleep 60/120/300s
+    monkeypatch.setattr(
+        "app.services.market_daily_price_sync._BACKFILL_BACKOFFS", (0,)
+    )
+    # 阈值压到 3，便于秒级验证熔断点
+    monkeypatch.setattr(
+        "app.services.market_daily_price_sync._BACKFILL_FAILURE_BREAKER", 3
+    )
+
+    with pytest.raises(RuntimeError) as excinfo:
+        await backfill_historical(
+            session, itf, [m.id for m in masters], date(2024, 1, 1)
+        )
+
+    msg = str(excinfo.value)
+    assert "熔断" in msg and "连续失败" in msg  # 中文消息含熔断/连续失败字样
+    # 关键：只处理了 3 只（阈值），而非 10 只——证明真的提前中止、未空转全池
+    assert len(calls) == 3
+
+
+@pytest.mark.asyncio
+async def test_backfill_failure_counter_reset_on_success(session, monkeypatch):
+    """「失败2→成功1→失败2」序列、阈值 3 时不应熔断（成功使连续失败计数清零）。
+
+    守护：成功分支必须重置 consecutive_failures，否则会被中间一次成功「误导」触发熔断。
+    """
+    masters = [await _add_master(session, code=f"600{200 + i}") for i in range(5)]
+    itf = await _seed_sdk_quote_source(session)
+    await session.commit()
+
+    call_idx = {"n": 0}
+    # 第 0、1 只失败（cf=1,2）；第 2 只成功（清零）；第 3、4 只失败（cf=1,2）→ 最大连续 2 < 3
+    success_at = {2}
+
+    async def _fake_sdk(self, itf_obj, params, codes):
+        i = call_idx["n"]
+        call_idx["n"] += 1
+        if i in success_at:
+            return [{"日期": "2024-01-02", "收盘": "10.50"}]
+        raise RuntimeError("拒连")
+
+    monkeypatch.setattr(MarketDataSyncService, "_fetch_sdk_raw", _fake_sdk)
+    monkeypatch.setattr(
+        "app.services.market_daily_price_sync._BACKFILL_BACKOFFS", (0,)
+    )
+    monkeypatch.setattr(
+        "app.services.market_daily_price_sync._BACKFILL_FAILURE_BREAKER", 3
+    )
+
+    # 不抛 RuntimeError 即证明未误触发熔断
+    result = await backfill_historical(
+        session, itf, [m.id for m in masters], date(2024, 1, 1)
+    )
+    assert "历史回补完成" in result
+    assert "失败 4 只" in result  # 0/1/3/4 共 4 只失败，均未误中止
+
+
+@pytest.mark.asyncio
+async def test_backfill_breaker_keeps_written_rows_resumable(session, monkeypatch):
+    """熔断抛出后，此前成功写入的日线行仍保留（已 commit），可断点续跑、未回滚。
+
+    构造：前 2 只成功写入 → 后续连续失败达阈值 3 触发熔断。断言前 2 只的日线行仍在库。
+    """
+    masters = [await _add_master(session, code=f"600{300 + i}") for i in range(5)]
+    itf = await _seed_sdk_quote_source(session)
+    await session.commit()
+    # 回补过程含 rollback，会使 masters 对象属性过期；先抓取纯量 id 供断言使用
+    master_ids = [m.id for m in masters]
+
+    call_idx = {"n": 0}
+
+    async def _fake_sdk(self, itf_obj, params, codes):
+        i = call_idx["n"]
+        call_idx["n"] += 1
+        if i < 2:  # 前两只成功写入（各自 commit）
+            return [{"日期": "2024-01-02", "收盘": "10.50"}]
+        raise RuntimeError("拒连")  # 第 2 只起连续失败 → 阈值 3 触发熔断
+
+    monkeypatch.setattr(MarketDataSyncService, "_fetch_sdk_raw", _fake_sdk)
+    monkeypatch.setattr(
+        "app.services.market_daily_price_sync._BACKFILL_BACKOFFS", (0,)
+    )
+    monkeypatch.setattr(
+        "app.services.market_daily_price_sync._BACKFILL_FAILURE_BREAKER", 3
+    )
+
+    with pytest.raises(RuntimeError):
+        await backfill_historical(
+            session, itf, master_ids, date(2024, 1, 1)
+        )
+
+    # 熔断前成功写入的 2 只日线行仍在库（已 commit，rollback 不回滚已提交事务）
+    rows = (await session.execute(select(MarketSecurityDailyPrice))).scalars().all()
+    written_masters = {r.master_id for r in rows}
+    assert master_ids[0] in written_masters
+    assert master_ids[1] in written_masters
+    # 失败的那只不应落任何行
+    assert master_ids[2] not in written_masters

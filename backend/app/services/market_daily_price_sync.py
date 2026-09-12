@@ -57,6 +57,14 @@ _BACKFILL_BURST = 10
 _BACKFILL_COOLDOWN_MIN = 60.0
 _BACKFILL_COOLDOWN_MAX = 120.0
 _BACKFILL_BACKOFFS = (60, 120, 300)  # 指数退避重试间隔（秒），依次用尽即放弃该证券
+# 连续失败熔断阈值：连续失败只数达到该值即中止整轮（抛 RuntimeError）。
+# 背景：数据源主机 push2his.eastmoney.com 会对本机 IP 定向拒连（0.2 秒内立即失败，
+# 非超时），而单只失败时退避重试共耗时约 60+120+300=480 秒。一旦被定向拒连，整轮会
+# 按每只约 480 秒的速度空转（4609 只全拒即白等约 614 小时）。连续 N 只失败即认定数据源
+# 不可达，立刻中止止损，避免长时间空转。取 3 是「最快止损」与「容忍偶发抖动」的折中：
+# 实测定向拒连时第 1 只即失败，故 3 只足以判定；而退避重试已内含 3 次自身重试，
+# 单只偶发网络故障不会轻易凑满连续 3 只。
+_BACKFILL_FAILURE_BREAKER = 3
 # 单只回补请求的兜底超时上界（秒）。实库「东财-历史行情」接口 timeout 列为 NULL，
 # _fetch_sdk_raw 内部 wait_for(timeout=None) 即不设超时，单只卡死会无限拖住整轮回补；
 # 此层是回补自己的兜底上界，超时后由 except Exception 退避重试，让循环继续推进。
@@ -363,9 +371,16 @@ async def backfill_historical(
       ``trade_date``，起点已覆盖 ``start_date`` 的证券跳过（无额外游标表）；
     - burst≈10 只/批 + 批间冷却 60–120s + 指数退避 60/120/300s（决策 A15），每批记进度日志；
     - 单只回补请求另有兜底超时上界 ``_BACKFILL_FETCH_TIMEOUT``（秒），防止接口 timeout=NULL
-      时单只卡死无限拖住整轮回补（超时由退避重试分支接住）。
+      时单只卡死无限拖住整轮回补（超时由退避重试分支接住）；
+    - 连续失败熔断：连续 ``_BACKFILL_FAILURE_BREAKER`` 只失败即中止整轮并抛 ``RuntimeError``
+      （数据源被定向拒连时止损，避免按每只约 480 秒的退避速度长时间空转）。熔断发生在批中途、
+      不等本批跑完；中止不影响断点续跑（进度由数据本身决定，重跑自动跳过已覆盖的证券，
+      已写入行保留、幂等可续）。
     """
     mds = MarketDataSyncService(session)
+    # 在循环前锁定数据源名称，避免单只失败后 session.rollback() 使 itf 属性过期、
+    # 后续成功分支再读 itf.name 触发惰性重载（异步会话下报 MissingGreenlet）。
+    source = itf.name
     today = today_app_tz()
     start_fmt = start_date.strftime("%Y%m%d")
     end_fmt = today.strftime("%Y%m%d")
@@ -374,11 +389,14 @@ async def backfill_historical(
     skipped = 0
     failed = 0
     written = 0
+    consecutive_failures = 0  # 连续失败计数，达到阈值即熔断中止整轮
 
     for start in range(0, total, _BACKFILL_BURST):
         for mid in master_ids[start : start + _BACKFILL_BURST]:
             sec = await session.get(Security, mid)
             if sec is None:
+                # 不重置 consecutive_failures：该分支未发任何请求，不携带连通性信息，
+                # 重置会掩盖真实的连续失败趋势、削弱熔断。
                 done += 1
                 continue
             # 断点即数据本身（P1-3）：已有最早 trade_date ≤ start_date ⇒ 起点已覆盖，跳过。
@@ -393,6 +411,8 @@ async def backfill_historical(
                 )
             ).scalar_one_or_none()
             if earliest is not None and earliest <= start_date:
+                # 不重置 consecutive_failures：该分支仅按已存数据跳过、未发任何请求，
+                # 不携带连通性信息，重置会掩盖真实的连续失败趋势、削弱熔断。
                 done += 1
                 skipped += 1
                 continue
@@ -423,14 +443,31 @@ async def backfill_historical(
                     )
                     await asyncio.sleep(wait)
                     continue
-                hist_written = await _upsert_hist_rows(session, mid, rows, itf.name)
+                hist_written = await _upsert_hist_rows(session, mid, rows, source)
                 await session.commit()
                 written += hist_written
                 succeeded = True
+                consecutive_failures = 0  # 单只成功：清零连续失败计数
                 break
             if not succeeded:
                 failed += 1
+                consecutive_failures += 1
                 await session.rollback()
+                # 连续失败达到阈值：判定数据源被定向拒连，立即中止整轮止损
+                # （中止发生在批中途，不等本批 10 只跑完）。
+                if consecutive_failures >= _BACKFILL_FAILURE_BREAKER:
+                    logger.error(
+                        "回补连续失败熔断：连续失败 %d 只 ≥ 阈值 %d，进度 %d/%d，"
+                        "已跳过 %d 只，已写入 %d 行，中止整轮",
+                        consecutive_failures, _BACKFILL_FAILURE_BREAKER,
+                        done + 1, total, skipped, written,
+                    )
+                    raise RuntimeError(
+                        f"回补连续失败熔断：连续失败 {consecutive_failures} 只"
+                        f"（阈值 {_BACKFILL_FAILURE_BREAKER}），进度 {done + 1}/{total}，"
+                        f"已写入行 {written}。已写入数据保留，可重跑续跑（幂等）。"
+                        f"请检查数据源 push2his.eastmoney.com 是否对本机 IP 定向拒连。"
+                    )
             done += 1
         # 批间冷却（决策 A15：60–120s，随机抖动），最后一批跳过
         if start + _BACKFILL_BURST < total:
