@@ -19,7 +19,6 @@ from sqlalchemy import select, update
 from app.models import (
     DividendYieldSettings,
     InterfaceCategory,
-    JobConfig,
     MarketSecurityDailyPrice,
     QuoteInterface,
     SecuritiesDataProvider,
@@ -31,8 +30,6 @@ from app.models import (
 from app.models.enums import (
     DividendStatus,
     DividendYieldMode,
-    JobKind,
-    JobTaskType,
     QuoteProviderAccessMethod,
     ReportPeriodType,
     SecurityType,
@@ -709,53 +706,36 @@ async def test_backfill_specials_requires_admin(session, client):
 
 
 @pytest.mark.asyncio
-async def test_backfill_specials_404_when_seed_job_missing(session, client):
-    """守护 §6.9：迁移 0011 种子任务缺失 → 404（携带可操作原因，而非静默空跑）。"""
-    admin = await _make_admin(session, client)
-    r = await client.post(
-        "/api/dividend-yield/backfill-specials", headers=auth(admin["token"])
-    )
-    assert r.status_code == 404
-    # 项目统一信封响应（code/data/message），非 FastAPI 默认 detail 字段
-    assert "0011" in r.text, "404 文案须指明迁移 0011 种子缺失，便于运维定位"
-
-
-@pytest.mark.asyncio
 async def test_backfill_specials_triggers_job_async(session, client, monkeypatch):
-    """守护 §6.9：admin 触发成功 → 200 + job_id，且**不阻塞**（fire-and-forget）。
+    """守护 §6.9：admin 触发成功 → 200，且 fire-and-forget 直接调起服务（不再依赖种子系统任务）。
 
-    ``run_task_now`` 被替换为空桩：真实链路会串行遍历 4609 只证券（10~25 分钟），
-    测试中绝不可真实执行；契约关注点是「定位到种子任务并触发」。
+    ``run_dividend_special_backfill`` 被替换为即时桩：真实链路会串行遍历 4609 只证券（10~25 分钟），
+    测试中绝不可真实执行；契约关注点是「直接调起服务且立即返回。
     """
-    import app.services.scheduler as sched
+    import app.services.dividend_notice_scan as dns
 
-    triggered: list[str] = []
-    monkeypatch.setattr(
-        sched, "run_task_now", lambda job_id: triggered.append(job_id)
-    )
+    captured: list = []
+    # 即时桩：记录被调用的 cfg（应为 None），返回占位摘要
+    async def _noop(cfg):
+        captured.append(cfg)
+        return "noop"
+
+    monkeypatch.setattr(dns, "run_dividend_special_backfill", _noop)
+
     admin = await _make_admin(session, client)
-
-    # 造迁移 0011 同构的种子任务（enabled=FALSE：不自动调度，仅手动 trigger）
-    job = JobConfig(
-        id=_uid(),
-        name="特别分红历史回补",
-        task_type=JobTaskType.DIVIDEND_SPECIAL_BACKFILL,
-        kind=JobKind.SYSTEM,
-        enabled=False,
-        cron_expr="0 3 1 1 *",
-        params={},
-    )
-    session.add(job)
-    await session.commit()
-
-    r = await client.post(
-        "/api/dividend-yield/backfill-specials", headers=auth(admin["token"])
-    )
+    h = auth(admin["token"])
+    r = await client.post("/api/dividend-yield/backfill-specials", headers=h)
     status, _, data, _ = env(r)
     assert status == 200
-    assert data["job_id"] == job.id
     assert "后台执行" in data["message"]
-    assert triggered == [job.id], "须以种子任务 id 触发，且不等待其完成"
+
+    # 等待 fire-and-forget 任务被调度（track_task + asyncio.create_task，同 /backfill-prices 契约）
+    for _ in range(50):
+        if captured:
+            break
+        await asyncio.sleep(0.01)
+    assert captured, "须以 fire-and-forget 调起 run_dividend_special_backfill(None)"
+    assert captured[0] is None, "按钮版直接调用服务函数，不再经系统任务 cfg"
 
 
 # ───────────────────────── /backfill-prices 端点契约（路线 B，决策 A15） ─────────────────────────
@@ -966,3 +946,108 @@ async def test_backfill_settings_accepts_symbol_params_sdk(session, client):
     assert status == 200
     assert data["price_backfill_source"]["id"] == itf.id
 
+# ───────────────────────── 在途回补护栏与取消（M-1 / M-3） ─────────────────────────
+@pytest.mark.asyncio
+async def test_backfill_prices_rejects_when_inflight(session, client):
+    """守护 M-1：已有在途任务（start_date 非空）→ 400，不得重复启动。
+
+    两个并发任务会各自选出**同一批**待补证券（回补长耗时，批完成前这些证券仍是
+    「未覆盖」，且 ORDER BY master_id 使结果确定）→ 同一批被请求两次、配额翻倍。
+    前端置灰只是 UX 层（多标签页/多管理员/直接 curl 均可绕过），本校验才是护栏。
+    """
+    admin = await _make_admin(session, client)
+    h = auth(admin["token"])
+    session.add(DividendYieldSettings(
+        green_threshold=Decimal("0.05"), red_threshold=Decimal("0.03"),
+        price_backfill_start_date=date(2021, 1, 1),
+    ))
+    await session.commit()
+
+    r = await client.post(
+        "/api/dividend-yield/backfill-prices",
+        json={"start_date": "2022-01-01"}, headers=h,
+    )
+    status, _, _, message = env(r)
+    assert status == 400
+    assert "已有在途回补任务" in message
+    assert "2021-01-01" in message  # 回显在途起点，便于判断「等」还是「取消」
+
+
+@pytest.mark.asyncio
+async def test_cancel_price_backfill_clears_start_date(session, client):
+    """守护 M-3：取消在途回补 → 清空 price_backfill_start_date（唯一 API 退路）。
+
+    在途标记由服务端管理（PUT 不接受该字段），而 run_pending_price_backfill 仅在
+    「选出 0 只」时自动清标记；数据源持续不可达时会永远在途，此前只能直接改库。
+    """
+    admin = await _make_admin(session, client)
+    h = auth(admin["token"])
+    session.add(DividendYieldSettings(
+        green_threshold=Decimal("0.05"), red_threshold=Decimal("0.03"),
+        price_backfill_start_date=date(2021, 1, 1),
+    ))
+    await session.commit()
+
+    r = await client.delete("/api/dividend-yield/backfill-prices", headers=h)
+    status, _, data, message = env(r)
+    assert status == 200
+    assert data["cancelled_start_date"] == "2021-01-01"
+    assert "已取消" in data["message"]  # 业务文案在 payload，envelope message 是状态 'ok'
+
+    row = (await session.execute(select(DividendYieldSettings).limit(1))).scalar_one()
+    assert row.price_backfill_start_date is None
+
+
+@pytest.mark.asyncio
+async def test_cancel_price_backfill_400_when_no_inflight(session, client):
+    """无在途任务时取消 → 400 明确告知，而非静默成功造成误解。"""
+    admin = await _make_admin(session, client)
+    h = auth(admin["token"])
+    session.add(DividendYieldSettings(
+        green_threshold=Decimal("0.05"), red_threshold=Decimal("0.03"),
+    ))
+    await session.commit()
+
+    r = await client.delete("/api/dividend-yield/backfill-prices", headers=h)
+    status, _, _, message = env(r)
+    assert status == 400
+    assert "无在途" in message
+
+
+@pytest.mark.asyncio
+async def test_cancel_price_backfill_requires_admin(session, client):
+    """取消会改变在途状态（等同写操作）：未登录 401 / 非 admin 403。"""
+    r = await client.delete("/api/dividend-yield/backfill-prices")
+    assert r.status_code == 401
+    info = await register_login(client)
+    r = await client.delete(
+        "/api/dividend-yield/backfill-prices", headers=auth(info["token"])
+    )
+    assert r.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_backfill_prices_allowed_after_cancel(session, client):
+    """闭环验证：取消后不再命中「已有在途」护栏——否则用户会被永久锁死。
+
+    取消端点与在途护栏必须成对存在：只加护栏不给退路 = 数据源故障即死锁。
+    """
+    admin = await _make_admin(session, client)
+    h = auth(admin["token"])
+    session.add(DividendYieldSettings(
+        green_threshold=Decimal("0.05"), red_threshold=Decimal("0.03"),
+        price_backfill_start_date=date(2021, 1, 1),
+    ))
+    await session.commit()
+    r = await client.delete("/api/dividend-yield/backfill-prices", headers=h)
+    assert r.status_code == 200
+
+    # 未配置回补源仍会 400，但原因必须是「未配置」而非「已有在途」
+    r = await client.post(
+        "/api/dividend-yield/backfill-prices",
+        json={"start_date": "2022-01-01"}, headers=h,
+    )
+    status, _, _, message = env(r)
+    assert status == 400
+    assert "已有在途" not in message
+    assert "未配置" in message
