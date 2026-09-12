@@ -447,6 +447,36 @@ async def _validate_interface(
         )
 
 
+async def _validate_backfill_interface(db: AsyncSession, interface_id: Optional[str]) -> None:
+    """历史行情回补源校验：存在性 + 分类 2 + enabled + **接入方式 sdk**；缺省允许置空。
+
+    **不做**「params 是否含 symbol」的形态启发式——``stock_zh_a_hist`` 天然逐只入参
+    （params 必含 symbol 占位，实库 ``东财-历史行情`` 即如此），该启发式是为股息列表
+    分类（报告期全量 vs 按证券逐只）设计的，对回补源不适用；路线 B 的硬约束是
+    ``backfill_historical`` 要求 sdk 接入（与 ``/backfill-prices`` 运行时校验同口径）。
+    """
+    if not interface_id:
+        return
+    itf = await db.get(QuoteInterface, interface_id)
+    if itf is None or itf.category_id != QUOTE_CAT_ID or not itf.enabled:
+        raise BusinessException(
+            code=BusinessErrorCode.VALIDATION_FAILED,
+            message="接口不存在、分类不符或未启用",
+            status_code=400,
+        )
+    provider = await db.get(SecuritiesDataProvider, itf.provider_id)
+    if provider is None or provider.access_method != QuoteProviderAccessMethod.SDK:
+        raise BusinessException(
+            code=BusinessErrorCode.VALIDATION_FAILED,
+            message=(
+                "历史行情回补接口接入方式须为 sdk（akshare stock_zh_a_hist），"
+                f"当前接口 {itf.name!r} 的提供方接入方式为 "
+                f"{provider.access_method if provider else '未知'}"
+            ),
+            status_code=400,
+        )
+
+
 async def _load_settings(db: AsyncSession) -> DividendYieldSettings:
     """读取单行配置；无行时返回空默认（阈值 0.05/0.03、三接口 null）。"""
     row = (
@@ -520,10 +550,9 @@ async def put_dividend_yield_settings(
     await _validate_interface(
         db, body.announcement_source_interface_id, NOTICE_CAT_ID, require_per_symbol=True
     )
-    # 历史行情回补源：分类 2「证券行情」；路线 B 须按报告期全量形态（params 无 symbol）
-    await _validate_interface(
-        db, body.price_backfill_source_interface_id, QUOTE_CAT_ID, require_per_symbol=False
-    )
+    # 历史行情回补源：分类 2「证券行情」+ 接入方式 sdk（路线 B）；
+    # 不做 symbol 形态启发式（stock_zh_a_hist 天然逐只带 symbol，见 helper 文档串）
+    await _validate_backfill_interface(db, body.price_backfill_source_interface_id)
 
     row = await _load_settings(db)
     is_new = row.id is None  # 空默认（无持久化行）时插入，否则更新既有行

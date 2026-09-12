@@ -17,6 +17,7 @@ import pytest
 from sqlalchemy import select, update
 
 from app.models import (
+    DividendYieldSettings,
     InterfaceCategory,
     JobConfig,
     MarketSecurityDailyPrice,
@@ -815,15 +816,13 @@ async def test_backfill_prices_requires_configured_source(session, client):
 
 @pytest.mark.asyncio
 async def test_backfill_prices_rejects_non_sdk_provider(session, client):
-    """守护 /backfill-prices：配置了回补接口但提供方接入方式非 sdk → 400。
-
-    PUT 仅校验分类/启用/调用形态（不校验接入方式），故可成功配置非 sdk 接口；
-    运行时 /backfill-prices 须 fail closed 拒绝（路线 B 硬要求 access_method=sdk）。
-    """
+    """守护回补源非 sdk 防线：PUT 保存期即拒（400，报错指向接入方式）；
+    绕过 PUT 直插配置行后，运行时 /backfill-prices 仍 fail closed 拒绝。"""
     admin = await _make_admin(session, client)
     h = auth(admin["token"])
     itf = await _seed_category2_interface(session, access_method="https")
-    # 配置回补源（PUT 通过：分类 2 + 按报告期全量形态）
+
+    # ① 保存期：非 sdk → PUT 400（fail closed 不落库），报错指向「接入方式」
     r = await client.put(
         "/api/dividend-yield/settings",
         json={
@@ -832,8 +831,17 @@ async def test_backfill_prices_rejects_non_sdk_provider(session, client):
         },
         headers=h,
     )
-    assert r.status_code == 200
-    # 触发回补：非 sdk → 400
+    status, _, _, message = env(r)
+    assert status == 400
+    assert "sdk" in message
+    assert "调用形态" not in message
+
+    # ② 运行时防线：绕过 PUT 直插配置行（模拟历史脏数据/并发窗口），POST 仍拒
+    session.add(DividendYieldSettings(
+        green_threshold=Decimal("0.05"), red_threshold=Decimal("0.03"),
+        price_backfill_source_interface_id=itf.id,
+    ))
+    await session.commit()
     r = await client.post(
         "/api/dividend-yield/backfill-prices",
         json={"start_date": "2021-01-01"}, headers=h,
@@ -901,3 +909,38 @@ async def test_backfill_prices_triggers_async_when_configured(session, client, m
         await asyncio.sleep(0.01)
     assert captured, "fire-and-forget 任务须被触发并执行"
     assert captured[0][1] == [m.id]
+
+
+@pytest.mark.asyncio
+async def test_backfill_settings_accepts_symbol_params_sdk(session, client):
+    """守护回补源 PUT 校验：sdk 接口 params 含 symbol（stock_zh_a_hist 真实形态）须放行。
+
+    回归背景：实库「东财-历史行情」params 含 ``symbol`` 占位，曾被「按报告期全量形态
+    （params 无 symbol）」启发式误杀致保存 400——该启发式只适用于股息列表分类，
+    回补源的正确约束是接入方式 sdk（与 /backfill-prices 运行时校验同口径）。
+    """
+    admin = await _make_admin(session, client)
+    h = auth(admin["token"])
+    itf = await _seed_category2_interface(
+        session,
+        access_method=QuoteProviderAccessMethod.SDK,
+        params={
+            "period": "daily", "adjust": "", "start_date": "",
+            "end_date": "", "timeout": "", "symbol": "000001",
+        },
+    )
+    r = await client.put(
+        "/api/dividend-yield/settings",
+        json={
+            "green_threshold": "0.05", "red_threshold": "0.03",
+            "price_backfill_source_interface_id": itf.id,
+        },
+        headers=h,
+    )
+    assert r.status_code == 200
+    status, _, data, _ = env(
+        await client.get("/api/dividend-yield/settings", headers=h)
+    )
+    assert status == 200
+    assert data["price_backfill_source"]["id"] == itf.id
+
