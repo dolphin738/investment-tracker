@@ -103,3 +103,19 @@ export function backfillSpecialDividends(): Promise<{
     '/dividend-yield/backfill-specials',
   );
 }
+
+/** 手动触发历史行情缺口回补响应（admin-only，后端 fire-and-forget 立即返回） */
+export interface BackfillPricesResult {
+  message: string;
+  start_date: string;
+  security_count: number;
+}
+
+/** 手动触发历史行情缺口回补（初始化块；admin-only，后端异步后台执行、立即返回） */
+export function backfillDailyPrices(
+  startDate: string,
+): Promise<BackfillPricesResult> {
+  return http.post<BackfillPricesResult>('/dividend-yield/backfill-prices', {
+    start_date: startDate,
+  });
+}

@@ -35,6 +35,7 @@ import {
 import { useQuoteProviders } from '@/modules/admin/composables/use-quote-provider';
 import { SELECT_EMPTY_VALUE } from '@/lib/constants';
 import type { UpdateDividendYieldSettingsDto } from '@/api/types';
+import GlobalSettingsDividendInitBlock from './GlobalSettingsDividendInitBlock.vue';
 
 const settingsQuery = useDividendYieldSettings(true);
 const dividendSettings = computed(() => settingsQuery.data.value);
@@ -59,6 +60,10 @@ const priceSourceOptions = computed(() =>
 const announcementSourceOptions = computed(() =>
   (interfacesQuery.data.value ?? []).filter((i) => i.category_id === '4' && i.enabled),
 );
+/** 历史行情回补接口候选（category_id === '2' && enabled；契约：证券行情分类） */
+const priceBackfillSourceOptions = computed(() =>
+  (interfacesQuery.data.value ?? []).filter((i) => i.category_id === '2' && i.enabled),
+);
 
 // 提供方 id → 名称：四个源下拉展示接口归属（如「东财-分红配送（东方财富）」）
 const { data: providers } = useQuoteProviders();
@@ -77,6 +82,7 @@ const settingsForm = reactive({
   dividendDetailSourceInterfaceId: SELECT_EMPTY_VALUE,
   priceSourceInterfaceId: SELECT_EMPTY_VALUE,
   announcementSourceInterfaceId: SELECT_EMPTY_VALUE,
+  priceBackfillSourceInterfaceId: SELECT_EMPTY_VALUE,
 });
 const settingsFormError = ref('');
 
@@ -105,6 +111,8 @@ watch(
     settingsForm.priceSourceInterfaceId = s.price_source?.id ?? SELECT_EMPTY_VALUE;
     settingsForm.announcementSourceInterfaceId =
       s.announcement_source?.id ?? SELECT_EMPTY_VALUE;
+    settingsForm.priceBackfillSourceInterfaceId =
+      s.price_backfill_source?.id ?? SELECT_EMPTY_VALUE;
   },
   { immediate: true },
 );
@@ -147,7 +155,9 @@ const settingsHasChanges = computed(() => {
     settingsForm.priceSourceInterfaceId !==
       (s.price_source?.id ?? SELECT_EMPTY_VALUE) ||
     settingsForm.announcementSourceInterfaceId !==
-      (s.announcement_source?.id ?? SELECT_EMPTY_VALUE)
+      (s.announcement_source?.id ?? SELECT_EMPTY_VALUE) ||
+    settingsForm.priceBackfillSourceInterfaceId !==
+      (s.price_backfill_source?.id ?? SELECT_EMPTY_VALUE)
   );
 });
 
@@ -173,6 +183,9 @@ function handleSaveSettings(): void {
     ),
     announcement_source_interface_id: toInterfaceIdOrNull(
       settingsForm.announcementSourceInterfaceId,
+    ),
+    price_backfill_source_interface_id: toInterfaceIdOrNull(
+      settingsForm.priceBackfillSourceInterfaceId,
     ),
   };
   settingsMutation.mutate(payload);
@@ -307,6 +320,40 @@ function handleSaveSettings(): void {
               </SelectItem>
             </SelectContent>
           </Select>
+        </div>
+
+        <!-- 初始化（冷启动 / 数据修复用手工动作） -->
+        <div class="space-y-4 border-t pt-4">
+          <div class="space-y-1">
+            <h3 class="text-sm font-medium">初始化</h3>
+            <p class="text-xs text-muted-foreground">
+              冷启动或数据修复时使用的手工动作；触发后任务在后台执行，进度见应用日志。
+            </p>
+          </div>
+
+          <!-- 历史行情回补接口（参与 settings 保存，候选 = category_id === '2' && enabled） -->
+          <div class="space-y-2">
+            <Label for="dy-price-backfill-source">历史行情回补接口（证券行情）</Label>
+            <Select v-model="settingsForm.priceBackfillSourceInterfaceId">
+              <SelectTrigger id="dy-price-backfill-source" class="w-full">
+                <SelectValue placeholder="选择历史行情回补接口" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem :value="SELECT_EMPTY_VALUE">不设置</SelectItem>
+                <SelectItem
+                  v-for="itf in priceBackfillSourceOptions"
+                  :key="itf.id"
+                  :value="itf.id"
+                >
+                  {{ itf.name }}（{{ providerNameById.get(itf.provider_id) ?? '未知提供方' }}）
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <GlobalSettingsDividendInitBlock
+            :backfill-interface-id="settingsForm.priceBackfillSourceInterfaceId"
+          />
         </div>
 
         <p v-if="settingsFormError" class="text-xs text-red-500">

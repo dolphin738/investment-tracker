@@ -38,17 +38,7 @@ import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
-import { Loader2, Search, X } from 'lucide-vue-next';
+import { Search, X } from 'lucide-vue-next';
 import {
   Select,
   SelectContent,
@@ -58,11 +48,7 @@ import {
 } from '@/components/ui/select';
 import { cn, formatPercent, formatCurrency } from '@/lib/utils';
 import { useIsAdmin } from '@/stores/auth.store';
-import {
-  useRank,
-  useRebuildDividendYield,
-  useBackfillSpecialDividends,
-} from '../composables/use-dividend-yield';
+import { useRank } from '../composables/use-dividend-yield';
 import { useYieldThresholds } from '../composables/use-yield-thresholds';
 import SecurityDetailDialog from '../components/SecurityDetailDialog.vue';
 import ImpliedPriceCalculator from '../components/ImpliedPriceCalculator.vue';
@@ -163,25 +149,6 @@ function modeLabel(mode: 'TTM' | 'LFY'): string {
   return mode === 'TTM' ? 'TTM' : 'LFY';
 }
 
-/** 手动全量重建（admin-only；替代原系统定时任务） */
-const rebuild = useRebuildDividendYield();
-const rebuilding = computed(() => rebuild.isPending.value);
-function onRebuild(): void {
-  rebuild.mutate();
-}
-
-/** 特别分红历史回补（§6.9；admin-only，冷启动一次性；后端异步后台执行） */
-const backfill = useBackfillSpecialDividends();
-const backfilling = computed(() => backfill.isPending.value);
-const backfillConfirmOpen = ref(false);
-function onBackfill(): void {
-  backfillConfirmOpen.value = true;
-}
-function confirmBackfill(): void {
-  backfillConfirmOpen.value = false;
-  backfill.mutate();
-}
-
 /** 页面级 Tab：榜单列表 / 股息价格推算（内容区 v-show 切换，保状态互不干扰） */
 const activeTab = ref<string>('rank');
 </script>
@@ -277,55 +244,7 @@ const activeTab = ref<string>('rank');
           <Switch id="dy-include-no-div" v-model="fIncludeNoDividend" />
           <Label for="dy-include-no-div" class="text-xs">显示两年无分红</Label>
         </div>
-        <Button
-          v-if="isAdmin"
-          variant="outline"
-          size="sm"
-          class="ml-auto self-end"
-          :disabled="rebuilding"
-          @click="onRebuild"
-        >
-          <Loader2 v-if="rebuilding" class="mr-1 h-4 w-4 animate-spin" />
-          全量重建
-        </Button>
-        <Button
-          v-if="isAdmin"
-          variant="outline"
-          size="sm"
-          class="self-end"
-          :disabled="backfilling"
-          title="冷启动一次性：补齐 5 年特别分红（须在季度抓取之后执行）"
-          @click="onBackfill"
-        >
-          <Loader2 v-if="backfilling" class="mr-1 h-4 w-4 animate-spin" />
-          特别分红回补
-        </Button>
       </div>
-
-      <AlertDialog
-        :open="backfillConfirmOpen"
-        @update:open="(o) => !o && (backfillConfirmOpen = false)"
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>确认触发特别分红回补？</AlertDialogTitle>
-            <AlertDialogDescription>
-              将串行回补近 5 年特别分红（约 12~25 分钟写库），属冷启动一次性操作，且须在季度抓取之后执行。进度可在「定时任务日志」查看。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel :disabled="backfilling">取消</AlertDialogCancel>
-            <AlertDialogAction
-              :disabled="backfilling"
-              class="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              @click="confirmBackfill"
-            >
-              <Loader2 v-if="backfilling" class="mr-2 h-4 w-4 animate-spin" />
-              确认回补
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
 
       <Card>
         <CardHeader>

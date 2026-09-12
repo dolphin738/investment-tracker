@@ -63,6 +63,21 @@ vi.mock('@/modules/dividend-yield/composables/use-dividend-yield', () => ({
     isError: ref(false),
     mutate: mutateSpy,
   }),
+  useRebuildDividendYield: () => ({
+    isPending: ref(false),
+    isError: ref(false),
+    mutate: vi.fn(),
+  }),
+  useBackfillSpecialDividends: () => ({
+    isPending: ref(false),
+    isError: ref(false),
+    mutate: vi.fn(),
+  }),
+  useBackfillDividendPrices: () => ({
+    isPending: ref(false),
+    isError: ref(false),
+    mutate: vi.fn(),
+  }),
 }));
 
 vi.mock('@/modules/admin/composables/use-quote-provider', () => ({
@@ -159,9 +174,9 @@ describe('GlobalSettingsDividendTab — 四源下拉与提供方名拼接（§15
     // 页面含「公司公告接口」区块
     expect(wrapper.text()).toContain('公司公告接口');
 
-    // 四个数据源下拉（主源 / 补充源 / 行情源 / 公告源）
+    // 五个数据源下拉（主源 / 补充源 / 行情源 / 公告源 / 历史行情回补接口）
     const selects = wrapper.findAll('select');
-    expect(selects).toHaveLength(4);
+    expect(selects).toHaveLength(5);
 
     // 公告源下拉（第 4 个）：仅包含启用的分类 4 接口
     const announcementOptions = interfaceOptions(selects[3]);

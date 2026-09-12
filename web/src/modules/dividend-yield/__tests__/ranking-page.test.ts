@@ -17,9 +17,7 @@ const fixtures = vi.hoisted(() => ({
   /** 捕获每次 getDividendYieldRank 的过滤参数 */
   calls: [] as DividendYieldRankFilters[],
   total: 0,
-  /** 记录「特别分红回补」触发次数 */
-  backfillCalls: 0,
-  /** 当前用户是否 admin（驱动「全量重建 / 特别分红回补」按钮显隐） */
+  /** 当前用户是否 admin（驱动 admin 专属按钮显隐） */
   isAdmin: false,
 }));
 
@@ -60,11 +58,6 @@ vi.mock('@/api/dividend-yield.api', () => ({
   getDividendYieldSettings: vi.fn(async () => null),
   getDividendYieldCurve: vi.fn(),
   getDividendYieldImpliedPrice: vi.fn(),
-  rebuildDividendYield: vi.fn(async () => ({ summary: '重算 1 只' })),
-  backfillSpecialDividends: vi.fn(async () => {
-    fixtures.backfillCalls += 1;
-    return { message: '已触发特别分红历史回补，后台执行中', job_id: 'job-1' };
-  }),
 }));
 vi.mock('@/api/quote-interface.api', () => ({
   listAllInterfaces: vi.fn(async () => []),
@@ -82,7 +75,6 @@ describe('RankingPage（§10.2 管理页）', () => {
   beforeEach(() => {
     fixtures.calls = [];
     fixtures.total = 1;
-    fixtures.backfillCalls = 0;
     fixtures.isAdmin = false;
     pinia = createPinia();
     setActivePinia(pinia);
@@ -156,40 +148,5 @@ describe('RankingPage（§10.2 管理页）', () => {
     const calcInput = wrapper.find('#dy-calc-security');
     expect(calcInput.exists()).toBe(true);
     expect(calcInput.isVisible()).toBe(false); // 初始榜单 Tab，推算区隐藏
-  });
-
-  it('「特别分红回补」按钮：非 admin 不渲染（§6.9 admin-only）', async () => {
-    fixtures.isAdmin = false;
-    const wrapper = await mountAt('/dividend-yield');
-    expect(wrapper.text()).not.toContain('特别分红回补');
-    expect(wrapper.text()).not.toContain('全量重建');
-  });
-
-  it('「特别分红回补」按钮：admin 可见，二次确认后才触发（L-4 §6.9 异步后台）', async () => {
-    fixtures.isAdmin = true;
-    const wrapper = await mountAt('/dividend-yield');
-    const btn = wrapper
-      .findAll('button')
-      .find((b) => b.text().includes('特别分红回补'));
-    expect(btn).toBeTruthy();
-
-    const before = fixtures.calls.length;
-    // L-4：点击按钮仅弹出二次确认，不直接触发
-    await btn!.trigger('click');
-    await flushPromises();
-
-    // 确认弹窗出现（reka-ui AlertDialog 经 Portal 渲染到 body）
-    const confirmBtn = Array.from(document.querySelectorAll('button')).find(
-      (b) => (b.textContent ?? '').includes('确认回补'),
-    );
-    expect(confirmBtn).toBeTruthy();
-    expect(fixtures.backfillCalls).toBe(0); // 未确认前不应触发
-
-    await confirmBtn!.click();
-    await flushPromises();
-
-    expect(fixtures.backfillCalls).toBe(1);
-    // 后端 fire-and-forget：本页不等待回补完成，故不应额外重拉榜单
-    expect(fixtures.calls.length).toBe(before);
   });
 });
