@@ -2195,58 +2195,6 @@
         ]
       }
     },
-    "/api/dividend-yield/backfill-prices": {
-      "post": {
-        "tags": [
-          "dividend-yield"
-        ],
-        "summary": "Backfill Daily Prices",
-        "description": "触发「按交易日横截面批量回补」（§6.2 路线 A；admin-only）。\n\n与 ``/backfill-specials`` 同为 fire-and-forget：直接 ``create_task`` 后台执行、\n立即返回，故长时间运行不会造成请求超时。进度经执行日志（§6.7）查看。\n\n**能力边界**：腾讯 ``q=`` 接口只返回当前价、无历史查询能力，故本端点只能补\n「行情接口仍能返回该日收盘价」的近端缺口（某日任务失败、新增证券补历史）。\n深度历史（数月~数年）须走日抓任务的 ``backfill_start`` 参数（路线 B，逐只，多小时级）。",
-        "operationId": "backfill_daily_prices_api_dividend_yield_backfill_prices_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "anyOf": [
-                  {
-                    "$ref": "#/components/schemas/GapBackfillBody"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "title": "Body"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "JWT-auth": []
-          }
-        ]
-      }
-    },
     "/api/dividend-yield/backfill-specials": {
       "post": {
         "tags": [
@@ -7886,18 +7834,6 @@
         ],
         "title": "FreshnessReasonOut",
         "description": "单条「数据不新鲜」原因（对齐前端 FreshnessReason）。\n\n- kind: ``PRICE`` / ``CASH``，驱动前端「去更新行情 / 去更新现金余额」按钮。\n- asOf / lagDays: 该维度最新数据日期与滞后天数（``None`` 表示缺失记录）。\n- label: 给前端展示的本地化文案。"
-      },
-      "GapBackfillBody": {
-        "properties": {
-          "lookback_days": {
-            "type": "integer",
-            "title": "Lookback Days",
-            "default": 30
-          }
-        },
-        "type": "object",
-        "title": "GapBackfillBody",
-        "description": "缺口回补入参：``lookback_days`` 为回溯天数（上限 400，服务侧再钳制）。"
       },
       "HTTPValidationError": {
         "properties": {
