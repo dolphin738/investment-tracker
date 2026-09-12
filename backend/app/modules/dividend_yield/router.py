@@ -53,6 +53,7 @@ from app.services.dividend_yield import (
 )
 from app.services.log import record
 from app.services.market_data_sync import DIVIDEND_LIST_CAT_ID, QUOTE_CAT_ID, NOTICE_CAT_ID
+from app.services.market_daily_price_sync import _select_pending_backfill_masters
 from app.core.bg import track_task
 
 router_dividend_yield = APIRouter(
@@ -391,6 +392,9 @@ class SettingsUpdateBody(BaseModel):
     price_source_interface_id: Optional[str] = None
     announcement_source_interface_id: Optional[str] = None
     price_backfill_source_interface_id: Optional[str] = None
+    # 每日回补额度（只/天）：1..2000，越界 PUT 400。为 None 表示不改（保留既有值）。
+    # 注意：price_backfill_start_date 不接受 PUT 设置（由触发/完成流程服务端管理，避免状态不一致）。
+    price_backfill_quota: Optional[int] = None
 
 
 def _interface_out(itf: Optional[QuoteInterface]) -> Optional[dict[str, Any]]:
@@ -510,6 +514,13 @@ async def _settings_out(db: AsyncSession, row: DividendYieldSettings) -> dict[st
         "price_backfill_source": _interface_out(
             await _resolve_interface(db, row.price_backfill_source_interface_id)
         ),
+        # 每日回补额度（只/天）；在途回补起点日期——非空即表示存在在途回补任务
+        "price_backfill_quota": row.price_backfill_quota,
+        "price_backfill_start_date": (
+            row.price_backfill_start_date.isoformat()
+            if row.price_backfill_start_date is not None
+            else None
+        ),
     }
 
 
@@ -554,6 +565,14 @@ async def put_dividend_yield_settings(
     # 不做 symbol 形态启发式（stock_zh_a_hist 天然逐只带 symbol，见 helper 文档串）
     await _validate_backfill_interface(db, body.price_backfill_source_interface_id)
 
+    # 每日回补额度（只/天）：1..2000；为 None 表示不改（保留既有值）。越界 400 中文。
+    if body.price_backfill_quota is not None and not (1 <= body.price_backfill_quota <= 2000):
+        raise BusinessException(
+            code=BusinessErrorCode.VALIDATION_FAILED,
+            message="每日回补额度 price_backfill_quota 须为 1..2000（只/天）",
+            status_code=400,
+        )
+
     row = await _load_settings(db)
     is_new = row.id is None  # 空默认（无持久化行）时插入，否则更新既有行
     before_detail = {
@@ -564,6 +583,7 @@ async def put_dividend_yield_settings(
         "price_source_interface_id": row.price_source_interface_id,
         "announcement_source_interface_id": row.announcement_source_interface_id,
         "price_backfill_source_interface_id": row.price_backfill_source_interface_id,
+        "price_backfill_quota": row.price_backfill_quota,
     }
     row.green_threshold = green
     row.red_threshold = red
@@ -572,6 +592,9 @@ async def put_dividend_yield_settings(
     row.price_source_interface_id = body.price_source_interface_id
     row.announcement_source_interface_id = body.announcement_source_interface_id
     row.price_backfill_source_interface_id = body.price_backfill_source_interface_id
+    # 仅当请求体显式给出额度时才覆盖（None = 不改）；before 已记录旧值供审计
+    if body.price_backfill_quota is not None:
+        row.price_backfill_quota = body.price_backfill_quota
     row.updated_by = admin.user_id
     if is_new:
         db.add(row)
@@ -592,6 +615,7 @@ async def put_dividend_yield_settings(
                 "price_source_interface_id": body.price_source_interface_id,
                 "announcement_source_interface_id": body.announcement_source_interface_id,
                 "price_backfill_source_interface_id": body.price_backfill_source_interface_id,
+                "price_backfill_quota": row.price_backfill_quota,
             },
         },
         user_id=admin.user_id,
@@ -684,23 +708,18 @@ class BackfillPricesBody(BaseModel):
     start_date: date
 
 
-async def _run_price_backfill(
-    interface_id: str, master_ids: list[str], start: date
-) -> None:
-    """后台执行历史行情回补（独立会话，fire-and-forget）。
+async def _run_price_backfill() -> None:
+    """后台执行在途回补首批（独立会话，fire-and-forget）。
 
-    接口在请求级会话内已校验存在与 access_method=sdk，此处再取一次以绑定到
-    任务独立会话（请求会话不可跨协程复用）。
+    直接复用 ``run_pending_price_backfill``：读 settings 解析接口、精确选出本批未覆盖证券
+    并回补。请求级已校验接口存在与 access_method=sdk 并写入了 ``price_backfill_start_date``，
+    此处独立会话重新读 settings 即可接管整轮在途任务（与每日「收盘价抓取」续跑共用同一函数）。
     """
     from app.db.database import AsyncSessionLocal
-    from app.services.market_daily_price_sync import backfill_historical
+    from app.services.market_daily_price_sync import run_pending_price_backfill
 
     async with AsyncSessionLocal() as session:
-        itf = await session.get(QuoteInterface, interface_id)
-        if itf is None:
-            logger.warning("历史行情回补接口 %s 不存在，跳过", interface_id)
-            return
-        await backfill_historical(session, itf, master_ids, start)
+        await run_pending_price_backfill(session)
 
 
 @router_dividend_yield.post("/backfill-prices")
@@ -709,12 +728,16 @@ async def backfill_prices(
     admin: CurrentUser = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    """手动触发历史行情回补（路线 B；admin-only，fire-and-forget）。
+    """手动触发历史行情回补（路线 B 形态 A；admin-only，fire-and-forget 在途任务）。
 
-    读 ``dividend_yield_settings.price_backfill_source_interface_id`` 作为回补接口；
-    未配置或接口非 sdk 接入方式时 fail closed 400 不触发。待回补证券集合 =
-    ``security_dividends`` 去重 ``master_id``（路线 B 仅需 master_id 列表）。
-    回补长耗时（全池约 11.6 小时），故异步后台执行、立即返回，进度见应用日志。
+    行为变更（形态 A）：写入 ``price_backfill_start_date``（= 启动在途任务），立即跑第一批
+    （run_pending_price_backfill，独立会话），补完自动停止、清状态。每日「收盘价抓取」任务
+    完成后若存在在途任务会按每日额度续跑。
+
+    保留既有 400 防线：未配置接口 / 接口不存在 / 非 sdk 接入方式；``price_backfill_start_date``
+    不由 PUT 设置（服务端管理，避免状态不一致）。回补长耗时，故异步后台执行、立即返回，
+    进度见应用日志。响应 ``security_count`` 语义改为「本批将处理的只数」（≤ 每日额度，
+    不再是全池数）。
     """
     settings = await _load_settings(db)
     interface_id = settings.price_backfill_source_interface_id
@@ -742,32 +765,34 @@ async def backfill_prices(
             ),
             status_code=400,
         )
-    # 待回补证券集合：security_dividends 去重 master_id（路线 B 只需 master_id 列表）
-    master_ids = list(
-        set(
-            (
-                await db.execute(select(SecurityDividend.master_id).distinct())
-            ).scalars().all()
-        )
-    )
+    # 启动在途任务：写入起点日期并落库（此后每日收盘价抓取会按额度续跑）
     start = body.start_date
-    # fire-and-forget：独立会话内执行，立即返回不阻塞请求（持有强引用防 GC 回收）
-    track_task(asyncio.create_task(_run_price_backfill(interface_id, master_ids, start)))
+    settings.price_backfill_start_date = start
+    await db.commit()
+
+    # 本批将处理的只数（精确选出未覆盖，限每日额度），用于响应语义
+    quota = settings.price_backfill_quota if settings.price_backfill_quota is not None else 1000
+    pending = await _select_pending_backfill_masters(db, start, quota)
+
+    # fire-and-forget：独立会话内跑首批（持有强引用防 GC 回收）
+    track_task(asyncio.create_task(_run_price_backfill()))
     await record(
         level="info",
         scope="admin",
         module="dividend_price_backfill",
-        message="历史行情回补（手动触发，异步后台执行）",
+        message="历史行情在途回补（启动在途任务，首批后台执行）",
         detail={
             "start_date": start.isoformat(),
-            "security_count": len(master_ids),
+            "quota": quota,
+            "security_count": len(pending),
             "interface_id": interface_id,
             "interface_name": itf.name,
         },
         user_id=admin.user_id,
     )
     return {
-        "message": "历史行情回补已触发，后台执行中；进度见应用日志",
+        "message": "已启动行情回补在途任务并跑首批（后台执行），补完自动停止（每日额度续跑）",
         "start_date": start.isoformat(),
-        "security_count": len(master_ids),
+        "security_count": len(pending),
+        "quota": quota,
     }

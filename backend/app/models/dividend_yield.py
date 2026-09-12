@@ -222,6 +222,15 @@ class DividendYieldSettings(Base, TimestampMixin):
         ForeignKey("quote_provider_interfaces.id", ondelete="SET NULL"),
         nullable=True,
     )
+    # 每日回补额度（只/天）：把全池回补摊到多天、做成在途任务时，每日「收盘价抓取」
+    # 完成后按此额度续跑一批。非空、默认 1000（<=2000 封禁红线，由 PUT 校验约束）。
+    price_backfill_quota: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1000, server_default="1000"
+    )
+    # 在途回补起点日期（"YYYY-MM-DD"）：非空即表示存在在途回补任务，由回补触发/完成流程
+    # 服务端管理（POST /backfill-prices 写入、补完清空），PUT 不接受设置以免状态不一致；
+    # 全部证券覆盖后由每日批次清空，任务结束、此后不再跑。
+    price_backfill_start_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     updated_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
 
 

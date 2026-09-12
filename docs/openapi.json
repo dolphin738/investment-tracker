@@ -2201,7 +2201,7 @@
           "dividend-yield"
         ],
         "summary": "Backfill Prices",
-        "description": "手动触发历史行情回补（路线 B；admin-only，fire-and-forget）。\n\n读 ``dividend_yield_settings.price_backfill_source_interface_id`` 作为回补接口；\n未配置或接口非 sdk 接入方式时 fail closed 400 不触发。待回补证券集合 =\n``security_dividends`` 去重 ``master_id``（路线 B 仅需 master_id 列表）。\n回补长耗时（全池约 11.6 小时），故异步后台执行、立即返回，进度见应用日志。",
+        "description": "手动触发历史行情回补（路线 B 形态 A；admin-only，fire-and-forget 在途任务）。\n\n行为变更（形态 A）：写入 ``price_backfill_start_date``（= 启动在途任务），立即跑第一批\n（run_pending_price_backfill，独立会话），补完自动停止、清状态。每日「收盘价抓取」任务\n完成后若存在在途任务会按每日额度续跑。\n\n保留既有 400 防线：未配置接口 / 接口不存在 / 非 sdk 接入方式；``price_backfill_start_date``\n不由 PUT 设置（服务端管理，避免状态不一致）。回补长耗时，故异步后台执行、立即返回，\n进度见应用日志。响应 ``security_count`` 语义改为「本批将处理的只数」（≤ 每日额度，\n不再是全池数）。",
         "operationId": "backfill_prices_api_dividend_yield_backfill_prices_post",
         "requestBody": {
           "content": {
@@ -10710,6 +10710,17 @@
               }
             ],
             "title": "Price Backfill Source Interface Id"
+          },
+          "price_backfill_quota": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price Backfill Quota"
           }
         },
         "type": "object",

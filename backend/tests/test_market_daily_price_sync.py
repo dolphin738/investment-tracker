@@ -34,6 +34,7 @@ from app.services.market_data_sync import (
 from app.services.market_daily_price_sync import (
     MarketDailyPriceSyncService,
     backfill_historical,
+    run_pending_price_backfill,
     _BACKFILL_BACKOFFS,
     _BACKFILL_BURST,
     _BACKFILL_COOLDOWN_MAX,
@@ -611,3 +612,144 @@ async def test_backfill_breaker_keeps_written_rows_resumable(session, monkeypatc
     assert master_ids[1] in written_masters
     # 失败的那只不应落任何行
     assert master_ids[2] not in written_masters
+
+
+# ───────────────────────── 在途回补任务（形态 A，§6.2 在途任务） ─────────────────────────
+@pytest.mark.asyncio
+async def test_run_pending_price_backfill_no_pending_makes_no_request(session, monkeypatch):
+    """守护形态 A：无在途任务（price_backfill_start_date 为空）→ 直接返回提示、不发任何请求。"""
+    await _seed_sdk_quote_source(session)  # 造 settings 行（start_date 为空）
+    await session.commit()
+
+    calls = {"n": 0}
+
+    async def _fake_sdk(self, itf_obj, params, codes):
+        calls["n"] += 1
+        return [{"日期": "2024-01-02", "收盘": "10.50"}]
+
+    monkeypatch.setattr(MarketDataSyncService, "_fetch_sdk_raw", _fake_sdk)
+    msg = await run_pending_price_backfill(session)
+    assert calls["n"] == 0  # 零请求
+    assert "无在途" in msg  # 中文提示含「无在途」
+
+
+@pytest.mark.asyncio
+async def test_run_pending_price_backfill_respects_quota(session, monkeypatch):
+    """守护形态 A：在途 + 有未覆盖 → 只处理 ≤ quota 只（quota=2、未覆盖 5 只 → 只请求 2 只）。"""
+    masters = [await _add_master(session, code=f"600{500 + i}") for i in range(5)]
+    # 待补证券集合来自 security_dividends（路线 B 以分红事件表的 master_id 为全集）
+    for m in masters:
+        session.add(SecurityDividend(
+            master_id=m.id, report_year=2024, report_quarter=1,
+            period_type=ReportPeriodType.ANNUAL,
+            cash_per_share=Decimal("1.0"), status=DividendStatus.PAID,
+        ))
+    itf = await _seed_sdk_quote_source(session)
+    await session.commit()
+    settings = (
+        await session.execute(select(DividendYieldSettings).limit(1))
+    ).scalar_one()
+    settings.price_backfill_source_interface_id = itf.id
+    settings.price_backfill_start_date = date(2024, 1, 1)
+    settings.price_backfill_quota = 2  # 每日额度 2
+    await session.commit()
+
+    fetched: list[str] = []
+    expected = {f"600{500 + i}" for i in range(5)}  # 5 只待补的纯数字代码
+
+    async def _fake_sdk(self, itf_obj, params, codes):
+        fetched.append(params["symbol"])
+        return [{"日期": "2024-01-02", "收盘": "10.50"}]
+
+    monkeypatch.setattr(MarketDataSyncService, "_fetch_sdk_raw", _fake_sdk)
+    monkeypatch.setattr(
+        "app.services.market_daily_price_sync._BACKFILL_BACKOFFS", (0,)
+    )
+    monkeypatch.setattr(
+        "app.services.market_daily_price_sync._BACKFILL_COOLDOWN_MIN", 0
+    )
+    monkeypatch.setattr(
+        "app.services.market_daily_price_sync._BACKFILL_COOLDOWN_MAX", 0
+    )
+
+    msg = await run_pending_price_backfill(session)
+    # 关键：只处理 quota=2 只，而非全池 5 只
+    assert len(fetched) == 2
+    assert set(fetched) <= expected  # 实际发请求的都在待补集合内
+    assert "在途" in msg or "回补" in msg
+
+
+@pytest.mark.asyncio
+async def test_run_pending_price_backfill_clears_when_all_covered(session, monkeypatch):
+    """守护形态 A：在途 + 全部已覆盖 → 清空 price_backfill_start_date 且零请求（终态）。"""
+    masters = [await _add_master(session, code=f"600{600 + i}") for i in range(3)]
+    # 待补证券集合来自 security_dividends（路线 B 以分红事件表的 master_id 为全集）
+    for m in masters:
+        session.add(SecurityDividend(
+            master_id=m.id, report_year=2024, report_quarter=1,
+            period_type=ReportPeriodType.ANNUAL,
+            cash_per_share=Decimal("1.0"), status=DividendStatus.PAID,
+        ))
+    itf = await _seed_sdk_quote_source(session)
+    await session.commit()
+    settings = (
+        await session.execute(select(DividendYieldSettings).limit(1))
+    ).scalar_one()
+    settings.price_backfill_source_interface_id = itf.id
+    settings.price_backfill_start_date = date(2024, 1, 1)
+    await session.commit()
+    # 全部已覆盖：每只都已有 trade_date <= start_date 的日线行
+    for m in masters:
+        session.add(MarketSecurityDailyPrice(
+            master_id=m.id, trade_date=date(2023, 1, 1), close=Decimal("10"),
+        ))
+    await session.commit()
+
+    calls = {"n": 0}
+
+    async def _fake_sdk(self, itf_obj, params, codes):
+        calls["n"] += 1
+        return [{"日期": "2024-01-02", "收盘": "10.50"}]
+
+    monkeypatch.setattr(MarketDataSyncService, "_fetch_sdk_raw", _fake_sdk)
+    msg = await run_pending_price_backfill(session)
+    assert calls["n"] == 0  # 零请求（补完，不发任何请求）
+    # 重新读 settings：在途状态已清空（终态，此后不再跑，避免无限循环白烧配额）
+    settings2 = (
+        await session.execute(select(DividendYieldSettings).limit(1))
+    ).scalar_one()
+    assert settings2.price_backfill_start_date is None
+    assert "完成" in msg or "结束" in msg
+
+
+@pytest.mark.asyncio
+async def test_daily_close_fetch_pending_backfill_is_noop_when_no_task(session, monkeypatch):
+    """守护形态 A：无在途任务时 daily_close_fetch 不发起历史回补（backfill_historical 零调用）。
+
+    无在途任务必须是纯 no-op：不发请求、不改数据，否则会打破既有每日抓取测试。
+    """
+    import app.services.market_daily_price_sync as mds
+
+    today = today_app_tz()
+    session.add(MarketTradeCalendar(trade_date=today))
+    m = await _add_master(session)
+    session.add(
+        SecurityDividend(master_id=m.id, report_year=today.year, report_quarter=1,
+                         period_type=ReportPeriodType.ANNUAL,
+                         cash_per_share=Decimal("1.0"), status=DividendStatus.PAID)
+    )
+    await _seed_sdk_quote_source(session)  # settings 行（start_date 为空）
+    await session.commit()
+
+    called = {"n": 0}
+
+    async def _spy(itf, master_ids, start_date):
+        called["n"] += 1
+        return "spy"
+
+    monkeypatch.setattr(mds, "backfill_historical", _spy)
+
+    svc = MarketDailyPriceSyncService(session)
+    result = await svc.daily_close_fetch({})
+    assert called["n"] == 0  # 无在途任务 → 不触发回补
+    assert "每日额度回补" not in result  # 结果串不含在途回补段

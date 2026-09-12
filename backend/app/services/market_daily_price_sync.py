@@ -19,7 +19,7 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Optional
 
-from sqlalchemy import select
+from sqlalchemy import exists, select
 
 from app.core.date_utils import today_app_tz
 from app.models import (
@@ -327,6 +327,18 @@ class MarketDailyPriceSyncService:
         if backfill_start_raw:
             backfill_note = await self._run_backfill(itf, code_map, backfill_start_raw)
 
+        # 在途回补任务（形态 A）：每日额度分批补完即清空（§6.2 在途任务）。
+        # 仅在存在在途任务时调用——无在途任务为纯 no-op（不发请求、不改数据），
+        # 否则会打破既有测试。每日批次回补失败须隔离：价格抓取本身已成功，回补熔断/
+        # 异常（含 backfill_historical 的 RuntimeError）不应让每日任务整体 FAILED。
+        backfill_status = ""
+        if getattr(settings, "price_backfill_start_date", None) is not None:
+            try:
+                backfill_status = await run_pending_price_backfill(self.session)
+            except Exception as exc:  # noqa: BLE001  每日批次回补失败隔离，不影响收盘价抓取
+                logger.warning("每日额度回补异常（已隔离，不影响收盘价抓取）：%s", exc)
+                backfill_status = f"每日额度回补失败：{exc}"
+
         result = (
             f"收盘价抓取完成：成功批次 {success_batches}，成功行 {total_rows}，"
             f"失败批次 {failed_batches}，重算证券 {len(changed)} 只，"
@@ -334,6 +346,8 @@ class MarketDailyPriceSyncService:
         )
         if backfill_note:
             result += f"；{backfill_note}"
+        if backfill_status:
+            result += f"；每日额度回补：{backfill_status}"
         return result
 
     async def _run_backfill(
@@ -537,6 +551,96 @@ async def _upsert_hist_rows(session, master_id: str, rows: list[dict], source: s
             row.fetched_at = fetched_at
         count += 1
     return count
+
+
+# --------------------------------------------------------------------------- #
+# 在途回补任务（形态 A，用户裁决方案）：摊到多天、按每日额度分批、补完即清空终态
+# --------------------------------------------------------------------------- #
+async def _select_pending_backfill_masters(
+    session, start_date: date, quota: int
+) -> list[str]:
+    """精确选出未覆盖证券的 master_id 列表（限 quota 只，按 master_id 稳定排序）。
+
+    未覆盖 = 该证券在 ``market_security_daily_prices`` 不存在
+    ``trade_date <= start_date`` 的日线行（断点即数据本身，语义同 backfill_historical
+    的跳过判定）。用一条 SQL 的 NOT EXISTS 子查询精确定位，而非逐只判定：
+      ① 每日批次可精确知道「还有没有剩余」，据此决定是否清空在途状态（终态），避免 §6.3
+         留存清理删早期数据后各证券 earliest 变晚、被判定未覆盖 → 每天重复请求全池、
+         次年再被删的无限循环白烧配额；
+      ② 避免每天扫全池 4609 次查询/请求，只按需取本批（≤ quota）。
+    """
+    subq = select(MarketSecurityDailyPrice.master_id).where(
+        MarketSecurityDailyPrice.master_id == SecurityDividend.master_id,
+        MarketSecurityDailyPrice.trade_date <= start_date,
+    )
+    stmt = (
+        select(SecurityDividend.master_id)
+        .distinct()
+        .where(~exists(subq))
+        .order_by(SecurityDividend.master_id)
+        .limit(quota)
+    )
+    return list((await session.execute(stmt)).scalars().all())
+
+
+async def run_pending_price_backfill(session) -> str:
+    """在途回补任务：按每日额度跑一批未覆盖证券的历史日线；补完即清空在途状态。
+
+    供两处复用：路由 ``POST /backfill-prices`` 首批、每日「收盘价抓取」完成后续跑。
+
+    语义（严格）：
+    1. 读 ``dividend_yield_settings``：无行或 ``price_backfill_start_date`` 为空 → 无在途
+       任务，直接返回提示、**不发任何请求**（no-op，不破坏每日收盘价抓取）。
+    2. 解析回补接口（settings.price_backfill_source_interface_id + 分类 2 + enabled +
+       sdk）；接口缺失/停用/非 sdk → 抛 RuntimeError（中文，fail fast）。
+    3. 一条 SQL 精确选出本批待补证券（未覆盖的，限每日额度 quota；quota 为 None 兜底 1000）。
+    4. 若选出 0 只 → 判定补完：清空 ``price_backfill_start_date`` 并 commit，返回
+       「已结束」提示、**不发任何请求**（终态，避免无限循环白烧配额）。
+    5. 否则调用 ``backfill_historical`` 跑本批，返回其摘要（加前缀注明本批只数/额度）。
+    6. start_date 从 settings.price_backfill_start_date 读（date 类型）。
+
+    为什么用「一条 SQL 精确定位未覆盖」而不是逐只判定——见 ``_select_pending_backfill_masters``
+    文档串：① 每日批次可精确知晓「还有无剩余」以决定清状态；② 避免每天扫全池 4609 次。
+    """
+    settings = (
+        await session.execute(select(DividendYieldSettings).limit(1))
+    ).scalar_one_or_none()
+    if settings is None or settings.price_backfill_start_date is None:
+        return "无在途回补任务（price_backfill_start_date 为空），本次不发起请求"
+
+    start_date = settings.price_backfill_start_date
+    quota = settings.price_backfill_quota if settings.price_backfill_quota is not None else 1000
+
+    # 解析回补接口：price_backfill_source_interface_id + 分类 2 + enabled + sdk（fail fast）
+    interface_id = settings.price_backfill_source_interface_id
+    if not interface_id:
+        raise RuntimeError(
+            "历史行情回补接口未配置（price_backfill_source_interface_id 为空），"
+            "无法执行在途回补任务"
+        )
+    itf = await session.get(QuoteInterface, interface_id)
+    if itf is None or itf.category_id != QUOTE_CAT_ID or not itf.enabled:
+        raise RuntimeError(
+            f"历史行情回补接口不存在/分类不符/未启用（{interface_id}），在途回补任务中止"
+        )
+    provider = await session.get(SecuritiesDataProvider, itf.provider_id)
+    if provider is None or provider.access_method != QuoteProviderAccessMethod.SDK:
+        raise RuntimeError(
+            "历史行情回补接口接入方式须为 sdk（akshare stock_zh_a_hist），"
+            f"当前接口 {itf.name!r} 的提供方接入方式为 "
+            f"{provider.access_method if provider else '未知'}，在途回补任务中止"
+        )
+
+    # 一条 SQL 精确选出未覆盖证券（待回补 = 不存在 trade_date <= start_date 的日线行）
+    pending = await _select_pending_backfill_masters(session, start_date, quota)
+    if not pending:
+        # 全部已覆盖 → 补完，清空在途状态（终态），此后不再跑
+        settings.price_backfill_start_date = None
+        await session.commit()
+        return "回补已完成：全部证券均已覆盖，在途回补任务已结束"
+
+    batch_note = await backfill_historical(session, itf, pending, start_date)
+    return f"在途回补本批 {len(pending)} 只（额度 {quota}）：{batch_note}"
 
 
 # --------------------------------------------------------------------------- #

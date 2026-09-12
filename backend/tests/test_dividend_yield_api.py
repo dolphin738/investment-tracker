@@ -912,6 +912,28 @@ async def test_backfill_prices_triggers_async_when_configured(session, client, m
 
 
 @pytest.mark.asyncio
+async def test_settings_put_backfill_quota_out_of_range(session, client):
+    """守护形态 A 每日额度：PUT price_backfill_quota 越界（0 与 2001）→ 400 中文。
+
+    合法区间 1..2000；越界须 fail closed（400，文案指向 price_backfill_quota），不落库。
+    """
+    admin = await _make_admin(session, client)
+    h = auth(admin["token"])
+    for bad in (0, 2001):
+        r = await client.put(
+            "/api/dividend-yield/settings",
+            json={
+                "green_threshold": "0.05", "red_threshold": "0.03",
+                "price_backfill_quota": bad,
+            },
+            headers=h,
+        )
+        status, _, _, message = env(r)
+        assert status == 400, f"quota={bad} 应被拒（实际 {status}）"
+        assert "price_backfill_quota" in message
+
+
+@pytest.mark.asyncio
 async def test_backfill_settings_accepts_symbol_params_sdk(session, client):
     """守护回补源 PUT 校验：sdk 接口 params 含 symbol（stock_zh_a_hist 真实形态）须放行。
 
