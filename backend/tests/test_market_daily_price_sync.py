@@ -753,3 +753,89 @@ async def test_daily_close_fetch_pending_backfill_is_noop_when_no_task(session, 
     result = await svc.daily_close_fetch({})
     assert called["n"] == 0  # 无在途任务 → 不触发回补
     assert "每日额度回补" not in result  # 结果串不含在途回补段
+
+@pytest.mark.asyncio
+async def test_run_pending_price_backfill_consumes_daily_quota(session, monkeypatch):
+    """额度按**自然日**消耗：同日第二次执行只能在剩余额度内，用尽则零请求。
+
+    口径：``used_today`` 按「本批实际处理只数」累加（成败都计），跨日自动归零。
+    修复前每次调用都 ``limit(quota)``，导致触发当天（手动 1 批 + 收盘价抓取续跑 1 批）
+    跑掉 2×quota，与「额度是每天的」冲突。
+    """
+    masters = [await _add_master(session, code=f"600{700 + i}") for i in range(5)]
+    for m in masters:
+        session.add(SecurityDividend(
+            master_id=m.id, report_year=2024, report_quarter=1,
+            period_type=ReportPeriodType.ANNUAL,
+            cash_per_share=Decimal("1.0"), status=DividendStatus.PAID,
+        ))
+    itf = await _seed_sdk_quote_source(session)
+    await session.commit()
+    settings = (await session.execute(select(DividendYieldSettings).limit(1))).scalar_one()
+    settings.price_backfill_source_interface_id = itf.id
+    settings.price_backfill_start_date = date(2024, 1, 1)
+    settings.price_backfill_quota = 2
+    await session.commit()
+
+    fetched: list[str] = []
+
+    async def _fake_sdk(self, itf_obj, params, codes):
+        fetched.append(params["symbol"])
+        return [{"日期": "2024-01-02", "收盘": "10.50"}]
+
+    monkeypatch.setattr(MarketDataSyncService, "_fetch_sdk_raw", _fake_sdk)
+    monkeypatch.setattr("app.services.market_daily_price_sync._BACKFILL_BACKOFFS", (0,))
+    monkeypatch.setattr("app.services.market_daily_price_sync._BACKFILL_COOLDOWN_MIN", 0)
+    monkeypatch.setattr("app.services.market_daily_price_sync._BACKFILL_COOLDOWN_MAX", 0)
+
+    # 第一次：跑满 quota=2，并记账
+    await run_pending_price_backfill(session)
+    assert len(fetched) == 2
+    s2 = (await session.execute(select(DividendYieldSettings).limit(1))).scalar_one()
+    assert s2.price_backfill_used_today == 2
+    assert s2.price_backfill_last_run_date == today_app_tz()
+
+    # 第二次（同一天）：余额 0 → 零请求，且不再消耗
+    fetched.clear()
+    msg = await run_pending_price_backfill(session)
+    assert fetched == [], "当日额度用尽后不得再发请求"
+    assert "额度已用尽" in msg
+
+
+@pytest.mark.asyncio
+async def test_run_pending_price_backfill_resets_quota_on_new_day(session, monkeypatch):
+    """跨日重置：last_run_date ≠ 今天 → used_today 归零，额度恢复。"""
+    masters = [await _add_master(session, code=f"600{800 + i}") for i in range(5)]
+    for m in masters:
+        session.add(SecurityDividend(
+            master_id=m.id, report_year=2024, report_quarter=1,
+            period_type=ReportPeriodType.ANNUAL,
+            cash_per_share=Decimal("1.0"), status=DividendStatus.PAID,
+        ))
+    itf = await _seed_sdk_quote_source(session)
+    await session.commit()
+    settings = (await session.execute(select(DividendYieldSettings).limit(1))).scalar_one()
+    settings.price_backfill_source_interface_id = itf.id
+    settings.price_backfill_start_date = date(2024, 1, 1)
+    settings.price_backfill_quota = 2
+    # 记账停在「很久以前」且已用满 → 今天应重置
+    settings.price_backfill_last_run_date = date(2000, 1, 1)
+    settings.price_backfill_used_today = 2
+    await session.commit()
+
+    fetched: list[str] = []
+
+    async def _fake_sdk(self, itf_obj, params, codes):
+        fetched.append(params["symbol"])
+        return [{"日期": "2024-01-02", "收盘": "10.50"}]
+
+    monkeypatch.setattr(MarketDataSyncService, "_fetch_sdk_raw", _fake_sdk)
+    monkeypatch.setattr("app.services.market_daily_price_sync._BACKFILL_BACKOFFS", (0,))
+    monkeypatch.setattr("app.services.market_daily_price_sync._BACKFILL_COOLDOWN_MIN", 0)
+    monkeypatch.setattr("app.services.market_daily_price_sync._BACKFILL_COOLDOWN_MAX", 0)
+
+    await run_pending_price_backfill(session)
+    assert len(fetched) == 2  # 重置后额度恢复，可再跑满 2 只
+    s2 = (await session.execute(select(DividendYieldSettings).limit(1))).scalar_one()
+    assert s2.price_backfill_last_run_date == today_app_tz()
+    assert s2.price_backfill_used_today == 2

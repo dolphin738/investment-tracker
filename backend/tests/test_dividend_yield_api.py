@@ -1051,3 +1051,33 @@ async def test_backfill_prices_allowed_after_cancel(session, client):
     assert status == 400
     assert "已有在途" not in message
     assert "未配置" in message
+
+@pytest.mark.asyncio
+async def test_backfill_prices_rejects_when_daily_quota_exhausted(session, client):
+    """额度按自然日消耗：当日额度用尽 → 400，不得触发一个注定空跑的批次。
+
+    与在途护栏（M-1）正交：此处 start_date 为空（无在途任务），
+    仅因「今天已跑满 quota」而被拒。
+    """
+    from app.core.date_utils import today_app_tz
+
+    admin = await _make_admin(session, client)
+    h = auth(admin["token"])
+    # 需先有合法 sdk 回补源：端点校验顺序为「配置 → 额度」，配置错误优先（更可行动）
+    itf = await _seed_category2_interface(session, access_method=QuoteProviderAccessMethod.SDK)
+    session.add(DividendYieldSettings(
+        green_threshold=Decimal("0.05"), red_threshold=Decimal("0.03"),
+        price_backfill_source_interface_id=itf.id,
+        price_backfill_quota=10,
+        price_backfill_last_run_date=today_app_tz(),
+        price_backfill_used_today=10,  # 今日已用满
+    ))
+    await session.commit()
+
+    r = await client.post(
+        "/api/dividend-yield/backfill-prices",
+        json={"start_date": "2021-01-01"}, headers=h,
+    )
+    status, _, _, message = env(r)
+    assert status == 400
+    assert "额度已用尽" in message
