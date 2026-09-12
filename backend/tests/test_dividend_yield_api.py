@@ -421,6 +421,33 @@ async def test_settings_get_announcement_source_null_by_default(session, client)
     assert data["announcement_source"] is None
 
 
+@pytest.mark.asyncio
+async def test_settings_put_saves_backfill_default_start_date(session, client):
+    """守护「回补起始日期可保存」修复：PUT 携带 price_backfill_default_start_date → 落库、GET 回传；
+    与在途标记 price_backfill_start_date 解耦（PUT 不接收后者，仍为空）。
+
+    回归背景：该输入框此前是纯前端本地 ref、不进 PUT，改了等于没存、重开回到一年前。
+    """
+    admin = await _make_admin(session, client)
+    h = auth(admin["token"])
+    r = await client.put(
+        "/api/dividend-yield/settings",
+        json={
+            "green_threshold": "0.05", "red_threshold": "0.03",
+            "price_backfill_default_start_date": "2020-06-01",
+        },
+        headers=h,
+    )
+    assert r.status_code == 200
+    status, _, data, _ = env(
+        await client.get("/api/dividend-yield/settings", headers=h)
+    )
+    assert status == 200
+    assert data["price_backfill_default_start_date"] == "2020-06-01"
+    # 在途标记仍为空（PUT 不接收）；二者解耦
+    assert data["price_backfill_start_date"] is None
+
+
 # ───────────────────────── 可排序列扩到 5 列（§8.1，P2-6） ─────────────────────────
 @pytest.mark.asyncio
 async def test_rankings_sort_by_numerator_and_mode_fixed_order(session, client):

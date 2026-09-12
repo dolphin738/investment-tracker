@@ -8500,8 +8500,7 @@
           "DIVIDEND_QUARTERLY_FETCH",
           "MARKET_DAILY_CLOSE_FETCH",
           "DIVIDEND_RETENTION_CLEANUP",
-          "DIVIDEND_NOTICE_SCAN",
-          "DIVIDEND_SPECIAL_BACKFILL"
+          "DIVIDEND_NOTICE_SCAN"
         ],
         "title": "JobTaskType",
         "description": "定时任务类型（统一调度器处理器注册表键 + 数据库任务类型列）。\n\n系统任务（不可追加/删除，仅可编辑）由迁移种子写入；普通任务（可增删改）在\n定时任务管理页由管理员新建。两者共用本枚举。"
