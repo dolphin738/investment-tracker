@@ -10,11 +10,14 @@
 """
 from __future__ import annotations
 
+import importlib.util
 import types
 from datetime import date
+from pathlib import Path
 
 import pytest
-from sqlalchemy import select
+import sqlalchemy as sa
+from sqlalchemy import func, select
 
 import app.services.dividend_yield_refresh as dyf
 from app.models import JobConfig, MarketTradeCalendar
@@ -88,3 +91,56 @@ async def test_handler_raises_when_still_empty(session, monkeypatch) -> None:
 
     with pytest.raises(RuntimeError, match="交易日历刷新后仍为空"):
         await run_trade_calendar_refresh(_stub_cfg())
+
+
+def _load_migration_0019():
+    """按路径加载迁移 0019 模块（``alembic/versions`` 非包，故用 importlib）。"""
+    path = (
+        Path(__file__).resolve().parents[1]
+        / "alembic"
+        / "versions"
+        / "0019_add_trade_calendar_refresh_task.py"
+    )
+    spec = importlib.util.spec_from_file_location("_mig_0019", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.asyncio
+async def test_migration_seeds_trade_calendar_task_row(session) -> None:
+    """守护迁移 0019 的**种子行写入**（QA 指出的覆盖缺口）。
+
+    既有 4 个用例都验不到「种子行落库」——因为 conftest 的 ``_clean_db``（autouse）
+    每个用例前 ``TRUNCATE`` 全表，会把 bootstrap 期由 ``alembic upgrade`` 种下的行清掉。
+    此处直接复用迁移文件里的种子 SQL（``_SEED_SQL``，单一真相源，避免重复/漂移），断言：
+    ① 落 1 行且关键字段正确（task_type/kind/enabled/cron）；② 幂等（再执行仍 1 行）。
+    """
+    mig = _load_migration_0019()
+    stmt = sa.text(mig._SEED_SQL).bindparams(name=mig._TASK_NAME, desc=mig._DESCRIPTION)
+
+    await session.execute(stmt)
+    await session.commit()
+
+    row = (
+        await session.execute(
+            select(JobConfig).where(JobConfig.name == mig._TASK_NAME)
+        )
+    ).scalar_one()
+    assert row.task_type == JobTaskType.TRADE_CALENDAR_REFRESH
+    assert row.kind == JobKind.SYSTEM
+    assert row.enabled is True
+    assert row.cron_expr == "0 8 * * *"
+
+    # 幂等：WHERE NOT EXISTS → 再执行一次仍只 1 行
+    await session.execute(stmt)
+    await session.commit()
+    count = (
+        await session.execute(
+            select(func.count())
+            .select_from(JobConfig)
+            .where(JobConfig.name == mig._TASK_NAME)
+        )
+    ).scalar_one()
+    assert count == 1

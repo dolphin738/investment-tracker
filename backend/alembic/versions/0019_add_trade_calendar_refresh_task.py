@@ -32,6 +32,20 @@ _DESCRIPTION = (
     "不刷新则 is_trade_day 降级 FAIL-OPEN"
 )
 
+# 种子行 INSERT（提取为模块常量，供 upgrade 与单测共用——单一真相源，避免 SQL 重复/漂移）
+_SEED_SQL = """
+    INSERT INTO job_configs
+        (id, name, task_type, kind, enabled, cron_expr, params, description,
+         created_at, updated_at)
+    SELECT
+        gen_random_uuid(), :name,
+        CAST('TRADE_CALENDAR_REFRESH' AS "JobTaskType"),
+        CAST('SYSTEM' AS "JobKind"),
+        TRUE, '0 8 * * *', '{}'::json, :desc,
+        now(), now()
+    WHERE NOT EXISTS (SELECT 1 FROM job_configs WHERE name = :name)
+"""
+
 
 def upgrade() -> None:
     # 1) 扩展原生枚举（ADD VALUE 须在 autocommit 块内执行，隔离独立事务）
@@ -43,22 +57,7 @@ def upgrade() -> None:
             )
         )
     # 2) 种子系统任务行（enabled=TRUE：每日 08:00 自动刷新；name 唯一约束兜底幂等）
-    op.execute(
-        sa.text(
-            """
-            INSERT INTO job_configs
-                (id, name, task_type, kind, enabled, cron_expr, params, description,
-                 created_at, updated_at)
-            SELECT
-                gen_random_uuid(), :name,
-                CAST('TRADE_CALENDAR_REFRESH' AS "JobTaskType"),
-                CAST('SYSTEM' AS "JobKind"),
-                TRUE, '0 8 * * *', '{}'::json, :desc,
-                now(), now()
-            WHERE NOT EXISTS (SELECT 1 FROM job_configs WHERE name = :name)
-            """
-        ).bindparams(name=_TASK_NAME, desc=_DESCRIPTION)
-    )
+    op.execute(sa.text(_SEED_SQL).bindparams(name=_TASK_NAME, desc=_DESCRIPTION))
 
 
 def downgrade() -> None:
