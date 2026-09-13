@@ -389,7 +389,6 @@ async def backfill_historical(
       不等本批跑完；中止不影响断点续跑（进度由数据本身决定，重跑自动跳过已覆盖的证券，
       已写入行保留、幂等可续）。
     """
-    mds = MarketDataSyncService(session)
     # 在循环前锁定数据源名称，避免单只失败后 session.rollback() 使 itf 属性过期、
     # 后续成功分支再读 itf.name 触发惰性重载（异步会话下报 MissingGreenlet）。
     source = itf.name
@@ -440,14 +439,22 @@ async def backfill_historical(
             succeeded = False
             for attempt, wait in enumerate(_BACKFILL_BACKOFFS, start=1):
                 try:
-                    # 外包单只兜底超时上界：_fetch_sdk_raw 实库可能因接口 timeout=NULL
-                    # 而不设超时；此处统一锁上界，超时走下方 except 退避重试。
-                    # 诚实局限：内部 asyncio.to_thread 无法真正取消已启动线程，超时
-                    # 只是让回补循环继续推进，底层 HTTP 请求可能仍在后台跑完。
-                    rows = await asyncio.wait_for(
-                        mds._fetch_sdk_raw(itf, params, codes=None),
-                        timeout=_BACKFILL_FETCH_TIMEOUT,
-                    )
+                    # 单只「抓取」用独立会话 fs 执行：akshare 经 asyncio.to_thread 失败时，
+                    # 被 asyncio.wait_for 包裹的共享会话 greenlet 上下文会被破坏（见本次回补
+                    # sh688115 / sz000830 的 greenlet_spawn has not been called 报错），导致
+                    # 后续每只证券首个 session 操作即崩、整轮回补被假「连续失败」熔断。抓取与
+                    # 入库解耦：抓取走 fs，异常时随 async with 退出自动关闭/回滚、不污染外层会话；
+                    # 入库（_upsert_hist_rows + commit）仍走外层共享会话，保证断点续跑与测试可见性。
+                    # 诚实局限：内部 asyncio.to_thread 无法真正取消已启动线程，超时只是让
+                    # 回补循环继续推进，底层 HTTP 请求可能仍在后台跑完。
+                    from app.db.database import AsyncSessionLocal
+
+                    async with AsyncSessionLocal() as fs:
+                        fmds = MarketDataSyncService(fs)
+                        rows = await asyncio.wait_for(
+                            fmds._fetch_sdk_raw(itf, params, codes=None),
+                            timeout=_BACKFILL_FETCH_TIMEOUT,
+                        )
                 except Exception as exc:  # noqa: BLE001  退避重试
                     logger.warning(
                         "回补 %s 第 %d/%d 次失败 %s，%ds 后重试",
