@@ -14,6 +14,7 @@ import importlib.util
 import sys
 import types
 from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -22,7 +23,7 @@ from sqlalchemy import func, select
 
 import app.services.dividend_yield_refresh as dyf
 from app.core.date_utils import today_app_tz
-from app.models import JobConfig, MarketTradeCalendar
+from app.models import DividendYieldSettings, JobConfig, MarketTradeCalendar
 from app.models.enums import JobKind, JobTaskType
 from app.services.dividend_yield_refresh import (
     TradeCalendarRefresh,
@@ -68,7 +69,9 @@ async def test_enum_value_accepted_by_db(session) -> None:
 async def test_handler_success_summary(session, monkeypatch) -> None:
     """守护正常路径：刷新后表非空 → 返回含「交易日历刷新完成」+ 计数 + 最新日的摘要。"""
 
-    async def _fake_refresh(sess, *, full: bool = False) -> TradeCalendarRefresh:  # noqa: ARG001
+    async def _fake_refresh(
+        sess, *, full: bool = False, start_date: date | None = None
+    ) -> TradeCalendarRefresh:  # noqa: ARG001
         sess.add(MarketTradeCalendar(trade_date=date(2025, 3, 3)))
         sess.add(MarketTradeCalendar(trade_date=date(2025, 3, 4)))
         return TradeCalendarRefresh(2, 2)  # 源 2 个交易日、写入 2 行
@@ -91,7 +94,9 @@ async def test_handler_success_summary(session, monkeypatch) -> None:
 async def test_handler_raises_when_still_empty(session, monkeypatch) -> None:
     """守护兜底：refresh 声称成功（返回 >0）却一行未落、表为空 → 抛 RuntimeError。"""
 
-    async def _fetch_ok_but_no_write(sess, *, full: bool = False) -> TradeCalendarRefresh:  # noqa: ARG001
+    async def _fetch_ok_but_no_write(
+        sess, *, full: bool = False, start_date: date | None = None
+    ) -> TradeCalendarRefresh:  # noqa: ARG001
         return TradeCalendarRefresh(5, 0)  # 声称拉到 5 个交易日，但一行未落（异常态）
 
     monkeypatch.setattr(dyf, "refresh_trade_calendar", _fetch_ok_but_no_write)
@@ -162,7 +167,9 @@ async def test_handler_raises_when_fetch_failed_even_if_table_nonempty(
     session.add(MarketTradeCalendar(trade_date=date(2020, 1, 1)))
     await session.commit()
 
-    async def _fetch_failed(sess, *, full: bool = False) -> TradeCalendarRefresh:  # noqa: ARG001
+    async def _fetch_failed(
+        sess, *, full: bool = False, start_date: date | None = None
+    ) -> TradeCalendarRefresh:  # noqa: ARG001
         return TradeCalendarRefresh(0, 0)  # 拉取失败：源 0 个
 
     monkeypatch.setattr(dyf, "refresh_trade_calendar", _fetch_failed)
@@ -246,7 +253,9 @@ async def test_handler_reads_full_param(session, monkeypatch) -> None:
     """handler 由 ``cfg.params["full"]`` 决定写入模式并透传给 refresh。"""
     captured: dict[str, bool] = {}
 
-    async def _fake(sess, *, full: bool = False) -> TradeCalendarRefresh:  # noqa: ARG001
+    async def _fake(
+        sess, *, full: bool = False, start_date: date | None = None
+    ) -> TradeCalendarRefresh:  # noqa: ARG001
         captured["full"] = full
         sess.add(MarketTradeCalendar(trade_date=today_app_tz()))  # 保证 total > 0
         return TradeCalendarRefresh(1, 1)
@@ -268,3 +277,58 @@ def test_handler_meta_exposes_full_toggle() -> None:
     assert meta["creatable"] is False
     fields = {f["key"]: f for f in meta["param_fields"]}
     assert fields["full"]["type"] == "boolean"
+
+
+@pytest.mark.asyncio
+async def test_refresh_respects_configured_start_date(session, monkeypatch) -> None:
+    """配置起始日期决定窗口下限：早于该日的交易日不落库（默认下限为「去年 1 月 1 日」）。"""
+    t = today_app_tz()
+    d_before = t - timedelta(days=200)
+    d_after = t - timedelta(days=50)
+    monkeypatch.setitem(
+        sys.modules,
+        "akshare",
+        _fake_akshare([d_before.isoformat(), d_after.isoformat()]),
+    )
+    # 未配置 → 默认下限（去年 1 月 1 日）→ 两个都在窗口内
+    res = await refresh_trade_calendar(session)
+    await session.commit()
+    assert res.fetched == 2 and res.written == 2
+
+    # 清空后按配置起始日再跑 → 只收 >= start_date 的
+    await session.execute(sa.delete(MarketTradeCalendar))
+    await session.commit()
+    res2 = await refresh_trade_calendar(session, start_date=t - timedelta(days=100))
+    await session.commit()
+    assert res2.fetched == 1 and res2.written == 1
+    got = (
+        await session.execute(select(MarketTradeCalendar.trade_date))
+    ).scalars().all()
+    assert got == [d_after]
+
+
+@pytest.mark.asyncio
+async def test_handler_uses_configured_calendar_start_date(session, monkeypatch) -> None:
+    """handler 从 dividend_yield_settings.trade_calendar_start_date 取窗口下限并透传。"""
+    t = today_app_tz()
+    start = t - timedelta(days=100)
+    session.add(
+        DividendYieldSettings(
+            green_threshold=Decimal("0.05"),
+            red_threshold=Decimal("0.03"),
+            trade_calendar_start_date=start,
+        )
+    )
+    await session.commit()
+
+    captured: dict[str, object] = {}
+
+    async def _fake(sess, *, full: bool = False, start_date: date | None = None):  # noqa: ARG001
+        captured["start_date"] = start_date
+        sess.add(MarketTradeCalendar(trade_date=t))
+        return TradeCalendarRefresh(1, 1)
+
+    monkeypatch.setattr(dyf, "refresh_trade_calendar", _fake)
+    await run_trade_calendar_refresh(_stub_cfg())
+
+    assert captured["start_date"] == start

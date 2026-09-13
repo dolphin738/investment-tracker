@@ -54,6 +54,9 @@ class SettingsUpdateBody(BaseModel):
     # 回补起始日期「配置默认值」（YYYY-MM-DD）：与在途标记解耦，PUT 可写、可保存。
     # 为 None 表示不改（保留既有值）；触发回补（POST /backfill-prices）以本值为起点。
     price_backfill_default_start_date: Optional[date] = None
+    # 交易日历刷新起始日期（YYYY-MM-DD）：refresh_trade_calendar 的窗口下限，决定
+    # 「获取多长时间」（上限受数据源限制只到当年末，故不暴露）。None 表示不改。
+    trade_calendar_start_date: Optional[date] = None
 
 
 def _interface_out(itf: Optional[QuoteInterface]) -> Optional[dict[str, Any]]:
@@ -199,6 +202,12 @@ async def _settings_out(db: AsyncSession, row: DividendYieldSettings) -> dict[st
         # 最近一次回补失败原因（熔断/接口不可达）：非空 = 最近一次在途回补以失败告终，
         # 前端在「在途」旁直接展示；续跑/补完/取消/重触发时清空。
         "price_backfill_last_error": row.price_backfill_last_error,
+        # 交易日历刷新起始日期（可保存）：None = 未配置 → 后端用默认下限「去年 1 月 1 日」
+        "trade_calendar_start_date": (
+            row.trade_calendar_start_date.isoformat()
+            if row.trade_calendar_start_date is not None
+            else None
+        ),
     }
 
 
@@ -267,6 +276,11 @@ async def put_dividend_yield_settings(
             if row.price_backfill_default_start_date is not None
             else None
         ),
+        "trade_calendar_start_date": (
+            row.trade_calendar_start_date.isoformat()
+            if row.trade_calendar_start_date is not None
+            else None
+        ),
     }
     row.green_threshold = green
     row.red_threshold = red
@@ -281,6 +295,9 @@ async def put_dividend_yield_settings(
     # 回补起始日期配置默认值：与额度同口径（None = 不改），与在途标记解耦
     if body.price_backfill_default_start_date is not None:
         row.price_backfill_default_start_date = body.price_backfill_default_start_date
+    # 交易日历刷新起始日期：与额度/回补起点同口径（None = 不改）
+    if body.trade_calendar_start_date is not None:
+        row.trade_calendar_start_date = body.trade_calendar_start_date
     row.updated_by = admin.user_id
     if is_new:
         db.add(row)
@@ -305,6 +322,11 @@ async def put_dividend_yield_settings(
             "price_backfill_default_start_date": (
                 row.price_backfill_default_start_date.isoformat()
                 if row.price_backfill_default_start_date is not None
+                else None
+            ),
+            "trade_calendar_start_date": (
+                row.trade_calendar_start_date.isoformat()
+                if row.trade_calendar_start_date is not None
                 else None
             ),
         },

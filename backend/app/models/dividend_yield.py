@@ -250,6 +250,10 @@ class DividendYieldSettings(Base, TimestampMixin):
     price_backfill_last_error: Mapped[Optional[str]] = mapped_column(
         String(512), nullable=True
     )
+    # 交易日历刷新起始日期（YYYY-MM-DD）：全局设置可配，决定 refresh_trade_calendar 的
+    # 窗口下限（只落该日及之后的交易日）；None = 用默认下限「去年 1 月 1 日」。
+    # 不暴露「结束日期」：akshare tool_trade_date_hist_sina 只给到当年末，配上限也拿不到数据。
+    trade_calendar_start_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     updated_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
 
 

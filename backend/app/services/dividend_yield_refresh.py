@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import date, datetime, timezone
-from typing import NamedTuple
+from typing import NamedTuple, Optional
 
 from sqlalchemy import case, func, select, tuple_, update as sa_update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -160,10 +160,17 @@ class TradeCalendarRefresh(NamedTuple):
     written: int
 
 
-async def refresh_trade_calendar(session, *, full: bool = False) -> TradeCalendarRefresh:
-    """刷新交易日历（§5.5/决策 A9）：akshare ``tool_trade_date_hist_sina`` 拉取未来 2 年 + 当年。
+async def refresh_trade_calendar(
+    session, *, full: bool = False, start_date: Optional[date] = None
+) -> TradeCalendarRefresh:
+    """刷新交易日历（§5.5/决策 A9）：akshare ``tool_trade_date_hist_sina`` 拉取交易日。
 
     失败仅记告警、不抛出——日线任务可降级依赖「返回日期比对」防线。
+
+    - ``start_date``：窗口**下限**（含），由全局配置
+      ``dividend_yield_settings.trade_calendar_start_date`` 提供；``None`` → 默认下限
+      「去年 1 月 1 日」（与原硬编码口径一致）。窗口上限固定为「今年 +2 年末」，
+      但源实际只给到当年末，故有效上限即当年末。
 
     - 默认**增量**：只 INSERT 缺失的交易日（PG ``ON CONFLICT DO NOTHING``），不触碰已有行
       （日历行只有主键、无业务 payload，无需刷新）；
@@ -183,10 +190,12 @@ async def refresh_trade_calendar(session, *, full: bool = False) -> TradeCalenda
         col = "trade_date" if "trade_date" in df.columns else df.columns[0]
         t = today_app_tz()
         horizon = date(t.year + 2, 12, 31)
+        # 窗口下限：配置优先，未配置回落「去年 1 月 1 日」（与原 d.year < t.year-1 口径等价）
+        lower = start_date if start_date is not None else date(t.year - 1, 1, 1)
         dates: list[date] = []
         for raw in df[col].tolist():
             d = parse_date(raw)
-            if d is None or d > horizon or d.year < t.year - 1:
+            if d is None or d > horizon or d < lower:
                 continue
             dates.append(d)
         if not dates:
@@ -300,7 +309,13 @@ async def run_trade_calendar_refresh(cfg) -> str:
 
     full = bool((getattr(cfg, "params", None) or {}).get("full"))
     async with AsyncSessionLocal() as session:
-        result = await refresh_trade_calendar(session, full=full)
+        from app.models import DividendYieldSettings
+
+        settings = (
+            await session.execute(select(DividendYieldSettings).limit(1))
+        ).scalar_one_or_none()
+        start_date = settings.trade_calendar_start_date if settings is not None else None
+        result = await refresh_trade_calendar(session, full=full, start_date=start_date)
         await session.commit()
         total = (
             await session.execute(select(func.count(MarketTradeCalendar.trade_date)))
@@ -319,7 +334,8 @@ async def run_trade_calendar_refresh(cfg) -> str:
             "akshare 是否已安装"
         )
     mode = "全量" if full else "增量"
+    lower = start_date.isoformat() if start_date is not None else "默认（去年 1 月 1 日）"
     return (
-        f"交易日历刷新完成（{mode}）：源 {result.fetched} 个交易日，"
+        f"交易日历刷新完成（{mode}，起始 {lower}）：源 {result.fetched} 个交易日，"
         f"本次写入 {result.written} 行，库中共 {total} 个，最新 {latest}"
     )

@@ -10756,6 +10756,18 @@
               }
             ],
             "title": "Price Backfill Default Start Date"
+          },
+          "trade_calendar_start_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trade Calendar Start Date"
           }
         },
         "type": "object",
