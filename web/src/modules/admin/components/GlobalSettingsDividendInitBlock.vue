@@ -53,11 +53,8 @@ const props = defineProps<{
   priceBackfillLastError: string | null;
 }>();
 
-/** 仅回传额度/起点输入值（v-model 风格），其余状态仍由父组件 settingsForm 统一管理 */
-const emit = defineEmits<{
-  (e: 'update:priceBackfillQuota', v: string): void;
-  (e: 'update:priceBackfillDefaultStartDate', v: string): void;
-}>();
+// 额度 / 回补起始日期 / 交易日历起始日期的输入框已上移至父组件
+// GlobalSettingsDividendInitSection 的 2×2 网格（统一布局），本组件只保留数值计算与动作按钮。
 
 // ── 全量重建（无二次确认） ──
 const rebuild = useRebuildDividendYield();
@@ -138,49 +135,6 @@ function confirmCancelPrices(): void {
     >
       回补失败：{{ priceBackfillLastError }}
     </p>
-
-    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-      <!-- 每日回补额度（只/天）：参与父组件 settings 保存，本组件仅渲染输入并回传 -->
-      <div class="space-y-2">
-      <Label for="dy-price-backfill-quota">每日回补额度（只/天）</Label>
-      <Input
-        id="dy-price-backfill-quota"
-        :model-value="priceBackfillQuota"
-        type="number"
-        min="1"
-        max="2000"
-        @update:model-value="(v) => emit('update:priceBackfillQuota', String(v))"
-      />
-      <p class="text-xs text-muted-foreground">
-        每日收盘价抓取后按该额度自动续跑，补完自动停止
-      </p>
-      <p
-        v-if="quotaNum > 0"
-        class="text-xs font-medium text-muted-foreground"
-      >
-        今日已用 {{ priceBackfillUsedToday }} / {{ quotaNum }} 只（额度按自然日重置）
-      </p>
-    </div>
-
-    <!-- 回补起始日期（随设置保存；在途任务存在时禁用并只读展示在途起点，改起点须先取消） -->
-    <div class="space-y-2">
-      <Label for="dy-backfill-start">回补起始日期</Label>
-      <Input
-        id="dy-backfill-start"
-        :model-value="priceBackfillDefaultStartDate"
-        type="date"
-        class="w-full"
-        :disabled="!!priceBackfillInFlightDate"
-        @update:model-value="(v) => emit('update:priceBackfillDefaultStartDate', String(v))"
-      />
-      <p v-if="priceBackfillInFlightDate" class="text-xs text-muted-foreground">
-        回补进行中，改起点请先「取消在途回补」
-      </p>
-      <p v-else class="text-xs text-muted-foreground">
-        保存后作为下次「回补行情缺口」的起点（默认一年前）
-      </p>
-    </div>
-    </div>
 
     <!-- 三个初始化按钮（均带 loading 态与 disabled 联动） -->
     <div class="flex flex-wrap items-center gap-3">

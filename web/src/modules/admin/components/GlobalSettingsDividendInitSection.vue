@@ -2,14 +2,17 @@
 /**
  * modules/admin/components/GlobalSettingsDividendInitSection.vue — 全局设置「股息率」TAB 的「初始化」功能块
  *
- * 哑组件（presentational）：不取数、不管保存，仅接 props 渲染、用 emit 回传两个值。
+ * 哑组件（presentational）：不取数、不管保存，仅接 props 渲染、用 emit 回传值。
  * 父组件继续持有全部状态（settingsForm）与保存逻辑。
  *
- * 承载内容：
- * - 「初始化」标题与说明
- * - 「历史行情回补接口」下拉（参与父组件 settings 保存，候选由父组件拼好 label 传入）
- * - 复用现有 GlobalSettingsDividendInitBlock（内部含额度输入 / 回补起始日期 / 三按钮 / 弹窗）
+ * 布局：四个配置控件排成 2×2 网格——
+ *   行1：历史行情回补接口（证券行情） | 交易日历起始日期
+ *   行2：每日回补额度（只/天） | 回补起始日期
+ * 其后复用 GlobalSettingsDividendInitBlock（内部只保留在途提示、失败原因与触发/取消按钮；
+ * 额度与起点的数值仍透传进去，供其「今日已用 X/N」与按钮禁用判断使用）。
  */
+import { computed } from 'vue';
+import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
   Select,
@@ -30,9 +33,11 @@ const props = defineProps<{
   quota: string;
   /** 回补起始日期配置默认值（可保存；v-model 回传父组件 settingsForm，触发回补以其为起点） */
   defaultStartDate: string;
+  /** 交易日历刷新起始日期（YYYY-MM-DD）；空串 = 未配置（后端默认「去年 1 月 1 日」） */
+  tradeCalendarStartDate: string;
   /** 在途回补任务目标起始日（只读，服务端管理）；非空 = 有在途任务，禁用起点输入与触发 */
   inFlightStartDate: string | null;
-  /** 当日已用回补额度（只），直接透传给 InitBlock（用于剩余额度与「今日已用 X/N」） */
+  /** 当日已用回补额度（只），用于「今日已用 X/N」展示 */
   usedToday: number;
   /** 最近一次回补失败原因（熔断/接口不可达）；非空 = 最近一次在途回补以失败告终，红字展示 */
   lastError: string | null;
@@ -42,7 +47,11 @@ const emit = defineEmits<{
   (e: 'update:interfaceId', v: string): void;
   (e: 'update:quota', v: string): void;
   (e: 'update:defaultStartDate', v: string): void;
+  (e: 'update:tradeCalendarStartDate', v: string): void;
 }>();
+
+/** 每日额度数值（字符串输入 → 数字，用于「今日已用 X/N」） */
+const quotaNum = computed(() => Number(props.quota) || 0);
 </script>
 
 <template>
@@ -54,27 +63,85 @@ const emit = defineEmits<{
       </p>
     </div>
 
-    <!-- 历史行情回补接口（参与 settings 保存，候选由父组件传入） -->
-    <div class="space-y-2">
-      <Label for="dy-price-backfill-source">历史行情回补接口（证券行情）</Label>
-      <Select
-        :model-value="interfaceId"
-        @update:model-value="(v) => emit('update:interfaceId', String(v))"
-      >
-        <SelectTrigger id="dy-price-backfill-source" class="w-full">
-          <SelectValue placeholder="选择历史行情回补接口" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem :value="SELECT_EMPTY_VALUE">不设置</SelectItem>
-          <SelectItem
-            v-for="itf in interfaceOptions"
-            :key="itf.id"
-            :value="itf.id"
-          >
-            {{ itf.label }}
-          </SelectItem>
-        </SelectContent>
-      </Select>
+    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <!-- 历史行情回补接口（参与 settings 保存，候选由父组件传入） -->
+      <div class="space-y-2">
+        <Label for="dy-price-backfill-source">历史行情回补接口（证券行情）</Label>
+        <Select
+          :model-value="interfaceId"
+          @update:model-value="(v) => emit('update:interfaceId', String(v))"
+        >
+          <SelectTrigger id="dy-price-backfill-source" class="w-full">
+            <SelectValue placeholder="选择历史行情回补接口" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem :value="SELECT_EMPTY_VALUE">不设置</SelectItem>
+            <SelectItem
+              v-for="itf in interfaceOptions"
+              :key="itf.id"
+              :value="itf.id"
+            >
+              {{ itf.label }}
+            </SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      <!-- 交易日历起始日期：决定「交易日历刷新」任务的窗口下限（结束上限受数据源限制为当年末） -->
+      <div class="space-y-2">
+        <Label for="dy-trade-calendar-start">交易日历起始日期</Label>
+        <Input
+          id="dy-trade-calendar-start"
+          :model-value="tradeCalendarStartDate"
+          type="date"
+          class="w-full"
+          @update:model-value="(v) => emit('update:tradeCalendarStartDate', String(v))"
+        />
+        <p class="text-xs text-muted-foreground">
+          交易日历刷新只落该日及之后的交易日；留空 = 去年 1 月 1 日（结束上限受数据源限制为当年末）
+        </p>
+      </div>
+
+      <!-- 每日回补额度（只/天）：参与父组件 settings 保存，本组件仅渲染输入并回传 -->
+      <div class="space-y-2">
+        <Label for="dy-price-backfill-quota">每日回补额度（只/天）</Label>
+        <Input
+          id="dy-price-backfill-quota"
+          :model-value="quota"
+          type="number"
+          min="1"
+          max="2000"
+          @update:model-value="(v) => emit('update:quota', String(v))"
+        />
+        <p class="text-xs text-muted-foreground">
+          每日收盘价抓取后按该额度自动续跑，补完自动停止
+        </p>
+        <p
+          v-if="quotaNum > 0"
+          class="text-xs font-medium text-muted-foreground"
+        >
+          今日已用 {{ usedToday }} / {{ quotaNum }} 只（额度按自然日重置）
+        </p>
+      </div>
+
+      <!-- 回补起始日期（随设置保存；在途任务存在时禁用，改起点须先取消） -->
+      <div class="space-y-2">
+        <Label for="dy-backfill-start">回补起始日期</Label>
+        <Input
+          id="dy-backfill-start"
+          :model-value="defaultStartDate"
+          type="date"
+          class="w-full"
+          :disabled="!!inFlightStartDate"
+          @update:model-value="(v) => emit('update:defaultStartDate', String(v))"
+        />
+        <p v-if="inFlightStartDate" class="text-xs text-muted-foreground">
+          回补进行中，改起点请先「取消在途回补」
+        </p>
+        <p v-else class="text-xs text-muted-foreground">
+          保存后作为下次「回补行情缺口」的起点（默认一年前）
+        </p>
+      </div>
     </div>
 
     <GlobalSettingsDividendInitBlock
@@ -84,8 +151,6 @@ const emit = defineEmits<{
       :price-backfill-in-flight-date="inFlightStartDate"
       :price-backfill-used-today="usedToday"
       :price-backfill-last-error="lastError"
-      @update:price-backfill-quota="(v) => emit('update:quota', v)"
-      @update:price-backfill-default-start-date="(v) => emit('update:defaultStartDate', v)"
     />
   </div>
 </template>

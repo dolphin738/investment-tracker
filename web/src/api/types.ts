@@ -866,6 +866,9 @@ export interface DividendYieldSettingsOut {
   price_backfill_used_today: number;
   /** 最近一次回补失败原因（熔断/接口不可达）；null = 无失败/已清空，前端在「在途」旁红字展示 */
   price_backfill_last_error: string | null;
+  /** 交易日历刷新起始日期（YYYY-MM-DD）：「交易日历刷新」任务的窗口下限；
+   *  null = 未配置（后端沿用默认「去年 1 月 1 日」）；结束上限受数据源限制为当年末，不暴露 */
+  trade_calendar_start_date: string | null;
 }
 
 /** 股息率设置更新请求（PUT /dividend-yield/settings · admin-only；写时用 *_interface_id 字段） */
@@ -885,4 +888,7 @@ export interface UpdateDividendYieldSettingsDto {
   /** 回补起始日期配置默认值（YYYY-MM-DD）；与在途标记解耦，PUT 可写、随设置保存；
    *  触发回补（POST /backfill-prices）以本值为起点；空串/不传 = 不改（保留既有值） */
   price_backfill_default_start_date?: string | null;
+  /** 交易日历刷新起始日期（YYYY-MM-DD）；空串/不传 = 不改（保留既有值）；
+   *  结束上限受数据源限制为当年末，故前端不提供结束日期 */
+  trade_calendar_start_date?: string | null;
 }

@@ -94,6 +94,8 @@ const settingsForm = reactive({
   priceBackfillQuota: '1000',
   /** 回补起始日期配置默认值（YYYY-MM-DD）；随设置保存、触发回补以其为起点；默认一年前 */
   priceBackfillStartDate: oneYearAgoIso(),
+  /** 交易日历刷新起始日期（YYYY-MM-DD）；空串 = 未配置（后端默认「去年 1 月 1 日」） */
+  tradeCalendarStartDate: '',
 });
 const settingsFormError = ref('');
 
@@ -137,6 +139,8 @@ watch(
     // 回补起始日期配置默认值：服务端 null 时回退一年前（与 settingsForm 初值口径一致，避免误报变更）
     settingsForm.priceBackfillStartDate =
       s.price_backfill_default_start_date ?? oneYearAgoIso();
+    // 交易日历刷新起始日期：服务端 null → 空串（未配置，后端用默认下限）
+    settingsForm.tradeCalendarStartDate = s.trade_calendar_start_date ?? '';
   },
   { immediate: true },
 );
@@ -202,7 +206,9 @@ const settingsHasChanges = computed(() => {
       (s.price_backfill_quota != null ? String(s.price_backfill_quota) : '1000') ||
     // 回补起始日期配置默认值：服务端 null 时回退一年前，与 watch 回填口径一致
     settingsForm.priceBackfillStartDate !==
-      (s.price_backfill_default_start_date ?? oneYearAgoIso())
+      (s.price_backfill_default_start_date ?? oneYearAgoIso()) ||
+    // 交易日历刷新起始日期：服务端 null → 空串，与 watch 回填口径一致
+    settingsForm.tradeCalendarStartDate !== (s.trade_calendar_start_date ?? '')
   );
 });
 
@@ -239,6 +245,8 @@ function handleSaveSettings(): void {
     price_backfill_default_start_date: settingsForm.priceBackfillStartDate
       ? settingsForm.priceBackfillStartDate
       : null,
+    // 交易日历刷新起始日期：空串 → null（后端视为「不改」）
+    trade_calendar_start_date: settingsForm.tradeCalendarStartDate || null,
   };
   settingsMutation.mutate(payload);
 }
@@ -382,6 +390,7 @@ function handleSaveSettings(): void {
           v-model:interface-id="settingsForm.priceBackfillSourceInterfaceId"
           v-model:quota="settingsForm.priceBackfillQuota"
           v-model:default-start-date="settingsForm.priceBackfillStartDate"
+          v-model:trade-calendar-start-date="settingsForm.tradeCalendarStartDate"
           :in-flight-start-date="dividendSettings?.price_backfill_start_date ?? null"
           :used-today="dividendSettings?.price_backfill_used_today ?? 0"
           :last-error="dividendSettings?.price_backfill_last_error ?? null"
