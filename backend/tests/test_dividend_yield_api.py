@@ -1026,6 +1026,27 @@ async def test_cancel_price_backfill_clears_start_date(session, client):
 
 
 @pytest.mark.asyncio
+async def test_cancel_price_backfill_also_clears_last_error(session, client):
+    """取消在途回补同时清空失败原因：按下取消后前端不应再显示上一次的熔断原因。"""
+    admin = await _make_admin(session, client)
+    h = auth(admin["token"])
+    session.add(DividendYieldSettings(
+        green_threshold=Decimal("0.05"), red_threshold=Decimal("0.03"),
+        price_backfill_start_date=date(2021, 1, 1),
+        price_backfill_last_error="回补连续失败熔断：连续失败 3 只",
+    ))
+    await session.commit()
+
+    r = await client.delete("/api/dividend-yield/backfill-prices", headers=h)
+    status, _, _, _ = env(r)
+    assert status == 200
+
+    row = (await session.execute(select(DividendYieldSettings).limit(1))).scalar_one()
+    assert row.price_backfill_start_date is None
+    assert row.price_backfill_last_error is None
+
+
+@pytest.mark.asyncio
 async def test_cancel_price_backfill_400_when_no_inflight(session, client):
     """无在途任务时取消 → 400 明确告知，而非静默成功造成误解。"""
     admin = await _make_admin(session, client)

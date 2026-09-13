@@ -839,3 +839,83 @@ async def test_run_pending_price_backfill_resets_quota_on_new_day(session, monke
     s2 = (await session.execute(select(DividendYieldSettings).limit(1))).scalar_one()
     assert s2.price_backfill_last_run_date == today_app_tz()
     assert s2.price_backfill_used_today == 2
+
+
+# ─────────── 熔断批额度补记 + 失败原因回写（R3 / 3536e20） ───────────
+@pytest.mark.asyncio
+async def test_breaker_still_counts_burst_quota_and_writes_last_error(session, monkeypatch):
+    """熔断中止时：本批额度必须照计（R3），且失败原因要回写 settings 供前端展示。
+
+    回归点：循环末尾那句 burst 记账在 ``raise RuntimeError`` 之后不会执行；
+    若不在熔断前补记，该批整体漏计 → 当日额度被低估，与「成败都计」口径不符。
+    """
+    masters = [await _add_master(session, code=f"600{900 + i}") for i in range(10)]
+    for m in masters:
+        # 待回补证券须有分红记录，_select_pending_backfill_masters 才会选中它们
+        session.add(SecurityDividend(
+            master_id=m.id, report_year=2024, report_quarter=1,
+            period_type=ReportPeriodType.ANNUAL,
+            cash_per_share=Decimal("1.0"), status=DividendStatus.PAID,
+        ))
+    itf = await _seed_sdk_quote_source(session)
+    await session.commit()
+    settings = (await session.execute(select(DividendYieldSettings).limit(1))).scalar_one()
+    settings.price_backfill_source_interface_id = itf.id
+    settings.price_backfill_start_date = date(2024, 1, 1)
+    settings.price_backfill_quota = 1000
+    await session.commit()
+
+    async def _always_fail(self, itf_obj, params, codes):
+        raise RuntimeError("数据源定向拒连（模拟）")
+
+    monkeypatch.setattr(MarketDataSyncService, "_fetch_sdk_raw", _always_fail)
+    monkeypatch.setattr("app.services.market_daily_price_sync._BACKFILL_BACKOFFS", (0,))
+    monkeypatch.setattr(
+        "app.services.market_daily_price_sync._BACKFILL_FAILURE_BREAKER", 3
+    )
+
+    with pytest.raises(RuntimeError):
+        await run_pending_price_backfill(session)
+
+    s2 = (await session.execute(select(DividendYieldSettings).limit(1))).scalar_one()
+    # R3：熔断批（本 burst 分配 10 只）也要计入当日已用，不能因 raise 而漏计
+    assert s2.price_backfill_used_today == 10
+    # 失败原因回写，前端在「在途」旁可见
+    assert s2.price_backfill_last_error is not None
+    assert "熔断" in s2.price_backfill_last_error
+    # 在途标记保留（可续跑），不能被熔断清掉
+    assert s2.price_backfill_start_date == date(2024, 1, 1)
+
+
+@pytest.mark.asyncio
+async def test_rerun_clears_previous_last_error(session, monkeypatch):
+    """新一轮续跑开始时应清空上一次遗留的失败原因（成功后前端不再显示旧错误）。"""
+    masters = [await _add_master(session, code=f"600{950 + i}") for i in range(3)]
+    for m in masters:
+        session.add(SecurityDividend(
+            master_id=m.id, report_year=2024, report_quarter=1,
+            period_type=ReportPeriodType.ANNUAL,
+            cash_per_share=Decimal("1.0"), status=DividendStatus.PAID,
+        ))
+    itf = await _seed_sdk_quote_source(session)
+    await session.commit()
+    settings = (await session.execute(select(DividendYieldSettings).limit(1))).scalar_one()
+    settings.price_backfill_source_interface_id = itf.id
+    settings.price_backfill_start_date = date(2024, 1, 1)
+    settings.price_backfill_quota = 1000
+    # 预置「上一次熔断」的失败原因，验证新一轮开始即清空
+    settings.price_backfill_last_error = "上一次熔断：连续失败 3 只"
+    await session.commit()
+
+    async def _ok(self, itf_obj, params, codes):
+        return [{"日期": "2024-01-02", "收盘": "10.50"}]
+
+    monkeypatch.setattr(MarketDataSyncService, "_fetch_sdk_raw", _ok)
+    monkeypatch.setattr("app.services.market_daily_price_sync._BACKFILL_BACKOFFS", (0,))
+    monkeypatch.setattr("app.services.market_daily_price_sync._BACKFILL_COOLDOWN_MIN", 0)
+    monkeypatch.setattr("app.services.market_daily_price_sync._BACKFILL_COOLDOWN_MAX", 0)
+
+    await run_pending_price_backfill(session)
+
+    s2 = (await session.execute(select(DividendYieldSettings).limit(1))).scalar_one()
+    assert s2.price_backfill_last_error is None, "续跑开始即清空旧失败原因"
