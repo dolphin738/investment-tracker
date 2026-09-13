@@ -187,6 +187,7 @@ beforeEach(() => {
   settings.price_backfill_start_date = null;
   settings.price_backfill_quota = null;
   settings.price_backfill_used_today = 0;
+  settings.price_backfill_last_error = null;
 });
 
 describe('GlobalSettingsDividendTab — 四源下拉与提供方名拼接（§15.3 T2）', () => {
@@ -363,6 +364,27 @@ describe('GlobalSettingsDividendTab — 四源下拉与提供方名拼接（§15
     expect(btn!.attributes('disabled')).toBeDefined(); // 触发必然 400，故置灰
     expect(btn!.attributes('title') ?? '').toContain('额度已用尽');
     expect(wrapper.text()).toContain('今日已用 1000 / 1000');
+
+    wrapper.unmount();
+  });
+
+  it('⑨ price_backfill_last_error 非空时渲染「回补失败」红字原因；为空时不渲染', async () => {
+    // 空值（无失败 / 已续跑成功清空）：不得渲染失败提示
+    wrapper = await mountTab();
+    expect(wrapper.text()).not.toContain('回补失败');
+    wrapper.unmount();
+
+    // 非空：红字展示后端回传的失败原因（熔断原因不再对前端双盲）
+    settings.price_backfill_last_error = '回补连续失败熔断：连续失败 3 只（阈值 3）';
+    wrapper = await mountTab();
+
+    const text = wrapper.text();
+    expect(text).toContain('回补失败');
+    expect(text).toContain('回补连续失败熔断');
+    // 红字承载「失败」语义
+    const failLine = wrapper.findAll('p').find((el) => el.text().includes('回补失败'));
+    expect(failLine).toBeTruthy();
+    expect(failLine!.classes()).toContain('text-red-600');
 
     wrapper.unmount();
   });
