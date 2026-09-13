@@ -18,10 +18,49 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import traceback
 
 _BG_TASKS: set[asyncio.Task] = set()
 
 logger = logging.getLogger(__name__)
+
+
+def _record_task_failure(name: str, exc: BaseException) -> None:
+    """把后台任务未捕获异常落到日志中心（app_logs），与 stderr 双写。
+
+    在事件循环线程的 done-callback 中调用，故用当前运行中的 loop 调度 ``record``
+    协程；``record`` 自建会话写库、失败静默吞掉，不会反向污染主流程。用模块级集合
+    持有该落库任务的强引用，避免被 GC 提前回收（与 _BG_TASKS 同款防回收语义）。
+    """
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        # 无运行中的事件循环（如进程关闭期）：放弃落库，stderr 侧已记录
+        return
+    log_task = loop.create_task(_do_record(name, exc))
+    _BG_TASKS.add(log_task)
+    log_task.add_done_callback(lambda t: _BG_TASKS.discard(t))
+
+
+async def _do_record(name: str, exc: BaseException) -> None:
+    from app.services.log import record
+
+    try:
+        await record(
+            level="error",
+            scope="error",
+            module=name,
+            message=f"后台任务 {name} 抛未捕获异常（任务静默失败）",
+            trace="".join(
+                traceback.format_exception(type(exc), exc, exc.__traceback__)
+            ),
+            detail={
+                "exception_type": type(exc).__name__,
+                "exception_str": str(exc),
+            },
+        )
+    except Exception:  # record 内部已吞库错误，这里兜底任何意外
+        logger.warning("后台任务失败落日志中心异常", exc_info=True)
 
 
 def _on_task_done(task: asyncio.Task) -> None:
@@ -29,7 +68,8 @@ def _on_task_done(task: asyncio.Task) -> None:
 
     顺序很重要——必须先 ``discard`` 解除对 task 的强引用，再读 ``exception()``，
     否则强引用可能让 asyncio "未取回异常" 警告延迟甚至永不触发。取消是正常路径，
-    不打错误日志；其余未捕获异常一律 error 级记录，便于定位静默失败。
+    不打错误日志；其余未捕获异常一律 error 级记录（stderr + 日志中心 app_logs），
+    便于定位静默失败。
     """
     _BG_TASKS.discard(task)
     if task.cancelled():
@@ -41,6 +81,7 @@ def _on_task_done(task: asyncio.Task) -> None:
             task.get_name(),
             exc_info=exc,
         )
+        _record_task_failure(task.get_name(), exc)
 
 
 def track_task(task: asyncio.Task) -> asyncio.Task:
