@@ -76,10 +76,11 @@ async def test_do_record_writes_failure_to_log_center(monkeypatch):
     """
     captured: dict = {}
 
-    async def _fake_record(**kwargs):
+    async def _fake_sink(**kwargs):
         captured.update(kwargs)
 
-    monkeypatch.setattr("app.services.log.record", _fake_record)
+    # 依赖倒置：bg 不直接 import services，而是经 core/log_sink 调用注入的 sink
+    monkeypatch.setattr("app.core.log_sink._sink", _fake_sink)
 
     await bg._do_record("backfill-prices", RuntimeError("数据源拒连"))
 
@@ -99,10 +100,11 @@ async def test_track_task_records_failure_end_to_end(monkeypatch):
     """端到端：track_task 捕获的后台异常最终被投递到日志中心。"""
     captured: dict = {}
 
-    async def _fake_record(**kwargs):
+    async def _fake_sink(**kwargs):
         captured.update(kwargs)
 
-    monkeypatch.setattr("app.services.log.record", _fake_record)
+    # 依赖倒置：bg 不直接 import services，而是经 core/log_sink 调用注入的 sink
+    monkeypatch.setattr("app.core.log_sink._sink", _fake_sink)
 
     async def boom():
         raise ValueError("任务炸了")
@@ -125,11 +127,12 @@ def test_record_task_failure_without_running_loop_is_noop(monkeypatch):
     """
     called: list = []
 
-    async def _fake_record(**kwargs):
+    async def _fake_sink(**kwargs):
         called.append(kwargs)
 
-    monkeypatch.setattr("app.services.log.record", _fake_record)
+    # 依赖倒置：bg 不直接 import services，而是经 core/log_sink 调用注入的 sink
+    monkeypatch.setattr("app.core.log_sink._sink", _fake_sink)
 
     # 同步上下文调用：内部 get_running_loop() 抛 RuntimeError，应被吞掉后直接 return
     bg._record_task_failure("no-loop", RuntimeError("x"))
-    assert called == [], "无事件循环时不应尝试调用 record"
+    assert called == [], "无事件循环时不应向 sink 投递"
