@@ -19,9 +19,10 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Optional
 
-from sqlalchemy import exists, select, text
+from sqlalchemy import exists, inspect, select, text
 
 from app.core.date_utils import today_app_tz
+from app.db.database import AsyncSessionLocal
 from app.models import (
     DividendYieldSettings,
     MarketSecurityDailyPrice,
@@ -391,6 +392,7 @@ async def backfill_historical(
     """
     # 在循环前锁定数据源名称，避免单只失败后 session.rollback() 使 itf 属性过期、
     # 后续成功分支再读 itf.name 触发惰性重载（异步会话下报 MissingGreenlet）。
+    # itf 其余属性（provider_id / endpoint / timeout）由循环内的「按需 refresh」保障，见下。
     source = itf.name
     today = today_app_tz()
     start_fmt = start_date.strftime("%Y%m%d")
@@ -435,6 +437,14 @@ async def backfill_historical(
                 "end_date": end_fmt,
                 "adjust": "",
             }
+            # 上一只失败时上面的 `session.rollback()` 会让**外层会话**的所有 ORM 对象过期
+            # （`expire_on_commit=False` 只挡 commit，挡不住 rollback）。而接下来
+            # `_fetch_sdk_raw` 会读 itf.provider_id / itf.endpoint / itf.timeout —— 一旦 itf
+            # 处于过期态，这些同步属性访问就会触发**外层会话**的惰性加载，在独立会话 fs 的
+            # 上下文里复现 MissingGreenlet，成为「假连续失败熔断」的另一条触发路径
+            #（原实现只快照了 itf.name，漏了这三个）。故此处按需刷新回新鲜态；未过期则零额外查询。
+            if inspect(itf).expired:
+                await session.refresh(itf)
             hist_written = 0
             succeeded = False
             for attempt, wait in enumerate(_BACKFILL_BACKOFFS, start=1):
@@ -447,8 +457,6 @@ async def backfill_historical(
                     # 入库（_upsert_hist_rows + commit）仍走外层共享会话，保证断点续跑与测试可见性。
                     # 诚实局限：内部 asyncio.to_thread 无法真正取消已启动线程，超时只是让
                     # 回补循环继续推进，底层 HTTP 请求可能仍在后台跑完。
-                    from app.db.database import AsyncSessionLocal
-
                     async with AsyncSessionLocal() as fs:
                         fmds = MarketDataSyncService(fs)
                         rows = await asyncio.wait_for(
@@ -481,6 +489,19 @@ async def backfill_historical(
                         consecutive_failures, _BACKFILL_FAILURE_BREAKER,
                         done + 1, total, skipped, written,
                     )
+                    # 熔断中止前补记**本批**额度：循环末尾那句 burst 记账在 raise 之后不会执行，
+                    # 不补记会让熔断批整体漏计（当日额度被低估，与「成败都计」口径不符）。
+                    # 与末尾同口径：按本批分配只数计（含跳过/失败）。
+                    try:
+                        await _bump_used_today(
+                            session, len(master_ids[start : start + _BACKFILL_BURST])
+                        )
+                        await session.commit()
+                    except Exception:  # noqa: BLE001  记账失败不得掩盖熔断原因
+                        logger.warning(
+                            "熔断前回补额度记账失败（不影响熔断判定）", exc_info=True
+                        )
+                        await session.rollback()
                     raise RuntimeError(
                         f"回补连续失败熔断：连续失败 {consecutive_failures} 只"
                         f"（阈值 {_BACKFILL_FAILURE_BREAKER}），进度 {done + 1}/{total}，"
@@ -488,17 +509,12 @@ async def backfill_historical(
                         f"请检查数据源 push2his.eastmoney.com 是否对本机 IP 定向拒连。"
                     )
             done += 1
-        # 每 burst 一批递增当日已用额度（成败都计）：原子 UPDATE 自带行锁，
-        # 与主事务的日线 commit/rollback 解耦；本 burst 实际处理只数（含跳过/失败）计入，
+        # 每 burst 一批递增当日已用额度（成败都计）：本 burst **分配只数**（含跳过/失败）计入，
         # 满足额度口径（单只失败不计时会导致同日额度被反复重试刷爆）。
+        # 用同一 session 但**立即 commit**：记账一旦落库就不再受后续日线写入 rollback 的抹除
+        #（并非独立事务/连接；单行表契约与原子性说明见 _bump_used_today）。
         burst_n = len(master_ids[start : start + _BACKFILL_BURST])
-        await session.execute(
-            text(
-                "UPDATE dividend_yield_settings "
-                "SET price_backfill_used_today = COALESCE(price_backfill_used_today, 0) + :n"
-            ),
-            {"n": burst_n},
-        )
+        await _bump_used_today(session, burst_n)
         await session.commit()
         # 批间冷却（决策 A15：60–120s，随机抖动），最后一批跳过
         if start + _BACKFILL_BURST < total:
@@ -512,6 +528,37 @@ async def backfill_historical(
     return (
         f"历史回补完成：处理 {total} 只，新增/更新行 {written}，跳过 {skipped} 只（已完成），"
         f"失败 {failed} 只"
+    )
+
+
+async def _bump_used_today(session, n: int) -> None:
+    """把当日已用回补额度原子递增 ``n``（成败都计）。
+
+    契约：``dividend_yield_settings`` 是**全局单行配置表**（恒 1 行），
+    故此处 UPDATE **故意不带 WHERE**；若未来该表改为多行语义（多租户/多档配置），
+    必须补 ``WHERE`` 限定，否则会波及全部行。
+
+    原子 UPDATE 自带行锁；调用方随后立即 commit，使这笔记账**不再受后续日线写入
+    rollback 的抹除**（注意：用的是同一个 session，并非独立事务/连接）。
+    """
+    await session.execute(
+        text(
+            "UPDATE dividend_yield_settings "
+            "SET price_backfill_used_today = COALESCE(price_backfill_used_today, 0) + :n"
+        ),
+        {"n": n},
+    )
+
+
+async def _set_last_error(session, message: Optional[str]) -> None:
+    """写/清回补失败原因（``message=None`` 表示清空）。
+
+    契约同 ``_bump_used_today``：目标是恒单行的全局配置表，故 UPDATE 故意不带 WHERE。
+    用原始 SQL 而非 ORM 赋值，是为了在会话对象可能已过期的异常路径上也能安全写入。
+    """
+    await session.execute(
+        text("UPDATE dividend_yield_settings SET price_backfill_last_error = :e"),
+        {"e": message},
     )
 
 
@@ -680,9 +727,7 @@ async def run_pending_price_backfill(session) -> str:
 
     # 新一轮尝试：先清掉上一次遗留的失败原因（stderr/app_logs 仍保留历史，
     # 这里只管当前在途标记的展示；失败原因回写见下方 except）。
-    await session.execute(
-        text("UPDATE dividend_yield_settings SET price_backfill_last_error = NULL")
-    )
+    await _set_last_error(session, None)
     await session.commit()
     try:
         batch_note = await backfill_historical(session, itf, pending, start_date)
@@ -691,21 +736,17 @@ async def run_pending_price_backfill(session) -> str:
         # 仍重抛，使 track_task 的 app_logs 落库链路（core/bg.py）继续生效。
         # 用原始 UPDATE 而非 ORM 对象：backfill_historical 内部已 rollback，
         # 避免依赖可能过期的会话对象状态。
-        await session.execute(
-            text(
-                "UPDATE dividend_yield_settings "
-                "SET price_backfill_last_error = :e"
-            ),
-            {"e": str(exc)[:512]},
-        )
+        await _set_last_error(session, str(exc)[:512])
         await session.commit()
         raise
-    # 每 burst 递增当日已用已由 backfill_historical 内原子 UPDATE 完成（成败都计，
-    # 与主事务 commit/rollback 解耦）；此处刷新内存对象以正确回显累计值
-    # （在途任务期间前端每 3s 轮询 settings 即可看到实时进度）。
+    # 每 burst 递增当日已用已由 backfill_historical 内结算（成败都计）；此处刷新内存对象
+    # 以回显累计值（在途任务期间前端每 3s 轮询 settings 即可看到实时进度）。
     await session.refresh(settings)
+    # 剩余额度按**刷新后**的已用值重算：上面那个 remaining 是本批开始前的旧值，
+    # 直接回显会与「已用 X/quota」不自洽（本批跑完额度已经变了）。
+    remaining_after = max(quota - (settings.price_backfill_used_today or 0), 0)
     return (
-        f"在途回补本批 {len(pending)} 只（今日剩余额度 {remaining}，"
+        f"在途回补本批 {len(pending)} 只（今日剩余额度 {remaining_after}，"
         f"已用 {settings.price_backfill_used_today}/{quota}）：{batch_note}"
     )
 
