@@ -866,7 +866,8 @@ async def test_backfill_prices_triggers_async_when_configured(session, client, m
 
     captured: list[tuple] = []
 
-    async def _noop(session, itf, master_ids, start_date):
+    # force：gap 模式的强制重抓开关（默认 False = legacy 口径），桩须接受该关键字参数
+    async def _noop(session, itf, master_ids, start_date, *, force: bool = False):
         captured.append((itf.id, list(master_ids), start_date))
         return "noop"
 

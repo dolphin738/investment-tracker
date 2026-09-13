@@ -6,7 +6,14 @@ from app.models.calc import DailyNav, DailyXirr
 from app.models.cashflow import CashBalance, CashFlow
 from app.models.dividend import DividendRecord
 from app.models.dividend_yield import (
+    GAP_STATUS_EXHAUSTED,
+    GAP_STATUS_PENDING,
+    GAP_STATUSES,
+    PRICE_BACKFILL_MODE_GAP,
+    PRICE_BACKFILL_MODE_LEGACY,
+    PRICE_BACKFILL_MODES,
     DividendYieldSettings,
+    MarketPriceBackfillGap,
     MarketSecurityDailyPrice,
     MarketTradeCalendar,
     SecurityDividend,
@@ -83,4 +90,11 @@ __all__ = [
     "SecurityDividendYield",
     "DividendYieldSettings",
     "MarketTradeCalendar",
+    "MarketPriceBackfillGap",
+    "PRICE_BACKFILL_MODE_LEGACY",
+    "PRICE_BACKFILL_MODE_GAP",
+    "PRICE_BACKFILL_MODES",
+    "GAP_STATUS_PENDING",
+    "GAP_STATUS_EXHAUSTED",
+    "GAP_STATUSES",
 ]

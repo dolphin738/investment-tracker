@@ -20,12 +20,18 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Optional
 
 from sqlalchemy import exists, inspect, select, text
+from sqlalchemy import update as sa_update
 
 from app.core.date_utils import today_app_tz
 from app.db.database import AsyncSessionLocal
 from app.models import (
+    GAP_STATUS_EXHAUSTED,
+    GAP_STATUS_PENDING,
+    PRICE_BACKFILL_MODE_GAP,
     DividendYieldSettings,
+    MarketPriceBackfillGap,
     MarketSecurityDailyPrice,
+    MarketTradeCalendar,
     QuoteInterface,
     SecuritiesDataProvider,
     Security,
@@ -70,6 +76,11 @@ _BACKFILL_FAILURE_BREAKER = 3
 # _fetch_sdk_raw 内部 wait_for(timeout=None) 即不设超时，单只卡死会无限拖住整轮回补；
 # 此层是回补自己的兜底上界，超时后由 except Exception 退避重试，让循环继续推进。
 _BACKFILL_FETCH_TIMEOUT = 60.0
+# 严格补洞（gap）模式：单个洞被纳入批次的次数上限。达到该次数仍未被填上 → status 置
+# exhausted 并不再入批（护栏二）。取 2 是「容忍一次偶发数据源抖动」与「不无限重试」的折中：
+# 首次入批可能因当日额度/网络抖动没跑成，第二次仍填不上基本可判定该日数据确实取不到
+# （停牌、退市后无行情等），继续重试只会每天重复消耗额度。
+_GAP_MAX_ATTEMPTS = 2
 
 # stock_zh_a_hist 返回中文列名（§6.2 行解析）
 _COL_HIST_DATE = "日期"
@@ -375,13 +386,20 @@ class MarketDailyPriceSyncService:
 # 历史日线回补（§6.2 末段 / 决策 A15）——单独方法供复用，不注册为任务默认调用
 # --------------------------------------------------------------------------- #
 async def backfill_historical(
-    session, itf: QuoteInterface, master_ids: list[str], start_date: date
+    session,
+    itf: QuoteInterface,
+    master_ids: list[str],
+    start_date: date,
+    *,
+    force: bool = False,
 ) -> str:
     """用 akshare ``stock_zh_a_hist`` 回补证券历史日线，按证券独立 commit、断点续跑。
 
     - ``itf`` 须为配置好的 SDK 行情接口（endpoint=``stock_zh_a_hist``），access_method=sdk；
     - 断点即数据本身：进度 = 该证券在 ``market_security_daily_prices`` 已存在的最早
       ``trade_date``，起点已覆盖 ``start_date`` 的证券跳过（无额外游标表）；
+      ``force=True``（严格补洞 gap 模式）时**不做该跳过**——洞恰恰出现在「起点已覆盖」
+      的证券上，不强制重抓同一区间就永远填不上；
     - burst≈10 只/批 + 批间冷却 60–120s + 指数退避 60/120/300s（决策 A15），每批记进度日志；
     - 单只回补请求另有兜底超时上界 ``_BACKFILL_FETCH_TIMEOUT``（秒），防止接口 timeout=NULL
       时单只卡死无限拖住整轮回补（超时由退避重试分支接住）；
@@ -415,6 +433,7 @@ async def backfill_historical(
             # 断点即数据本身（P1-3）：已有最早 trade_date ≤ start_date ⇒ 起点已覆盖，跳过。
             # 勿用 max(trade_date)——若日线任务先跑了近期数据，latest=today ≥ start_date
             # 会把中间历史空洞的证券全部误跳过，空洞永不回填。
+            # force（gap 模式）例外：洞就在「起点已覆盖」的证券上，必须强制重抓。
             earliest = (
                 await session.execute(
                     select(MarketSecurityDailyPrice.trade_date)
@@ -423,7 +442,7 @@ async def backfill_historical(
                     .limit(1)
                 )
             ).scalar_one_or_none()
-            if earliest is not None and earliest <= start_date:
+            if not force and earliest is not None and earliest <= start_date:
                 # 不重置 consecutive_failures：该分支仅按已存数据跳过、未发任何请求，
                 # 不携带连通性信息，重置会掩盖真实的连续失败趋势、削弱熔断。
                 done += 1
@@ -647,6 +666,189 @@ async def _select_pending_backfill_masters(
     return list((await session.execute(stmt)).scalars().all())
 
 
+# --------------------------------------------------------------------------- #
+# 严格补洞（gap）模式：按交易日历逐日比对，回填「日历有、日线表无」的缺失交易日
+# --------------------------------------------------------------------------- #
+async def _load_gap_window_days(session, lower: date, upper: date) -> list[date]:
+    """取回补窗口内的**已记录交易日**（升序）；窗口内无交易日返回空列表。"""
+    return list(
+        (
+            await session.execute(
+                select(MarketTradeCalendar.trade_date)
+                .where(
+                    MarketTradeCalendar.trade_date >= lower,
+                    MarketTradeCalendar.trade_date <= upper,
+                )
+                .order_by(MarketTradeCalendar.trade_date.asc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
+async def sync_price_backfill_gaps(
+    session, start_date: date, today: Optional[date] = None
+) -> Optional[int]:
+    """按交易日历重算「洞」并落 ``market_price_backfill_gaps``（幂等，只 INSERT 缺失行）。
+
+    洞 = 窗口内的已记录交易日中，该证券 ``market_security_daily_prices`` 没有对应行的日子。
+
+    三条护栏：
+    1. **上界 = 昨天**（``upper = today - 1 天``）：今天的日线可能尚未抓取（日线任务 15:05
+       才跑），把今天当洞会让每只证券每天必然多出一个「永远填不满」的洞 → 任务永不结束；
+    2. **只对「起点已覆盖」的证券记洞**：完全未覆盖的证券由 legacy 分支兜住
+       （``_select_gap_backfill_masters`` 取并集），否则「N 只 × 窗口交易日」会瞬间撑爆
+       状态表。单只证券的洞行数上界 = 窗口交易日数；
+    3. **日历不覆盖 → 返回 None**（不是 0）：窗口内查不到任何已记录交易日时**无从判定**
+       哪些日子该有数据，返回 0 会被误读成「没有洞 → 补完」并错误清空在途标记，
+       故用 None 明确表达「无法判定」，由调用方回落 legacy。
+
+    返回新增洞行数；``None`` = 日历不覆盖、无法判定。
+    """
+    today = today or today_app_tz()
+    upper = today - timedelta(days=1)  # 护栏一：上界 = 昨天
+    if upper < start_date:
+        return 0
+    days = await _load_gap_window_days(session, start_date, upper)
+    if not days:
+        logger.warning(
+            "交易日历不覆盖回补窗口 %s..%s（无已记录交易日），gap 模式无法判定洞，"
+            "本轮应回落 legacy 口径",
+            start_date.isoformat(),
+            upper.isoformat(),
+        )
+        return None  # 护栏三：无从判定，交由调用方回落 legacy
+
+    # 池 = 有分红记录且「起点已覆盖」的证券（护栏二：排除完全未覆盖的，避免行爆炸），
+    # 与窗口内的「已记录交易日」做差集，落 pending 洞行。
+    #
+    # 用**库内一条 SQL** 完成：规模上界 = 池规模 × 窗口交易日数（起始日期可配到很早，
+    # 如 2020 起则窗口内 1400+ 个交易日 → 4609 × 1400 ≈ 645 万对），且本函数每轮回补
+    # （含每日收盘价抓取后的续跑）都会执行——若把已覆盖日线行与已知洞行全量读进内存再
+    # 逐对判断，会显著拖慢每日任务。ON CONFLICT DO NOTHING 天然幂等，重复调用不产生重复洞。
+    # 窗口外的存量洞行（起始日期收紧 / 日期推移后）不再有效，先清掉：
+    # 否则「只剩陈旧洞」的证券会被反复判待补（白烧额度），并在 attempts 达阈值后
+    # 被无谓置 exhausted，真实洞反而再也补不上。
+    await session.execute(
+        text(
+            "DELETE FROM market_price_backfill_gaps "
+            "WHERE gap_date < :lo OR gap_date > :hi"
+        ),
+        {"lo": start_date, "hi": upper},
+    )
+
+    res = await session.execute(
+        text(
+            """
+            INSERT INTO market_price_backfill_gaps
+                (id, master_id, gap_date, status, attempts, created_at, updated_at)
+            SELECT gen_random_uuid(), m.master_id, c.trade_date,
+                   CAST(:pending AS varchar), 0, now(), now()
+            FROM (
+                SELECT DISTINCT sd.master_id
+                FROM security_dividends sd
+                WHERE EXISTS (
+                    SELECT 1 FROM market_security_daily_prices p
+                    WHERE p.master_id = sd.master_id AND p.trade_date <= :lo
+                )
+            ) m
+            CROSS JOIN market_trade_calendar c
+            WHERE c.trade_date BETWEEN :lo AND :hi
+              AND NOT EXISTS (
+                  SELECT 1 FROM market_security_daily_prices p2
+                  WHERE p2.master_id = m.master_id AND p2.trade_date = c.trade_date
+              )
+              AND NOT EXISTS (
+                  SELECT 1 FROM market_price_backfill_gaps g
+                  WHERE g.master_id = m.master_id AND g.gap_date = c.trade_date
+              )
+            ON CONFLICT (master_id, gap_date) DO NOTHING
+            """
+        ),
+        {"lo": start_date, "hi": upper, "pending": GAP_STATUS_PENDING},
+    )
+    added = int(res.rowcount or 0)
+    return added
+
+
+async def _select_gap_backfill_masters(
+    session, start_date: date, quota: int
+) -> tuple[list[str], bool]:
+    """gap 模式待补名单：``起点未覆盖`` ∪ ``有未耗尽洞``（限 quota 只，按 master_id 排序）。
+
+    返回 ``(master_ids, calendar_ok)``；``calendar_ok=False`` 表示交易日历不覆盖回补窗口、
+    无法按洞判定，调用方须回落 legacy（护栏三）。
+    """
+    synced = await sync_price_backfill_gaps(session, start_date)
+    if synced is None:
+        return [], False
+    # 起点未覆盖（legacy 口径）：兜住完全无数据 / 起点之前无数据的证券
+    uncovered = await _select_pending_backfill_masters(session, start_date, quota)
+    # 有洞且未耗尽：attempts 达阈值的已置 exhausted，不在此列（护栏二）
+    gapped = list(
+        (
+            await session.execute(
+                select(MarketPriceBackfillGap.master_id)
+                .where(
+                    MarketPriceBackfillGap.status == GAP_STATUS_PENDING,
+                    MarketPriceBackfillGap.attempts < _GAP_MAX_ATTEMPTS,
+                )
+                .distinct()
+                .order_by(MarketPriceBackfillGap.master_id)
+                .limit(quota)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return sorted(set(uncovered) | set(gapped))[:quota], True
+
+
+async def _bump_gap_attempts(session, master_ids: list[str]) -> int:
+    """本批证券的 pending 洞 ``attempts`` +1；达阈值（≥2）的置 ``exhausted``（护栏二）。
+
+    返回被置 exhausted 的洞行数。用 Core UPDATE 而非逐行 ORM：洞行数可能成百上千，
+    且调用方会话可能刚经历过 rollback（无需依赖对象新鲜度）。
+    """
+    if not master_ids:
+        return 0
+    await session.execute(
+        sa_update(MarketPriceBackfillGap)
+        .where(
+            MarketPriceBackfillGap.master_id.in_(master_ids),
+            MarketPriceBackfillGap.status == GAP_STATUS_PENDING,
+        )
+        .values(attempts=MarketPriceBackfillGap.attempts + 1)
+    )
+    res = await session.execute(
+        sa_update(MarketPriceBackfillGap)
+        .where(
+            MarketPriceBackfillGap.master_id.in_(master_ids),
+            MarketPriceBackfillGap.status == GAP_STATUS_PENDING,
+            MarketPriceBackfillGap.attempts >= _GAP_MAX_ATTEMPTS,
+        )
+        .values(status=GAP_STATUS_EXHAUSTED)
+    )
+    return int(res.rowcount or 0)
+
+
+async def reconcile_price_backfill_gaps(session) -> int:
+    """删掉已被填上的洞（``(master_id, gap_date)`` 已有日线行）；返回删除行数。
+
+    洞即数据本身：补上即删，不留终态。用 ``DELETE ... USING`` 一条 SQL 完成关联删除，
+    避免把（可能成百上千行）洞读进内存再逐行 delete。
+    """
+    res = await session.execute(
+        text(
+            "DELETE FROM market_price_backfill_gaps g "
+            "USING market_security_daily_prices p "
+            "WHERE p.master_id = g.master_id AND p.trade_date = g.gap_date"
+        )
+    )
+    return int(res.rowcount or 0)
+
+
 async def run_pending_price_backfill(session) -> str:
     """在途回补任务：按每日额度跑一批未覆盖证券的历史日线；补完即清空在途状态。
 
@@ -716,21 +918,55 @@ async def run_pending_price_backfill(session) -> str:
             f"{provider.access_method if provider else '未知'}，在途回补任务中止"
         )
 
-    # 一条 SQL 精确选出未覆盖证券（待回补 = 不存在 trade_date <= start_date 的日线行）
-    pending = await _select_pending_backfill_masters(session, start_date, remaining)
+    # 按回补模式分派选批：
+    # - legacy（存量默认）：原「起点未覆盖」口径——起点一覆盖就整只跳过，中间空洞不补；
+    # - gap（严格补洞）：按交易日历逐日比对，把「起点已覆盖但中间缺日」的证券重新纳入；
+    #   交易日历不覆盖回补窗口时无从判定洞 → 回落 legacy（护栏三），不静默空转。
+    mode = settings.price_backfill_mode or PRICE_BACKFILL_MODE_LEGACY
+    force = False  # gap 模式须强制重抓（洞就在「起点已覆盖」的证券上）
+    gap_active = False
+    if mode == PRICE_BACKFILL_MODE_GAP:
+        pending, calendar_ok = await _select_gap_backfill_masters(
+            session, start_date, remaining
+        )
+        if calendar_ok:
+            force = True
+            gap_active = True
+        else:
+            logger.warning(
+                "回补模式为 gap，但交易日历不覆盖回补窗口（起点 %s），本轮回落 legacy 口径；"
+                "请先执行交易日历刷新任务",
+                start_date.isoformat(),
+            )
+            pending = await _select_pending_backfill_masters(
+                session, start_date, remaining
+            )
+    else:
+        pending = await _select_pending_backfill_masters(session, start_date, remaining)
+
     if not pending:
         # 全部已覆盖 → 补完，清空在途状态（终态），此后不再跑
         settings.price_backfill_start_date = None
         settings.price_backfill_last_error = None
         await session.commit()
-        return "回补已完成：全部证券均已覆盖，在途回补任务已结束"
+        return (
+            f"回补已完成（{mode} 模式）：全部证券均已覆盖、无待补洞，"
+            "在途回补任务已结束"
+        )
 
     # 新一轮尝试：先清掉上一次遗留的失败原因（stderr/app_logs 仍保留历史，
     # 这里只管当前在途标记的展示；失败原因回写见下方 except）。
     await _set_last_error(session, None)
+    # gap 模式：本批入批即 attempts+1（护栏二，达阈值置 exhausted）。
+    # 与清 last_error 同批提交——即便下面回补失败/熔断，这一轮尝试也已被计数，
+    # 避免同一批洞在数据源长期无数据时被无限重试、每天白烧额度。
+    if gap_active:
+        await _bump_gap_attempts(session, pending)
     await session.commit()
     try:
-        batch_note = await backfill_historical(session, itf, pending, start_date)
+        batch_note = await backfill_historical(
+            session, itf, pending, start_date, force=force
+        )
     except RuntimeError as exc:
         # 熔断/接口不可达：把失败原因回写 settings，供前端在「在途」旁直接展示；
         # 仍重抛，使 track_task 的 app_logs 落库链路（core/bg.py）继续生效。
@@ -739,6 +975,11 @@ async def run_pending_price_backfill(session) -> str:
         await _set_last_error(session, str(exc)[:512])
         await session.commit()
         raise
+    # gap 模式：清掉本批已填上的洞（洞即数据本身，补上即删、不留终态）；
+    # 未填上的保持 pending，attempts 已在入批时 +1，达阈值即 exhausted（护栏二）。
+    if gap_active:
+        await reconcile_price_backfill_gaps(session)
+        await session.commit()
     # 每 burst 递增当日已用已由 backfill_historical 内结算（成败都计）；此处刷新内存对象
     # 以回显累计值（在途任务期间前端每 3s 轮询 settings 即可看到实时进度）。
     await session.refresh(settings)
@@ -746,7 +987,7 @@ async def run_pending_price_backfill(session) -> str:
     # 直接回显会与「已用 X/quota」不自洽（本批跑完额度已经变了）。
     remaining_after = max(quota - (settings.price_backfill_used_today or 0), 0)
     return (
-        f"在途回补本批 {len(pending)} 只（今日剩余额度 {remaining_after}，"
+        f"在途回补本批 {len(pending)} 只（{mode} 模式，今日剩余额度 {remaining_after}，"
         f"已用 {settings.price_backfill_used_today}/{quota}）：{batch_note}"
     )
 
