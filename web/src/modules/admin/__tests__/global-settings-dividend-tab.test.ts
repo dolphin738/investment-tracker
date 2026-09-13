@@ -50,6 +50,8 @@ const settings = vi.hoisted<DividendYieldSettingsOut>(() => ({
   price_backfill_source: null,
   // 在途回补任务目标起始日（YYYY-MM-DD）；null = 无在途任务
   price_backfill_start_date: null,
+  // 回补起始日期配置默认值（YYYY-MM-DD）；null = 未设置（前端回退一年前）
+  price_backfill_default_start_date: null,
   // 每日回补额度（只/天）；后端默认 1000
   price_backfill_quota: null,
   // 当日已用额度（只）；后端回传当日有效值（跨日已归零）
