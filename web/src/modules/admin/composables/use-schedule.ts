@@ -21,6 +21,7 @@ import {
   type JobKind,
   type JobRunStatus,
   type JobTaskType,
+  type ScheduleTask,
   type ScheduleTaskCreate,
   type ScheduleTaskUpdate,
   type TaskLogQuery,
@@ -32,13 +33,32 @@ export function tasksKey(): unknown[] {
   return ['admin', 'tasks'];
 }
 
-/** 列出全部任务；非管理员不发起请求 */
+/** 手动触发后的观察窗口：覆盖「HTTP 已返回、但执行日志尚未落库」的竞态 */
+const WATCH_AFTER_TRIGGER_MS = 60_000;
+/** 观察窗口截止时间戳（模块级：同页多实例共享；0 = 未开启） */
+let watchUntil = 0;
+
+/**
+ * 列出全部任务；非管理员不发起请求。
+ *
+ * **轮询策略**（修「执行完成后状态不更新、须手动刷新页面」）：任务执行是
+ * fire-and-forget —— POST /trigger 立即返回、后台异步跑，触发瞬间那次失效只能看到
+ * 「尚未开始 / 仍在执行」，执行完成后前端收不到任何通知。故：
+ * - 存在 RUNNING 的任务 → 3s 快轮询，状态落定（SUCCESS / FAILED）后自动停止；
+ * - 触发后的观察窗口内 → 5s 兜底轮询（防日志落库竞态导致始终没见到 RUNNING）；
+ * - 其余情况不轮询，避免无谓请求。
+ */
 export function useTasks() {
   const isAdmin = useIsAdmin();
   return useQuery({
     queryKey: tasksKey(),
     queryFn: listTasks,
     enabled: isAdmin,
+    refetchInterval: (query) => {
+      const tasks = (query.state.data as ScheduleTask[] | undefined) ?? [];
+      if (tasks.some((t) => t.last_run_status === 'RUNNING')) return 3000;
+      return Date.now() < watchUntil ? 5000 : false;
+    },
   });
 }
 
@@ -120,7 +140,9 @@ export function useTriggerTask() {
   return useMutation({
     mutationFn: (id: string) => triggerTask(id),
     onSuccess: () => {
-      toast.success('已触发执行，稍后刷新查看结果');
+      // 开启观察窗口：让 useTasks 的轮询持续到结果落定（执行完成后自动显示成功/失败）
+      watchUntil = Date.now() + WATCH_AFTER_TRIGGER_MS;
+      toast.success('已触发执行，结果将自动更新');
       queryClient.invalidateQueries({ queryKey: tasksKey() });
     },
     onError: () => toast.error('触发失败'),
