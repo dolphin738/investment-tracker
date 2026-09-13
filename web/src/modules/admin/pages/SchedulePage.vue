@@ -59,6 +59,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import TaskParamFields from '@/modules/admin/components/TaskParamFields.vue';
 import type {
   JobKind,
   JobRunStatus,
@@ -137,6 +138,9 @@ const currentHandler = computed(() =>
   handlers.value?.find((h) => h.task_type === form.taskType),
 );
 
+/** 当前任务类型的参数字段：分级任务渲染于「清理规则」页签，其余渲染于「基础设置」页签 */
+const paramFields = computed(() => currentHandler.value?.param_fields ?? []);
+
 /** 由默认值生成参数字符串记录 */
 function defaultsOf(taskTypeToken: string): Record<string, string> {
   const h = handlers.value?.find((x) => x.task_type === taskTypeToken);
@@ -158,11 +162,9 @@ const hasLeveledParams = computed(() => {
 });
 
 /**
- * JSON 对象参数（type=json 且含 map_of）的辅助读写。
- * 表单内部以「JSON 字符串」承载（与 number 输入框承载数字字符串的交互一致），
- * 由以下函数在「JSON 字符串 ↔ 各级别数字」之间转换。
+ * 解析 JSON 对象参数（type=json 且含 map_of）——表单内部以「JSON 字符串」承载；
+ * 非法/空时回退空对象。字段级渲染（jsonFieldValue/setJsonKey）已抽至 TaskParamFields 组件。
  */
-/** 把表单里存的 JSON 字符串解析成对象；非法时回退空对象 */
 function jsonObjectOf(raw: unknown): Record<string, number> {
   if (typeof raw === 'string' && raw.trim()) {
     try {
@@ -178,19 +180,6 @@ function jsonObjectOf(raw: unknown): Record<string, number> {
     return raw as Record<string, number>;
   }
   return {};
-}
-/** 取某级别当前值（数字转字符串，供 input 显示） */
-function jsonFieldValue(raw: unknown, sub: string): string {
-  const o = jsonObjectOf(raw);
-  const v = o[sub];
-  return v == null ? '' : String(v);
-}
-/** 更新某级别的值，写回 JSON 字符串 */
-function setJsonKey(fkey: string, sub: string, val: string): void {
-  const o = jsonObjectOf(form.params[fkey]);
-  if (val.trim() === '') delete o[sub];
-  else o[sub] = Number(val);
-  form.params[fkey] = JSON.stringify(o);
 }
 
 /** 打开时按目标初始化表单（新增取第一个可建类型；编辑取其参数）。同步执行，避免受控时序 */
@@ -708,58 +697,26 @@ function cronTitle(task: ScheduleTask): string {
                 :rows="3"
               />
             </div>
+
+            <!-- 参数（无分级参数的任务在此渲染，如「交易日历刷新」的 full 开关；含分级参数的见「清理规则」页签） -->
+            <div v-if="!hasLeveledParams && paramFields.length > 0" class="space-y-3">
+              <Label>参数</Label>
+              <TaskParamFields
+                :fields="paramFields"
+                :params="form.params"
+                @update:param="(k, v) => (form.params[k] = v)"
+              />
+            </div>
           </TabsContent>
 
           <!-- 清理规则：分级保留参数（仅含 retention_days/max_rows 的任务可设）+ 保留日志条数（通用） -->
           <TabsContent value="rules" class="space-y-4">
             <template v-if="hasLeveledParams">
-              <template v-for="f in currentHandler?.param_fields ?? []" :key="f.key">
-                <div
-                  v-if="f.type === 'boolean'"
-                  class="flex items-center justify-between rounded-md border p-3"
-                >
-                  <Label :for="`param-${f.key}`" class="text-sm">
-                    {{ f.label }}
-                    <span v-if="f.required" class="text-destructive"> *</span>
-                  </Label>
-                  <Switch
-                    :id="`param-${f.key}`"
-                    :model-value="(form.params[f.key] ?? 'false') === 'true'"
-                    @update:model-value="(v: boolean) => (form.params[f.key] = String(v))"
-                  />
-                </div>
-                <!-- JSON 对象参数（map_of）：渲染为各级别独立 number 输入框，与"已读通知保留天数"样式一致 -->
-                <div v-else-if="f.type === 'json' && f.map_of" class="space-y-2">
-                  <Label :for="`param-${f.key}`">
-                    {{ f.label }}
-                    <span v-if="f.required" class="text-destructive"> *</span>
-                  </Label>
-                  <div class="grid grid-cols-3 gap-3">
-                    <div v-for="sub in f.map_of" :key="sub" class="space-y-1">
-                      <span class="text-xs text-muted-foreground">{{ sub }}</span>
-                      <Input
-                        :id="`param-${f.key}-${sub}`"
-                        :model-value="jsonFieldValue(form.params[f.key], sub)"
-                        :type="'number'"
-                        :placeholder="String((f.default as Record<string, unknown>)?.[sub] ?? '')"
-                        @update:model-value="(v: string | number) => setJsonKey(f.key, sub, String(v))"
-                      />
-                    </div>
-                  </div>
-                </div>
-                <div v-else class="space-y-2">
-                  <Label :for="`param-${f.key}`">
-                    {{ f.label }}
-                    <span v-if="f.required" class="text-destructive"> *</span>
-                  </Label>
-                  <Input
-                    :id="`param-${f.key}`"
-                    v-model="form.params[f.key]"
-                    :type="f.type === 'number' || f.type === 'integer' ? 'number' : 'text'"
-                    :placeholder="f.label"
-                  />
-                </div>
-              </template>
+              <TaskParamFields
+                :fields="paramFields"
+                :params="form.params"
+                @update:param="(k, v) => (form.params[k] = v)"
+              />
             </template>
             <p v-else class="text-sm text-muted-foreground">
               该任务无分级保留规则，仅可设置下方执行日志保留条数。
