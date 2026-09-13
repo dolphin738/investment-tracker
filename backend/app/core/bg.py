@@ -4,10 +4,14 @@
 导致后台协程被静默取消（长耗时任务尤其危险）。本项目多处 fire-and-forget
 （管理员手动触发任务、组合价格同步、股息率行情缺口回补）均适用。
 
-统一落在 ``core`` 层的原因：纯 asyncio 基础设施、不依赖任何业务模块，
-故 ``core_no_business`` 契约不受影响；同时避免各 router / service 各自
+统一落在 ``core`` 层的原因：纯 asyncio 基础设施，且避免各 router / service 各自
 复制一份 ``_BG_TASKS`` / ``_track_task`` 造成多份漂移（历史上已漂移至 2 处，
 新增端点再次漏用即回归，见 review-unpushed-2026-09-12 M-2）。
+
+**依赖关系（勿误读为「无业务依赖」）**：本模块**确实**依赖 ``app.services.log``
+（``_do_record`` 落 app_logs），这是 ``core_no_business`` 契约的**第二处单点豁免**
+——与 ``core/exceptions.py`` 的 5xx 落库同因（``services.log`` -> ``models.log``），
+已在 ``.importlinter`` 显式登记并注明「豁免上限即此两处」。
 
 ``track_task`` 现在同时承担**异常可观测**职责：后台协程若抛出未捕获异常，
 会经 done-callback 以 error 级日志记录（带堆栈）。否则后台任务静默失败

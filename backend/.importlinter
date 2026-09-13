@@ -48,3 +48,10 @@ ignore_imports =
     # core/exceptions.py:104），循环依赖所迫（services.log -> models.log 且 handler
     # 须在 app 装配前可用），与业务编排无涉。
     app.core.exceptions -> app.services.log
+    # 第二处（同为「落库」职责）：core/bg.py 的 _do_record 把后台任务未捕获异常
+    # 落 app_logs（函数内延迟 import services.log，自建会话、失败静默）。
+    # 与上面 exceptions 同因（services.log -> models.log）。
+    # **豁免上限即此两处**：core 不得承载写库/业务职责，后续若再有落库需求，
+    # 必须改为依赖倒置（core 暴露 set_*_handler 钩子，由非 core 层在装配期注入），
+    # 不得再扩豁免。
+    app.core.bg -> app.services.log
