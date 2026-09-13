@@ -332,3 +332,56 @@ async def test_handler_uses_configured_calendar_start_date(session, monkeypatch)
     await run_trade_calendar_refresh(_stub_cfg())
 
     assert captured["start_date"] == start
+
+
+@pytest.mark.asyncio
+async def test_refresh_full_prunes_rows_before_start_date(session, monkeypatch) -> None:
+    """全量（full=True）：除 upsert 窗口内交易日外，还**删除早于起始日期的历史行**——
+    收紧起始日期后旧数据不应残留（否则「改成 2026 起始、2025 数据还在」不可预期）。"""
+    t = today_app_tz()
+    d_old = t - timedelta(days=200)  # 早于本次起始日 → 应被清理
+    d_keep = t - timedelta(days=50)  # 窗口内 → 保留
+    session.add(MarketTradeCalendar(trade_date=d_old))
+    await session.commit()
+
+    monkeypatch.setitem(
+        sys.modules,
+        "akshare",
+        _fake_akshare([d_old.isoformat(), d_keep.isoformat()]),
+    )
+    start = t - timedelta(days=100)
+    res = await refresh_trade_calendar(session, full=True, start_date=start)
+    await session.commit()
+
+    # 源给了 2 个日期，但 d_old 在窗口外 → 只 upsert 1 行、清理 1 行
+    assert res.fetched == 1 and res.written == 1 and res.pruned == 1
+    got = (
+        await session.execute(select(MarketTradeCalendar.trade_date))
+    ).scalars().all()
+    assert got == [d_keep]
+
+
+@pytest.mark.asyncio
+async def test_refresh_incremental_keeps_rows_before_start_date(
+    session, monkeypatch
+) -> None:
+    """增量（默认）**不删除**任何行：窗口外的历史数据原样保留，pruned 恒为 0。"""
+    t = today_app_tz()
+    d_old = t - timedelta(days=200)
+    d_keep = t - timedelta(days=50)
+    session.add(MarketTradeCalendar(trade_date=d_old))
+    await session.commit()
+
+    monkeypatch.setitem(
+        sys.modules,
+        "akshare",
+        _fake_akshare([d_old.isoformat(), d_keep.isoformat()]),
+    )
+    res = await refresh_trade_calendar(session, start_date=t - timedelta(days=100))
+    await session.commit()
+
+    assert res.fetched == 1 and res.written == 1 and res.pruned == 0
+    got = (
+        await session.execute(select(MarketTradeCalendar.trade_date))
+    ).scalars().all()
+    assert sorted(got) == sorted([d_old, d_keep])

@@ -14,7 +14,14 @@ import logging
 from datetime import date, datetime, timezone
 from typing import NamedTuple, Optional
 
-from sqlalchemy import case, func, select, tuple_, update as sa_update
+from sqlalchemy import (
+    case,
+    delete as sa_delete,
+    func,
+    select,
+    tuple_,
+    update as sa_update,
+)
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.core.date_utils import today_app_tz
@@ -153,11 +160,13 @@ class TradeCalendarRefresh(NamedTuple):
     """交易日历刷新结果。
 
     - ``fetched``：本次从源拉取并过滤后的交易日数；``0`` = 拉取失败/返回空（调用方据此判失败）；
-    - ``written``：本次实际写入行数（增量=新增条数；全量=upsert 条数）。
+    - ``written``：本次实际写入行数（增量=新增条数；全量=upsert 条数）；
+    - ``pruned``：本次删除的窗口外行数（仅全量模式清理；增量恒为 ``0``）。
     """
 
     fetched: int
     written: int
+    pruned: int = 0
 
 
 async def refresh_trade_calendar(
@@ -175,8 +184,9 @@ async def refresh_trade_calendar(
     - 默认**增量**：只 INSERT 缺失的交易日（PG ``ON CONFLICT DO NOTHING``），不触碰已有行
       （日历行只有主键、无业务 payload，无需刷新）；
     - ``full=True``**全量**：对窗口内全部交易日 upsert（``ON CONFLICT DO UPDATE``），刷新已有行
-      的 ``updated_at``，用于强制重建/修复。（注意：``merge`` 不会刷新未显式赋值的列，
-      故全量用 DO UPDATE 而非逐行 merge。）
+      的 ``updated_at``，并**删除窗口下限之外的历史行**（收紧起始日期后不再残留旧数据），
+      用于强制重建/修复。（注意：``merge`` 不会刷新未显式赋值的列，故全量用 DO UPDATE
+      而非逐行 merge。）
     - 返回 ``TradeCalendarRefresh(fetched, written)``；拉取失败/返回空 → ``(0, 0)``。
     """
     try:
@@ -215,7 +225,19 @@ async def refresh_trade_calendar(
         else:
             stmt = ins.on_conflict_do_nothing(index_elements=["trade_date"])
         res = await session.execute(stmt)
-        return TradeCalendarRefresh(len(dates), int(res.rowcount or 0))
+        written = int(res.rowcount or 0)
+        # 全量模式：顺带清理窗口下限之外的历史行——起始日期收紧后，早于它的旧交易日
+        # 不再属于本窗口，理应移除，否则「改成 2026 起始、2025 数据仍留在库里」不可预期。
+        # 只删下限之外：窗口上限是数据源天然边界（源只给到当年末），本就不会有超出数据。
+        pruned = 0
+        if full:
+            del_res = await session.execute(
+                sa_delete(MarketTradeCalendar).where(
+                    MarketTradeCalendar.trade_date < lower
+                )
+            )
+            pruned = max(0, int(del_res.rowcount or 0))
+        return TradeCalendarRefresh(len(dates), written, pruned)
     except Exception:  # 刷新失败不阻断清理（§6.3 语义）
         logger.warning("交易日历刷新失败，日线任务降级依赖「返回日期比对」防线", exc_info=True)
         return TradeCalendarRefresh(0, 0)
@@ -335,7 +357,9 @@ async def run_trade_calendar_refresh(cfg) -> str:
         )
     mode = "全量" if full else "增量"
     lower = start_date.isoformat() if start_date is not None else "默认（去年 1 月 1 日）"
+    # 全量摘要附带清理行数（pruned 仅在 full 下非 0，增量不展示以免误导）
+    prune_note = f"，清理窗口外 {result.pruned} 行" if full else ""
     return (
         f"交易日历刷新完成（{mode}，起始 {lower}）：源 {result.fetched} 个交易日，"
-        f"本次写入 {result.written} 行，库中共 {total} 个，最新 {latest}"
+        f"本次写入 {result.written} 行{prune_note}，库中共 {total} 个，最新 {latest}"
     )

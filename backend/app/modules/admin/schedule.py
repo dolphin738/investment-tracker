@@ -90,7 +90,7 @@ _HANDLER_META: dict[JobTaskType, dict[str, Any]] = {
         "param_fields": [
             {
                 "key": "full",
-                "label": "全量刷新（覆盖已有行；默认关闭=仅补缺失）",
+                "label": "全量刷新（覆盖已有行并清理早于起始日期的历史；默认关闭=仅补缺失）",
                 "required": False,
                 "type": "boolean",
                 "default": False,

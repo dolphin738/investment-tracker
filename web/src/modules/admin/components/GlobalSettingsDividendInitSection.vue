@@ -98,7 +98,8 @@ const quotaNum = computed(() => Number(props.quota) || 0);
           @update:model-value="(v) => emit('update:tradeCalendarStartDate', String(v))"
         />
         <p class="text-xs text-muted-foreground">
-          交易日历刷新只落该日及之后的交易日；留空 = 去年 1 月 1 日（结束上限受数据源限制为当年末）
+          交易日历刷新只落该日及之后的交易日；留空 = 去年 1 月 1 日。
+          定时任务开启「全量刷新」时会同步清理早于该日的历史；默认增量只补不删。
         </p>
       </div>
 
