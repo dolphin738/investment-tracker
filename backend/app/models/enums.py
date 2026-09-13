@@ -115,6 +115,7 @@ class JobTaskType(str, enum.Enum):
     MARKET_DAILY_CLOSE_FETCH = "MARKET_DAILY_CLOSE_FETCH"  # 每日收盘价抓取（§6.2）
     DIVIDEND_RETENTION_CLEANUP = "DIVIDEND_RETENTION_CLEANUP"  # 五年留存清理（§6.3）
     DIVIDEND_NOTICE_SCAN = "DIVIDEND_NOTICE_SCAN"  # 每日公告扫描+特别分红补充（§6.8）
+    TRADE_CALENDAR_REFRESH = "TRADE_CALENDAR_REFRESH"  # 交易日历刷新（系统任务，迁移种子写入）
 
 
 class JobKind(str, enum.Enum):

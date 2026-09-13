@@ -2201,7 +2201,7 @@
           "dividend-yield"
         ],
         "summary": "Backfill Prices",
-        "description": "手动触发历史行情回补（路线 B 形态 A；admin-only，fire-and-forget 在途任务）。\n\n行为变更（形态 A）：写入 ``price_backfill_start_date``（= 启动在途任务），立即跑第一批\n（run_pending_price_backfill，独立会话），补完自动停止、清状态。每日「收盘价抓取」任务\n完成后若存在在途任务会按每日额度续跑。\n\n保留既有 400 防线：未配置接口 / 接口不存在 / 非 sdk 接入方式；``price_backfill_start_date``\n不由 PUT 设置（服务端管理，避免状态不一致）。回补长耗时，故异步后台执行、立即返回，\n进度见应用日志。响应 ``security_count`` 语义改为「本批将处理的只数」（≤ 每日额度，\n不再是全池数）。",
+        "description": "手动触发历史行情回补（路线 B 形态 A；admin-only，fire-and-forget 在途任务）。\n\n行为变更（形态 A）：写入 ``price_backfill_start_date``（= 启动在途任务），立即跑第一批\n（run_pending_price_backfill，独立会话），补完自动停止、清状态。每日「收盘价抓取」任务\n完成后若存在在途任务会按每日额度续跑。\n\n保留既有 400 防线：未配置接口 / 接口不存在 / 非 sdk 接入方式；``price_backfill_start_date``\n不由 PUT 设置（服务端管理，避免状态不一致）。回补长耗时，故异步后台执行、立即返回，\n进度见应用日志。响应 ``security_count`` 语义改为「本批将处理的只数」（≤ 每日额度，\n不再是全池数）。\n\n**额度按自然日消耗**：同日的手动触发与每日「收盘价抓取」续跑共享 ``price_backfill_quota``，\n已用只数记在 ``price_backfill_used_today``（跨日自动归零）。余额 ≤ 0 时本端点 400，\n避免触发一个注定空跑的批次。\n\n**在途护栏（M-1）**：已有在途任务（``price_backfill_start_date`` 非空）时拒绝再次启动。\n前端会把按钮置灰，但那只是 UX 层——多标签页/多管理员/直接 curl 都能绕过，\n故本校验是唯一真正的护栏。取消请走 ``DELETE /backfill-prices``。\n\n**响应 ``security_count`` 为估算值**：本批名单在请求会话内算出，后台任务用独立会话\n重新选取，两者非原子，极端情况下与实际处理只数可能有偏差。",
         "operationId": "backfill_prices_api_dividend_yield_backfill_prices_post",
         "requestBody": {
           "content": {
@@ -2238,6 +2238,29 @@
             "JWT-auth": []
           }
         ]
+      },
+      "delete": {
+        "tags": [
+          "dividend-yield"
+        ],
+        "summary": "Cancel Price Backfill",
+        "description": "取消在途的历史行情回补（admin-only）：清空 ``price_backfill_start_date``。\n\n为什么需要本端点：在途标记由服务端管理（PUT /settings 不接受该字段），\n而 ``run_pending_price_backfill`` 仅在「选出 0 只」时才自动清标记。\n若数据源持续不可达，熔断会每天触发却永远清不掉标记 → 任务无限期在途、\n每天白烧额度，而 admin 无任何 API 手段停止（只能直接改库）。\n\n有了取消，「已有在途任务」的 400 与前端置灰才不会把人锁死，形成闭环：\n进行中 → 取消 → 重新填起点触发。\n\n**能力边界（诚实说明）**：本端点仅清标记，**不中断正在运行的后台批次**——\n当前批次会跑完本批（≤ quota 只）后自然停止，此后每日收盘价抓取不再续跑。\n已写入的日线行一律保留（upsert 幂等，重跑自动跳过已覆盖证券）。",
+        "operationId": "cancel_price_backfill_api_dividend_yield_backfill_prices_delete",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ]
       }
     },
     "/api/dividend-yield/backfill-specials": {
@@ -2246,7 +2269,7 @@
           "dividend-yield"
         ],
         "summary": "Backfill Special Dividends",
-        "description": "手动触发特别分红历史回补（§6.9；admin-only）。\n\n按 ``task_type`` 定位迁移 0011 种子的系统任务并手动 trigger。\n``run_task_now`` 为 fire-and-forget（``asyncio.create_task``），\n故 12~25 分钟的长耗时**不会**造成请求超时——区别于同步等待的 ``/rebuild``。\n进度与结果经「系统管理 - 定时任务」执行日志查看（§6.7）。",
+        "description": "手动触发特别分红历史回补（§6.9；admin-only）。\n\n直接 fire-and-forget 调起服务函数（不再依赖迁移 0011 种子的系统任务），\n长耗时（12~25 分钟）不阻塞请求；进度与结果经应用日志查看。",
         "operationId": "backfill_special_dividends_api_dividend_yield_backfill_specials_post",
         "responses": {
           "200": {
@@ -8500,7 +8523,8 @@
           "DIVIDEND_QUARTERLY_FETCH",
           "MARKET_DAILY_CLOSE_FETCH",
           "DIVIDEND_RETENTION_CLEANUP",
-          "DIVIDEND_NOTICE_SCAN"
+          "DIVIDEND_NOTICE_SCAN",
+          "TRADE_CALENDAR_REFRESH"
         ],
         "title": "JobTaskType",
         "description": "定时任务类型（统一调度器处理器注册表键 + 数据库任务类型列）。\n\n系统任务（不可追加/删除，仅可编辑）由迁移种子写入；普通任务（可增删改）在\n定时任务管理页由管理员新建。两者共用本枚举。"
@@ -10720,6 +10744,18 @@
               }
             ],
             "title": "Price Backfill Quota"
+          },
+          "price_backfill_default_start_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price Backfill Default Start Date"
           }
         },
         "type": "object",

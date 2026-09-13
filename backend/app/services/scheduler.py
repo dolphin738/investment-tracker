@@ -48,6 +48,7 @@ from app.services.dividend_sync import (
     run_dividend_quarterly_fetch,
     run_dividend_retention_cleanup,
 )
+from app.services.dividend_yield_refresh import run_trade_calendar_refresh
 from app.services.market_data_sync import MarketDataSyncService
 from app.services.market_daily_price_sync import run_market_daily_close_fetch
 
@@ -206,6 +207,8 @@ _HANDLERS: dict[JobTaskType, Callable[[JobConfig], Any]] = {
     JobTaskType.MARKET_DAILY_CLOSE_FETCH: run_market_daily_close_fetch,
     JobTaskType.DIVIDEND_RETENTION_CLEANUP: run_dividend_retention_cleanup,
     JobTaskType.DIVIDEND_NOTICE_SCAN: run_dividend_notice_scan,
+    # 交易日历刷新（系统任务，§5.5 防线一 / §7 stale 基准）
+    JobTaskType.TRADE_CALENDAR_REFRESH: run_trade_calendar_refresh,
 }
 
 

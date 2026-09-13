@@ -238,3 +238,37 @@ async def is_trade_day(session, d: date) -> bool:
             select(MarketTradeCalendar.trade_date).where(MarketTradeCalendar.trade_date == d)
         )
     ).scalar_one_or_none() is not None
+
+
+# --------------------------------------------------------------------------- #
+# 模块级 handler 入口（供 scheduler 薄注册；独立会话对齐既有 handler 风格）
+# --------------------------------------------------------------------------- #
+async def run_trade_calendar_refresh(cfg) -> str:
+    """交易日历刷新 handler（系统定时任务入口）。
+
+    把原先「只在五年留存清理里顺带刷新」的交易日历刷新拆成**独立系统定时任务**，
+    使 ``market_trade_calendar`` 表稳定被填充——否则 ``is_trade_day`` 因日历为空而
+    FAIL-OPEN（§5.5 防线一失效）、stale 判定降级为快照表基准（§7）。
+
+    - 用独立 ``AsyncSessionLocal`` 会话（对齐 ``run_market_daily_close_fetch`` 风格）；
+    - ``refresh_trade_calendar`` 内部吞异常（返回 None），故此处**后置校验**：刷新后表仍为空
+      → 抛 ``RuntimeError``，令 ``job_run_logs`` 落 ``FAILED``，把失败显性化（而非静默 SUCCESS）。
+    """
+    from app.db.database import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as session:
+        await refresh_trade_calendar(session)
+        await session.commit()
+        total = (
+            await session.execute(select(func.count(MarketTradeCalendar.trade_date)))
+        ).scalar_one()
+        latest = (
+            await session.execute(select(func.max(MarketTradeCalendar.trade_date)))
+        ).scalar_one_or_none()
+    if not total:
+        # refresh_trade_calendar 内部吞异常；此处用后置校验把失败显性化 → job_run_logs=FAILED
+        raise RuntimeError(
+            "交易日历刷新后仍为空：请检查 akshare tool_trade_date_hist_sina 是否可达 / "
+            "akshare 是否已安装"
+        )
+    return f"交易日历刷新完成：共 {total} 个交易日，最新 {latest}"
