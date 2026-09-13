@@ -17,8 +17,10 @@ import pytest
 from sqlalchemy import select, update
 
 from app.models import (
+    GAP_STATUS_EXHAUSTED,
     DividendYieldSettings,
     InterfaceCategory,
+    MarketPriceBackfillGap,
     MarketSecurityDailyPrice,
     QuoteInterface,
     SecuritiesDataProvider,
@@ -917,6 +919,59 @@ async def test_backfill_prices_triggers_async_when_configured(session, client, m
         await asyncio.sleep(0.01)
     assert captured, "fire-and-forget 任务须被触发并执行"
     assert captured[0][1] == [m.id]
+
+
+@pytest.mark.asyncio
+async def test_backfill_prices_trigger_clears_gap_state(session, client, monkeypatch):
+    """P1(b)：重新触发回补会清空严格补洞状态表（含 exhausted），给用户显式重试路径。
+
+    exhausted 的洞不会自动重试（护栏二），此前触发/取消都不清空 → 数据源恢复后也没有
+    任何途径让它们重新入批。此处在 POST 事务内清空，验证旧洞（含已放弃的）被清掉。
+    """
+    import app.services.market_daily_price_sync as mds
+
+    async def _noop(session, itf, master_ids, start_date, *, force: bool = False):
+        return "noop"
+
+    monkeypatch.setattr(mds, "backfill_historical", _noop)
+
+    admin = await _make_admin(session, client)
+    h = auth(admin["token"])
+    itf = await _seed_category2_interface(
+        session, access_method=QuoteProviderAccessMethod.SDK
+    )
+    r = await client.put(
+        "/api/dividend-yield/settings",
+        json={
+            "green_threshold": "0.05", "red_threshold": "0.03",
+            "price_backfill_source_interface_id": itf.id,
+        },
+        headers=h,
+    )
+    assert r.status_code == 200
+    # 造一条证券 + 一条已放弃（exhausted）的洞行（master_id 外键指向 securities.id）
+    m = Security(
+        id=_uid(), code="sh600111", name="证券sh600111",
+        asset_class=SecurityType.STOCK, exchange="SH",
+    )
+    session.add(m)
+    await session.flush()
+    session.add(MarketPriceBackfillGap(
+        master_id=m.id, gap_date=date(2021, 1, 5),
+        status=GAP_STATUS_EXHAUSTED, attempts=2,
+    ))
+    await session.commit()
+
+    r = await client.post(
+        "/api/dividend-yield/backfill-prices",
+        json={"start_date": "2021-01-01"}, headers=h,
+    )
+    assert r.status_code == 200
+
+    # 重新触发即清空严格补洞状态（含 exhausted）——旧洞随新起点失效、须按新起点重建
+    session.expire_all()
+    rows = (await session.execute(select(MarketPriceBackfillGap))).scalars().all()
+    assert rows == []
 
 
 @pytest.mark.asyncio

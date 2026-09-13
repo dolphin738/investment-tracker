@@ -63,6 +63,16 @@ def _uid() -> str:
     return str(uuid.uuid4())
 
 
+def _window_upper() -> date:
+    """回补窗口上界（护栏一：上界 = 昨天）。
+
+    护栏三要求日历覆盖窗口**两端**（``<= start`` 且 ``>= 上界``）；既有用例的日历原只
+    铺到窗口内的某几天，在「只判窗口内任意一天」的旧判据下能通过、在两端判据下会判为
+    「上界未覆盖」，故这些用例须显式补一行上界交易日。
+    """
+    return today_app_tz() - timedelta(days=1)
+
+
 async def _add_master(session, code: str = "600000") -> Security:
     norm = _normalize_master_code(code, infer_exchange(code))
     m = Security(id=_uid(), code=norm, name="浦发银行", asset_class=SecurityType.STOCK)
@@ -184,7 +194,11 @@ async def test_gap_mode_selects_security_with_missing_trade_day(session):
     start = date(2024, 1, 1)
     # 起点已覆盖（有 start 当天日线）→ legacy 口径下该证券会被跳过
     session.add(MarketSecurityDailyPrice(master_id=m.id, trade_date=start, close=Decimal("10")))
-    for d in (start, date(2024, 1, 2), date(2024, 1, 3)):
+    # 护栏三（两端覆盖）：日历须覆盖窗口下界（<= start）与上界（>= 昨天）；故除窗口内交易日
+    # 外，还需补一行上界交易日（并为其补日线，避免它本身变成洞、污染断言）。
+    upper = _window_upper()
+    session.add(MarketSecurityDailyPrice(master_id=m.id, trade_date=upper, close=Decimal("10")))
+    for d in (start, date(2024, 1, 2), date(2024, 1, 3), upper):
         session.add(MarketTradeCalendar(trade_date=d))
     await session.commit()
 
@@ -233,6 +247,10 @@ async def test_gap_mode_marks_exhausted_after_max_attempts(session, monkeypatch)
     session.add(MarketSecurityDailyPrice(master_id=m.id, trade_date=start, close=Decimal("10")))
     session.add(MarketTradeCalendar(trade_date=start))
     session.add(MarketTradeCalendar(trade_date=date(2024, 1, 2)))  # 洞
+    # 护栏三（两端覆盖）：补一行上界交易日并为其补日线（避免上界本身变成洞）
+    upper = _window_upper()
+    session.add(MarketSecurityDailyPrice(master_id=m.id, trade_date=upper, close=Decimal("10")))
+    session.add(MarketTradeCalendar(trade_date=upper))
     itf = await _seed_sdk_backfill_source(session)
     await _seed_settings(session, itf, start)
     _no_wait(monkeypatch)
@@ -358,7 +376,10 @@ async def test_gap_mode_reconciles_filled_gaps_and_clears_inflight(session, monk
     start = date(2024, 1, 1)
     session.add(MarketSecurityDailyPrice(master_id=m.id, trade_date=start, close=Decimal("10")))
     session.add(MarketSecurityDailyPrice(master_id=m.id, trade_date=date(2024, 1, 2), close=Decimal("10")))
-    for d in (start, date(2024, 1, 2), date(2024, 1, 3)):
+    # 护栏三（两端覆盖）：补一行上界交易日并为其补日线（避免上界本身变成洞）
+    upper = _window_upper()
+    session.add(MarketSecurityDailyPrice(master_id=m.id, trade_date=upper, close=Decimal("10")))
+    for d in (start, date(2024, 1, 2), date(2024, 1, 3), upper):
         session.add(MarketTradeCalendar(trade_date=d))
     itf = await _seed_sdk_backfill_source(session)
     await _seed_settings(session, itf, start)
@@ -402,8 +423,11 @@ async def test_gap_mode_prunes_stale_gaps_outside_window(session):
     m = await _add_master(session)
     await _add_dividend(session, m.id)
     new_start = date(2024, 2, 1)
-    # 新起点已覆盖，且新窗口内每个交易日都有日线 → 收紧后应判定「无洞」
-    for d in (new_start, date(2024, 2, 2)):
+    # 新起点已覆盖，且新窗口内每个交易日都有日线 → 收紧后应判定「无洞」。
+    # 护栏三（两端覆盖）：窗口内日历须覆盖下界（<= new_start）与上界（>= 昨天）；
+    # 故除窗口内交易日外补一行上界交易日，并为其补日线（避免它本身变成洞）。
+    upper = _window_upper()
+    for d in (new_start, date(2024, 2, 2), upper):
         session.add(
             MarketSecurityDailyPrice(master_id=m.id, trade_date=d, close=Decimal("10"))
         )
@@ -428,3 +452,121 @@ async def test_gap_mode_prunes_stale_gaps_outside_window(session):
     masters, calendar_ok = await _select_gap_backfill_masters(session, new_start, 100)
     assert calendar_ok is True
     assert masters == []  # 不会仅因陈旧洞而被选中
+
+
+# ───────────── ⑧ 护栏三（两端覆盖）：下界未覆盖 → None ─────────────
+@pytest.mark.asyncio
+async def test_gap_mode_returns_none_when_lower_bound_not_covered(session):
+    """护栏三（两端覆盖）：日历未覆盖窗口**下界**（无 ``trade_date <= start``）→ None 回落 legacy。
+
+    构造：仅铺窗口上界那一行（``>= 上界`` 成立），但没有任何 ``<= start`` 的行 → 下界未覆盖。
+    旧判据（窗口内任意一天在日历里）会误判为「已覆盖」而继续判定，故本用例是真回归守护。
+    """
+    m = await _add_master(session)
+    await _add_dividend(session, m.id)
+    start = date(2024, 1, 1)
+    upper = _window_upper()
+    session.add(MarketTradeCalendar(trade_date=upper))  # 仅覆盖上界，不覆盖下界
+    await session.commit()
+
+    assert await sync_price_backfill_gaps(session, start) is None
+    assert await _gap_rows(session) == []  # 无从判定 → 不落任何洞
+
+
+# ───────────── ⑨ 护栏三（两端覆盖）：上界未覆盖 → None ─────────────
+@pytest.mark.asyncio
+async def test_gap_mode_returns_none_when_upper_bound_not_covered(session):
+    """护栏三（两端覆盖）：日历未覆盖窗口**上界**（无 ``trade_date >= 昨天``）→ None 回落 legacy。
+
+    构造：仅铺起点那一天（``<= start`` 成立），日历尾部在窗口结束前断层 → 上界未覆盖。
+    这正是「部分覆盖静默漏判一整段」的真实场景：若按旧判据（窗口内任意一天）会误判为
+    「已覆盖」，尾部整段「日历有、日线无」的交易日被漏判、任务还被误报成「补完」。
+    """
+    m = await _add_master(session)
+    await _add_dividend(session, m.id)
+    start = date(2024, 1, 1)
+    session.add(MarketTradeCalendar(trade_date=start))  # 仅覆盖下界，不覆盖上界
+    await session.commit()
+
+    assert await sync_price_backfill_gaps(session, start) is None
+    assert await _gap_rows(session) == []  # 无从判定 → 不落任何洞
+
+
+# ───────────── ⑩ 窗口内的 exhausted 洞不被窗口清理 DELETE 掉 ─────────────
+@pytest.mark.asyncio
+async def test_gap_mode_keeps_in_window_exhausted_gap(session):
+    """守护覆盖缺口：窗口清理 DELETE 只删**窗口外**（``gap_date < start`` 或 ``> 昨天``）的洞；
+    窗口内的 exhausted 洞必须保留。
+
+    否则它会被每轮 sync 删掉后以 pending 重新插入，「已放弃」状态形同虚设，停牌洞又会每天
+    被重新选中白烧额度——与护栏二（attempts 达阈值不再重试）自相矛盾。
+    """
+    m = await _add_master(session)
+    await _add_dividend(session, m.id)
+    upper = _window_upper()
+    start = upper - timedelta(days=3)
+    # 日历覆盖窗口两端；起点有日线（纳入池），上界无日线
+    session.add(MarketSecurityDailyPrice(master_id=m.id, trade_date=start, close=Decimal("10")))
+    for d in (start, upper):
+        session.add(MarketTradeCalendar(trade_date=d))
+    # 窗口内的 exhausted 洞（位于上界）
+    session.add(
+        MarketPriceBackfillGap(
+            master_id=m.id,
+            gap_date=upper,
+            status=GAP_STATUS_EXHAUSTED,
+            attempts=_GAP_MAX_ATTEMPTS,
+        )
+    )
+    await session.commit()
+
+    synced = await sync_price_backfill_gaps(session, start)
+    await session.commit()
+
+    assert synced == 0  # (master, gap_date) 已存在 → 不新增
+    # 窗口内 exhausted 洞未被 DELETE、也未被改回 pending
+    assert await _gap_rows(session) == [
+        (m.id, upper, GAP_STATUS_EXHAUSTED, _GAP_MAX_ATTEMPTS)
+    ]
+
+
+# ───────────── ⑪ 护栏：每日续跑不清空 gap 表、不重置 attempts ─────────────
+@pytest.mark.asyncio
+async def test_daily_continuation_does_not_clear_gap_state(session, monkeypatch):
+    """护栏：每日续跑（``run_pending_price_backfill``）**绝不清空** gap 表、也不重置 attempts。
+
+    清空只允许发生在路由层的「重新触发 / 取消」两处（与在途标记同事务）。若续跑里也清，
+    attempts 会每天归零 → 停牌洞永远循环（活锁），护栏二（达阈值不再重试）形同虚设。
+    本用例：留一个 pending 洞（续跑后 attempts 应 0→1，而非被清空归零）+ 一个 exhausted 洞
+    （续跑后应保持 exhausted），二者都必须在续跑后仍在表内。
+    """
+    m = await _add_master(session)
+    await _add_dividend(session, m.id)
+    upper = _window_upper()
+    start = upper - timedelta(days=3)
+    mid = start + timedelta(days=1)
+    # 日历覆盖窗口两端；仅起点有日线（纳入池）→ mid/upper 为洞
+    session.add(MarketSecurityDailyPrice(master_id=m.id, trade_date=start, close=Decimal("10")))
+    for d in (start, mid, upper):
+        session.add(MarketTradeCalendar(trade_date=d))
+    # 预置一个已达阈值的 exhausted 洞（位于上界）
+    session.add(
+        MarketPriceBackfillGap(
+            master_id=m.id,
+            gap_date=upper,
+            status=GAP_STATUS_EXHAUSTED,
+            attempts=_GAP_MAX_ATTEMPTS,
+        )
+    )
+    itf = await _seed_sdk_backfill_source(session)
+    await _seed_settings(session, itf, start)
+    _no_wait(monkeypatch)
+    _calls, _fake = _sdk_returning([])  # 抓不到任何行 → 洞填不上
+    monkeypatch.setattr(MarketDataSyncService, "_fetch_sdk_raw", _fake)
+
+    await run_pending_price_backfill(session)
+
+    rows = await _gap_rows(session)
+    # pending 洞 attempts 递增（未被清空归零）；exhausted 洞保持 exhausted
+    assert (m.id, mid, GAP_STATUS_PENDING, 1) in rows
+    assert (m.id, upper, GAP_STATUS_EXHAUSTED, _GAP_MAX_ATTEMPTS) in rows

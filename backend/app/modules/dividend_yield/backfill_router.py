@@ -29,7 +29,10 @@ from app.models.enums import QuoteProviderAccessMethod
 from app.modules.dividend_yield.settings_router import load_settings
 from app.services.auth import CurrentUser, require_admin
 from app.services.log import record
-from app.services.market_daily_price_sync import _select_pending_backfill_masters
+from app.services.market_daily_price_sync import (
+    _select_pending_backfill_masters,
+    clear_price_backfill_gaps,
+)
 
 router_backfill = APIRouter(route_class=EnvelopeRoute)
 
@@ -212,6 +215,12 @@ async def backfill_prices(
     # 启动在途任务：写入起点日期并落库（此后每日收盘价抓取按剩余额度续跑）
     start = body.start_date
     settings.price_backfill_start_date = start
+    # 起点 / 判定基准已变 → 清空严格补洞状态表（``market_price_backfill_gaps``），
+    # 与写入起点**同一事务**提交。两重作用：① 旧洞（含 exhausted 的）全部失效、须按新起点
+    # 重建；② 给「数据源长期给不到的日期」一条显式重试路径——gap 模式下 attempts 达阈值会置
+    # exhausted 不再入批，清空即重置。⚠️ 只有此处与取消端点清空；**绝不可**在续跑里清空
+    # （那会把 attempts 每天归零 → 停牌洞永远循环，护栏二形同虚设）。
+    await clear_price_backfill_gaps(db)
     await db.commit()
 
     # 本批将处理的只数（精确选出未覆盖，限当日剩余额度），用于响应语义
@@ -263,6 +272,10 @@ async def cancel_price_backfill(
     **能力边界（诚实说明）**：本端点仅清标记，**不中断正在运行的后台批次**——
     当前批次会跑完本批（≤ quota 只）后自然停止，此后每日收盘价抓取不再续跑。
     已写入的日线行一律保留（upsert 幂等，重跑自动跳过已覆盖证券）。
+
+    **同时清空严格补洞状态**：与清在途标记**同一事务**清空 ``market_price_backfill_gaps``
+    （旧洞随取消一并失效、须由下次触发重建；也顺带重置 exhausted 状态）。
+    ⚠️ 清空仅限本端点与 ``POST /backfill-prices`` 两处；续跑链路**绝不**清空。
     """
     settings = await load_settings(db)
     if settings.price_backfill_start_date is None:
@@ -274,6 +287,8 @@ async def cancel_price_backfill(
     cancelled = settings.price_backfill_start_date
     settings.price_backfill_start_date = None
     settings.price_backfill_last_error = None
+    # 与清在途标记同事务清空严格补洞状态（同 POST：起点/基准失效 + 重置 exhausted 重试路径）
+    await clear_price_backfill_gaps(db)
     await db.commit()
     await record(
         level="info",

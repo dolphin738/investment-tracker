@@ -107,25 +107,34 @@ vi.mock('@/modules/admin/composables/use-quote-provider', () => ({
   }),
 }));
 
-// reka-ui Select 原生替身：Select 渲染为 <select>，SelectItem 渲染为 <option>（可断言文本）
+// reka-ui Select 原生替身：Select 渲染为 <select>，SelectItem 渲染为 <option>（可断言文本）。
+// 关键：把子节点 SelectTrigger 上的 id 转接到替身 <select> 的 id，使测试可按
+// #dy-backfill-mode / #dy-report-source 等稳定锚点定位，不再依赖 DOM 顺序（selects[i]）。
 vi.mock('@/components/ui/select', async () => {
   await import('vue');
   const Select = defineComponent({
     props: { modelValue: { type: String, default: '' } },
     emits: ['update:modelValue'],
     setup(props, { emit, slots }) {
-      return () =>
-        h(
+      return () => {
+        const children = slots.default?.() ?? [];
+        // 模板里 id 挂在 SelectTrigger 上（真实组件落到触发元素）；替身须把它转到 <select>
+        const triggerId = children
+          .map((v) => (v && typeof v === 'object' ? v.props : null))
+          .find((p) => p && typeof p === 'object' && 'id' in p)?.id;
+        return h(
           'select',
           {
+            id: triggerId,
             value: props.modelValue ?? '',
             'data-testid': 'select',
             class: 'select-stub',
             onChange: (e: Event) =>
               emit('update:modelValue', (e.target as HTMLSelectElement).value),
           },
-          [h('option', { key: '__ph', value: '' }, ''), slots.default?.()],
+          [h('option', { key: '__ph', value: '' }, ''), children],
         );
+      };
     },
   });
   const SelectItem = defineComponent({
@@ -184,6 +193,20 @@ function interfaceOptions(select: DOMWrapper<Element>): DOMWrapper<Element>[] {
     );
 }
 
+/**
+ * 五个**接口**下拉的稳定锚点（id 由各下拉的 SelectTrigger 提供，替身 <select> 会转接）。
+ * 用 id 定位而非 `selects.slice(0, 5)` 的魔法下标——后者依赖 DOM 渲染顺序，
+ * 一旦布局调整（如「回补模式」下拉上移）就会静默错配。
+ * 「回补模式」下拉（id=dy-backfill-mode）是模式选择、非接口下拉，故不在其列。
+ */
+const INTERFACE_SELECT_IDS = [
+  'dy-report-source',
+  'dy-detail-source',
+  'dy-price-source',
+  'dy-announcement-source',
+  'dy-price-backfill-source',
+] as const;
+
 beforeEach(() => {
   vi.clearAllMocks();
   // 隔离在途状态 / 额度字段，避免污染其他用例（共享 hoisted settings 对象可变）
@@ -203,21 +226,27 @@ describe('GlobalSettingsDividendTab — 四源下拉与提供方名拼接（§15
     // 六个下拉（主源 / 补充源 / 行情源 / 公告源 / 历史行情回补接口 / 回补模式）
     const selects = wrapper.findAll('select');
     expect(selects).toHaveLength(6);
-    // 末尾是「回补模式」下拉：仅 legacy / gap 两项
-    expect(realOptions(selects[5]).map((o) => o.attributes('value'))).toEqual([
+    // 「回补模式」下拉（稳定锚点，非魔法下标）：仅 legacy / gap 两项
+    const modeSelect = wrapper.find('#dy-backfill-mode');
+    expect(modeSelect.exists()).toBe(true);
+    expect(realOptions(modeSelect).map((o) => o.attributes('value'))).toEqual([
       'legacy',
       'gap',
     ]);
 
-    // 公告源下拉（第 4 个）：仅包含启用的分类 4 接口
-    const announcementOptions = interfaceOptions(selects[3]);
+    // 公告源下拉（按 id 锚定）：仅包含启用的分类 4 接口
+    const announcementOptions = interfaceOptions(
+      wrapper.find('#dy-announcement-source'),
+    );
     const announcementValues = announcementOptions.map((o) =>
       o.attributes('value'),
     );
     expect(announcementValues).toEqual(['i4']);
     // 每个接口下拉都提供「不设置」哨兵项（reka-ui 禁止 value=""，故用哨兵而非空串）；
-    // 末尾的「回补模式」下拉是模式选择（legacy/gap），不适用哨兵项
-    selects.slice(0, 5).forEach((sel) => {
+    // 按 id 稳定锚定每个接口下拉，不依赖 DOM 顺序
+    INTERFACE_SELECT_IDS.forEach((id) => {
+      const sel = wrapper.find(`#${id}`);
+      expect(sel.exists()).toBe(true);
       expect(
         realOptions(sel).some((o) => o.attributes('value') === SELECT_EMPTY_VALUE),
       ).toBe(true);
@@ -235,20 +264,24 @@ describe('GlobalSettingsDividendTab — 四源下拉与提供方名拼接（§15
     wrapper = await mountTab();
 
     const selects = wrapper.findAll('select');
-    // 主源下拉：东财-分红配送 归属 东方财富（p1）
-    const reportOptions = interfaceOptions(selects[0]);
+    // 六个下拉（含「回补模式」）——仅作数量守护，定位一律按 id 锚点
+    expect(selects).toHaveLength(6);
+    // 主源下拉（按 id 锚定）：东财-分红配送 归属 东方财富（p1）
+    const reportOptions = interfaceOptions(wrapper.find('#dy-report-source'));
     expect(reportOptions[0].text()).toBe('东财-分红配送（东方财富）');
     // 补充源下拉（候选与主源同为分类 3）：两个提供方名反查均生效
-    const detailOptions = interfaceOptions(selects[1]);
+    const detailOptions = interfaceOptions(wrapper.find('#dy-detail-source'));
     expect(detailOptions[0].text()).toBe('东财-分红配送（东方财富）');
     expect(detailOptions[1].text()).toBe('新浪-分红配股（新浪财经）');
-    // 公告源下拉：沪深京A股公告 归属 东方财富（p1）
-    const announcementOptions = interfaceOptions(selects[3]);
+    // 公告源下拉（按 id 锚定）：沪深京A股公告 归属 东方财富（p1）
+    const announcementOptions = interfaceOptions(
+      wrapper.find('#dy-announcement-source'),
+    );
     expect(announcementOptions[0].text()).toBe('沪深京A股公告（东方财富）');
 
-    // 全部接口 option 均须符合「（提供方名）」结尾格式（排除末尾的「回补模式」下拉）
-    selects.slice(0, 5).forEach((sel) => {
-      interfaceOptions(sel).forEach((o) => {
+    // 全部接口 option 均须符合「（提供方名）」结尾格式（按 id 锚定，排除「回补模式」下拉）
+    INTERFACE_SELECT_IDS.forEach((id) => {
+      interfaceOptions(wrapper.find(`#${id}`)).forEach((o) => {
         expect(o.text()).toMatch(/（.+）$/);
       });
     });
@@ -263,11 +296,10 @@ describe('GlobalSettingsDividendTab — 四源下拉与提供方名拼接（§15
     wrapper.unmount();
 
     wrapper = await mountTab();
-    const selects = wrapper.findAll('select');
-    // 四个数据源下拉的模型值均回填为服务端配置
-    expect((selects[0].element as HTMLSelectElement).value).toBe('i1');
-    expect((selects[1].element as HTMLSelectElement).value).toBe('i2');
-    expect((selects[2].element as HTMLSelectElement).value).toBe('i3');
+    // 四个数据源下拉的模型值均回填为服务端配置（按 id 锚定，不依赖 DOM 顺序）
+    expect((wrapper.find('#dy-report-source').element as HTMLSelectElement).value).toBe('i1');
+    expect((wrapper.find('#dy-detail-source').element as HTMLSelectElement).value).toBe('i2');
+    expect((wrapper.find('#dy-price-source').element as HTMLSelectElement).value).toBe('i3');
     // 阈值回填 → settingsHasChanges 为 false → 保存按钮不因假差异而启用
     const saveBtn = wrapper.findAll('button').find((b) => b.text().includes('保存股息率设置'));
     expect(saveBtn).toBeDefined();

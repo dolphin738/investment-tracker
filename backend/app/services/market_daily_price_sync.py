@@ -19,7 +19,7 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Optional
 
-from sqlalchemy import exists, inspect, select, text
+from sqlalchemy import exists, func, inspect, select, text
 from sqlalchemy import update as sa_update
 
 from app.core.date_utils import today_app_tz
@@ -28,6 +28,7 @@ from app.models import (
     GAP_STATUS_EXHAUSTED,
     GAP_STATUS_PENDING,
     PRICE_BACKFILL_MODE_GAP,
+    PRICE_BACKFILL_MODE_LEGACY,
     DividendYieldSettings,
     MarketPriceBackfillGap,
     MarketSecurityDailyPrice,
@@ -669,22 +670,32 @@ async def _select_pending_backfill_masters(
 # --------------------------------------------------------------------------- #
 # 严格补洞（gap）模式：按交易日历逐日比对，回填「日历有、日线表无」的缺失交易日
 # --------------------------------------------------------------------------- #
-async def _load_gap_window_days(session, lower: date, upper: date) -> list[date]:
-    """取回补窗口内的**已记录交易日**（升序）；窗口内无交易日返回空列表。"""
-    return list(
-        (
-            await session.execute(
-                select(MarketTradeCalendar.trade_date)
-                .where(
-                    MarketTradeCalendar.trade_date >= lower,
-                    MarketTradeCalendar.trade_date <= upper,
-                )
-                .order_by(MarketTradeCalendar.trade_date.asc())
+async def _calendar_covers_window_bounds(
+    session, lower: date, upper: date
+) -> tuple[bool, bool]:
+    """日历是否覆盖回补窗口的**下界**与**上界**，返回 ``(lo_covered, hi_covered)``。
+
+    用两条 ``EXISTS`` 判定，避免把窗口内全部交易日读进内存（窗口可到 1400+ 天）：
+    - ``lo_covered``：存在 ``trade_date <= lower`` → 窗口起始已在日历范围内；
+    - ``hi_covered``：存在 ``trade_date >= upper`` → 日历延伸到了窗口结束。
+    """
+    lo_stmt = select(
+        exists(
+            select(MarketTradeCalendar.trade_date).where(
+                MarketTradeCalendar.trade_date <= lower
             )
         )
-        .scalars()
-        .all()
     )
+    hi_stmt = select(
+        exists(
+            select(MarketTradeCalendar.trade_date).where(
+                MarketTradeCalendar.trade_date >= upper
+            )
+        )
+    )
+    lo_covered = bool(await session.scalar(lo_stmt))
+    hi_covered = bool(await session.scalar(hi_stmt))
+    return lo_covered, hi_covered
 
 
 async def sync_price_backfill_gaps(
@@ -700,23 +711,31 @@ async def sync_price_backfill_gaps(
     2. **只对「起点已覆盖」的证券记洞**：完全未覆盖的证券由 legacy 分支兜住
        （``_select_gap_backfill_masters`` 取并集），否则「N 只 × 窗口交易日」会瞬间撑爆
        状态表。单只证券的洞行数上界 = 窗口交易日数；
-    3. **日历不覆盖 → 返回 None**（不是 0）：窗口内查不到任何已记录交易日时**无从判定**
-       哪些日子该有数据，返回 0 会被误读成「没有洞 → 补完」并错误清空在途标记，
-       故用 None 明确表达「无法判定」，由调用方回落 legacy。
+    3. **日历不覆盖窗口两端 → 返回 None**（不是 0）：判据是窗口**两端**是否都有日历记录
+       （``trade_date <= start_date`` 且 ``trade_date >= upper``）。仅判「窗口内任意一天
+       在日历里」是不充分的——日历若在窗口尾部断层（例如只到 03-01，而窗口上界在 03-07），
+       尾部整段「日历有、日线无」的交易日会被静默漏判、永不回补，任务还会被误判成
+       「补完」。任一端不覆盖即**无从判定**哪些日子该有数据，返回 0 会被误读成
+       「没有洞 → 补完」并错误清空在途标记，故用 None 明确表达「无法判定」，
+       由调用方回落 legacy（legacy 至少按前边界处理，不会漏补后误报「完成」）。
 
-    返回新增洞行数；``None`` = 日历不覆盖、无法判定。
+    返回新增洞行数；``None`` = 日历未覆盖窗口两端、无法判定。
     """
     today = today or today_app_tz()
     upper = today - timedelta(days=1)  # 护栏一：上界 = 昨天
     if upper < start_date:
         return 0
-    days = await _load_gap_window_days(session, start_date, upper)
-    if not days:
+    lo_covered, hi_covered = await _calendar_covers_window_bounds(
+        session, start_date, upper
+    )
+    if not (lo_covered and hi_covered):
         logger.warning(
-            "交易日历不覆盖回补窗口 %s..%s（无已记录交易日），gap 模式无法判定洞，"
-            "本轮应回落 legacy 口径",
+            "交易日历未覆盖回补窗口 %s..%s 两端（下界覆盖=%s，上界覆盖=%s），"
+            "gap 模式无法判定洞，本轮应回落 legacy 口径",
             start_date.isoformat(),
             upper.isoformat(),
+            lo_covered,
+            hi_covered,
         )
         return None  # 护栏三：无从判定，交由调用方回落 legacy
 
@@ -768,7 +787,9 @@ async def sync_price_backfill_gaps(
         ),
         {"lo": start_date, "hi": upper, "pending": GAP_STATUS_PENDING},
     )
-    added = int(res.rowcount or 0)
+    # rowcount 防御：-1 是 truthy，`or 0` 兜不住（部分驱动对 INSERT...ON CONFLICT 可能回 -1），
+    # 故统一 max(..., 0) 归一到非负计数。
+    added = max(int(res.rowcount or 0), 0)
     return added
 
 
@@ -830,7 +851,8 @@ async def _bump_gap_attempts(session, master_ids: list[str]) -> int:
         )
         .values(status=GAP_STATUS_EXHAUSTED)
     )
-    return int(res.rowcount or 0)
+    # rowcount 防御：-1 是 truthy，`or 0` 兜不住，统一 max(..., 0) 归一。
+    return max(int(res.rowcount or 0), 0)
 
 
 async def reconcile_price_backfill_gaps(session) -> int:
@@ -846,7 +868,27 @@ async def reconcile_price_backfill_gaps(session) -> int:
             "WHERE p.master_id = g.master_id AND p.trade_date = g.gap_date"
         )
     )
-    return int(res.rowcount or 0)
+    # rowcount 防御：-1 是 truthy，`or 0` 兜不住，统一 max(..., 0) 归一。
+    return max(int(res.rowcount or 0), 0)
+
+
+async def clear_price_backfill_gaps(session) -> int:
+    """清空 ``market_price_backfill_gaps``（严格补洞状态），返回删除行数。
+
+    调用时机**严格限定两处**（均在路由层、与在途标记同事务提交）：
+    - ``POST /backfill-prices`` 写入 ``price_backfill_start_date`` 时；
+    - ``DELETE /backfill-prices`` 取消、清 ``price_backfill_start_date`` 时。
+
+    为什么清空：起点 / 判定基准变了 → 旧洞（含已 exhausted 的）全部失效、须重建；
+    同时给「数据源长期给不到的日期」一条显式重试路径——gap 模式下洞的 ``attempts``
+    达阈值会被置 exhausted 且不再入批，清空即重置该状态、可重新尝试。
+
+    ⚠️ **绝对禁止**在 ``run_pending_price_backfill`` / 每日续跑链路里调用本函数：
+    那会把 attempts 每天归零 → 停牌洞永远循环（活锁），正是护栏二要防的。
+    """
+    res = await session.execute(text("DELETE FROM market_price_backfill_gaps"))
+    # rowcount 防御：-1 是 truthy，`or 0` 兜不住，统一 max(..., 0) 归一。
+    return max(int(res.rowcount or 0), 0)
 
 
 async def run_pending_price_backfill(session) -> str:
@@ -945,13 +987,31 @@ async def run_pending_price_backfill(session) -> str:
         pending = await _select_pending_backfill_masters(session, start_date, remaining)
 
     if not pending:
-        # 全部已覆盖 → 补完，清空在途状态（终态），此后不再跑
+        # 全部已覆盖 → 补完，清空在途状态（终态），此后不再跑。
+        # 终态不再静默：gap 模式下把已放弃（exhausted）的洞数一并告知——这些洞是数据源长期
+        # 未提供的日期，attempts 达阈值后不再入批；重新触发回补（POST /backfill-prices 会
+        # 清空洞表）即可重置状态重试。
+        exhausted_note = ""
+        if mode == PRICE_BACKFILL_MODE_GAP:
+            exhausted_count = int(
+                await session.scalar(
+                    select(func.count())
+                    .select_from(MarketPriceBackfillGap)
+                    .where(MarketPriceBackfillGap.status == GAP_STATUS_EXHAUSTED)
+                )
+                or 0
+            )
+            if exhausted_count > 0:
+                exhausted_note = (
+                    f"；另有 {exhausted_count} 个洞因数据源长期未提供已放弃（exhausted）；"
+                    "重新触发回补可重置状态重试"
+                )
         settings.price_backfill_start_date = None
         settings.price_backfill_last_error = None
         await session.commit()
         return (
             f"回补已完成（{mode} 模式）：全部证券均已覆盖、无待补洞，"
-            "在途回补任务已结束"
+            f"在途回补任务已结束{exhausted_note}"
         )
 
     # 新一轮尝试：先清掉上一次遗留的失败原因（stderr/app_logs 仍保留历史，
