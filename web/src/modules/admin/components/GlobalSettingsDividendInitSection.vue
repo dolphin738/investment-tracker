@@ -5,9 +5,10 @@
  * 哑组件（presentational）：不取数、不管保存，仅接 props 渲染、用 emit 回传值。
  * 父组件继续持有全部状态（settingsForm）与保存逻辑。
  *
- * 布局：四个配置控件排成 2×2 网格——
+ * 布局：五个配置控件排成网格——
  *   行1：历史行情回补接口（证券行情） | 交易日历起始日期
  *   行2：每日回补额度（只/天） | 回补起始日期
+ *   行3：回补模式（整行，因说明文字较长）
  * 其后复用 GlobalSettingsDividendInitBlock（内部只保留在途提示、失败原因与触发/取消按钮；
  * 额度与起点的数值仍透传进去，供其「今日已用 X/N」与按钮禁用判断使用）。
  */
@@ -21,7 +22,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { SELECT_EMPTY_VALUE } from '@/lib/constants';
+import {
+  PRICE_BACKFILL_MODE_LEGACY,
+  PRICE_BACKFILL_MODE_OPTIONS,
+  SELECT_EMPTY_VALUE,
+} from '@/lib/constants';
 import GlobalSettingsDividendInitBlock from './GlobalSettingsDividendInitBlock.vue';
 
 const props = defineProps<{
@@ -33,6 +38,8 @@ const props = defineProps<{
   quota: string;
   /** 回补起始日期配置默认值（可保存；v-model 回传父组件 settingsForm，触发回补以其为起点） */
   defaultStartDate: string;
+  /** 历史行情回补模式（'legacy' | 'gap'）；参与父组件 settings 保存，本组件仅渲染选择并回传 */
+  mode: string;
   /** 交易日历刷新起始日期（YYYY-MM-DD）；空串 = 未配置（后端默认「去年 1 月 1 日」） */
   tradeCalendarStartDate: string;
   /** 在途回补任务目标起始日（只读，服务端管理）；非空 = 有在途任务，禁用起点输入与触发 */
@@ -48,6 +55,7 @@ const emit = defineEmits<{
   (e: 'update:quota', v: string): void;
   (e: 'update:defaultStartDate', v: string): void;
   (e: 'update:tradeCalendarStartDate', v: string): void;
+  (e: 'update:mode', v: string): void;
 }>();
 
 /** 每日额度数值（字符串输入 → 数字，用于「今日已用 X/N」） */
@@ -141,6 +149,34 @@ const quotaNum = computed(() => Number(props.quota) || 0);
         </p>
         <p v-else class="text-xs text-muted-foreground">
           保存后作为下次「回补行情缺口」的起点（默认一年前）
+        </p>
+      </div>
+
+      <!-- 回补模式：说明文字较长，整行摆放（sm 起占满两列） -->
+      <div class="space-y-2 sm:col-span-2">
+        <Label for="dy-backfill-mode">回补模式</Label>
+        <Select
+          :model-value="mode"
+          @update:model-value="(v) => emit('update:mode', String(v))"
+        >
+          <SelectTrigger id="dy-backfill-mode" class="w-full">
+            <SelectValue placeholder="选择回补模式" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem
+              v-for="opt in PRICE_BACKFILL_MODE_OPTIONS"
+              :key="opt.value"
+              :value="opt.value"
+            >
+              {{ opt.label }}
+            </SelectItem>
+          </SelectContent>
+        </Select>
+        <p class="text-xs text-muted-foreground">
+          「常规」只判断该证券有没有早于起点的日线行，一旦有就整只跳过，<strong>中间的空洞不会补</strong>；
+          「严格补洞」按交易日历逐日比对，缺失的交易日会重新抓取（会重复消耗每日额度）。
+          切到「严格补洞」前请确认交易日历已刷新——日历未覆盖回补区间时后端会自动回落为「常规」。
+          当前模式：{{ mode === PRICE_BACKFILL_MODE_LEGACY ? '常规' : '严格补洞' }}
         </p>
       </div>
     </div>

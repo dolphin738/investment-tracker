@@ -60,6 +60,7 @@ const settings = vi.hoisted<DividendYieldSettingsOut>(() => ({
   price_backfill_last_error: null,
   // 交易日历刷新起始日期；null = 未配置（后端默认去年 1 月 1 日）
   trade_calendar_start_date: null,
+  price_backfill_mode: 'legacy',
 }));
 
 const mutateSpy = vi.hoisted(() => vi.fn());
@@ -199,9 +200,14 @@ describe('GlobalSettingsDividendTab — 四源下拉与提供方名拼接（§15
     // 页面含「公司公告接口」区块
     expect(wrapper.text()).toContain('公司公告接口');
 
-    // 五个数据源下拉（主源 / 补充源 / 行情源 / 公告源 / 历史行情回补接口）
+    // 六个下拉（主源 / 补充源 / 行情源 / 公告源 / 历史行情回补接口 / 回补模式）
     const selects = wrapper.findAll('select');
-    expect(selects).toHaveLength(5);
+    expect(selects).toHaveLength(6);
+    // 末尾是「回补模式」下拉：仅 legacy / gap 两项
+    expect(realOptions(selects[5]).map((o) => o.attributes('value'))).toEqual([
+      'legacy',
+      'gap',
+    ]);
 
     // 公告源下拉（第 4 个）：仅包含启用的分类 4 接口
     const announcementOptions = interfaceOptions(selects[3]);
@@ -209,8 +215,9 @@ describe('GlobalSettingsDividendTab — 四源下拉与提供方名拼接（§15
       o.attributes('value'),
     );
     expect(announcementValues).toEqual(['i4']);
-    // 每个下拉都提供「不设置」哨兵项（reka-ui 禁止 value=""，故用哨兵而非空串）
-    selects.forEach((sel) => {
+    // 每个接口下拉都提供「不设置」哨兵项（reka-ui 禁止 value=""，故用哨兵而非空串）；
+    // 末尾的「回补模式」下拉是模式选择（legacy/gap），不适用哨兵项
+    selects.slice(0, 5).forEach((sel) => {
       expect(
         realOptions(sel).some((o) => o.attributes('value') === SELECT_EMPTY_VALUE),
       ).toBe(true);
@@ -239,8 +246,8 @@ describe('GlobalSettingsDividendTab — 四源下拉与提供方名拼接（§15
     const announcementOptions = interfaceOptions(selects[3]);
     expect(announcementOptions[0].text()).toBe('沪深京A股公告（东方财富）');
 
-    // 全部接口 option 均须符合「（提供方名）」结尾格式
-    selects.forEach((sel) => {
+    // 全部接口 option 均须符合「（提供方名）」结尾格式（排除末尾的「回补模式」下拉）
+    selects.slice(0, 5).forEach((sel) => {
       interfaceOptions(sel).forEach((o) => {
         expect(o.text()).toMatch(/（.+）$/);
       });
@@ -270,10 +277,10 @@ describe('GlobalSettingsDividendTab — 四源下拉与提供方名拼接（§15
   });
 
   it('④ 每日回补额度越界（2001）点击保存不调用 update 且显示中文错误', async () => {
-    // 新增的「每日回补额度」是 number input（非 Select），下拉数量仍为 5
+    // 「每日回补额度」是 number input（非 Select）；下拉共 6 个（含「回补模式」）
     wrapper = await mountTab();
     const selects = wrapper.findAll('select');
-    expect(selects).toHaveLength(5);
+    expect(selects).toHaveLength(6);
 
     const quotaInput = wrapper.find('input#dy-price-backfill-quota');
     expect(quotaInput.exists()).toBe(true);

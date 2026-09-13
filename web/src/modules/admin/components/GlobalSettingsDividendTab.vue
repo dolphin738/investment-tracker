@@ -33,7 +33,7 @@ import {
   useUpdateDividendYieldSettings,
 } from '@/modules/dividend-yield/composables/use-dividend-yield';
 import { useQuoteProviders } from '@/modules/admin/composables/use-quote-provider';
-import { SELECT_EMPTY_VALUE } from '@/lib/constants';
+import { PRICE_BACKFILL_MODE_LEGACY, SELECT_EMPTY_VALUE } from '@/lib/constants';
 import type { UpdateDividendYieldSettingsDto } from '@/api/types';
 import GlobalSettingsDividendInitSection from './GlobalSettingsDividendInitSection.vue';
 
@@ -94,6 +94,9 @@ const settingsForm = reactive({
   priceBackfillQuota: '1000',
   /** 回补起始日期配置默认值（YYYY-MM-DD）；随设置保存、触发回补以其为起点；默认一年前 */
   priceBackfillStartDate: oneYearAgoIso(),
+  /** 历史行情回补模式：'legacy'（起点覆盖即跳过，不补空洞）| 'gap'（严格补洞）；
+   *  默认 'legacy' 与后端 server_default 一致 */
+  priceBackfillMode: PRICE_BACKFILL_MODE_LEGACY,
   /** 交易日历刷新起始日期（YYYY-MM-DD）；空串 = 未配置（后端默认「去年 1 月 1 日」） */
   tradeCalendarStartDate: '',
 });
@@ -139,6 +142,8 @@ watch(
     // 回补起始日期配置默认值：服务端 null 时回退一年前（与 settingsForm 初值口径一致，避免误报变更）
     settingsForm.priceBackfillStartDate =
       s.price_backfill_default_start_date ?? oneYearAgoIso();
+    // 回补模式：服务端空值兜底 legacy（列有 server_default，防御旧行/脏数据）
+    settingsForm.priceBackfillMode = s.price_backfill_mode || PRICE_BACKFILL_MODE_LEGACY;
     // 交易日历刷新起始日期：服务端 null → 空串（未配置，后端用默认下限）
     settingsForm.tradeCalendarStartDate = s.trade_calendar_start_date ?? '';
   },
@@ -207,6 +212,9 @@ const settingsHasChanges = computed(() => {
     // 回补起始日期配置默认值：服务端 null 时回退一年前，与 watch 回填口径一致
     settingsForm.priceBackfillStartDate !==
       (s.price_backfill_default_start_date ?? oneYearAgoIso()) ||
+    // 回补模式：与 watch 回填同口径（空值兜底 legacy）
+    settingsForm.priceBackfillMode !==
+      (s.price_backfill_mode || PRICE_BACKFILL_MODE_LEGACY) ||
     // 交易日历刷新起始日期：服务端 null → 空串，与 watch 回填口径一致
     settingsForm.tradeCalendarStartDate !== (s.trade_calendar_start_date ?? '')
   );
@@ -245,6 +253,8 @@ function handleSaveSettings(): void {
     price_backfill_default_start_date: settingsForm.priceBackfillStartDate
       ? settingsForm.priceBackfillStartDate
       : null,
+    // 回补模式：'legacy' | 'gap'，后端有值域校验（越界 400）；下拉只给两项，无需前端再校验
+    price_backfill_mode: settingsForm.priceBackfillMode,
     // 交易日历刷新起始日期：空串 → null（后端视为「不改」）
     trade_calendar_start_date: settingsForm.tradeCalendarStartDate || null,
   };
@@ -390,6 +400,7 @@ function handleSaveSettings(): void {
           v-model:interface-id="settingsForm.priceBackfillSourceInterfaceId"
           v-model:quota="settingsForm.priceBackfillQuota"
           v-model:default-start-date="settingsForm.priceBackfillStartDate"
+          v-model:mode="settingsForm.priceBackfillMode"
           v-model:trade-calendar-start-date="settingsForm.tradeCalendarStartDate"
           :in-flight-start-date="dividendSettings?.price_backfill_start_date ?? null"
           :used-today="dividendSettings?.price_backfill_used_today ?? 0"

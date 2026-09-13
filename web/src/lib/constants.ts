@@ -54,6 +54,25 @@ export const AUTH_RETURN_KEY = 'invest:auth-return';
  */
 export const SELECT_EMPTY_VALUE = '__none__';
 
+// ===== 历史行情回补模式（与后端 PRICE_BACKFILL_MODES 对齐，迁移 0021） =====
+/**
+ * ``legacy``：起点覆盖即整只跳过（只看「该证券有没有早于起点的日线行」），
+ *   **中间的空洞永不回填**——存量默认，改动前的行为。
+ * ``gap``：严格补洞——按交易日历逐日比对「应有交易日 vs 已有日线」，缺失的日子
+ *   逐个回填（会重新抓取起点已覆盖的证券，代价是重复消耗额度）。
+ *
+ * 后端对越界值 400，前端下拉只给这两个选项，故无需再校验。
+ */
+export const PRICE_BACKFILL_MODE_LEGACY = 'legacy';
+export const PRICE_BACKFILL_MODE_GAP = 'gap';
+export const PRICE_BACKFILL_MODE_OPTIONS = [
+  {
+    value: PRICE_BACKFILL_MODE_LEGACY,
+    label: '常规（起点覆盖即跳过，不补空洞）',
+  },
+  { value: PRICE_BACKFILL_MODE_GAP, label: '严格补洞（按交易日历逐日补齐）' },
+] as const;
+
 // ===== 查询维度选项（用于 UI 下拉/Tab） =====
 export const GRANULARITY_OPTIONS = [
   { value: 'day', label: '按日' },
