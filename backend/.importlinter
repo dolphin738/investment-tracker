@@ -43,15 +43,8 @@ forbidden_modules =
     app.services
     app.modules
     app.models
-ignore_imports =
-    # 单点豁免：exceptions.unhandled_exception_handler 函数内延迟落库（5xx 错误日志，
-    # core/exceptions.py:104），循环依赖所迫（services.log -> models.log 且 handler
-    # 须在 app 装配前可用），与业务编排无涉。
-    app.core.exceptions -> app.services.log
-    # 第二处（同为「落库」职责）：core/bg.py 的 _do_record 把后台任务未捕获异常
-    # 落 app_logs（函数内延迟 import services.log，自建会话、失败静默）。
-    # 与上面 exceptions 同因（services.log -> models.log）。
-    # **豁免上限即此两处**：core 不得承载写库/业务职责，后续若再有落库需求，
-    # 必须改为依赖倒置（core 暴露 set_*_handler 钩子，由非 core 层在装配期注入），
-    # 不得再扩豁免。
-    app.core.bg -> app.services.log
+# 注：core_no_business 原有两处 ``ignore_imports`` 单点豁免（core.exceptions 的 5xx
+# 落库、core.bg 的后台任务落库）。现已**全部改为依赖倒置** —— core 侧统一经
+# ``app/core/log_sink.py`` 的 ``emit_error_log`` 调用，真正实现由 ``app/main.py``
+# 在装配期注入 ``services.log.record``。故本契约现为**零豁免**：core 不得再引入任何
+# 业务层依赖；后续若新增落库/外部能力需求，请复用 log_sink 或按同法新增 core 侧钩子。

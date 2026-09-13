@@ -8,10 +8,10 @@
 复制一份 ``_BG_TASKS`` / ``_track_task`` 造成多份漂移（历史上已漂移至 2 处，
 新增端点再次漏用即回归，见 review-unpushed-2026-09-12 M-2）。
 
-**依赖关系（勿误读为「无业务依赖」）**：本模块**确实**依赖 ``app.services.log``
-（``_do_record`` 落 app_logs），这是 ``core_no_business`` 契约的**第二处单点豁免**
-——与 ``core/exceptions.py`` 的 5xx 落库同因（``services.log`` -> ``models.log``），
-已在 ``.importlinter`` 显式登记并注明「豁免上限即此两处」。
+**依赖倒置（core_no_business 零豁免）**：本模块落 app_logs **不**直接 import
+``app.services.log``，而是调用 ``core/log_sink.emit_error_log``；真正的落库实现
+由 ``app/main.py`` 在装配期注入（详见 ``core/log_sink.py``）。故 core 侧零业务依赖，
+``.importlinter`` 无需任何豁免。
 
 ``track_task`` 现在同时承担**异常可观测**职责：后台协程若抛出未捕获异常，
 会经 done-callback 以 error 级日志记录（带堆栈）。否则后台任务静默失败
@@ -23,6 +23,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import traceback
+
+from app.core.log_sink import emit_error_log
 
 _BG_TASKS: set[asyncio.Task] = set()
 
@@ -47,24 +49,23 @@ def _record_task_failure(name: str, exc: BaseException) -> None:
 
 
 async def _do_record(name: str, exc: BaseException) -> None:
-    from app.services.log import record
+    """把后台任务未捕获异常交给已注入的日志落库 sink（见 ``core/log_sink``）。
 
-    try:
-        await record(
-            level="error",
-            scope="error",
-            module=name,
-            message=f"后台任务 {name} 抛未捕获异常（任务静默失败）",
-            trace="".join(
-                traceback.format_exception(type(exc), exc, exc.__traceback__)
-            ),
-            detail={
-                "exception_type": type(exc).__name__,
-                "exception_str": str(exc),
-            },
-        )
-    except Exception:  # record 内部已吞库错误，这里兜底任何意外
-        logger.warning("后台任务失败落日志中心异常", exc_info=True)
+    本模块**不**直接依赖 services（``core_no_business`` 契约）：sink 由
+    ``app/main.py`` 装配期注入 ``services.log.record``，未注入时静默跳过。
+    ``emit_error_log`` 自身已吞掉落库异常，故此处无需再包 try/except。
+    """
+    await emit_error_log(
+        level="error",
+        scope="error",
+        module=name,
+        message=f"后台任务 {name} 抛未捕获异常（任务静默失败）",
+        trace="".join(traceback.format_exception(type(exc), exc, exc.__traceback__)),
+        detail={
+            "exception_type": type(exc).__name__,
+            "exception_str": str(exc),
+        },
+    )
 
 
 def _on_task_done(task: asyncio.Task) -> None:

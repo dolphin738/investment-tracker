@@ -17,6 +17,7 @@ from fastapi.exceptions import RequestValidationError
 
 from app.core.enums import BusinessErrorCode, CODE_TO_HTTP_STATUS, HTTP_STATUS_TO_CODE
 from app.core.envelope import EnvelopeJSONResponse
+from app.core.log_sink import emit_error_log
 
 
 class BusinessException(Exception):
@@ -100,19 +101,15 @@ async def unhandled_exception_handler(
     # 仅 5xx / 未捕获异常落库（4xx 业务异常走各自的 handler，不在此落库，避免噪音，
     # 见方案 §4.2 评审结论）。本处理器只响应 Exception（即非 BusinessException /
     # HTTPException / validation 的未处理异常），故天然只覆盖 5xx。
-    try:
-        from app.services.log import record
-
-        await record(
-            level="error",
-            scope="error",
-            module="api",
-            message=str(exc),
-            trace=_traceback.format_exc(),
-        )
-    except Exception:
-        # 落库本身失败（如 DB 不可用）绝不影响 500 响应
-        pass
+    # 落库实现由 app/main.py 在装配期注入（core 不得依赖 services，见 core/log_sink.py）；
+    # emit_error_log 内部已吞掉落库异常（如 DB 不可用），故绝不影响 500 响应。
+    await emit_error_log(
+        level="error",
+        scope="error",
+        module="api",
+        message=str(exc),
+        trace=_traceback.format_exc(),
+    )
     return EnvelopeJSONResponse(
         {
             "code": BusinessErrorCode.INTERNAL_ERROR,

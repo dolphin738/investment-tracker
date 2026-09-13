@@ -26,6 +26,8 @@ from app.core.exceptions import (
     unhandled_exception_handler,
     validation_exception_handler,
 )
+from app.core.log_sink import set_error_log_sink
+from app.services.log import record as record_app_log
 from app.services.scheduler import shutdown_scheduler, start_scheduler
 from app.modules import (
     admin,
@@ -45,6 +47,12 @@ from app.modules import (
 )
 
 settings = get_settings()
+
+# 依赖倒置：core 不得依赖业务层（import-linter `core_no_business`），故「错误日志落库」
+# 的实现（services.log.record）在此**装配期**注入 core —— core/exceptions.py 的 5xx
+# 处理器与 core/bg.py 的后台任务收尾均经 core/log_sink.emit_error_log 走到它。
+# 全局注入一次；未注入时（如不 import app.main 的单测）落库静默跳过、不影响主流程。
+set_error_log_sink(record_app_log)
 
 
 @asynccontextmanager
