@@ -62,9 +62,10 @@ async def test_enum_value_accepted_by_db(session) -> None:
 async def test_handler_success_summary(session, monkeypatch) -> None:
     """守护正常路径：刷新后表非空 → 返回含「交易日历刷新完成」+ 计数 + 最新日的摘要。"""
 
-    async def _fake_refresh(sess) -> None:
+    async def _fake_refresh(sess) -> int:
         sess.add(MarketTradeCalendar(trade_date=date(2025, 3, 3)))
         sess.add(MarketTradeCalendar(trade_date=date(2025, 3, 4)))
+        return 2  # 本次拉取 2 个交易日
 
     monkeypatch.setattr(dyf, "refresh_trade_calendar", _fake_refresh)
 
@@ -82,12 +83,12 @@ async def test_handler_success_summary(session, monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_handler_raises_when_still_empty(session, monkeypatch) -> None:
-    """守护失败显性化：refresh 为 no-op（内部吞异常）且表为空 → 抛 RuntimeError。"""
+    """守护兜底：refresh 声称成功（返回 >0）却一行未落、表为空 → 抛 RuntimeError。"""
 
-    async def _noop_refresh(sess) -> None:  # noqa: ARG001
-        return None
+    async def _fetch_ok_but_no_write(sess) -> int:  # noqa: ARG001
+        return 5  # 声称拉到 5 个交易日，但一行未落（异常态）
 
-    monkeypatch.setattr(dyf, "refresh_trade_calendar", _noop_refresh)
+    monkeypatch.setattr(dyf, "refresh_trade_calendar", _fetch_ok_but_no_write)
 
     with pytest.raises(RuntimeError, match="交易日历刷新后仍为空"):
         await run_trade_calendar_refresh(_stub_cfg())
@@ -144,3 +145,21 @@ async def test_migration_seeds_trade_calendar_task_row(session) -> None:
         )
     ).scalar_one()
     assert count == 1
+
+
+@pytest.mark.asyncio
+async def test_handler_raises_when_fetch_failed_even_if_table_nonempty(
+    session, monkeypatch
+) -> None:
+    """缺口 B：表里**已有旧数据**，但本次拉取失败（refresh 返回 0）→ 仍必须 FAILED，
+    不得静默 SUCCESS（否则「日历陈旧」不可见）。"""
+    session.add(MarketTradeCalendar(trade_date=date(2020, 1, 1)))
+    await session.commit()
+
+    async def _fetch_failed(sess) -> int:  # noqa: ARG001
+        return 0  # refresh_trade_calendar 吞异常/空数据后返回 0
+
+    monkeypatch.setattr(dyf, "refresh_trade_calendar", _fetch_failed)
+
+    with pytest.raises(RuntimeError, match="未拉取到任何交易日"):
+        await run_trade_calendar_refresh(_stub_cfg())
