@@ -22,11 +22,13 @@ import {
   type JobRunStatus,
   type JobTaskType,
   type ScheduleTask,
+  type TaskLog,
   type ScheduleTaskCreate,
   type ScheduleTaskUpdate,
   type TaskLogQuery,
 } from '@/api/schedule.api';
 import { useIsAdmin } from '@/stores/auth.store';
+import type { PaginatedResponse } from '@/api/types';
 
 /** 任务列表 query key（供失效精确命中） */
 export function tasksKey(): unknown[] {
@@ -91,6 +93,12 @@ export function useTaskLogs(
     // 若用静态布尔表达式，useQuery 创建时即求值为 false，之后永不再发起请求，
     // 表现为「查看执行日志永远为空」。
     enabled: computed(() => isAdmin && Boolean(taskId.value)),
+    // 与 useTasks 同理：任务后台异步执行，弹窗打开期间最新一条可能仍是 RUNNING，
+    // 若只在打开时取一次，须关掉重开才能看到最终状态与耗时/报错。
+    refetchInterval: (query) => {
+      const data = query.state.data as PaginatedResponse<TaskLog> | undefined;
+      return data?.items?.[0]?.status === 'RUNNING' ? 3000 : false;
+    },
   });
 }
 

@@ -12,14 +12,30 @@
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
-import { defineComponent } from 'vue';
+import { computed, defineComponent } from 'vue';
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query';
 
 vi.mock('@/api/schedule.api', () => ({
   createTask: vi.fn(),
   deleteTask: vi.fn(),
   listTaskHandlers: vi.fn(async () => []),
-  listTaskLogs: vi.fn(async () => ({ items: [], total: 0 })),
+  listTaskLogs: vi.fn(async () => ({
+    items: [
+      {
+        id: 'l1',
+        job_id: 't1',
+        status: 'SUCCESS',
+        trigger_source: 'MANUAL',
+        started_at: '2026-09-14T00:00:00Z',
+        finished_at: null,
+        message: null,
+        error: null,
+      },
+    ],
+    total: 1,
+    page: 1,
+    pageSize: 20,
+  })),
   listTasks: vi.fn(async () => [{ id: 't1', last_run_status: 'SUCCESS' }]),
   triggerTask: vi.fn(async () => ({ id: 't1', triggered: true })),
   updateTask: vi.fn(),
@@ -29,7 +45,11 @@ vi.mock('@/composables/use-toast', () => ({
 }));
 vi.mock('@/stores/auth.store', () => ({ useIsAdmin: () => true }));
 
-import { useTasks, useTriggerTask } from '@/modules/admin/composables/use-schedule';
+import {
+  useTaskLogs,
+  useTasks,
+  useTriggerTask,
+} from '@/modules/admin/composables/use-schedule';
 
 function setupHarness() {
   const queryClient = new QueryClient({
@@ -38,6 +58,10 @@ function setupHarness() {
   const Comp = defineComponent({
     setup() {
       useTasks();
+      useTaskLogs(
+        computed(() => 't1'),
+        computed(() => ({ page: 1, pageSize: 20 })),
+      );
       const trigger = useTriggerTask();
       return { trigger };
     },
@@ -95,5 +119,46 @@ describe('use-schedule 轮询策略', () => {
     const q = queryClient.getQueryCache().find({ queryKey: ['admin', 'tasks'] })!;
     q.state.data = [{ id: 't1', last_run_status: 'SUCCESS' }] as never;
     expect(intervalFn(queryClient)(q)).toBe(5000);
+  });
+});
+
+/** 取任意 query 的 refetchInterval 回调（vue-query 类型未暴露，按运行时结构取） */
+function intervalFnOf(q: { options: unknown; state: { data?: unknown } }) {
+  const opts = q.options as unknown as {
+    refetchInterval?: (query: unknown) => number | false | undefined;
+  };
+  return opts.refetchInterval!;
+}
+
+describe('useTaskLogs 轮询策略（执行日志弹窗）', () => {
+  const LOGS_KEY = ['admin', 'task-logs', 't1', 1, 20];
+
+  it('最新一条为 RUNNING 时按 3s 轮询', async () => {
+    const { queryClient } = setupHarness();
+    await flushPromises();
+
+    const q = queryClient.getQueryCache().find({ queryKey: LOGS_KEY })!;
+    expect(q).toBeTruthy();
+    q.state.data = {
+      items: [{ id: 'l1', job_id: 't1', status: 'RUNNING' }],
+      total: 1,
+      page: 1,
+      pageSize: 20,
+    } as never;
+    expect(intervalFnOf(q)(q)).toBe(3000);
+  });
+
+  it('最新一条已落定（SUCCESS）时停止轮询', async () => {
+    const { queryClient } = setupHarness();
+    await flushPromises();
+
+    const q = queryClient.getQueryCache().find({ queryKey: LOGS_KEY })!;
+    q.state.data = {
+      items: [{ id: 'l1', job_id: 't1', status: 'SUCCESS' }],
+      total: 1,
+      page: 1,
+      pageSize: 20,
+    } as never;
+    expect(intervalFnOf(q)(q)).toBe(false);
   });
 });
