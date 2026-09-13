@@ -34,6 +34,8 @@ const props = defineProps<{
   inFlightStartDate: string | null;
   /** 当日已用回补额度（只），直接透传给 InitBlock（用于剩余额度与「今日已用 X/N」） */
   usedToday: number;
+  /** 最近一次回补失败原因（熔断/接口不可达）；非空 = 最近一次在途回补以失败告终，红字展示 */
+  lastError: string | null;
 }>();
 
 const emit = defineEmits<{
@@ -81,6 +83,7 @@ const emit = defineEmits<{
       :price-backfill-default-start-date="defaultStartDate"
       :price-backfill-in-flight-date="inFlightStartDate"
       :price-backfill-used-today="usedToday"
+      :price-backfill-last-error="lastError"
       @update:price-backfill-quota="(v) => emit('update:quota', v)"
       @update:price-backfill-default-start-date="(v) => emit('update:defaultStartDate', v)"
     />

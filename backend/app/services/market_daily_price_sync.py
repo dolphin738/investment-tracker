@@ -674,10 +674,32 @@ async def run_pending_price_backfill(session) -> str:
     if not pending:
         # 全部已覆盖 → 补完，清空在途状态（终态），此后不再跑
         settings.price_backfill_start_date = None
+        settings.price_backfill_last_error = None
         await session.commit()
         return "回补已完成：全部证券均已覆盖，在途回补任务已结束"
 
-    batch_note = await backfill_historical(session, itf, pending, start_date)
+    # 新一轮尝试：先清掉上一次遗留的失败原因（stderr/app_logs 仍保留历史，
+    # 这里只管当前在途标记的展示；失败原因回写见下方 except）。
+    await session.execute(
+        text("UPDATE dividend_yield_settings SET price_backfill_last_error = NULL")
+    )
+    await session.commit()
+    try:
+        batch_note = await backfill_historical(session, itf, pending, start_date)
+    except RuntimeError as exc:
+        # 熔断/接口不可达：把失败原因回写 settings，供前端在「在途」旁直接展示；
+        # 仍重抛，使 track_task 的 app_logs 落库链路（core/bg.py）继续生效。
+        # 用原始 UPDATE 而非 ORM 对象：backfill_historical 内部已 rollback，
+        # 避免依赖可能过期的会话对象状态。
+        await session.execute(
+            text(
+                "UPDATE dividend_yield_settings "
+                "SET price_backfill_last_error = :e"
+            ),
+            {"e": str(exc)[:512]},
+        )
+        await session.commit()
+        raise
     # 每 burst 递增当日已用已由 backfill_historical 内原子 UPDATE 完成（成败都计，
     # 与主事务 commit/rollback 解耦）；此处刷新内存对象以正确回显累计值
     # （在途任务期间前端每 3s 轮询 settings 即可看到实时进度）。

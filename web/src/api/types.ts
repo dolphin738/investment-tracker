@@ -864,6 +864,8 @@ export interface DividendYieldSettingsOut {
   /** 当日已用回补额度（只）；后端回传的是**当日有效值**（跨日已归零），
    *  前端无需自己判断跨日重置，直接用于「今日已用 X/N」与额度用尽时禁用触发 */
   price_backfill_used_today: number;
+  /** 最近一次回补失败原因（熔断/接口不可达）；null = 无失败/已清空，前端在「在途」旁红字展示 */
+  price_backfill_last_error: string | null;
 }
 
 /** 股息率设置更新请求（PUT /dividend-yield/settings · admin-only；写时用 *_interface_id 字段） */

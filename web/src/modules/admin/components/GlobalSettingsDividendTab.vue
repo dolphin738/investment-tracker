@@ -384,6 +384,7 @@ function handleSaveSettings(): void {
           v-model:default-start-date="settingsForm.priceBackfillStartDate"
           :in-flight-start-date="dividendSettings?.price_backfill_start_date ?? null"
           :used-today="dividendSettings?.price_backfill_used_today ?? 0"
+          :last-error="dividendSettings?.price_backfill_last_error ?? null"
         />
 
         <p v-if="settingsFormError" class="text-xs text-red-500">

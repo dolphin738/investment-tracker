@@ -49,6 +49,8 @@ const props = defineProps<{
   priceBackfillInFlightDate: string | null;
   /** 当日已用回补额度（只）：后端已按自然日归零，用于剩余额度计算与「今日已用 X/N」 */
   priceBackfillUsedToday: number;
+  /** 最近一次回补失败原因（熔断/接口不可达）；非空 = 最近一次在途回补以失败告终，红字展示 */
+  priceBackfillLastError: string | null;
 }>();
 
 /** 仅回传额度/起点输入值（v-model 风格），其余状态仍由父组件 settingsForm 统一管理 */
@@ -129,6 +131,12 @@ function confirmCancelPrices(): void {
       class="text-xs font-medium text-amber-600"
     >
       回补进行中（目标起始日 {{ priceBackfillInFlightDate }}）：每日收盘价抓取后按额度自动续跑，全部补完自动结束
+    </p>
+    <p
+      v-if="priceBackfillLastError"
+      class="text-xs font-medium text-red-600"
+    >
+      回补失败：{{ priceBackfillLastError }}
     </p>
 
     <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">

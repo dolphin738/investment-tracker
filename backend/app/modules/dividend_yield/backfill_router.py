@@ -273,6 +273,7 @@ async def cancel_price_backfill(
         )
     cancelled = settings.price_backfill_start_date
     settings.price_backfill_start_date = None
+    settings.price_backfill_last_error = None
     await db.commit()
     await record(
         level="info",

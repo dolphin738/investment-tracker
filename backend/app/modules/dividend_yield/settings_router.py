@@ -196,6 +196,9 @@ async def _settings_out(db: AsyncSession, row: DividendYieldSettings) -> dict[st
             if row.price_backfill_last_run_date == today_app_tz()
             else 0
         ),
+        # 最近一次回补失败原因（熔断/接口不可达）：非空 = 最近一次在途回补以失败告终，
+        # 前端在「在途」旁直接展示；续跑/补完/取消/重触发时清空。
+        "price_backfill_last_error": row.price_backfill_last_error,
     }
 
 

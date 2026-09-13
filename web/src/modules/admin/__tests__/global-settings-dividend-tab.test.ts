@@ -56,6 +56,8 @@ const settings = vi.hoisted<DividendYieldSettingsOut>(() => ({
   price_backfill_quota: null,
   // 当日已用额度（只）；后端回传当日有效值（跨日已归零）
   price_backfill_used_today: 0,
+  // 最近一次回补失败原因（熔断/接口不可达）；null = 无失败/已清空
+  price_backfill_last_error: null,
 }));
 
 const mutateSpy = vi.hoisted(() => vi.fn());

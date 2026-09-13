@@ -245,6 +245,11 @@ class DividendYieldSettings(Base, TimestampMixin):
     price_backfill_used_today: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default="0"
     )
+    # 最近一次回补失败原因（熔断/接口不可达）：非空表示最近一次在途回补以失败告终，
+    # 前端在「在途」旁直接展示；续跑成功 / 补完 / 取消 / 重新触发时清空。
+    price_backfill_last_error: Mapped[Optional[str]] = mapped_column(
+        String(512), nullable=True
+    )
     updated_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
 
 
