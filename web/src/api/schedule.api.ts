@@ -19,7 +19,8 @@ export type JobTaskType =
   | 'MARKET_DATA_SYNC'
   | 'SECURITY_MASTER_SYNC'
   | 'HTTP_CALLBACK'
-  | 'ACCOUNT_CLEANUP';
+  | 'ACCOUNT_CLEANUP'
+  | 'TRADE_CALENDAR_REFRESH';
 
 /** 任务归类（后端 JobKind）：SYSTEM 仅可编辑不可删除；NORMAL 可增删改 */
 export type JobKind = 'SYSTEM' | 'NORMAL';

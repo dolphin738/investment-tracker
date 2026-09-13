@@ -27,6 +27,11 @@ export interface components {
         accessToken: string;
         user: components['schemas']['UserPublicOut'];
       };
+    /** 回补请求体：起点日期（ISO YYYY-MM-DD，必填）。 */
+    BackfillPricesBody: {
+        /** Start Date */
+        start_date: string;
+      };
     /** Body_import_preview_api_portfolios__portfolio_id__import_preview_post */
     Body_import_preview_api_portfolios__portfolio_id__import_preview_post: {
         type: components['schemas']['ImportType'];
@@ -245,11 +250,6 @@ app_logs（message/trace/detail 均为无界 Text/JSON 列）。 */
         /** Label */
         label: string;
       };
-    /** 缺口回补入参：``lookback_days`` 为回溯天数（上限 400，服务侧再钳制）。 */
-    GapBackfillBody: {
-        /** Lookback Days */
-        lookback_days?: number;
-      };
     /** HTTPValidationError */
     HTTPValidationError: {
         /** Detail */
@@ -435,7 +435,7 @@ PG 原生枚举类型名 `interface_direction`（由迁移创建）。
 
 系统任务（不可追加/删除，仅可编辑）由迁移种子写入；普通任务（可增删改）在
 定时任务管理页由管理员新建。两者共用本枚举。 */
-    JobTaskType: 'MARKET_DATA_SYNC' | 'SECURITY_MASTER_SYNC' | 'HTTP_CALLBACK' | 'ACCOUNT_CLEANUP' | 'LOG_CLEANUP' | 'DIVIDEND_QUARTERLY_FETCH' | 'MARKET_DAILY_CLOSE_FETCH' | 'DIVIDEND_RETENTION_CLEANUP' | 'DIVIDEND_NOTICE_SCAN';
+    JobTaskType: 'MARKET_DATA_SYNC' | 'SECURITY_MASTER_SYNC' | 'HTTP_CALLBACK' | 'ACCOUNT_CLEANUP' | 'LOG_CLEANUP' | 'DIVIDEND_QUARTERLY_FETCH' | 'MARKET_DAILY_CLOSE_FETCH' | 'DIVIDEND_RETENTION_CLEANUP' | 'DIVIDEND_NOTICE_SCAN' | 'TRADE_CALENDAR_REFRESH';
     /** JobUpdate */
     JobUpdate: {
         /** Name */
@@ -1014,6 +1014,12 @@ type 为可选 override；不传则读取时由代码前缀推断（infer_securi
         price_source_interface_id?: string | null;
         /** Announcement Source Interface Id */
         announcement_source_interface_id?: string | null;
+        /** Price Backfill Source Interface Id */
+        price_backfill_source_interface_id?: string | null;
+        /** Price Backfill Quota */
+        price_backfill_quota?: number | null;
+        /** Price Backfill Default Start Date */
+        price_backfill_default_start_date?: string | null;
       };
     /** SnapshotCreateReq */
     SnapshotCreateReq: {

@@ -136,6 +136,7 @@ export const TASK_TYPE_LABEL: Record<JobTaskType, string> = {
   SECURITY_MASTER_SYNC: '证券主数据同步',
   HTTP_CALLBACK: 'HTTP 回调',
   ACCOUNT_CLEANUP: '账户清理',
+  TRADE_CALENDAR_REFRESH: '交易日历刷新',
 };
 
 /** 任务归类 → 中文标签（SYSTEM 系统任务仅可编辑不可删除） */
