@@ -131,6 +131,13 @@ export function useDividendYieldSettings(
     queryFn: () => getDividendYieldSettings(),
     enabled: computed(() => Boolean(toValue(enabled))),
     staleTime: 5 * 60 * 1000,
+    // 在途回补任务期间每 3s 轮询一次，使前端「今日已用 X/N」实时随后端每 burst 递增刷新；
+    // 任务结束（price_backfill_start_date 清空）即停止轮询，避免无谓请求。
+    refetchInterval: (query) =>
+      (query.state.data as { price_backfill_start_date?: string | null } | undefined)
+        ?.price_backfill_start_date
+        ? 3000
+        : false,
   });
 }
 
@@ -188,7 +195,7 @@ export function useRebuildDividendYield() {
 /**
  * 手动触发特别分红历史回补（§6.9；admin-only，冷启动一次性）。
  * 后端为 fire-and-forget：本调用立即返回、任务在后台执行，
- * 进度经「系统管理 - 定时任务」执行日志查看，故此处不失效榜单查询。
+ * 进度经应用日志（record 审计）查看，故此处不失效榜单查询。
  */
 export function useBackfillSpecialDividends() {
   return useMutation({
@@ -203,7 +210,7 @@ export function useBackfillSpecialDividends() {
 /**
  * 手动触发历史行情缺口回补（初始化块；admin-only，冷启动/修复用）。
  * 后端为 fire-and-forget：本调用立即返回、任务在后台执行，
- * 进度经「系统管理 - 定时任务」执行日志查看，故此处不失效榜单查询。
+ * 进度经前端轮询 settings 的 price_backfill_used_today 实时展示（在途任务时每 3s 刷新），故此处不失效榜单查询。
  *
  * **必须失效 settings 查询**：响应带回服务端写入的 price_backfill_start_date，
  * 它是「是否有在途任务」的唯一数据源。若不刷新，按钮会一直显示可点，

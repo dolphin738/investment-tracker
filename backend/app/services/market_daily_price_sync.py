@@ -19,7 +19,7 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Optional
 
-from sqlalchemy import exists, select
+from sqlalchemy import exists, select, text
 
 from app.core.date_utils import today_app_tz
 from app.models import (
@@ -481,6 +481,18 @@ async def backfill_historical(
                         f"请检查数据源 push2his.eastmoney.com 是否对本机 IP 定向拒连。"
                     )
             done += 1
+        # 每 burst 一批递增当日已用额度（成败都计）：原子 UPDATE 自带行锁，
+        # 与主事务的日线 commit/rollback 解耦；本 burst 实际处理只数（含跳过/失败）计入，
+        # 满足额度口径（单只失败不计时会导致同日额度被反复重试刷爆）。
+        burst_n = len(master_ids[start : start + _BACKFILL_BURST])
+        await session.execute(
+            text(
+                "UPDATE dividend_yield_settings "
+                "SET price_backfill_used_today = COALESCE(price_backfill_used_today, 0) + :n"
+            ),
+            {"n": burst_n},
+        )
+        await session.commit()
         # 批间冷却（决策 A15：60–120s，随机抖动），最后一批跳过
         if start + _BACKFILL_BURST < total:
             cooldown = random.uniform(_BACKFILL_COOLDOWN_MIN, _BACKFILL_COOLDOWN_MAX)
@@ -659,11 +671,10 @@ async def run_pending_price_backfill(session) -> str:
         return "回补已完成：全部证券均已覆盖，在途回补任务已结束"
 
     batch_note = await backfill_historical(session, itf, pending, start_date)
-    # 成败都计入当日已用：数据源抖动时若失败不计，反复重试会把当天额度刷爆
-    settings.price_backfill_used_today = (
-        settings.price_backfill_used_today or 0
-    ) + len(pending)
-    await session.commit()
+    # 每 burst 递增当日已用已由 backfill_historical 内原子 UPDATE 完成（成败都计，
+    # 与主事务 commit/rollback 解耦）；此处刷新内存对象以正确回显累计值
+    # （在途任务期间前端每 3s 轮询 settings 即可看到实时进度）。
+    await session.refresh(settings)
     return (
         f"在途回补本批 {len(pending)} 只（今日剩余额度 {remaining}，"
         f"已用 {settings.price_backfill_used_today}/{quota}）：{batch_note}"
