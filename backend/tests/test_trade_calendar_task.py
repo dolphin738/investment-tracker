@@ -11,8 +11,9 @@
 from __future__ import annotations
 
 import importlib.util
+import sys
 import types
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -20,9 +21,14 @@ import sqlalchemy as sa
 from sqlalchemy import func, select
 
 import app.services.dividend_yield_refresh as dyf
+from app.core.date_utils import today_app_tz
 from app.models import JobConfig, MarketTradeCalendar
 from app.models.enums import JobKind, JobTaskType
-from app.services.dividend_yield_refresh import run_trade_calendar_refresh
+from app.services.dividend_yield_refresh import (
+    TradeCalendarRefresh,
+    refresh_trade_calendar,
+    run_trade_calendar_refresh,
+)
 from app.services.scheduler import _HANDLERS
 
 
@@ -62,10 +68,10 @@ async def test_enum_value_accepted_by_db(session) -> None:
 async def test_handler_success_summary(session, monkeypatch) -> None:
     """守护正常路径：刷新后表非空 → 返回含「交易日历刷新完成」+ 计数 + 最新日的摘要。"""
 
-    async def _fake_refresh(sess) -> int:
+    async def _fake_refresh(sess, *, full: bool = False) -> TradeCalendarRefresh:  # noqa: ARG001
         sess.add(MarketTradeCalendar(trade_date=date(2025, 3, 3)))
         sess.add(MarketTradeCalendar(trade_date=date(2025, 3, 4)))
-        return 2  # 本次拉取 2 个交易日
+        return TradeCalendarRefresh(2, 2)  # 源 2 个交易日、写入 2 行
 
     monkeypatch.setattr(dyf, "refresh_trade_calendar", _fake_refresh)
 
@@ -85,8 +91,8 @@ async def test_handler_success_summary(session, monkeypatch) -> None:
 async def test_handler_raises_when_still_empty(session, monkeypatch) -> None:
     """守护兜底：refresh 声称成功（返回 >0）却一行未落、表为空 → 抛 RuntimeError。"""
 
-    async def _fetch_ok_but_no_write(sess) -> int:  # noqa: ARG001
-        return 5  # 声称拉到 5 个交易日，但一行未落（异常态）
+    async def _fetch_ok_but_no_write(sess, *, full: bool = False) -> TradeCalendarRefresh:  # noqa: ARG001
+        return TradeCalendarRefresh(5, 0)  # 声称拉到 5 个交易日，但一行未落（异常态）
 
     monkeypatch.setattr(dyf, "refresh_trade_calendar", _fetch_ok_but_no_write)
 
@@ -156,10 +162,109 @@ async def test_handler_raises_when_fetch_failed_even_if_table_nonempty(
     session.add(MarketTradeCalendar(trade_date=date(2020, 1, 1)))
     await session.commit()
 
-    async def _fetch_failed(sess) -> int:  # noqa: ARG001
-        return 0  # refresh_trade_calendar 吞异常/空数据后返回 0
+    async def _fetch_failed(sess, *, full: bool = False) -> TradeCalendarRefresh:  # noqa: ARG001
+        return TradeCalendarRefresh(0, 0)  # 拉取失败：源 0 个
 
     monkeypatch.setattr(dyf, "refresh_trade_calendar", _fetch_failed)
 
     with pytest.raises(RuntimeError, match="未拉取到任何交易日"):
         await run_trade_calendar_refresh(_stub_cfg())
+
+
+def _fake_akshare(trade_dates: list[str]):
+    """构造假 akshare 模块：``tool_trade_date_hist_sina`` 返回含 ``trade_date`` 列的 DataFrame。"""
+    import pandas as pd
+
+    class _FakeAkShare:
+        @staticmethod
+        def tool_trade_date_hist_sina():
+            return pd.DataFrame({"trade_date": trade_dates})
+
+    return _FakeAkShare
+
+
+@pytest.mark.asyncio
+async def test_refresh_incremental_inserts_only_missing(session, monkeypatch) -> None:
+    """增量（默认）：只 INSERT 缺失日期，**已存在的行不被触碰**（updated_at 不刷新）。"""
+    t = today_app_tz()
+    d_exist = t - timedelta(days=10)
+    d_new = t - timedelta(days=9)
+    old_ts = datetime(2000, 1, 1, tzinfo=timezone.utc)
+    session.add(MarketTradeCalendar(trade_date=d_exist, updated_at=old_ts))
+    await session.commit()
+
+    monkeypatch.setitem(
+        sys.modules, "akshare", _fake_akshare([d_exist.isoformat(), d_new.isoformat()])
+    )
+    res = await refresh_trade_calendar(session)
+    await session.commit()
+
+    assert res.fetched == 2 and res.written == 1  # 只新增 d_new
+    existing_ts = (
+        await session.execute(
+            select(MarketTradeCalendar.updated_at).where(
+                MarketTradeCalendar.trade_date == d_exist
+            )
+        )
+    ).scalar_one()
+    assert existing_ts == old_ts  # 已有行未被 UPDATE
+    # 幂等：再跑一次零新增
+    res2 = await refresh_trade_calendar(session)
+    await session.commit()
+    assert res2.fetched == 2 and res2.written == 0
+
+
+@pytest.mark.asyncio
+async def test_refresh_full_upserts_existing(session, monkeypatch) -> None:
+    """全量（full=True）：upsert 全窗口，已有行 updated_at 被刷新。"""
+    t = today_app_tz()
+    d_exist = t - timedelta(days=10)
+    d_new = t - timedelta(days=9)
+    old_ts = datetime(2000, 1, 1, tzinfo=timezone.utc)
+    session.add(MarketTradeCalendar(trade_date=d_exist, updated_at=old_ts))
+    await session.commit()
+
+    monkeypatch.setitem(
+        sys.modules, "akshare", _fake_akshare([d_exist.isoformat(), d_new.isoformat()])
+    )
+    res = await refresh_trade_calendar(session, full=True)
+    await session.commit()
+
+    assert res.fetched == 2 and res.written == 2
+    existing_ts = (
+        await session.execute(
+            select(MarketTradeCalendar.updated_at).where(
+                MarketTradeCalendar.trade_date == d_exist
+            )
+        )
+    ).scalar_one()
+    assert existing_ts != old_ts  # 全量刷新了已有行
+
+
+@pytest.mark.asyncio
+async def test_handler_reads_full_param(session, monkeypatch) -> None:
+    """handler 由 ``cfg.params["full"]`` 决定写入模式并透传给 refresh。"""
+    captured: dict[str, bool] = {}
+
+    async def _fake(sess, *, full: bool = False) -> TradeCalendarRefresh:  # noqa: ARG001
+        captured["full"] = full
+        sess.add(MarketTradeCalendar(trade_date=today_app_tz()))  # 保证 total > 0
+        return TradeCalendarRefresh(1, 1)
+
+    monkeypatch.setattr(dyf, "refresh_trade_calendar", _fake)
+    cfg = types.SimpleNamespace(
+        task_type=JobTaskType.TRADE_CALENDAR_REFRESH, params={"full": True}
+    )
+    await run_trade_calendar_refresh(cfg)
+
+    assert captured["full"] is True
+
+
+def test_handler_meta_exposes_full_toggle() -> None:
+    """系统任务元数据暴露 full 布尔开关（前端据此渲染；creatable=False 不进新建清单）。"""
+    from app.modules.admin.schedule import _HANDLER_META
+
+    meta = _HANDLER_META[JobTaskType.TRADE_CALENDAR_REFRESH]
+    assert meta["creatable"] is False
+    fields = {f["key"]: f for f in meta["param_fields"]}
+    assert fields["full"]["type"] == "boolean"

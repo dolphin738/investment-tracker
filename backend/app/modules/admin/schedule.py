@@ -84,6 +84,19 @@ _HANDLER_META: dict[JobTaskType, dict[str, Any]] = {
             },
         ],
     },
+    JobTaskType.TRADE_CALENDAR_REFRESH: {
+        "label": "交易日历刷新",
+        "creatable": False,
+        "param_fields": [
+            {
+                "key": "full",
+                "label": "全量刷新（覆盖已有行；默认关闭=仅补缺失）",
+                "required": False,
+                "type": "boolean",
+                "default": False,
+            },
+        ],
+    },
 }
 
 # 系统任务仅由迁移种子写入，不提供新建入口

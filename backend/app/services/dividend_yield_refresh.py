@@ -12,8 +12,10 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import date, datetime, timezone
+from typing import NamedTuple
 
 from sqlalchemy import case, func, select, tuple_, update as sa_update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.core.date_utils import today_app_tz
 from app.models import (
@@ -147,13 +149,28 @@ async def refresh_yields_for_masters(session, master_ids: list[str]) -> tuple[in
     return rebuilt, preserved
 
 
-async def refresh_trade_calendar(session) -> int:
+class TradeCalendarRefresh(NamedTuple):
+    """交易日历刷新结果。
+
+    - ``fetched``：本次从源拉取并过滤后的交易日数；``0`` = 拉取失败/返回空（调用方据此判失败）；
+    - ``written``：本次实际写入行数（增量=新增条数；全量=upsert 条数）。
+    """
+
+    fetched: int
+    written: int
+
+
+async def refresh_trade_calendar(session, *, full: bool = False) -> TradeCalendarRefresh:
     """刷新交易日历（§5.5/决策 A9）：akshare ``tool_trade_date_hist_sina`` 拉取未来 2 年 + 当年。
 
     失败仅记告警、不抛出——日线任务可降级依赖「返回日期比对」防线。
 
-    返回**本次拉取并写入的交易日数**；拉取失败/返回空 → 返回 ``0``（调用方据此判失败，
-    见 ``run_trade_calendar_refresh`` 的缺口 B 修复：表非空时也能识别「本次刷新失败」）。
+    - 默认**增量**：只 INSERT 缺失的交易日（PG ``ON CONFLICT DO NOTHING``），不触碰已有行
+      （日历行只有主键、无业务 payload，无需刷新）；
+    - ``full=True``**全量**：对窗口内全部交易日 upsert（``ON CONFLICT DO UPDATE``），刷新已有行
+      的 ``updated_at``，用于强制重建/修复。（注意：``merge`` 不会刷新未显式赋值的列，
+      故全量用 DO UPDATE 而非逐行 merge。）
+    - 返回 ``TradeCalendarRefresh(fetched, written)``；拉取失败/返回空 → ``(0, 0)``。
     """
     try:
         import akshare  # noqa: PLC0415 懒导入（非 SDK 环境不阻塞）
@@ -162,21 +179,37 @@ async def refresh_trade_calendar(session) -> int:
             asyncio.to_thread(akshare.tool_trade_date_hist_sina), timeout=30
         )
         if df is None or getattr(df, "empty", False):
-            return 0
+            return TradeCalendarRefresh(0, 0)
         col = "trade_date" if "trade_date" in df.columns else df.columns[0]
         t = today_app_tz()
         horizon = date(t.year + 2, 12, 31)
-        written = 0
+        dates: list[date] = []
         for raw in df[col].tolist():
             d = parse_date(raw)
             if d is None or d > horizon or d.year < t.year - 1:
                 continue
-            await session.merge(MarketTradeCalendar(trade_date=d))
-            written += 1
-        return written
+            dates.append(d)
+        if not dates:
+            return TradeCalendarRefresh(0, 0)
+        # 单条多值 INSERT；主键冲突时按模式处理：
+        # - 增量（默认）：DO NOTHING —— 只落缺失日期、不动已有行（日历行只有主键，无 payload）；
+        # - 全量（full）：DO UPDATE 刷新 updated_at —— 强制重写全窗口（重建/修复用）。
+        now = datetime.now(timezone.utc)
+        ins = pg_insert(MarketTradeCalendar).values(
+            [{"trade_date": d, "updated_at": now} for d in dates]
+        )
+        if full:
+            stmt = ins.on_conflict_do_update(
+                index_elements=["trade_date"],
+                set_={"updated_at": now},
+            )
+        else:
+            stmt = ins.on_conflict_do_nothing(index_elements=["trade_date"])
+        res = await session.execute(stmt)
+        return TradeCalendarRefresh(len(dates), int(res.rowcount or 0))
     except Exception:  # 刷新失败不阻断清理（§6.3 语义）
         logger.warning("交易日历刷新失败，日线任务降级依赖「返回日期比对」防线", exc_info=True)
-        return 0
+        return TradeCalendarRefresh(0, 0)
 
 
 async def update_stale_flags(session) -> int:
@@ -257,15 +290,17 @@ async def run_trade_calendar_refresh(cfg) -> str:
     FAIL-OPEN（§5.5 防线一失效）、stale 判定降级为快照表基准（§7）。
 
     - 用独立 ``AsyncSessionLocal`` 会话（对齐 ``run_market_daily_close_fetch`` 风格）；
-    - ``refresh_trade_calendar`` 内部吞异常，并以**返回 0** 表示「本次未拉到任何交易日」；
-      故校验 ``fetched == 0`` → 抛 ``RuntimeError``：**即便表里仍有旧数据（非空）也判失败**，
-      避免「日历陈旧却报 SUCCESS」（缺口 B 修复）。
+    - 写入模式由 ``cfg.params.full`` 控制：默认**增量**（只补缺失）；``full=true``**全量** upsert；
+    - ``refresh_trade_calendar`` 内部吞异常，并以 ``fetched == 0`` 表示「本次未拉到任何交易日」；
+      故校验 ``result.fetched == 0`` → 抛 ``RuntimeError``：**即便表里仍有旧数据（非空）也判失败**
+      （缺口 B），避免「日历陈旧却报 SUCCESS」。
     - 另留 ``total == 0`` 兜底：声称拉到数据却一行未落（异常态）同样判失败。
     """
     from app.db.database import AsyncSessionLocal
 
+    full = bool((getattr(cfg, "params", None) or {}).get("full"))
     async with AsyncSessionLocal() as session:
-        fetched = await refresh_trade_calendar(session)
+        result = await refresh_trade_calendar(session, full=full)
         await session.commit()
         total = (
             await session.execute(select(func.count(MarketTradeCalendar.trade_date)))
@@ -273,9 +308,7 @@ async def run_trade_calendar_refresh(cfg) -> str:
         latest = (
             await session.execute(select(func.max(MarketTradeCalendar.trade_date)))
         ).scalar_one_or_none()
-    if fetched == 0:
-        # 缺口 B：本次拉取失败/为空（refresh_trade_calendar 吞异常后返回 0）。即便库中已有
-        # 历史交易日（total > 0），也必须显性失败，避免静默 SUCCESS 掩盖「日历已陈旧」。
+    if result.fetched == 0:
         raise RuntimeError(
             "交易日历刷新失败：本次未拉取到任何交易日（akshare "
             "tool_trade_date_hist_sina 不可达/未安装/返回空）。已有历史数据保留，但日历可能陈旧"
@@ -285,4 +318,8 @@ async def run_trade_calendar_refresh(cfg) -> str:
             "交易日历刷新后仍为空：请检查 akshare tool_trade_date_hist_sina 是否可达 / "
             "akshare 是否已安装"
         )
-    return f"交易日历刷新完成：本次拉取 {fetched} 个交易日，库中共 {total} 个，最新 {latest}"
+    mode = "全量" if full else "增量"
+    return (
+        f"交易日历刷新完成（{mode}）：源 {result.fetched} 个交易日，"
+        f"本次写入 {result.written} 行，库中共 {total} 个，最新 {latest}"
+    )
