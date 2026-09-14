@@ -484,6 +484,43 @@ async def test_settings_put_rejects_calendar_start_after_backfill_start(session,
     assert r.status_code == 200
 
 
+# ─────────────── 建洞时也按 skip_exchange 过滤（与两条选批腿同口径） ───────────────
+@pytest.mark.asyncio
+async def test_sync_gaps_skips_excluded_exchange(session):
+    """建洞时同样排除被跳过交易所（如腾讯源无京A → ``'BJ'``），并清理遗留的该类洞。
+
+    此前只有两条**选批**腿（uncovered / gapped）过滤了该交易所，建洞 SQL 没有 → BJ 证券的
+    洞会被永久创建又永远不入批（不 exhausted、也不影响「补完」判定），只是白占状态表。
+    """
+    start = date(2024, 1, 1)
+    upper = _window_upper()
+    sh = await _add_master(session, code="600001")
+    sh.exchange = "SH"
+    bj = await _add_master(session, code="830001")
+    bj.exchange = "BJ"
+    for m in (sh, bj):
+        await _add_dividend(session, m.id)
+        # 起点已覆盖 → 进入「洞」的池子（护栏二）
+        session.add(
+            MarketSecurityDailyPrice(
+                master_id=m.id, trade_date=start, close=Decimal("10")
+            )
+        )
+    # 日历覆盖窗口两端；窗口内 01-02 / 01-03 缺日线 → 对两只都是洞
+    for d in (start, date(2024, 1, 2), date(2024, 1, 3), upper):
+        session.add(MarketTradeCalendar(trade_date=d))
+    await session.commit()
+
+    # 对照组：不传 skip_exchange 时两只都记洞（证明池子本身包含 BJ）
+    await sync_price_backfill_gaps(session, start)
+    assert {r[0] for r in await _gap_rows(session)} == {sh.id, bj.id}
+
+    # 传 'BJ'：既有 BJ 洞被清理，且不再新建（SH 的洞已存在 → 无新增）
+    added = await sync_price_backfill_gaps(session, start, skip_exchange="BJ")
+    assert added == 0
+    assert {r[0] for r in await _gap_rows(session)} == {sh.id}
+
+
 # ───────────────────────── ⑥ 补上即删 + 终态清标记 ─────────────────────────
 @pytest.mark.asyncio
 async def test_gap_mode_reconciles_filled_gaps_and_clears_inflight(session, monkeypatch):

@@ -769,7 +769,11 @@ async def _calendar_covers_window_bounds(
 
 
 async def sync_price_backfill_gaps(
-    session, start_date: date, today: Optional[date] = None
+    session,
+    start_date: date,
+    today: Optional[date] = None,
+    *,
+    skip_exchange: Optional[str] = None,
 ) -> Optional[int]:
     """按交易日历重算「洞」并落 ``market_price_backfill_gaps``（幂等，只 INSERT 缺失行）。
 
@@ -781,6 +785,10 @@ async def sync_price_backfill_gaps(
     2. **只对「起点已覆盖」的证券记洞**：完全未覆盖的证券由 legacy 分支兜住
        （``_select_gap_backfill_masters`` 取并集），否则「N 只 × 窗口交易日」会瞬间撑爆
        状态表。单只证券的洞行数上界 = 窗口交易日数；
+       另：``skip_exchange``（如腾讯源无京A → ``'BJ'``）在**建洞时**也排除该交易所，与
+       ``_select_pending_backfill_masters`` / ``_select_gap_backfill_masters`` 两条选批腿
+       同口径——否则这些洞会被永久创建又永远不入批（不 exhausted、也不影响补完判定），
+       只是白占状态表；并顺带清理修复前遗留的该类洞（自愈）；
     3. **日历不覆盖窗口两端 → 返回 None**（不是 0）：判据是窗口**两端**是否都有日历记录
        （``trade_date <= start_date`` 且 ``trade_date >= upper``）。仅判「窗口内任意一天
        在日历里」是不充分的——日历若在窗口尾部断层（例如只到 03-01，而窗口上界在 03-07），
@@ -826,6 +834,17 @@ async def sync_price_backfill_gaps(
         ),
         {"lo": start_date, "hi": upper},
     )
+    if skip_exchange is not None:
+        # 自愈：清掉修复前遗留的「被该源跳过交易所」的洞（此前建洞未按源过滤 → 永久堆积）。
+        await session.execute(
+            text(
+                "DELETE FROM market_price_backfill_gaps g "
+                "USING securities s "
+                "WHERE s.id = g.master_id "
+                "AND s.exchange = CAST(:skip_exchange AS varchar)"
+            ),
+            {"skip_exchange": skip_exchange},
+        )
 
     res = await session.execute(
         text(
@@ -837,7 +856,13 @@ async def sync_price_backfill_gaps(
             FROM (
                 SELECT DISTINCT sd.master_id
                 FROM security_dividends sd
-                WHERE EXISTS (
+                JOIN securities s ON s.id = sd.master_id
+                WHERE (
+                    CAST(:skip_exchange AS varchar) IS NULL
+                    OR s.exchange IS NULL
+                    OR s.exchange <> CAST(:skip_exchange AS varchar)
+                )
+                  AND EXISTS (
                     SELECT 1 FROM market_security_daily_prices p
                     WHERE p.master_id = sd.master_id AND p.trade_date <= :lo
                 )
@@ -855,7 +880,12 @@ async def sync_price_backfill_gaps(
             ON CONFLICT (master_id, gap_date) DO NOTHING
             """
         ),
-        {"lo": start_date, "hi": upper, "pending": GAP_STATUS_PENDING},
+        {
+            "lo": start_date,
+            "hi": upper,
+            "pending": GAP_STATUS_PENDING,
+            "skip_exchange": skip_exchange,
+        },
     )
     # rowcount 防御：-1 是 truthy，`or 0` 兜不住（部分驱动对 INSERT...ON CONFLICT 可能回 -1），
     # 故统一 max(..., 0) 归一到非负计数。
@@ -871,7 +901,9 @@ async def _select_gap_backfill_masters(
     返回 ``(master_ids, calendar_ok)``；``calendar_ok=False`` 表示交易日历不覆盖回补窗口、
     无法按洞判定，调用方须回落 legacy（护栏三）。
     """
-    synced = await sync_price_backfill_gaps(session, start_date)
+    synced = await sync_price_backfill_gaps(
+        session, start_date, skip_exchange=skip_exchange
+    )
     if synced is None:
         return [], False
     # 起点未覆盖（legacy 口径）：兜住完全无数据 / 起点之前无数据的证券
