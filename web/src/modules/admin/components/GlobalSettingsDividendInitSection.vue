@@ -27,8 +27,8 @@ import {
 import {
   PRICE_BACKFILL_ADJUST_NONE,
   PRICE_BACKFILL_ADJUST_OPTIONS,
-  PRICE_BACKFILL_MODE_LEGACY,
   PRICE_BACKFILL_MODE_OPTIONS,
+  PRICE_BACKFILL_MODE_SHORT_LABEL,
   SELECT_EMPTY_VALUE,
 } from '@/lib/constants';
 import GlobalSettingsDividendInitBlock from './GlobalSettingsDividendInitBlock.vue';
@@ -197,10 +197,12 @@ function onAdjustChange(v: string | number): void {
         </Select>
         <p class="text-xs text-muted-foreground">
           「常规」只判断该证券有没有早于起点的日线行，一旦有就整只跳过，<strong>中间的空洞不会补</strong>；
-          「严格补洞」按交易日历逐日比对，缺失的交易日会重新抓取（会重复消耗每日额度）。
+          「严格补洞」按交易日历逐日比对，缺失的交易日会重新抓取（会重复消耗每日额度）；
+          「全量重抓」忽略已有数据，对全部有回补资格的证券整段重抓并覆盖，<strong>消耗额度最多</strong>，
+          用于切换复权方式后统一历史口径。
           严格补洞下，源长期给不到的日期尝试 2 次后会被跳过（放弃该洞），<strong>重新触发回补会重置该状态</strong>；
           切到「严格补洞」前请确认交易日历已刷新——日历未覆盖回补区间时后端会自动回落为「常规」。
-          当前模式：{{ mode === PRICE_BACKFILL_MODE_LEGACY ? '常规' : '严格补洞' }}
+          当前模式：{{ PRICE_BACKFILL_MODE_SHORT_LABEL[mode] ?? mode }}
         </p>
       </div>
 

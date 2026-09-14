@@ -60,18 +60,32 @@ export const SELECT_EMPTY_VALUE = '__none__';
  *   **中间的空洞永不回填**——存量默认，改动前的行为。
  * ``gap``：严格补洞——按交易日历逐日比对「应有交易日 vs 已有日线」，缺失的日子
  *   逐个回填（会重新抓取起点已覆盖的证券，代价是重复消耗额度）。
+ * ``rebuild``：全量重抓——**忽略覆盖度**，对全部有分红记录的证券按 master_id 游标推进、
+ *   整段重抓并 upsert 覆盖已有行；用于统一复权口径等「整体重算」场景，走完证券池即结束。
  *
- * 后端对越界值 400，前端下拉只给这两个选项，故无需再校验。
+ * 后端对越界值 400，前端下拉只给这三个选项，故无需再校验。
  */
 export const PRICE_BACKFILL_MODE_LEGACY = 'legacy';
 export const PRICE_BACKFILL_MODE_GAP = 'gap';
+export const PRICE_BACKFILL_MODE_REBUILD = 'rebuild';
 export const PRICE_BACKFILL_MODE_OPTIONS = [
   {
     value: PRICE_BACKFILL_MODE_LEGACY,
     label: '常规（起点覆盖即跳过，不补空洞）',
   },
   { value: PRICE_BACKFILL_MODE_GAP, label: '严格补洞（按交易日历逐日补齐）' },
+  {
+    value: PRICE_BACKFILL_MODE_REBUILD,
+    label: '全量重抓（忽略已有数据，整段重新覆盖）',
+  },
 ] as const;
+
+/** 模式短标签（用于「当前模式：X」等展示位，避免长说明文案重复） */
+export const PRICE_BACKFILL_MODE_SHORT_LABEL: Record<string, string> = {
+  [PRICE_BACKFILL_MODE_LEGACY]: '常规',
+  [PRICE_BACKFILL_MODE_GAP]: '严格补洞',
+  [PRICE_BACKFILL_MODE_REBUILD]: '全量重抓',
+};
 
 // ===== 历史行情回补「复权方式」（与后端 PRICE_BACKFILL_ADJUSTS 对齐，迁移 0022） =====
 /**
