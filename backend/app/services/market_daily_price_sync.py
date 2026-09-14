@@ -834,13 +834,18 @@ async def _bump_gap_attempts(session, master_ids: list[str]) -> int:
     """
     if not master_ids:
         return 0
+    # Core UPDATE 不触发 ORM 的 Python 端 onupdate（TimestampMixin），故显式刷 updated_at，
+    # 保证洞行的审计时间戳与状态变更同步。
     await session.execute(
         sa_update(MarketPriceBackfillGap)
         .where(
             MarketPriceBackfillGap.master_id.in_(master_ids),
             MarketPriceBackfillGap.status == GAP_STATUS_PENDING,
         )
-        .values(attempts=MarketPriceBackfillGap.attempts + 1)
+        .values(
+            attempts=MarketPriceBackfillGap.attempts + 1,
+            updated_at=func.now(),
+        )
     )
     res = await session.execute(
         sa_update(MarketPriceBackfillGap)
@@ -849,7 +854,7 @@ async def _bump_gap_attempts(session, master_ids: list[str]) -> int:
             MarketPriceBackfillGap.status == GAP_STATUS_PENDING,
             MarketPriceBackfillGap.attempts >= _GAP_MAX_ATTEMPTS,
         )
-        .values(status=GAP_STATUS_EXHAUSTED)
+        .values(status=GAP_STATUS_EXHAUSTED, updated_at=func.now())
     )
     # rowcount 防御：-1 是 truthy，`or 0` 兜不住，统一 max(..., 0) 归一。
     return max(int(res.rowcount or 0), 0)
