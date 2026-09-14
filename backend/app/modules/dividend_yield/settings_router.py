@@ -25,7 +25,6 @@ from app.core.exceptions import BusinessException
 from app.db.database import get_db
 from app.models import (
     PRICE_BACKFILL_ADJUSTS,
-    PRICE_BACKFILL_MODE_GAP,
     PRICE_BACKFILL_MODE_LEGACY,
     PRICE_BACKFILL_MODES,
     DividendYieldSettings,
@@ -275,14 +274,15 @@ async def put_dividend_yield_settings(
             message="每日回补额度 price_backfill_quota 须为 1..2000（只/天）",
             status_code=400,
         )
-    # 历史行情回补模式：值域 legacy | gap（None = 不改）。越界 400 中文——
-    # 不拦住的话 services 侧分派会把未知值静默当 legacy，用户以为切了 gap 却没生效。
+    # 历史行情回补模式：值域见 PRICE_BACKFILL_MODES（legacy | gap | rebuild，None = 不改）。
+    # 越界 400 中文——不拦住的话 services 侧分派会把未知值静默当 legacy，用户以为切了却没生效。
+    # 报错文案由常量元组拼出，避免新增模式时漏改（rebuild 就曾漏过一次）。
     if body.price_backfill_mode is not None and body.price_backfill_mode not in PRICE_BACKFILL_MODES:
         raise BusinessException(
             code=BusinessErrorCode.VALIDATION_FAILED,
             message=(
                 "历史行情回补模式 price_backfill_mode 须为 "
-                f"{PRICE_BACKFILL_MODE_LEGACY} 或 {PRICE_BACKFILL_MODE_GAP}"
+                f"{'、'.join(PRICE_BACKFILL_MODES)} 之一"
             ),
             status_code=400,
         )
