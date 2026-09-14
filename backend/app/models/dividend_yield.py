@@ -44,12 +44,16 @@ from app.models.enums import DividendStatus, DividendYieldMode, ReportPeriodType
 # --------------------------------------------------------------------------- #
 # 回补模式取值。``legacy`` = 原口径：只要该证券存在 ``trade_date <= start_date`` 的日线行
 # 就整只跳过（起点覆盖即视为完成），**中间的空洞永不回填**；``gap`` = 严格补洞：按交易日历
-# 比对回补窗口，逐个缺失交易日回填。
+# 比对回补窗口，逐个缺失交易日回填；``rebuild`` = 全量重抓：不做覆盖度筛选，对**全部**有分红
+# 记录的证券按 ``master_id`` 游标推进重抓整段区间（upsert 覆盖已有行），用于统一复权口径等
+# 「整体重算」场景——因判据不收敛，靠 ``price_backfill_rebuild_cursor`` 游标才能判定终态。
 PRICE_BACKFILL_MODE_LEGACY = "legacy"
 PRICE_BACKFILL_MODE_GAP = "gap"
+PRICE_BACKFILL_MODE_REBUILD = "rebuild"
 PRICE_BACKFILL_MODES: tuple[str, ...] = (
     PRICE_BACKFILL_MODE_LEGACY,
     PRICE_BACKFILL_MODE_GAP,
+    PRICE_BACKFILL_MODE_REBUILD,
 )
 
 # --------------------------------------------------------------------------- #
@@ -294,6 +298,13 @@ class DividendYieldSettings(Base, TimestampMixin):
         nullable=False,
         default=PRICE_BACKFILL_MODE_LEGACY,
         server_default=PRICE_BACKFILL_MODE_LEGACY,
+    )
+    # rebuild（全量重抓）模式的**游标**：上一批重抓完的最后一个 ``master_id``（迁移 0023）。
+    # 池按 master_id 升序推进，取不出下一批即池尾 → 终态（清游标 + 清在途标记）。
+    # 只有 rebuild 模式使用；由 POST /backfill-prices 重置（新起点 = 新一轮重抓）。
+    # 为 NULL = 未开始 / 无进行中的重抓。
+    price_backfill_rebuild_cursor: Mapped[Optional[str]] = mapped_column(
+        String(36), nullable=True
     )
     # 历史行情回补「复权方式」：``""``（不复权，默认，与既有行为零差异）| ``qfq``（前复权）
     # | ``hfq``（后复权）。回补抓取时作为 akshare ``stock_zh_a_hist`` 的 ``adjust`` 入参，

@@ -224,6 +224,9 @@ async def backfill_prices(
     # exhausted 不再入批，清空即重置。⚠️ 只有此处与取消端点清空；**绝不可**在续跑里清空
     # （那会把 attempts 每天归零 → 停牌洞永远循环，护栏二形同虚设）。
     await clear_price_backfill_gaps(db)
+    # rebuild（全量重抓）模式的游标同理重置：新起点 = 新一轮重抓，须从池首开始。
+    # 与清洞表同事务（同属「起点/判定基准已变 → 派生进度失效」）。
+    settings.price_backfill_rebuild_cursor = None
     await db.commit()
 
     # 本批将处理的只数（精确选出未覆盖，限当日剩余额度），用于响应语义
@@ -292,6 +295,8 @@ async def cancel_price_backfill(
     settings.price_backfill_last_error = None
     # 与清在途标记同事务清空严格补洞状态（同 POST：起点/基准失效 + 重置 exhausted 重试路径）
     await clear_price_backfill_gaps(db)
+    # rebuild 游标同理清空（取消即放弃本轮重抓进度）
+    settings.price_backfill_rebuild_cursor = None
     await db.commit()
     await record(
         level="info",

@@ -980,6 +980,55 @@ async def test_backfill_prices_trigger_clears_gap_state(session, client, monkeyp
 
 
 @pytest.mark.asyncio
+async def test_backfill_prices_trigger_resets_rebuild_cursor(session, client, monkeypatch):
+    """重新触发回补 = 新一轮全量重抓：rebuild 游标须清零。
+
+    游标只单向前进，不清零的话新一轮会从上次中断处继续 → 池首那批证券被永久跳过。
+    """
+    import app.services.market_daily_price_sync as mds
+
+    async def _noop(
+        session, itf, master_ids, start_date, *, force: bool = False, adjust: str = ""
+    ):
+        return "noop"
+
+    monkeypatch.setattr(mds, "backfill_historical", _noop)
+
+    admin = await _make_admin(session, client)
+    h = auth(admin["token"])
+    itf = await _seed_category2_interface(
+        session, access_method=QuoteProviderAccessMethod.SDK
+    )
+    r = await client.put(
+        "/api/dividend-yield/settings",
+        json={
+            "green_threshold": "0.05",
+            "red_threshold": "0.03",
+            "price_backfill_source_interface_id": itf.id,
+        },
+        headers=h,
+    )
+    assert r.status_code == 200
+
+    # 预置非空游标（模拟上次中断的全量重抓）
+    session.expire_all()
+    s = (await session.execute(select(DividendYieldSettings).limit(1))).scalar_one()
+    s.price_backfill_rebuild_cursor = "00000000-0000-0000-0000-000000000001"
+    await session.commit()
+
+    r = await client.post(
+        "/api/dividend-yield/backfill-prices",
+        json={"start_date": "2021-01-01"},
+        headers=h,
+    )
+    assert r.status_code == 200
+
+    session.expire_all()
+    s2 = (await session.execute(select(DividendYieldSettings).limit(1))).scalar_one()
+    assert s2.price_backfill_rebuild_cursor is None
+
+
+@pytest.mark.asyncio
 async def test_settings_put_backfill_quota_out_of_range(session, client):
     """守护形态 A 每日额度：PUT price_backfill_quota 越界（0 与 2001）→ 400 中文。
 

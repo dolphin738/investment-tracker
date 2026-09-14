@@ -27,6 +27,7 @@ from app.models import (
     GAP_STATUS_PENDING,
     PRICE_BACKFILL_MODE_GAP,
     PRICE_BACKFILL_MODE_LEGACY,
+    PRICE_BACKFILL_MODE_REBUILD,
     DividendYieldSettings,
     MarketPriceBackfillGap,
     MarketSecurityDailyPrice,
@@ -519,6 +520,67 @@ async def test_sync_gaps_skips_excluded_exchange(session):
     added = await sync_price_backfill_gaps(session, start, skip_exchange="BJ")
     assert added == 0
     assert {r[0] for r in await _gap_rows(session)} == {sh.id}
+
+
+# ───────────────────────── rebuild（全量重抓）模式 ─────────────────────────
+@pytest.mark.asyncio
+async def test_rebuild_mode_advances_cursor_then_finishes(session, monkeypatch):
+    """rebuild：按游标推进全池重抓，走到池尾即终态（清游标 + 清在途标记）。
+
+    关键区别：rebuild **不做覆盖度筛选**——起点已覆盖的证券也要重抓（用于统一复权口径）；
+    判据不收敛，故必须靠 ``price_backfill_rebuild_cursor`` 游标才能结束，否则每轮都会重新
+    选中全池 → 任务永不结束、每日额度天天烧满。
+    """
+    start = date(2024, 1, 1)
+    masters = [await _add_master(session, code=f"600{100 + i}") for i in range(3)]
+    for m in masters:
+        await _add_dividend(session, m.id)
+        # 三只都「起点已覆盖」：legacy 会整只跳过、gap 无洞也不选，rebuild 必须重抓
+        session.add(
+            MarketSecurityDailyPrice(
+                master_id=m.id, trade_date=start, close=Decimal("10")
+            )
+        )
+    itf = await _seed_sdk_backfill_source(session)
+    await _seed_settings(session, itf, start, PRICE_BACKFILL_MODE_REBUILD, quota=2)
+
+    calls: list[str] = []
+
+    async def _fake(self, itf_obj, params, codes):
+        calls.append(params["symbol"])
+        return [{"日期": "2024-01-02", "收盘": "10.5"}]
+
+    monkeypatch.setattr(MarketDataSyncService, "_fetch_sdk_raw", _fake)
+    monkeypatch.setattr("app.services.market_daily_price_sync._BACKFILL_BACKOFFS", (0,))
+    monkeypatch.setattr("app.services.market_daily_price_sync._BACKFILL_COOLDOWN_MIN", 0)
+    monkeypatch.setattr("app.services.market_daily_price_sync._BACKFILL_COOLDOWN_MAX", 0)
+
+    # 第一批（quota=2）：抓 2 只（起点已覆盖也被抓 → 证明 rebuild 强制重抓），游标推进、仍在途
+    await run_pending_price_backfill(session)
+    assert len(calls) == 2
+    s1 = (await session.execute(select(DividendYieldSettings).limit(1))).scalar_one()
+    assert s1.price_backfill_rebuild_cursor is not None
+    assert s1.price_backfill_start_date is not None
+
+    # 模拟跨日重置额度（本用例只验证游标推进，不验证额度口径）
+    s1.price_backfill_last_run_date = date(2000, 1, 1)
+    await session.commit()
+
+    # 第二批：抓最后 1 只 → 游标推到池尾
+    await run_pending_price_backfill(session)
+    assert len(calls) == 3
+
+    s2 = (await session.execute(select(DividendYieldSettings).limit(1))).scalar_one()
+    s2.price_backfill_last_run_date = date(2000, 1, 1)
+    await session.commit()
+
+    # 第三批：取不出人 → 池尾 → 终态（清游标 + 清在途标记），且不再发请求
+    msg = await run_pending_price_backfill(session)
+    assert "全量重抓已完成" in msg
+    assert len(calls) == 3
+    s3 = (await session.execute(select(DividendYieldSettings).limit(1))).scalar_one()
+    assert s3.price_backfill_rebuild_cursor is None
+    assert s3.price_backfill_start_date is None
 
 
 # ───────────────────────── ⑥ 补上即删 + 终态清标记 ─────────────────────────

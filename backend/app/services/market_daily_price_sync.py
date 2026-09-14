@@ -29,6 +29,7 @@ from app.models import (
     GAP_STATUS_PENDING,
     PRICE_BACKFILL_MODE_GAP,
     PRICE_BACKFILL_MODE_LEGACY,
+    PRICE_BACKFILL_MODE_REBUILD,
     DividendYieldSettings,
     MarketPriceBackfillGap,
     MarketSecurityDailyPrice,
@@ -738,6 +739,41 @@ async def _select_pending_backfill_masters(
 
 
 # --------------------------------------------------------------------------- #
+# 全量重抓（rebuild）模式：不做覆盖度筛选，按 master_id 游标推进全池重抓
+# --------------------------------------------------------------------------- #
+async def _select_rebuild_backfill_masters(
+    session,
+    cursor: Optional[str],
+    quota: int,
+    skip_exchange: Optional[str] = None,
+) -> list[str]:
+    """**全量重抓（rebuild）**模式的待办名单：按 ``master_id`` **游标**升序推进（限 quota 只）。
+
+    池 = 有分红记录的证券（与 ``_select_pending_backfill_masters`` 同全集），但**不做任何
+    覆盖度筛选** —— 本模式的目的就是重抓全部、抹平复权口径差异（如 adjust 从 '' 切到 qfq）。
+
+    为什么必须用游标：legacy / gap 的选批判据本身会收敛（「起点未覆盖」/「有未耗尽洞」），
+    抓完自然选不出人；而「全部有分红证券」是**恒定集合**，没有游标就会每轮重新选中全池 →
+    任务永不结束、每日额度天天烧满。游标 = 上一批的最后一个 ``master_id``，取不出下一批
+    即到池尾，由调用方判终态（清游标 + 清在途标记）。
+    """
+    stmt = (
+        select(SecurityDividend.master_id)
+        .distinct()
+        .order_by(SecurityDividend.master_id)
+        .limit(quota)
+    )
+    if cursor is not None:
+        stmt = stmt.where(SecurityDividend.master_id > cursor)
+    if skip_exchange is not None:
+        # 与另两条选批腿同口径：跳过该源拿不到的交易所（交易所未知的保留，避免误伤）
+        stmt = stmt.join(Security, Security.id == SecurityDividend.master_id).where(
+            Security.exchange.is_(None) | (Security.exchange != skip_exchange)
+        )
+    return list((await session.execute(stmt)).scalars().all())
+
+
+# --------------------------------------------------------------------------- #
 # 严格补洞（gap）模式：按交易日历逐日比对，回填「日历有、日线表无」的缺失交易日
 # --------------------------------------------------------------------------- #
 async def _calendar_covers_window_bounds(
@@ -1078,10 +1114,14 @@ async def run_pending_price_backfill(session) -> str:
     # 按回补模式分派选批：
     # - legacy（存量默认）：原「起点未覆盖」口径——起点一覆盖就整只跳过，中间空洞不补；
     # - gap（严格补洞）：按交易日历逐日比对，把「起点已覆盖但中间缺日」的证券重新纳入；
-    #   交易日历不覆盖回补窗口时无从判定洞 → 回落 legacy（护栏三），不静默空转。
+    #   交易日历不覆盖回补窗口时无从判定洞 → 回落 legacy（护栏三），不静默空转；
+    # - rebuild（全量重抓）：不做覆盖度筛选，按 master_id 游标推进全池重抓（统一复权口径等
+    #   「整体重算」场景），游标走到池尾即终态。
     mode = settings.price_backfill_mode or PRICE_BACKFILL_MODE_LEGACY
-    force = False  # gap 模式须强制重抓（洞就在「起点已覆盖」的证券上）
+    # gap / rebuild 都须强制重抓：前者洞就在「起点已覆盖」的证券上；后者目标就是覆盖已有行。
+    force = False
     gap_active = False
+    rebuild_active = False
     if mode == PRICE_BACKFILL_MODE_GAP:
         pending, calendar_ok = await _select_gap_backfill_masters(
             session, start_date, remaining, skip_exchange
@@ -1098,6 +1138,12 @@ async def run_pending_price_backfill(session) -> str:
             pending = await _select_pending_backfill_masters(
                 session, start_date, remaining, skip_exchange
             )
+    elif mode == PRICE_BACKFILL_MODE_REBUILD:
+        force = True
+        rebuild_active = True
+        pending = await _select_rebuild_backfill_masters(
+            session, settings.price_backfill_rebuild_cursor, remaining, skip_exchange
+        )
     else:
         pending = await _select_pending_backfill_masters(
             session, start_date, remaining, skip_exchange
@@ -1125,7 +1171,11 @@ async def run_pending_price_backfill(session) -> str:
                 )
         settings.price_backfill_start_date = None
         settings.price_backfill_last_error = None
+        # rebuild：游标走到池尾即完成 → 一并清游标（下次重新触发从头开始）
+        settings.price_backfill_rebuild_cursor = None
         await session.commit()
+        if mode == PRICE_BACKFILL_MODE_REBUILD:
+            return "全量重抓已完成（已走完证券池），在途回补任务已结束"
         return (
             f"回补已完成（{mode} 模式）：全部证券均已覆盖、无待补洞，"
             f"在途回补任务已结束{exhausted_note}"
@@ -1161,6 +1211,11 @@ async def run_pending_price_backfill(session) -> str:
     # 未填上的保持 pending，attempts 已在入批时 +1，达阈值即 exhausted（护栏二）。
     if gap_active:
         await reconcile_price_backfill_gaps(session)
+        await session.commit()
+    # rebuild 模式：本批**成功**后推进游标到最后一个 master_id（列表按 master_id 升序），
+    # 下一批从这里继续。熔断/异常时上面 except 直接抛出 → 游标不推进 → 该批下轮重试，不会漏抓。
+    if rebuild_active:
+        settings.price_backfill_rebuild_cursor = pending[-1]
         await session.commit()
     # 每 burst 递增当日已用已由 backfill_historical 内结算（成败都计）；此处刷新内存对象
     # 以回显累计值（在途任务期间前端每 3s 轮询 settings 即可看到实时进度）。
