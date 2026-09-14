@@ -868,8 +868,11 @@ async def test_backfill_prices_triggers_async_when_configured(session, client, m
 
     captured: list[tuple] = []
 
-    # force：gap 模式的强制重抓开关（默认 False = legacy 口径），桩须接受该关键字参数
-    async def _noop(session, itf, master_ids, start_date, *, force: bool = False):
+    # force：gap 模式的强制重抓开关（默认 False = legacy 口径），桩须接受该关键字参数；
+    # adjust：回补复权方式（迁移 0022 新增），桩亦须接受（keyword-only）。
+    async def _noop(
+        session, itf, master_ids, start_date, *, force: bool = False, adjust: str = ""
+    ):
         captured.append((itf.id, list(master_ids), start_date))
         return "noop"
 
@@ -930,7 +933,9 @@ async def test_backfill_prices_trigger_clears_gap_state(session, client, monkeyp
     """
     import app.services.market_daily_price_sync as mds
 
-    async def _noop(session, itf, master_ids, start_date, *, force: bool = False):
+    async def _noop(
+        session, itf, master_ids, start_date, *, force: bool = False, adjust: str = ""
+    ):
         return "noop"
 
     monkeypatch.setattr(mds, "backfill_historical", _noop)
@@ -994,6 +999,116 @@ async def test_settings_put_backfill_quota_out_of_range(session, client):
         status, _, _, message = env(r)
         assert status == 400, f"quota={bad} 应被拒（实际 {status}）"
         assert "price_backfill_quota" in message
+
+
+@pytest.mark.asyncio
+async def test_settings_put_backfill_adjust_validation_and_roundtrip(session, client):
+    """守护回补复权方式配置（迁移 0022）：非法值 400 不落库；'' / qfq / hfq 可写、可读回、可往返。
+
+    默认不复权（''）须与既有行为零差异；越界值须 fail closed（400，文案指向
+    price_backfill_adjust），且**不得落库**（GET 仍为默认 ''）。
+    """
+    admin = await _make_admin(session, client)
+    h = auth(admin["token"])
+
+    # 非法值 → 400，文案指向字段；且不落库（GET 仍为默认 ''）
+    r = await client.put(
+        "/api/dividend-yield/settings",
+        json={
+            "green_threshold": "0.05", "red_threshold": "0.03",
+            "price_backfill_adjust": "bad",
+        },
+        headers=h,
+    )
+    status, _, _, message = env(r)
+    assert status == 400, f"非法 adjust 应被拒（实际 {status}）"
+    assert "price_backfill_adjust" in message
+    status, _, data, _ = env(
+        await client.get("/api/dividend-yield/settings", headers=h)
+    )
+    assert status == 200
+    assert data["price_backfill_adjust"] == ""
+
+    # 合法值 '' / qfq / hfq：PUT 可写、响应回显、GET 可读回（往返一致）
+    for val in ("", "qfq", "hfq"):
+        r = await client.put(
+            "/api/dividend-yield/settings",
+            json={
+                "green_threshold": "0.05", "red_threshold": "0.03",
+                "price_backfill_adjust": val,
+            },
+            headers=h,
+        )
+        status, _, body, _ = env(r)
+        assert status == 200, f"adjust={val!r} 应可写（实际 {status}）"
+        assert body["price_backfill_adjust"] == val
+        status, _, data, _ = env(
+            await client.get("/api/dividend-yield/settings", headers=h)
+        )
+        assert status == 200
+        assert data["price_backfill_adjust"] == val
+
+
+@pytest.mark.asyncio
+async def test_backfill_adjust_drives_fetch_params(session, client, monkeypatch):
+    """守护：``price_backfill_adjust`` 真正驱动回补抓取（不是只存不用）。
+
+    背景：历史上回补抓取的 ``adjust`` 硬编码为空串。本用例把配置设为 ``hfq`` 后跑在途
+    回补，monkeypatch ``_fetch_sdk_raw`` 捕获实际入参，断言 ``params["adjust"] == "hfq"``。
+    """
+    import app.services.market_daily_price_sync as mds
+
+    captured: list[dict] = []
+
+    async def _fake_sdk(self, itf_obj, params, codes):
+        captured.append(dict(params))
+        return [{"日期": "2024-01-02", "收盘": "10.50"}]
+
+    monkeypatch.setattr(mds.MarketDataSyncService, "_fetch_sdk_raw", _fake_sdk)
+    monkeypatch.setattr(mds, "_BACKFILL_BACKOFFS", (0,))
+    monkeypatch.setattr(mds, "_BACKFILL_COOLDOWN_MIN", 0)
+    monkeypatch.setattr(mds, "_BACKFILL_COOLDOWN_MAX", 0)
+
+    admin = await _make_admin(session, client)
+    h = auth(admin["token"])
+    itf = await _seed_category2_interface(
+        session, access_method=QuoteProviderAccessMethod.SDK
+    )
+    # 配置回补源 + 复权方式 hfq（同时证明 PUT 存储值）
+    r = await client.put(
+        "/api/dividend-yield/settings",
+        json={
+            "green_threshold": "0.05", "red_threshold": "0.03",
+            "price_backfill_source_interface_id": itf.id,
+            "price_backfill_adjust": "hfq",
+        },
+        headers=h,
+    )
+    assert r.status_code == 200
+
+    # 造一只待回补证券（security_dividends 去重 master_id）
+    m = Security(
+        id=_uid(), code="sh600888", name="证券sh600888",
+        asset_class=SecurityType.STOCK, exchange="SH",
+    )
+    session.add(m)
+    session.add(SecurityDividend(
+        master_id=m.id, report_year=date.today().year, report_quarter=4,
+        period_type=ReportPeriodType.ANNUAL,
+        cash_per_share=Decimal("1.0"), status=DividendStatus.PAID,
+    ))
+    await session.commit()
+    # 置在途任务（起点），使 run_pending_price_backfill 真正取批并发起抓取
+    settings = (
+        await session.execute(select(DividendYieldSettings).limit(1))
+    ).scalar_one()
+    settings.price_backfill_start_date = date(2024, 1, 1)
+    await session.commit()
+
+    await mds.run_pending_price_backfill(session)
+
+    assert captured, "应发生历史回补抓取请求"
+    assert captured[0]["adjust"] == "hfq"  # 配置真正驱动抓取入参
 
 
 @pytest.mark.asyncio

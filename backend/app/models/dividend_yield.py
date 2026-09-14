@@ -52,6 +52,23 @@ PRICE_BACKFILL_MODES: tuple[str, ...] = (
     PRICE_BACKFILL_MODE_GAP,
 )
 
+# --------------------------------------------------------------------------- #
+# 历史行情回补「复权方式」（迁移 0022 引入）
+# --------------------------------------------------------------------------- #
+# 回补抓取时传给 akshare ``stock_zh_a_hist`` 的 ``adjust`` 参数。历史口径硬编码不复权
+# （``adjust=""``），本配置把它显性化、可控：
+# - ``""``（不复权，默认）：原始成交价（含除权跳空），与既有行为**零差异**（存量默认）；
+# - ``qfq``（前复权）：保持当前价，历史价随时间变；
+# - ``hfq``（后复权）：保持历史价，反映长期真实收益。
+PRICE_BACKFILL_ADJUST_NONE = ""  # 不复权（akshare adjust=""）
+PRICE_BACKFILL_ADJUST_QFQ = "qfq"  # 前复权
+PRICE_BACKFILL_ADJUST_HFQ = "hfq"  # 后复权
+PRICE_BACKFILL_ADJUSTS: tuple[str, ...] = (
+    PRICE_BACKFILL_ADJUST_NONE,
+    PRICE_BACKFILL_ADJUST_QFQ,
+    PRICE_BACKFILL_ADJUST_HFQ,
+)
+
 # 补洞状态：pending = 待补；exhausted = 已尝试多次仍填不上，不再入批（避免白烧每日额度）。
 GAP_STATUS_PENDING = "pending"
 GAP_STATUS_EXHAUSTED = "exhausted"
@@ -277,6 +294,16 @@ class DividendYieldSettings(Base, TimestampMixin):
         nullable=False,
         default=PRICE_BACKFILL_MODE_LEGACY,
         server_default=PRICE_BACKFILL_MODE_LEGACY,
+    )
+    # 历史行情回补「复权方式」：``""``（不复权，默认，与既有行为零差异）| ``qfq``（前复权）
+    # | ``hfq``（后复权）。回补抓取时作为 akshare ``stock_zh_a_hist`` 的 ``adjust`` 入参，
+    # 真正驱动历史回补（此前该参数硬编码为空串）。存量行由 server_default='' 覆盖
+    # （迁移 0022 无需回填）；值域校验在 PUT /settings 与运行时分派双重把关。
+    price_backfill_adjust: Mapped[str] = mapped_column(
+        String(8),
+        nullable=False,
+        default=PRICE_BACKFILL_ADJUST_NONE,
+        server_default=PRICE_BACKFILL_ADJUST_NONE,
     )
     # 交易日历刷新起始日期（YYYY-MM-DD）：全局设置可配，决定 refresh_trade_calendar 的
     # 窗口下限（只落该日及之后的交易日）；None = 用默认下限「去年 1 月 1 日」。

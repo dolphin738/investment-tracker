@@ -24,6 +24,7 @@ from app.core.envelope import EnvelopeRoute
 from app.core.exceptions import BusinessException
 from app.db.database import get_db
 from app.models import (
+    PRICE_BACKFILL_ADJUSTS,
     PRICE_BACKFILL_MODE_GAP,
     PRICE_BACKFILL_MODE_LEGACY,
     PRICE_BACKFILL_MODES,
@@ -60,6 +61,9 @@ class SettingsUpdateBody(BaseModel):
     # 历史行情回补模式：``legacy``（起点覆盖即整只跳过、不补中间空洞）或 ``gap``
     #（严格补洞：按交易日历逐日回填）。None 表示不改（保留既有值）；越界 400。
     price_backfill_mode: Optional[str] = None
+    # 历史行情回补复权方式：``""``（不复权，默认）| ``qfq``（前复权）| ``hfq``（后复权）。
+    # 回补抓取时作为 akshare stock_zh_a_hist 的 adjust 入参。None 表示不改（保留既有值）；越界 400。
+    price_backfill_adjust: Optional[str] = None
     # 交易日历刷新起始日期（YYYY-MM-DD）：refresh_trade_calendar 的窗口下限，决定
     # 「获取多长时间」（上限受数据源限制只到当年末，故不暴露）。None 表示不改。
     trade_calendar_start_date: Optional[date] = None
@@ -211,6 +215,9 @@ async def _settings_out(db: AsyncSession, row: DividendYieldSettings) -> dict[st
         # 历史行情回补模式（legacy | gap）：前端据此回填「回补模式」下拉框；
         # 空值兜底 legacy（列有 server_default，理论非空，防御性兼容旧行）。
         "price_backfill_mode": row.price_backfill_mode or PRICE_BACKFILL_MODE_LEGACY,
+        # 历史行情回补复权方式（'' 不复权 | qfq 前复权 | hfq 后复权）：前端据此回填
+        # 「回补复权方式」下拉框；空值兜底 ''（列有 server_default，防御性兼容旧行）。
+        "price_backfill_adjust": row.price_backfill_adjust or "",
         # 交易日历刷新起始日期（可保存）：None = 未配置 → 后端用默认下限「去年 1 月 1 日」
         "trade_calendar_start_date": (
             row.trade_calendar_start_date.isoformat()
@@ -279,6 +286,17 @@ async def put_dividend_yield_settings(
             ),
             status_code=400,
         )
+    # 历史行情回补复权方式：值域 '' | qfq | hfq（None = 不改）。越界 400 中文——
+    # 不拦住的话会原样透传给 akshare，抓取静默失败或口径错乱。
+    if body.price_backfill_adjust is not None and body.price_backfill_adjust not in PRICE_BACKFILL_ADJUSTS:
+        raise BusinessException(
+            code=BusinessErrorCode.VALIDATION_FAILED,
+            message=(
+                "历史行情回补复权方式 price_backfill_adjust 须为 ''（不复权）、"
+                "qfq（前复权）或 hfq（后复权）"
+            ),
+            status_code=400,
+        )
 
     row = await load_settings(db)
     is_new = row.id is None  # 空默认（无持久化行）时插入，否则更新既有行
@@ -316,6 +334,7 @@ async def put_dividend_yield_settings(
         "price_backfill_source_interface_id": row.price_backfill_source_interface_id,
         "price_backfill_quota": row.price_backfill_quota,
         "price_backfill_mode": row.price_backfill_mode,
+        "price_backfill_adjust": row.price_backfill_adjust,
         "price_backfill_default_start_date": (
             row.price_backfill_default_start_date.isoformat()
             if row.price_backfill_default_start_date is not None
@@ -346,6 +365,9 @@ async def put_dividend_yield_settings(
     # 历史行情回补模式：与额度同口径（None = 不改），值域已在上面校验
     if body.price_backfill_mode is not None:
         row.price_backfill_mode = body.price_backfill_mode
+    # 历史行情回补复权方式：与模式同口径（None = 不改），值域已在上面校验
+    if body.price_backfill_adjust is not None:
+        row.price_backfill_adjust = body.price_backfill_adjust
     # 交易日历刷新起始日期：同回补起点的显式提交语义（显式 null = 清除 → 用默认下限）
     if "trade_calendar_start_date" in body.model_fields_set:
         row.trade_calendar_start_date = body.trade_calendar_start_date
@@ -371,6 +393,7 @@ async def put_dividend_yield_settings(
             "price_backfill_source_interface_id": body.price_backfill_source_interface_id,
             "price_backfill_quota": row.price_backfill_quota,
             "price_backfill_mode": row.price_backfill_mode,
+            "price_backfill_adjust": row.price_backfill_adjust,
             "price_backfill_default_start_date": (
                 row.price_backfill_default_start_date.isoformat()
                 if row.price_backfill_default_start_date is not None
