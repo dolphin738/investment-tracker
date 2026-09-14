@@ -425,12 +425,14 @@ async def backfill_historical(
       ``trade_date``，起点已覆盖 ``start_date`` 的证券跳过（无额外游标表）；
       ``force=True``（严格补洞 gap 模式）时**不做该跳过**——洞恰恰出现在「起点已覆盖」
       的证券上，不强制重抓同一区间就永远填不上；
-    - ``replace=True``（全量重抓 rebuild 模式）时**清空后重建**：每只证券写入前先删除其
-      ``[start_date, 今天]`` 窗口内的全部既有日线，再整段写入本次抓到的行——目的是
-      「不留旧数据」：源如今给不到的日期（停牌、源缺失）宁可空缺，也不残留旧源/旧复权
-      口径的值。与 ``force`` 的区别：``force`` 只是「不跳过」（仍为覆盖式 upsert，未返回
-      的日期原样保留），``replace`` 才是清空重写。源返回空 / 全部行解析失败时**不删**，
-      见 ``_upsert_hist_rows``（避免空响应误清该证券整段数据且无从恢复）；
+    - ``replace=True``（全量重抓 rebuild 模式）时**清空后重建**：窗口下限取
+      ``min(start_date, 该证券已有最早 trade_date)``，写入前先删除该窗口内的全部既有日线，
+      再整段写入本次抓到的行——目的是「不留旧数据」：源如今给不到的日期（停牌、源缺失）
+      宁可空缺，也不残留旧源/旧复权口径的值。**抓取窗口同步下探到同一下限**（见循环内
+      ``effective_start``）：源不会返回早于配置起点的那段，不同宽下探就会「删了补不回来」，
+      形成净数据丢失。与 ``force`` 的区别：``force`` 只是「不跳过」（仍为覆盖式 upsert，
+      未返回的日期原样保留），``replace`` 才是清空重写。源返回空 / 全部行解析失败时
+      **不删**，见 ``_upsert_hist_rows``（避免空响应误清该证券整段数据且无从恢复）；
     - burst≈10 只/批 + 批间冷却 60–120s + 指数退避 60/120/300s（决策 A15），每批记进度日志；
     - 单只回补请求另有兜底超时上界 ``_BACKFILL_FETCH_TIMEOUT``（秒），防止接口 timeout=NULL
       时单只卡死无限拖住整轮回补（超时由退避重试分支接住）；
@@ -451,7 +453,7 @@ async def backfill_historical(
     hist_date_field = _fields.get(SLOT_DATE)
     hist_price_field = _fields.get(SLOT_PRICE)
     today = today_app_tz()
-    start_fmt = start_date.strftime("%Y%m%d")
+    # 抓取窗口下限改为逐只计算（见循环内 effective_start）：rebuild 会按该证券已有最早日期下探。
     end_fmt = today.strftime("%Y%m%d")
     total = len(master_ids)
     done = 0
@@ -486,11 +488,18 @@ async def backfill_historical(
                 done += 1
                 skipped += 1
                 continue
+            # 窗口下限：rebuild（replace）下扩到「该证券库里已有最早日期」——早于配置起点的旧口径
+            # 数据若不清除，「不留旧数据」就落空；而源不会返回那段，故**抓取窗口必须同宽下探**，
+            # 否则会出现「删了却补不回来」的净数据丢失（删除与抓取两处必须一起改，勿只改其一）。
+            # 非 replace 模式 effective_start 恒 == start_date，与改动前完全一致（零行为变更）。
+            effective_start = start_date
+            if replace and earliest is not None and earliest < effective_start:
+                effective_start = earliest
             params = {
                 # akshare stock_zh_a_hist 的 symbol 须为纯数字代码（如 600519），
                 # Security.code 带交易所前缀（sh600519），须剥离（P2-2，对照 notice_scan）。
                 "symbol": re.sub(r"\D", "", sec.code),
-                "start_date": start_fmt,
+                "start_date": effective_start.strftime("%Y%m%d"),
                 "end_date": end_fmt,
                 "adjust": adjust,
             }
@@ -530,9 +539,10 @@ async def backfill_historical(
                 hist_written = await _upsert_hist_rows(
                     session, mid, rows, source,
                     date_field=hist_date_field, price_field=hist_price_field,
-                    # rebuild 模式：清空 [起点, 今天] 后重建（不留旧源/旧复权口径的数据）；
+                    # rebuild 模式：清空 [窗口下限, 今天] 后重建（不留旧源/旧复权口径的数据）；
+                    # 下限 effective_start 已按「该证券已有最早日期」下探，与上面 params 同宽。
                     # 其余模式恒 None → 纯 upsert，绝不删既有行。
-                    replace_window=(start_date, today) if replace else None,
+                    replace_window=(effective_start, today) if replace else None,
                 )
                 await session.commit()
                 written += hist_written
@@ -645,8 +655,9 @@ async def _upsert_hist_rows(
     ``replace_window``（闭区间 ``(起, 止)``）为 ``rebuild`` 模式的「清空后重建」语义：
     写入前先删除本证券该窗口内的**全部既有日线**，再整段写入本次抓到的行——目的是
     **不留旧数据**：源如今给不到的日期（停牌、源缺失）宁可空缺，也不残留旧源/旧复权
-    口径的值。``None``（默认，legacy / gap 模式）保持纯 upsert：命中即覆盖、未命中才新增，
-    绝不删除既有行。
+    口径的值。窗口**下限由调用方给出**（``backfill_historical`` 在 replace 下已按该证券
+    已有最早日期下探，且抓取窗口同宽），本函数不做计算。``None``（默认，legacy / gap 模式）
+    保持纯 upsert：命中即覆盖、未命中才新增，绝不删除既有行。
     """
     if not rows:
         return 0

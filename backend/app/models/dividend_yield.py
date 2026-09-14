@@ -46,7 +46,8 @@ from app.models.enums import DividendStatus, DividendYieldMode, ReportPeriodType
 # 就整只跳过（起点覆盖即视为完成），**中间的空洞永不回填**；``gap`` = 严格补洞：按交易日历
 # 比对回补窗口，逐个缺失交易日回填；``rebuild`` = 全量重抓：不做覆盖度筛选，对**全部**有分红
 # 记录的证券按 ``master_id`` 游标推进重抓整段区间，且为**清空后重建**（写前先删该证券窗口内
-# 既有日线，不留旧源/旧复权口径的数据；源给不到的日期宁可空缺），用于统一复权口径等
+# 既有日线，不留旧源/旧复权口径的数据；源给不到的日期宁可空缺），窗口下限取
+# ``min(配置起点, 该证券已有最早 trade_date)``，抓取同步下探到同一下限，用于统一复权口径等
 # 「整体重算」场景——因判据不收敛，靠 ``price_backfill_rebuild_cursor`` 游标才能判定终态。
 PRICE_BACKFILL_MODE_LEGACY = "legacy"
 PRICE_BACKFILL_MODE_GAP = "gap"
