@@ -871,7 +871,7 @@ async def test_backfill_prices_triggers_async_when_configured(session, client, m
     # force：gap 模式的强制重抓开关（默认 False = legacy 口径），桩须接受该关键字参数；
     # adjust：回补复权方式（迁移 0022 新增），桩亦须接受（keyword-only）。
     async def _noop(
-        session, itf, master_ids, start_date, *, force: bool = False, replace: bool = False, adjust: str = ""
+        session, itf, master_ids, start_date, *, force: bool = False, replace: bool = False, run_token=None, adjust: str = ""
     ):
         captured.append((itf.id, list(master_ids), start_date))
         return "noop"
@@ -915,13 +915,80 @@ async def test_backfill_prices_triggers_async_when_configured(session, client, m
     assert "后台执行" in data["message"]
     assert "价格回补" in data["message"] or "行情回补" in data["message"]
 
-    # 等待 fire-and-forget 任务执行（持有强引用，不阻塞请求但须真正被调度）
-    for _ in range(50):
+    # 等待 fire-and-forget 任务执行（持有强引用，不阻塞请求但须真正被调度）。
+    # 放宽到 3s：全量回归时 DB 负载高（每用例前 TRUNCATE 全表），0.5s 窗口偶发不够，
+    # 会误报「任务未触发」——任务其实只是还没被调度到。
+    for _ in range(300):
         if captured:
             break
         await asyncio.sleep(0.01)
     assert captured, "fire-and-forget 任务须被触发并执行"
     assert captured[0][1] == [m.id]
+
+
+@pytest.mark.asyncio
+async def test_backfill_prices_rotates_run_token_and_cancel_clears_it(
+    session, client, monkeypatch
+):
+    """世代标记（迁移 0024）：触发写入新 token，取消清空为 NULL。
+
+    在途批次据此识别「自己已被取消 / 被新一次触发取代」并协作式中止。若取消不清 token，
+    则「取消后立刻重新触发」时老批次会看到标记重新变成非 NULL → 误判自己仍有效 →
+    与新批次并发抓同一池子（这正是只看「标记是否为 NULL」的缺陷）。
+    """
+    import app.services.market_daily_price_sync as mds
+
+    async def _noop(
+        session, itf, master_ids, start_date, *,
+        force=False, replace=False, run_token=None, adjust="",
+    ):
+        return "noop"
+
+    monkeypatch.setattr(mds, "backfill_historical", _noop)
+
+    admin = await _make_admin(session, client)
+    h = auth(admin["token"])
+    itf = await _seed_category2_interface(
+        session, access_method=QuoteProviderAccessMethod.SDK
+    )
+    r = await client.put(
+        "/api/dividend-yield/settings",
+        json={
+            "green_threshold": "0.05", "red_threshold": "0.03",
+            "price_backfill_source_interface_id": itf.id,
+        },
+        headers=h,
+    )
+    assert r.status_code == 200
+    m = Security(
+        id=_uid(), code="sh600998", name="证券sh600998",
+        asset_class=SecurityType.STOCK, exchange="SH",
+    )
+    session.add(m)
+    session.add(SecurityDividend(
+        master_id=m.id, report_year=date.today().year, report_quarter=4,
+        period_type=ReportPeriodType.ANNUAL,
+        cash_per_share=Decimal("1.0"), status=DividendStatus.PAID,
+    ))
+    await session.commit()
+
+    r = await client.post(
+        "/api/dividend-yield/backfill-prices",
+        json={"start_date": "2021-01-01"}, headers=h,
+    )
+    status, _, _, _ = env(r)
+    assert status == 200
+    s = (await session.execute(select(DividendYieldSettings).limit(1))).scalar_one()
+    assert s.price_backfill_run_token, "触发回补须写入世代标记"
+
+    r = await client.delete("/api/dividend-yield/backfill-prices", headers=h)
+    status, _, _, _ = env(r)
+    assert status == 200
+    # 端点在独立会话里提交；本会话已把该行载入 identity map，二次 select 会直接返回
+    # 同一个持久对象（不刷新属性），必须先 expire 才能读到落库后的新值。
+    session.expire_all()
+    s = (await session.execute(select(DividendYieldSettings).limit(1))).scalar_one()
+    assert s.price_backfill_run_token is None, "取消须清空世代标记（让在途批次中止）"
 
 
 @pytest.mark.asyncio
@@ -934,7 +1001,7 @@ async def test_backfill_prices_trigger_clears_gap_state(session, client, monkeyp
     import app.services.market_daily_price_sync as mds
 
     async def _noop(
-        session, itf, master_ids, start_date, *, force: bool = False, replace: bool = False, adjust: str = ""
+        session, itf, master_ids, start_date, *, force: bool = False, replace: bool = False, run_token=None, adjust: str = ""
     ):
         return "noop"
 
@@ -988,7 +1055,7 @@ async def test_backfill_prices_trigger_resets_rebuild_cursor(session, client, mo
     import app.services.market_daily_price_sync as mds
 
     async def _noop(
-        session, itf, master_ids, start_date, *, force: bool = False, replace: bool = False, adjust: str = ""
+        session, itf, master_ids, start_date, *, force: bool = False, replace: bool = False, run_token=None, adjust: str = ""
     ):
         return "noop"
 

@@ -11,7 +11,7 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from app.core.date_utils import today_app_tz
 from app.models import (
@@ -35,6 +35,7 @@ from app.services.market_data_sync import (
 )
 from app.services.market_daily_price_sync import (
     MarketDailyPriceSyncService,
+    _acquire_backfill_lease,
     _select_gap_backfill_masters,
     _select_pending_backfill_masters,
     backfill_historical,
@@ -1270,4 +1271,209 @@ async def test_run_pending_price_backfill_skips_bj_for_tencent_source(session, m
     # 腾讯源不含京A数据 → BJ 代码 830799 不应被请求；沪市 600000 正常回补
     assert "830799" not in fetched
     assert "600000" in fetched
+
+
+# ───── 协作式取消（世代标记 run_token）：取消 / 被取代后不再抓取剩余证券 ─────
+@pytest.mark.asyncio
+@pytest.mark.parametrize("new_token", [None, "REPLACED-TOKEN"])
+async def test_backfill_aborts_when_run_token_invalidated(
+    session, monkeypatch, new_token
+):
+    """取消要真能停：世代标记失效（被取消 → NULL / 被新一次触发取代 → 新值）后，
+    回补须在**下一只证券开始前**优雅中止——不再抓取剩余证券、不抛异常。
+
+    这是「点了取消，界面显示已停、后台却又跑了几小时」的修复：此前取消只清在途标记，
+    而循环从不复查，会把整个 pending（上限 = 当日剩余额度，可达 1000 只）跑完。
+    """
+    masters = [await _add_master(session, code=f"600{300 + i}") for i in range(3)]
+    itf = await _seed_sdk_quote_source(session)
+    settings = (await session.execute(select(DividendYieldSettings).limit(1))).scalar_one()
+    settings.price_backfill_run_token = "ORIGINAL-TOKEN"
+    await session.commit()
+
+    calls: list[str] = []
+
+    async def _fake_sdk(self, itf_obj, params, codes):
+        calls.append(params["symbol"])
+        if len(calls) == 1:
+            # 抓完第 1 只后模拟「用户在别处点了取消（NULL）」或「重新触发（新 UUID）」
+            cur = (await session.execute(select(DividendYieldSettings).limit(1))).scalar_one()
+            cur.price_backfill_run_token = new_token
+            await session.commit()
+        return [{"日期": "2024-01-02", "收盘": "10.50"}]
+
+    monkeypatch.setattr(MarketDataSyncService, "_fetch_sdk_raw", _fake_sdk)
+    monkeypatch.setattr("app.services.market_daily_price_sync._BACKFILL_BACKOFFS", (0,))
+
+    msg = await backfill_historical(
+        session, itf, [m.id for m in masters], date(2024, 1, 1),
+        force=True, run_token="ORIGINAL-TOKEN",
+    )
+    # 只抓第 1 只即中止（剩余 2 只不再抓取）；中止是优雅返回、不是异常
+    assert calls == ["600300"]
+    assert "已中止" in msg
+
+
+@pytest.mark.asyncio
+async def test_backfill_ignores_cancellation_without_run_token(session, monkeypatch):
+    """非在途链路（``run_token=None``，如定时任务按 ``backfill_start`` 参数直接调用）
+    **不做**取消判定：即便库里的世代标记被改写也要全量跑完（零行为变更）。
+    """
+    masters = [await _add_master(session, code=f"600{310 + i}") for i in range(3)]
+    itf = await _seed_sdk_quote_source(session)
+    settings = (await session.execute(select(DividendYieldSettings).limit(1))).scalar_one()
+    settings.price_backfill_run_token = "ORIGINAL-TOKEN"
+    await session.commit()
+
+    calls: list[str] = []
+
+    async def _fake_sdk(self, itf_obj, params, codes):
+        calls.append(params["symbol"])
+        if len(calls) == 1:
+            cur = (await session.execute(select(DividendYieldSettings).limit(1))).scalar_one()
+            cur.price_backfill_run_token = None  # 模拟被取消
+            await session.commit()
+        return [{"日期": "2024-01-02", "收盘": "10.50"}]
+
+    monkeypatch.setattr(MarketDataSyncService, "_fetch_sdk_raw", _fake_sdk)
+    monkeypatch.setattr("app.services.market_daily_price_sync._BACKFILL_BACKOFFS", (0,))
+
+    msg = await backfill_historical(
+        session, itf, [m.id for m in masters], date(2024, 1, 1), force=True,
+    )
+    assert len(calls) == 3  # 未传 run_token → 不检查 → 三只都抓
+    assert "已中止" not in msg
+
+
+# ───────── 执行租约：同一时刻只允许一个 run（防同日起跑重叠） ─────────
+async def _seed_backfill_run(session):
+    """造 SDK 回补源 + 在途标记 + 待回补证券（供租约用例复用）。"""
+    provider = SecuritiesDataProvider(
+        id=_uid(), name="akshare", access_method=QuoteProviderAccessMethod.SDK,
+        config={}, enabled=True,
+    )
+    itf = QuoteInterface(
+        id=_uid(), provider_id=provider.id, category_id=QUOTE_CAT_ID,
+        name="东财历史", endpoint="stock_zh_a_hist", http_method="GET",
+        enabled=True, priority=1, resp_code_field="代码", resp_price_field="收盘",
+        response_parse={}, params={},
+    )
+    session.add(provider)
+    await session.flush()
+    session.add(InterfaceCategory(id=QUOTE_CAT_ID, label="证券行情", system=True))
+    await session.flush()
+    session.add(itf)
+    m = await _add_master(session, code="600000")
+    session.add(
+        SecurityDividend(
+            master_id=m.id, report_year=date(2023, 1, 1).year, report_quarter=4,
+            period_type=ReportPeriodType.ANNUAL,
+            cash_per_share=Decimal("1.0"), status=DividendStatus.PAID,
+        )
+    )
+    await session.flush()
+    session.add(
+        DividendYieldSettings(
+            green_threshold=Decimal("0.05"), red_threshold=Decimal("0.03"),
+            price_source_interface_id=itf.id,
+            price_backfill_source_interface_id=itf.id,
+            price_backfill_start_date=date(2024, 1, 1),
+            price_backfill_quota=10,
+        )
+    )
+    await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_run_pending_price_backfill_lease_blocks_concurrent(session, monkeypatch):
+    """租约被占用 → 本次直接跳过、**不发任何请求**。
+
+    修复「管理员手动首批尚未跑完 + 15:05 每日收盘价抓取又起一个 run」：settings 行锁
+    在第一次 commit 就释放，拦不住；租约保证同一时刻只有一个 run 在抓同一池子。
+    """
+    await _seed_backfill_run(session)
+    settings = (await session.execute(select(DividendYieldSettings).limit(1))).scalar_one()
+    settings.price_backfill_running = True  # 模拟已有 run 正在执行
+    await session.commit()
+
+    calls: list[str] = []
+
+    async def _fake_sdk(self, itf_obj, params, codes):
+        calls.append(params["symbol"])
+        return [{"日期": "2024-01-02", "收盘": "10.50"}]
+
+    monkeypatch.setattr(MarketDataSyncService, "_fetch_sdk_raw", _fake_sdk)
+    monkeypatch.setattr("app.services.market_daily_price_sync._BACKFILL_BACKOFFS", (0,))
+
+    msg = await run_pending_price_backfill(session)
+    assert "已有回补任务正在执行中" in msg
+    assert calls == [], "抢不到租约不得发起任何抓取请求"
+
+
+@pytest.mark.asyncio
+async def test_acquire_backfill_lease_waits_for_release(session):
+    """「取消 → 立刻重新触发」：老任务要跑到下一个取消检查点才释放租约，等待应当能等到。
+
+    有界等待是**手动首批**专用（路由传 ``_BACKFILL_LEASE_WAIT_SECONDS``）：不等会让新首批
+    命中「租约占用」直接跳过 → 当天什么都不跑、要等次日 15:05 续跑。
+    """
+    from app.db.database import AsyncSessionLocal  # 取 conftest 已 patch 的 sessionmaker
+
+    await _seed_backfill_run(session)
+    settings = (await session.execute(select(DividendYieldSettings).limit(1))).scalar_one()
+    settings.price_backfill_running = True  # 模拟老任务仍占用
+    await session.commit()
+
+    # 无等待：立刻返回 False（保持「抢不到即跳过」的原语义）
+    assert await _acquire_backfill_lease(session) is False
+
+    async def _release_later() -> None:
+        await asyncio.sleep(0.3)  # 模拟老任务跑到下一个检查点后中止
+        async with AsyncSessionLocal() as s2:
+            await s2.execute(
+                text("UPDATE dividend_yield_settings SET price_backfill_running = false")
+            )
+            await s2.commit()
+
+    releaser = asyncio.create_task(_release_later())
+    try:
+        assert await _acquire_backfill_lease(session, timeout=5.0) is True
+    finally:
+        await releaser
+
+
+@pytest.mark.asyncio
+async def test_run_pending_price_backfill_lease_released_on_success_and_breaker(
+    session, monkeypatch
+):
+    """租约必须在**成功**与**熔断**两条路径都释放，否则此后所有回补被永久挡住。"""
+    await _seed_backfill_run(session)
+
+    async def _ok(self, itf_obj, params, codes):
+        return [{"日期": "2024-01-02", "收盘": "10.50"}]
+
+    monkeypatch.setattr(MarketDataSyncService, "_fetch_sdk_raw", _ok)
+    monkeypatch.setattr("app.services.market_daily_price_sync._BACKFILL_BACKOFFS", (0,))
+    monkeypatch.setattr("app.services.market_daily_price_sync._BACKFILL_COOLDOWN_MIN", 0)
+    monkeypatch.setattr("app.services.market_daily_price_sync._BACKFILL_COOLDOWN_MAX", 0)
+
+    await run_pending_price_backfill(session)
+    cur = (await session.execute(select(DividendYieldSettings).limit(1))).scalar_one()
+    assert cur.price_backfill_running is False, "成功路径必须释放租约"
+
+    # 熔断路径：连续失败达阈值即中止（RuntimeError 向上抛），finally 仍须释放租约
+    cur.price_backfill_start_date = date(2024, 1, 1)
+    cur.price_backfill_used_today = 0
+    await session.commit()
+
+    async def _always_fail(self, itf_obj, params, codes):
+        raise RuntimeError("数据源定向拒连（模拟）")
+
+    monkeypatch.setattr(MarketDataSyncService, "_fetch_sdk_raw", _always_fail)
+    monkeypatch.setattr("app.services.market_daily_price_sync._BACKFILL_FAILURE_BREAKER", 1)
+
+    with pytest.raises(RuntimeError):
+        await run_pending_price_backfill(session)
+    cur2 = (await session.execute(select(DividendYieldSettings).limit(1))).scalar_one()
+    assert cur2.price_backfill_running is False, "熔断/异常路径也必须释放租约"
 
