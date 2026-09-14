@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import date
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
@@ -30,6 +31,7 @@ from app.modules.dividend_yield.settings_router import load_settings
 from app.services.auth import CurrentUser, require_admin
 from app.services.log import record
 from app.services.market_daily_price_sync import (
+    _BACKFILL_LEASE_WAIT_SECONDS,
     _select_pending_backfill_masters,
     _skip_exchange_for_source,
     clear_price_backfill_gaps,
@@ -122,7 +124,12 @@ async def _run_price_backfill() -> None:
     from app.services.market_daily_price_sync import run_pending_price_backfill
 
     async with AsyncSessionLocal() as session:
-        await run_pending_price_backfill(session)
+        # 手动首批**有界等待**租约：「取消 → 立刻重新触发」时老任务要跑到下一个取消
+        # 检查点才中止释放，不等就会命中「租约占用」直接跳过 → 当天什么都不跑。
+        # 每日续跑链路不传（默认 0），它没空位就下次再说，不值得等。
+        await run_pending_price_backfill(
+            session, wait_for_lease=_BACKFILL_LEASE_WAIT_SECONDS
+        )
 
 
 @router_backfill.post("/backfill-prices")
@@ -218,6 +225,10 @@ async def backfill_prices(
     # 启动在途任务：写入起点日期并落库（此后每日收盘价抓取按剩余额度续跑）
     start = body.start_date
     settings.price_backfill_start_date = start
+    # 世代标记：每次触发都换一个新 UUID（与写入起点同事务）。在途任务启动时快照它，
+    # 循环里比对不一致即协作式中止——「被取消」（本列清 NULL）与「被新一次触发取代」
+    # （换成另一个 UUID）两种作废状态都能被识别，避免取消后立刻重新触发时老批次误判。
+    settings.price_backfill_run_token = str(uuid4())
     # 起点 / 判定基准已变 → 清空严格补洞状态表（``market_price_backfill_gaps``），
     # 与写入起点**同一事务**提交。两重作用：① 旧洞（含 exhausted 的）全部失效、须按新起点
     # 重建；② 给「数据源长期给不到的日期」一条显式重试路径——gap 模式下 attempts 达阈值会置
@@ -275,9 +286,16 @@ async def cancel_price_backfill(
     有了取消，「已有在途任务」的 400 与前端置灰才不会把人锁死，形成闭环：
     进行中 → 取消 → 重新填起点触发。
 
-    **能力边界（诚实说明）**：本端点仅清标记，**不中断正在运行的后台批次**——
-    当前批次会跑完本批（≤ quota 只）后自然停止，此后每日收盘价抓取不再续跑。
-    已写入的日线行一律保留（upsert 幂等，重跑自动跳过已覆盖证券）。
+    **取消语义（协作式，迁移 0024）**：本端点清在途标记 + **清世代标记**
+    （``price_backfill_run_token`` → NULL）。正在运行的批次会在下一个取消检查点
+    （每只证券开始前 / 退避 sleep 之后 / 批间冷却分片之间）察觉并**优雅中止**：
+    不再抓取剩余证券，已写入的日线行一律保留（upsert 幂等，重跑自动跳过已覆盖证券）。
+    此后每日收盘价抓取因在途标记已空而不再续跑。
+
+    诚实边界：若此刻正卡在某一只的抓取里（``asyncio.to_thread`` 内的同步 HTTP 无法被
+    asyncio 取消），这一只会跑完（≤ ``_BACKFILL_FETCH_TIMEOUT`` 秒）后才中止；
+    另注：本端点**不释放执行租约**（``price_backfill_running``）——它仍由中止中的
+    那个 run 在自己的 ``finally`` 里释放，避免此处释放后另一个 run 立刻插进来并发。
 
     **同时清空严格补洞状态**：与清在途标记**同一事务**清空 ``market_price_backfill_gaps``
     （旧洞随取消一并失效、须由下次触发重建；也顺带重置 exhausted 状态）。
@@ -293,6 +311,10 @@ async def cancel_price_backfill(
     cancelled = settings.price_backfill_start_date
     settings.price_backfill_start_date = None
     settings.price_backfill_last_error = None
+    # 世代标记清空：正在跑的批次据此识别「自己已被取消」并优雅中止（见本函数文档串）。
+    # 若之后再次触发，POST 会写入**新的** UUID，即便老批次此刻还没跑到检查点也能识别为
+    # 「被取代」而中止——不会与新批次并发抓同一池子。
+    settings.price_backfill_run_token = None
     # 与清在途标记同事务清空严格补洞状态（同 POST：起点/基准失效 + 重置 exhausted 重试路径）
     await clear_price_backfill_gaps(db)
     # rebuild 游标同理清空（取消即放弃本轮重抓进度）

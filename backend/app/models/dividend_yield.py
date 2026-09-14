@@ -308,6 +308,26 @@ class DividendYieldSettings(Base, TimestampMixin):
     price_backfill_rebuild_cursor: Mapped[Optional[str]] = mapped_column(
         String(36), nullable=True
     )
+    # 在途回补的**世代标记**（迁移 0024）：每次触发回补（POST /backfill-prices）写入新 UUID，
+    # 取消（DELETE）清空为 NULL。运行中的回补任务启动时快照自己的 token，循环里比对不一致
+    # 即优雅中止（见 backfill_historical 的取消检查点）。
+    # 为何不直接看「在途标记是否为 NULL」：取消后标记被清空，但用户可立刻重新触发 → 标记
+    # 又变成非 NULL，老批次无法区分「这是我自己的标记」还是「新批次的」→ 误判继续跑完，
+    # 且与新批次并发。世代标记让「被取消」与「被取代」两种作废状态都能被识别。
+    price_backfill_run_token: Mapped[Optional[str]] = mapped_column(
+        String(36), nullable=True
+    )
+    # 执行占用租约（迁移 0024）：true = 此刻正有一个回补 run 在抓取。
+    # 单轮回补可跑数小时（pending 上限 = 当日剩余额度，10 只/批 + 60~120s 批间冷却），
+    # 而 settings 行锁在第一次 commit 就已释放，拦不住「手动首批未跑完 + 15:05 每日续跑」
+    # 的并发。本租约保证同一时刻只有一个 run（抢不到即跳过，不发请求；异常/熔断亦在
+    # finally 释放）。进程重启时由应用启动流程复位，防异常退出导致租约卡死。
+    price_backfill_running: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=false(),
+    )
     # 历史行情回补「复权方式」：``""``（不复权，默认，与既有行为零差异）| ``qfq``（前复权）
     # | ``hfq``（后复权）。回补抓取时作为 akshare ``stock_zh_a_hist`` 的 ``adjust`` 入参，
     # 真正驱动历史回补（此前该参数硬编码为空串）。存量行由 server_default='' 覆盖

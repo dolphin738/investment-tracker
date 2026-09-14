@@ -15,6 +15,7 @@ import asyncio
 import logging
 import random
 import re
+import time
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Optional
@@ -84,6 +85,17 @@ _BACKFILL_FETCH_TIMEOUT = 60.0
 # 首次入批可能因当日额度/网络抖动没跑成，第二次仍填不上基本可判定该日数据确实取不到
 # （停牌、退市后无行情等），继续重试只会每天重复消耗额度。
 _GAP_MAX_ATTEMPTS = 2
+# 「批间冷却」的分片长度（秒）：冷却整段 sleep 会让「取消在途回补」最长等 120s 才被察觉，
+# 改为每 _BACKFILL_COOLDOWN_SLICE 秒醒一次复查世代标记（见 _sleep_with_cancel_check）。
+# 成本只是冷却期内每片一次单行 SELECT（单行配置表，可忽略）。
+_BACKFILL_COOLDOWN_SLICE = 5.0
+# 手动首批抢不到执行租约时的**有界等待**上界（秒）与轮询间隔。
+# 场景：管理员「取消 → 立刻用新起点重新触发」。此时老任务要跑到下一个取消检查点才中止并
+# 释放租约（典型 ≤ 单只耗时，最坏 ≈ 抓取超时 60s + 一次退避 60s），而新首批几乎立刻启动 →
+# 若不等待就会命中「租约占用」直接跳过，结果是**当天什么都不跑、要等次日 15:05 续跑**。
+# 上界取 180s 覆盖最坏中止延迟；超期仍拿不到则按原语义跳过（绝不放行并发）。
+_BACKFILL_LEASE_WAIT_SECONDS = 180.0
+_LEASE_RETRY_INTERVAL = 1.0
 
 # 旧列兜底：仅用于**未声明** date/price 槽的历史 SDK 接口（未配置 response_fields 时的
 # 旧列合成路径，此时 date 槽为空）。新注册接口应声明 date/price 槽，取值走 resolve_fields；
@@ -414,6 +426,7 @@ async def backfill_historical(
     *,
     force: bool = False,
     replace: bool = False,
+    run_token: Optional[str] = None,
     adjust: str = "",
 ) -> str:
     """用 akshare ``stock_zh_a_hist`` 回补证券历史日线，按证券独立 commit、断点续跑。
@@ -433,6 +446,11 @@ async def backfill_historical(
       形成净数据丢失。与 ``force`` 的区别：``force`` 只是「不跳过」（仍为覆盖式 upsert，
       未返回的日期原样保留），``replace`` 才是清空重写。源返回空 / 全部行解析失败时
       **不删**，见 ``_upsert_hist_rows``（避免空响应误清该证券整段数据且无从恢复）；
+    - ``run_token``（在途回补的世代标记，迁移 0024）非空时启用**协作式取消**：在「每只证券
+      开始前」「退避 sleep 之后」「批间冷却分片之间」复查该标记，一旦与启动时快照不一致
+      （被取消 → NULL；被新一次触发取代 → 另一个 UUID）即**优雅中止**——已写入的行保留、
+      剩余证券不再抓取、**不抛异常**（避免被当成失败写 ``last_error``）。为 ``None`` 表示
+      非在途链路（如定时任务按 ``backfill_start`` 参数直接调用），完全不检查，零行为变更；
     - burst≈10 只/批 + 批间冷却 60–120s + 指数退避 60/120/300s（决策 A15），每批记进度日志；
     - 单只回补请求另有兜底超时上界 ``_BACKFILL_FETCH_TIMEOUT``（秒），防止接口 timeout=NULL
       时单只卡死无限拖住整轮回补（超时由退避重试分支接住）；
@@ -464,6 +482,13 @@ async def backfill_historical(
 
     for start in range(0, total, _BACKFILL_BURST):
         for mid in master_ids[start : start + _BACKFILL_BURST]:
+            # 取消检查点 ①：每只证券开始前。放在「每只」而非「每批」——一个 burst 是 10 只，
+            # 放批首会让取消最长多等一整批（数分钟）。
+            if not await _backfill_run_still_valid(session, run_token):
+                await _commit_burst_quota(
+                    session, len(master_ids[start : start + _BACKFILL_BURST])
+                )
+                return _abort_summary(done, written, skipped)
             sec = await session.get(Security, mid)
             if sec is None:
                 # 不重置 consecutive_failures：该分支未发任何请求，不携带连通性信息，
@@ -535,6 +560,13 @@ async def backfill_historical(
                         sec.code, attempt, len(_BACKFILL_BACKOFFS), exc, wait,
                     )
                     await asyncio.sleep(wait)
+                    # 取消检查点 ②：退避睡眠之后。退避合计最长 60+120+300=480s，
+                    # 若只在「每只开始前」检查，取消最长要等一整轮退避跑完。
+                    if not await _backfill_run_still_valid(session, run_token):
+                        await _commit_burst_quota(
+                            session, len(master_ids[start : start + _BACKFILL_BURST])
+                        )
+                        return _abort_summary(done, written, skipped)
                     continue
                 hist_written = await _upsert_hist_rows(
                     session, mid, rows, source,
@@ -565,16 +597,9 @@ async def backfill_historical(
                     # 熔断中止前补记**本批**额度：循环末尾那句 burst 记账在 raise 之后不会执行，
                     # 不补记会让熔断批整体漏计（当日额度被低估，与「成败都计」口径不符）。
                     # 与末尾同口径：按本批分配只数计（含跳过/失败）。
-                    try:
-                        await _bump_used_today(
-                            session, len(master_ids[start : start + _BACKFILL_BURST])
-                        )
-                        await session.commit()
-                    except Exception:  # noqa: BLE001  记账失败不得掩盖熔断原因
-                        logger.warning(
-                            "熔断前回补额度记账失败（不影响熔断判定）", exc_info=True
-                        )
-                        await session.rollback()
+                    await _commit_burst_quota(
+                        session, len(master_ids[start : start + _BACKFILL_BURST])
+                    )
                     raise RuntimeError(
                         f"回补连续失败熔断：连续失败 {consecutive_failures} 只"
                         f"（阈值 {_BACKFILL_FAILURE_BREAKER}），进度 {done + 1}/{total}，"
@@ -594,7 +619,10 @@ async def backfill_historical(
             cooldown = random.uniform(_BACKFILL_COOLDOWN_MIN, _BACKFILL_COOLDOWN_MAX)
             next_at = (datetime.now() + timedelta(seconds=cooldown)).strftime("%H:%M")
             logger.info("已回补 %d/%d，下一冷却到 %s（%.0fs）", done, total, next_at, cooldown)
-            await asyncio.sleep(cooldown)
+            # 取消检查点 ③：批间冷却分片复查 —— 整段 sleep 会让取消最长等 120s。
+            # 注意本 burst 额度已在上面记账，此处中止**不再**补记（避免双计）。
+            if await _sleep_with_cancel_check(session, run_token, cooldown):
+                return _abort_summary(done, written, skipped)
         else:
             logger.info("已回补 %d/%d，回补结束", done, total)
 
@@ -621,6 +649,111 @@ async def _bump_used_today(session, n: int) -> None:
         ),
         {"n": n},
     )
+
+
+def _abort_summary(done: int, written: int, skipped: int) -> str:
+    """协作式取消的中止摘要（**不抛异常**：取消是正常路径，不该被记成失败）。"""
+    return (
+        "回补已中止（世代标记失效：已被取消，或被新一次触发取代）："
+        f"已处理 {done} 只，写入行 {written}，跳过 {skipped} 只；"
+        "已写入的日线行一律保留，剩余证券未抓取"
+    )
+
+
+async def _commit_burst_quota(session, burst_n: int) -> None:
+    """把本 burst 的**分配只数**计入当日额度并立即提交（成败都计）。
+
+    与 ``_bump_used_today`` 的区别只是「提交 + 吞掉记账异常」：
+    中止路径（熔断 / 取消 / 被取代）上，记账失败不得掩盖真正的中止原因，故仅告警。
+    """
+    try:
+        await _bump_used_today(session, burst_n)
+        await session.commit()
+    except Exception:  # noqa: BLE001
+        await session.rollback()
+        logger.warning("回补额度记账失败（不影响本次中止原因）", exc_info=True)
+
+
+# --------------------------------------------------------------------------- #
+# 回补执行租约 + 世代标记（迁移 0024）：取消要真能停、同一时刻只允许一个 run
+# --------------------------------------------------------------------------- #
+async def _acquire_backfill_lease(session, *, timeout: float = 0.0) -> bool:
+    """抢占回补执行租约（``price_backfill_running``）；抢到返回 True。
+
+    为什么需要它：单轮回补可跑数小时（``pending`` 上限 = 当日剩余额度，10 只/批 +
+    60~120s 批间冷却），而入口那把 settings 行锁在**第一次 commit 就已释放**，拦不住
+    「管理员手动首批尚未跑完、15:05 每日收盘价抓取又并发起一个 run」——两者会各选一批、
+    重复抓取同一池子且额度双计。
+
+    用一条条件 UPDATE 原子抢占：``WHERE running = false`` → rowcount 1 即抢到；
+    rowcount 0 表示已有 run 在执行（或上次异常退出的残留，由应用启动流程复位）。
+    本表恒单行，故**不带主键 WHERE**（契约同 ``_bump_used_today``）。
+
+    ``timeout > 0`` 时按 ``_LEASE_RETRY_INTERVAL`` 轮询重试到上界：仅**手动首批**
+    需要（见 ``_BACKFILL_LEASE_WAIT_SECONDS``），每日续跑等不及也没必要等，用默认 0。
+    """
+    deadline = time.monotonic() + max(float(timeout), 0.0)
+    while True:
+        res = await session.execute(
+            text(
+                "UPDATE dividend_yield_settings SET price_backfill_running = true "
+                "WHERE price_backfill_running = false"
+            )
+        )
+        await session.commit()
+        if max(int(res.rowcount or 0), 0) == 1:
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        await asyncio.sleep(_LEASE_RETRY_INTERVAL)
+
+
+async def _release_backfill_lease(session) -> None:
+    """释放回补执行租约（正常 / 熔断 / 取消都在 ``finally`` 调用，防止卡死）。"""
+    await session.execute(
+        text("UPDATE dividend_yield_settings SET price_backfill_running = false")
+    )
+    await session.commit()
+
+
+async def _backfill_run_still_valid(session, run_token: Optional[str]) -> bool:
+    """本次在途回补的**世代标记**是否仍然有效（未被取消、也未被新一次触发取代）。
+
+    - ``run_token`` 为 ``None``：非在途链路（如定时任务带 ``backfill_start`` 参数直接
+      调 ``backfill_historical``），永不做取消判定，保持既有行为；
+    - 当前库值 == 快照值 → 有效；
+    - 当前库值为 ``NULL`` → 已被取消；为另一个 UUID → 已被新一次触发取代。
+
+    为何不直接看「在途标记是否为 NULL」：取消后该标记被清空，但用户可**立刻重新触发**，
+    标记随即又变成非 NULL —— 老批次无法区分「这是我自己的」还是「新批次的」。
+    """
+    if run_token is None:
+        return True
+    current = await session.scalar(
+        select(DividendYieldSettings.price_backfill_run_token).limit(1)
+    )
+    return current == run_token
+
+
+async def _sleep_with_cancel_check(
+    session, run_token: Optional[str], seconds: float
+) -> bool:
+    """分片 sleep 并在片间复查世代标记；**应中止**返回 True。
+
+    整段 ``asyncio.sleep`` 会让取消最长等到冷却结束（≤120s）；分片后最迟
+    ``_BACKFILL_COOLDOWN_SLICE`` 秒即可响应。``run_token`` 为 None 时退化为普通 sleep。
+    """
+    if run_token is None:
+        await asyncio.sleep(seconds)
+        return False
+    waited = 0.0
+    while waited < seconds:
+        step = min(_BACKFILL_COOLDOWN_SLICE, seconds - waited)
+        await asyncio.sleep(step)
+        waited += step
+        if not await _backfill_run_still_valid(session, run_token):
+            return True
+    return False
 
 
 async def _set_last_error(session, message: Optional[str]) -> None:
@@ -1079,10 +1212,17 @@ async def clear_price_backfill_gaps(session) -> int:
     return max(int(res.rowcount or 0), 0)
 
 
-async def run_pending_price_backfill(session) -> str:
+async def run_pending_price_backfill(
+    session, *, wait_for_lease: float = 0.0
+) -> str:
     """在途回补任务：按每日额度跑一批未覆盖证券的历史日线；补完即清空在途状态。
 
     供两处复用：路由 ``POST /backfill-prices`` 首批、每日「收盘价抓取」完成后续跑。
+
+    ``wait_for_lease``：抢不到执行租约时的等待上界（秒），**仅手动首批传**
+    （``_BACKFILL_LEASE_WAIT_SECONDS``）——「取消后立刻重新触发」时老任务要跑到下一个
+    取消检查点才释放租约，等待可避免新首批直接跳过导致当天不跑。每日续跑用默认 0：
+    它本来就是「有空位就补、没空位下次再说」，不值得等。
 
     语义（严格）：
     1. 读 ``dividend_yield_settings``：无行或 ``price_backfill_start_date`` 为空 → 无在途
@@ -1191,85 +1331,100 @@ async def run_pending_price_backfill(session) -> str:
             session, start_date, remaining, skip_exchange
         )
 
-    if not pending:
-        # 全部已覆盖 → 补完，清空在途状态（终态），此后不再跑。
-        # 终态不再静默：gap 模式下把已放弃（exhausted）的洞数一并告知——这些洞是数据源长期
-        # 未提供的日期，attempts 达阈值后不再入批；重新触发回补（POST /backfill-prices 会
-        # 清空洞表）即可重置状态重试。
-        exhausted_note = ""
-        if mode == PRICE_BACKFILL_MODE_GAP:
-            exhausted_count = int(
-                await session.scalar(
-                    select(func.count())
-                    .select_from(MarketPriceBackfillGap)
-                    .where(MarketPriceBackfillGap.status == GAP_STATUS_EXHAUSTED)
-                )
-                or 0
-            )
-            if exhausted_count > 0:
-                exhausted_note = (
-                    f"；另有 {exhausted_count} 个洞因数据源长期未提供已放弃（exhausted）；"
-                    "重新触发回补可重置状态重试"
-                )
-        settings.price_backfill_start_date = None
-        settings.price_backfill_last_error = None
-        # rebuild：游标走到池尾即完成 → 一并清游标（下次重新触发从头开始）
-        settings.price_backfill_rebuild_cursor = None
-        await session.commit()
-        if mode == PRICE_BACKFILL_MODE_REBUILD:
-            return "全量重抓已完成（已走完证券池），在途回补任务已结束"
-        return (
-            f"回补已完成（{mode} 模式）：全部证券均已覆盖、无待补洞，"
-            f"在途回补任务已结束{exhausted_note}"
-        )
-
-    # 新一轮尝试：先清掉上一次遗留的失败原因（stderr/app_logs 仍保留历史，
-    # 这里只管当前在途标记的展示；失败原因回写见下方 except）。
-    await _set_last_error(session, None)
-    # gap 模式：本批入批即 attempts+1（护栏二，达阈值置 exhausted）。
-    # 与清 last_error 同批提交——即便下面回补失败/熔断，这一轮尝试也已被计数，
-    # 避免同一批洞在数据源长期无数据时被无限重试、每天白烧额度。
-    if gap_active:
-        await _bump_gap_attempts(session, pending)
-    await session.commit()
+    # 执行占用租约：同一时刻只允许一个回补 run。
+    # 单轮可跑数小时（pending 上限 = 当日剩余额度，10 只/批 + 60~120s 批间冷却），
+    # 而入口那把 settings 行锁在**第一次 commit 就已释放**，拦不住「管理员手动首批尚未跑完
+    # + 15:05 每日收盘价抓取又并发起一个 run」——两者会各选一批、重复抓取同一池子且额度双计。
+    if not await _acquire_backfill_lease(session, timeout=wait_for_lease):
+        logger.info("回补执行租约已被占用（已有 run 在执行），本次跳过、不发起请求")
+        return "已有回补任务正在执行中（同一时刻只允许一个 run），本次跳过"
     try:
-        batch_note = await backfill_historical(
-            session,
-            itf,
-            pending,
-            start_date,
-            force=force,
-            replace=rebuild_active,
-            adjust=(settings.price_backfill_adjust or ""),
+        if not pending:
+            # 全部已覆盖 → 补完，清空在途状态（终态），此后不再跑。
+            # 终态不再静默：gap 模式下把已放弃（exhausted）的洞数一并告知——这些洞是数据源
+            # 长期未提供的日期，attempts 达阈值后不再入批；重新触发回补（POST
+            # /backfill-prices 会清空洞表）即可重置状态重试。
+            exhausted_note = ""
+            if mode == PRICE_BACKFILL_MODE_GAP:
+                exhausted_count = int(
+                    await session.scalar(
+                        select(func.count())
+                        .select_from(MarketPriceBackfillGap)
+                        .where(MarketPriceBackfillGap.status == GAP_STATUS_EXHAUSTED)
+                    )
+                    or 0
+                )
+                if exhausted_count > 0:
+                    exhausted_note = (
+                        f"；另有 {exhausted_count} 个洞因数据源长期未提供已放弃"
+                        "（exhausted）；重新触发回补可重置状态重试"
+                    )
+            settings.price_backfill_start_date = None
+            settings.price_backfill_last_error = None
+            # rebuild：游标走到池尾即完成 → 一并清游标（下次重新触发从头开始）
+            settings.price_backfill_rebuild_cursor = None
+            await session.commit()
+            if mode == PRICE_BACKFILL_MODE_REBUILD:
+                return "全量重抓已完成（已走完证券池），在途回补任务已结束"
+            return (
+                f"回补已完成（{mode} 模式）：全部证券均已覆盖、无待补洞，"
+                f"在途回补任务已结束{exhausted_note}"
+            )
+
+        # 新一轮尝试：先清掉上一次遗留的失败原因（stderr/app_logs 仍保留历史，
+        # 这里只管当前在途标记的展示；失败原因回写见下方 except）。
+        await _set_last_error(session, None)
+        # gap 模式：本批入批即 attempts+1（护栏二，达阈值置 exhausted）。
+        # 与清 last_error 同批提交——即便下面回补失败/熔断，这一轮尝试也已被计数，
+        # 避免同一批洞在数据源长期无数据时被无限重试、每天白烧额度。
+        if gap_active:
+            await _bump_gap_attempts(session, pending)
+        await session.commit()
+        try:
+            batch_note = await backfill_historical(
+                session,
+                itf,
+                pending,
+                start_date,
+                force=force,
+                replace=rebuild_active,
+                # 世代标记：让在途任务能在循环里识别「自己已被取消 / 被新一次触发取代」，
+                # 从而协作式中止（详见 backfill_historical 的取消检查点）。
+                run_token=settings.price_backfill_run_token,
+                adjust=(settings.price_backfill_adjust or ""),
+            )
+        except RuntimeError as exc:
+            # 熔断/接口不可达：把失败原因回写 settings，供前端在「在途」旁直接展示；
+            # 仍重抛，使 track_task 的 app_logs 落库链路（core/bg.py）继续生效。
+            # 用原始 UPDATE 而非 ORM 对象：backfill_historical 内部已 rollback，
+            # 避免依赖可能过期的会话对象状态。
+            await _set_last_error(session, str(exc)[:512])
+            await session.commit()
+            raise
+        # gap 模式：清掉本批已填上的洞（洞即数据本身，补上即删、不留终态）；
+        # 未填上的保持 pending，attempts 已在入批时 +1，达阈值即 exhausted（护栏二）。
+        if gap_active:
+            await reconcile_price_backfill_gaps(session)
+            await session.commit()
+        # rebuild 模式：本批**成功**后推进游标到最后一个 master_id（按 master_id 升序），
+        # 下一批从这里继续。熔断/异常时上面 except 直接抛出 → 游标不推进 → 该批下轮重试。
+        if rebuild_active:
+            settings.price_backfill_rebuild_cursor = pending[-1]
+            await session.commit()
+        # 每 burst 递增当日已用已由 backfill_historical 内结算（成败都计）；此处刷新内存对象
+        # 以回显累计值（在途任务期间前端每 3s 轮询 settings 即可看到实时进度）。
+        await session.refresh(settings)
+        # 剩余额度按**刷新后**的已用值重算：上面那个 remaining 是本批开始前的旧值，
+        # 直接回显会与「已用 X/quota」不自洽（本批跑完额度已经变了）。
+        remaining_after = max(quota - (settings.price_backfill_used_today or 0), 0)
+        return (
+            f"在途回补本批 {len(pending)} 只（{mode} 模式，今日剩余额度 {remaining_after}，"
+            f"已用 {settings.price_backfill_used_today}/{quota}）：{batch_note}"
         )
-    except RuntimeError as exc:
-        # 熔断/接口不可达：把失败原因回写 settings，供前端在「在途」旁直接展示；
-        # 仍重抛，使 track_task 的 app_logs 落库链路（core/bg.py）继续生效。
-        # 用原始 UPDATE 而非 ORM 对象：backfill_historical 内部已 rollback，
-        # 避免依赖可能过期的会话对象状态。
-        await _set_last_error(session, str(exc)[:512])
-        await session.commit()
-        raise
-    # gap 模式：清掉本批已填上的洞（洞即数据本身，补上即删、不留终态）；
-    # 未填上的保持 pending，attempts 已在入批时 +1，达阈值即 exhausted（护栏二）。
-    if gap_active:
-        await reconcile_price_backfill_gaps(session)
-        await session.commit()
-    # rebuild 模式：本批**成功**后推进游标到最后一个 master_id（列表按 master_id 升序），
-    # 下一批从这里继续。熔断/异常时上面 except 直接抛出 → 游标不推进 → 该批下轮重试，不会漏抓。
-    if rebuild_active:
-        settings.price_backfill_rebuild_cursor = pending[-1]
-        await session.commit()
-    # 每 burst 递增当日已用已由 backfill_historical 内结算（成败都计）；此处刷新内存对象
-    # 以回显累计值（在途任务期间前端每 3s 轮询 settings 即可看到实时进度）。
-    await session.refresh(settings)
-    # 剩余额度按**刷新后**的已用值重算：上面那个 remaining 是本批开始前的旧值，
-    # 直接回显会与「已用 X/quota」不自洽（本批跑完额度已经变了）。
-    remaining_after = max(quota - (settings.price_backfill_used_today or 0), 0)
-    return (
-        f"在途回补本批 {len(pending)} 只（{mode} 模式，今日剩余额度 {remaining_after}，"
-        f"已用 {settings.price_backfill_used_today}/{quota}）：{batch_note}"
-    )
+    finally:
+        # 无论成功 / 熔断 / 异常 / 取消，都必须释放租约——否则此后所有回补（含每日续跑）
+        # 都会被永久挡住。异常退出（进程被杀）的残留由应用启动流程复位兜底。
+        await _release_backfill_lease(session)
 
 
 # --------------------------------------------------------------------------- #
