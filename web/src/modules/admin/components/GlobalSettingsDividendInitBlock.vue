@@ -189,7 +189,7 @@ function confirmCancelPrices(): void {
         v-if="priceBackfillInFlightDate"
         variant="outline"
         :disabled="cancellingPrices"
-        title="清除在途标记：正在运行的当前批次会跑完本批后停止，此后不再续跑，已补数据保留"
+        title="取消在途回补：正在抓取的这一只会跑完，随后立即停止且不再续跑，已补数据保留"
         @click="onCancelPrices"
       >
         <Loader2 v-if="cancellingPrices" class="mr-2 h-4 w-4 animate-spin" />
@@ -249,7 +249,7 @@ function confirmCancelPrices(): void {
       </AlertDialogContent>
     </AlertDialog>
 
-    <!-- 取消在途回补二次确认（与启动同构；说明能力边界：不中断当前批次） -->
+    <!-- 取消在途回补二次确认（协作式取消：当前一只跑完即停，不再等整批） -->
     <AlertDialog
       :open="cancelPricesConfirmOpen"
       @update:open="(o) => !o && (cancelPricesConfirmOpen = false)"
@@ -258,7 +258,7 @@ function confirmCancelPrices(): void {
         <AlertDialogHeader>
           <AlertDialogTitle>确认取消在途回补？</AlertDialogTitle>
           <AlertDialogDescription>
-            将清除在途标记（起点 {{ priceBackfillInFlightDate }}）。正在运行的当前批次会跑完本批后自然停止，此后每日收盘价抓取不再续跑；已补的数据一律保留，可随时用新起点重新触发。
+            将清除在途标记（起点 {{ priceBackfillInFlightDate }}）。正在抓取的这一只会跑完、随后立即停止，剩余证券不再抓取；此后每日收盘价抓取不再续跑。已补的数据一律保留，可随时用新起点重新触发。
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
