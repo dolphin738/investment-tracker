@@ -333,6 +333,86 @@ async def test_backfill_uses_declared_english_response_fields(session, monkeypat
     assert hit[0].close == Decimal("10.50")
 
 
+# ───────── 回补 replace（rebuild 全量重抓）：清空窗口后重建，不留源给不到的旧行 ─────────
+@pytest.mark.asyncio
+@pytest.mark.parametrize("replace,expect_dropped", [(True, True), (False, False)])
+async def test_backfill_replace_window_clears_stale_rows(
+    session, monkeypatch, replace, expect_dropped
+):
+    """守护 rebuild 语义：``replace=True`` 先清空窗口内既有日线再整段写入（不留旧数据）。
+
+    场景：库里存在源**不再返回**的日期（旧源 / 旧复权口径的残留）。
+    - ``replace=True``（rebuild）→ 该行必须被删掉（这就是「清空后重建」与 upsert 的分界）；
+    - ``replace=False``（legacy / gap 的 upsert）→ 该行必须原样保留。
+    两种口径共同保证：窗口**外**（早于起点）的行不受波及，窗口内源已返回的日期被覆盖为新值。
+    """
+    m = await _add_master(session, code="600000")
+    provider = SecuritiesDataProvider(
+        id=_uid(), name="akshare", access_method=QuoteProviderAccessMethod.SDK,
+        config={}, enabled=True,
+    )
+    itf = QuoteInterface(
+        id=_uid(), provider_id=provider.id, category_id=QUOTE_CAT_ID, name="东财历史",
+        endpoint="stock_zh_a_hist", http_method="GET", enabled=True, priority=1,
+        resp_code_field="代码", resp_price_field="收盘",
+        response_parse={}, params={},
+    )
+    session.add(provider)
+    await session.flush()  # 提供方先落库，接口 provider_id 外键才有归属
+    session.add(InterfaceCategory(id=QUOTE_CAT_ID, label="证券行情", system=True))
+    await session.flush()
+    session.add(itf)
+    # 预置既有日线（旧源）：01-02 源会返回（应被覆盖）、01-03 源不再返回（replace 下应被删）、
+    # 2023-12-29 早于起点 = 窗口外（任何模式都不得删）
+    session.add_all([
+        MarketSecurityDailyPrice(
+            master_id=m.id, trade_date=date(2024, 1, 2), close=Decimal("1.00"),
+            source="旧源",
+        ),
+        MarketSecurityDailyPrice(
+            master_id=m.id, trade_date=date(2024, 1, 3), close=Decimal("1.11"),
+            source="旧源",
+        ),
+        MarketSecurityDailyPrice(
+            master_id=m.id, trade_date=date(2023, 12, 29), close=Decimal("0.99"),
+            source="旧源",
+        ),
+    ])
+    await session.commit()
+
+    async def _fake_sdk(self, itf_obj, params, codes):
+        # 只返回 01-02：01-03 是「源如今给不到」的日期，正是要验证是否被清掉
+        return [{"日期": "2024-01-02", "收盘": "10.50"}]
+
+    monkeypatch.setattr(MarketDataSyncService, "_fetch_sdk_raw", _fake_sdk)
+    # 退避常量归零：mock 失败时也不真实 sleep（保持测试秒级）
+    monkeypatch.setattr("app.services.market_daily_price_sync._BACKFILL_BACKOFFS", (0,))
+
+    # force=True（rebuild/gap 的选批前提）+ 被测开关 replace
+    await backfill_historical(
+        session, itf, [m.id], date(2024, 1, 1), force=True, replace=replace
+    )
+
+    rows = {
+        r.trade_date: r
+        for r in (
+            await session.execute(
+                select(MarketSecurityDailyPrice).where(
+                    MarketSecurityDailyPrice.master_id == m.id
+                )
+            )
+        ).scalars().all()
+    }
+    # 窗口内源已返回的日期：被覆盖为新值（两种模式一致）
+    assert rows[date(2024, 1, 2)].close == Decimal("10.50")
+    assert rows[date(2024, 1, 2)].source == itf.name
+    # 窗口内源未返回的日期：replace 清掉、非 replace 保留 —— 这就是两种模式的分界
+    assert (date(2024, 1, 3) not in rows) is expect_dropped
+    # 窗口外（早于起点）：任何模式都不得删
+    assert rows[date(2023, 12, 29)].close == Decimal("0.99")
+    assert rows[date(2023, 12, 29)].source == "旧源"
+
+
 # ───────────────────────── 回补断点判定（P1-3，§6.2/A15） ─────────────────────────
 @pytest.mark.asyncio
 async def test_backfill_gap_security_not_skipped(session, monkeypatch):

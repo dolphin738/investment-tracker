@@ -20,6 +20,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Optional
 
 from sqlalchemy import exists, func, inspect, select, text
+from sqlalchemy import delete as sa_delete
 from sqlalchemy import update as sa_update
 
 from app.core.date_utils import today_app_tz
@@ -412,6 +413,7 @@ async def backfill_historical(
     start_date: date,
     *,
     force: bool = False,
+    replace: bool = False,
     adjust: str = "",
 ) -> str:
     """用 akshare ``stock_zh_a_hist`` 回补证券历史日线，按证券独立 commit、断点续跑。
@@ -423,6 +425,12 @@ async def backfill_historical(
       ``trade_date``，起点已覆盖 ``start_date`` 的证券跳过（无额外游标表）；
       ``force=True``（严格补洞 gap 模式）时**不做该跳过**——洞恰恰出现在「起点已覆盖」
       的证券上，不强制重抓同一区间就永远填不上；
+    - ``replace=True``（全量重抓 rebuild 模式）时**清空后重建**：每只证券写入前先删除其
+      ``[start_date, 今天]`` 窗口内的全部既有日线，再整段写入本次抓到的行——目的是
+      「不留旧数据」：源如今给不到的日期（停牌、源缺失）宁可空缺，也不残留旧源/旧复权
+      口径的值。与 ``force`` 的区别：``force`` 只是「不跳过」（仍为覆盖式 upsert，未返回
+      的日期原样保留），``replace`` 才是清空重写。源返回空 / 全部行解析失败时**不删**，
+      见 ``_upsert_hist_rows``（避免空响应误清该证券整段数据且无从恢复）；
     - burst≈10 只/批 + 批间冷却 60–120s + 指数退避 60/120/300s（决策 A15），每批记进度日志；
     - 单只回补请求另有兜底超时上界 ``_BACKFILL_FETCH_TIMEOUT``（秒），防止接口 timeout=NULL
       时单只卡死无限拖住整轮回补（超时由退避重试分支接住）；
@@ -522,6 +530,9 @@ async def backfill_historical(
                 hist_written = await _upsert_hist_rows(
                     session, mid, rows, source,
                     date_field=hist_date_field, price_field=hist_price_field,
+                    # rebuild 模式：清空 [起点, 今天] 后重建（不留旧源/旧复权口径的数据）；
+                    # 其余模式恒 None → 纯 upsert，绝不删既有行。
+                    replace_window=(start_date, today) if replace else None,
                 )
                 await session.commit()
                 written += hist_written
@@ -622,13 +633,20 @@ async def _upsert_hist_rows(
     *,
     date_field: Optional[CompiledField] = None,
     price_field: Optional[CompiledField] = None,
+    replace_window: Optional[tuple[date, date]] = None,
 ) -> int:
-    """把历史日线返回行幂等 upsert 进 ``market_security_daily_prices``，返回写入行数。
+    """把历史日线返回行写进 ``market_security_daily_prices``，返回写入行数。
 
     取值优先级：优先按接口声明的 ``date``/``price`` 槽（``resolve_fields`` 编译的
     ``CompiledField``，兼容任意响应列名，如腾讯源的 ``date``/``close``）；未声明对应槽
     （``date_field``/``price_field`` 为 ``None``，存量未配置 ``response_fields`` 的 SDK 接口）
     时兜底旧中文列名（``日期``/``收盘``）。
+
+    ``replace_window``（闭区间 ``(起, 止)``）为 ``rebuild`` 模式的「清空后重建」语义：
+    写入前先删除本证券该窗口内的**全部既有日线**，再整段写入本次抓到的行——目的是
+    **不留旧数据**：源如今给不到的日期（停牌、源缺失）宁可空缺，也不残留旧源/旧复权
+    口径的值。``None``（默认，legacy / gap 模式）保持纯 upsert：命中即覆盖、未命中才新增，
+    绝不删除既有行。
     """
     if not rows:
         return 0
@@ -651,6 +669,17 @@ async def _upsert_hist_rows(
             continue
     if not trace:
         return 0
+    if replace_window is not None:
+        # 清空后重建：先删窗口内既有行（含旧源/旧复权口径的），再整段写入。
+        # 安全性：本行以下才执行删除，故「源返回空 / 全部行解析失败」时（上面两处 return 0）
+        # **不会删**——避免因一次空响应/解析异常把该证券整段数据清空且无从恢复。
+        await session.execute(
+            sa_delete(MarketSecurityDailyPrice).where(
+                MarketSecurityDailyPrice.master_id == master_id,
+                MarketSecurityDailyPrice.trade_date >= replace_window[0],
+                MarketSecurityDailyPrice.trade_date <= replace_window[1],
+            )
+        )
     existing = {
         e.trade_date: e
         for e in (
@@ -1115,10 +1144,12 @@ async def run_pending_price_backfill(session) -> str:
     # - legacy（存量默认）：原「起点未覆盖」口径——起点一覆盖就整只跳过，中间空洞不补；
     # - gap（严格补洞）：按交易日历逐日比对，把「起点已覆盖但中间缺日」的证券重新纳入；
     #   交易日历不覆盖回补窗口时无从判定洞 → 回落 legacy（护栏三），不静默空转；
-    # - rebuild（全量重抓）：不做覆盖度筛选，按 master_id 游标推进全池重抓（统一复权口径等
-    #   「整体重算」场景），游标走到池尾即终态。
+    # - rebuild（全量重抓）：不做覆盖度筛选，按 master_id 游标推进全池重抓；**清空后重建**
+    #   （replace=True：先删该证券窗口内既有日线再整段写入，不留旧源/旧复权口径的数据），
+    #   游标走到池尾即终态。
     mode = settings.price_backfill_mode or PRICE_BACKFILL_MODE_LEGACY
-    # gap / rebuild 都须强制重抓：前者洞就在「起点已覆盖」的证券上；后者目标就是覆盖已有行。
+    # gap 只须「不跳过」（force），rebuild 须「清空重写」（replace）：前者洞在「起点已覆盖」
+    # 的证券上、未返回的日期要保留；后者目的就是不留任何旧数据。
     force = False
     gap_active = False
     rebuild_active = False
@@ -1197,6 +1228,7 @@ async def run_pending_price_backfill(session) -> str:
             pending,
             start_date,
             force=force,
+            replace=rebuild_active,
             adjust=(settings.price_backfill_adjust or ""),
         )
     except RuntimeError as exc:

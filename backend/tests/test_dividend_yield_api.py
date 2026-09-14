@@ -871,7 +871,7 @@ async def test_backfill_prices_triggers_async_when_configured(session, client, m
     # force：gap 模式的强制重抓开关（默认 False = legacy 口径），桩须接受该关键字参数；
     # adjust：回补复权方式（迁移 0022 新增），桩亦须接受（keyword-only）。
     async def _noop(
-        session, itf, master_ids, start_date, *, force: bool = False, adjust: str = ""
+        session, itf, master_ids, start_date, *, force: bool = False, replace: bool = False, adjust: str = ""
     ):
         captured.append((itf.id, list(master_ids), start_date))
         return "noop"
@@ -934,7 +934,7 @@ async def test_backfill_prices_trigger_clears_gap_state(session, client, monkeyp
     import app.services.market_daily_price_sync as mds
 
     async def _noop(
-        session, itf, master_ids, start_date, *, force: bool = False, adjust: str = ""
+        session, itf, master_ids, start_date, *, force: bool = False, replace: bool = False, adjust: str = ""
     ):
         return "noop"
 
@@ -988,7 +988,7 @@ async def test_backfill_prices_trigger_resets_rebuild_cursor(session, client, mo
     import app.services.market_daily_price_sync as mds
 
     async def _noop(
-        session, itf, master_ids, start_date, *, force: bool = False, adjust: str = ""
+        session, itf, master_ids, start_date, *, force: bool = False, replace: bool = False, adjust: str = ""
     ):
         return "noop"
 
