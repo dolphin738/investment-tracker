@@ -9,6 +9,7 @@
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+import { jsonFieldValue, setJsonKey } from '@/modules/admin/utils/task-params';
 
 export interface TaskParamField {
   key: string;
@@ -30,37 +31,9 @@ const emit = defineEmits<{
   (e: 'update:param', key: string, value: string): void;
 }>();
 
-/** 把表单里存的 JSON 字符串解析成对象；非法时回退空对象 */
-function jsonObjectOf(raw: unknown): Record<string, number> {
-  if (typeof raw === 'string' && raw.trim()) {
-    try {
-      const o = JSON.parse(raw);
-      if (o && typeof o === 'object' && !Array.isArray(o)) {
-        return o as Record<string, number>;
-      }
-    } catch {
-      /* 忽略非法 JSON，回退空对象 */
-    }
-  }
-  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
-    return raw as Record<string, number>;
-  }
-  return {};
-}
-
-/** 取某级别当前值（数字转字符串，供 input 显示） */
-function jsonFieldValue(raw: unknown, sub: string): string {
-  const o = jsonObjectOf(raw);
-  const v = o[sub];
-  return v == null ? '' : String(v);
-}
-
-/** 更新某级别的值，写回 JSON 字符串并上抛 */
-function setJsonKey(fkey: string, sub: string, val: string): void {
-  const o = jsonObjectOf(props.params[fkey]);
-  if (val.trim() === '') delete o[sub];
-  else o[sub] = Number(val);
-  emit('update:param', fkey, JSON.stringify(o));
+/** 更新某级别的值：JSON 读写逻辑在 utils/task-params，这里只负责把结果上抛 */
+function onSetJsonKey(fkey: string, sub: string, val: string): void {
+  emit('update:param', fkey, setJsonKey(props.params[fkey], sub, val));
 }
 </script>
 
@@ -93,7 +66,7 @@ function setJsonKey(fkey: string, sub: string, val: string): void {
             :model-value="jsonFieldValue(params[f.key], sub)"
             type="number"
             :placeholder="String((f.default as Record<string, unknown>)?.[sub] ?? '')"
-            @update:model-value="(v: string | number) => setJsonKey(f.key, sub, String(v))"
+            @update:model-value="(v: string | number) => onSetJsonKey(f.key, sub, String(v))"
           />
         </div>
       </div>

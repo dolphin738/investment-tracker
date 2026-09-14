@@ -60,6 +60,7 @@ import {
 } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import TaskParamFields from '@/modules/admin/components/TaskParamFields.vue';
+import { jsonObjectOf } from '@/modules/admin/utils/task-params';
 import type {
   JobKind,
   JobRunStatus,
@@ -160,27 +161,6 @@ const hasLeveledParams = computed(() => {
   const keys = (currentHandler.value?.param_fields ?? []).map((f) => f.key);
   return keys.includes('retention_days') || keys.includes('max_rows');
 });
-
-/**
- * 解析 JSON 对象参数（type=json 且含 map_of）——表单内部以「JSON 字符串」承载；
- * 非法/空时回退空对象。字段级渲染（jsonFieldValue/setJsonKey）已抽至 TaskParamFields 组件。
- */
-function jsonObjectOf(raw: unknown): Record<string, number> {
-  if (typeof raw === 'string' && raw.trim()) {
-    try {
-      const o = JSON.parse(raw);
-      if (o && typeof o === 'object' && !Array.isArray(o)) {
-        return o as Record<string, number>;
-      }
-    } catch {
-      /* 忽略非法 JSON，回退空对象 */
-    }
-  }
-  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
-    return raw as Record<string, number>;
-  }
-  return {};
-}
 
 /** 打开时按目标初始化表单（新增取第一个可建类型；编辑取其参数）。同步执行，避免受控时序 */
 function initFormFor(t: ScheduleTask | null): void {
