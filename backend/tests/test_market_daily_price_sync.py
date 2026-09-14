@@ -276,6 +276,59 @@ async def test_backfill_strips_exchange_prefix_from_symbol(session, monkeypatch)
     assert "历史回补完成" in result
 
 
+# ─────────────── 回补按接口声明的 date/price 槽解析（修复腾讯源静默 0 写入） ───────────────
+@pytest.mark.asyncio
+async def test_backfill_uses_declared_english_response_fields(session, monkeypatch):
+    """守护修复：历史回补须按接口声明的 date/price 槽取值，而非写死东财中文列。
+
+    回归场景：新注册的 SDK 接口（如腾讯 stock_zh_a_hist_tx）声明**英文列**
+    ``date``/``close``，旧实现的 ``_upsert_hist_rows`` 写死 ``日期``/``收盘`` →
+    每行日期 ``parse_date`` 得 ``None`` → trace 为空 → ``return 0`` →
+    **静默 0 写入**（回补报「完成」但库里没数据）。本用例修复前必 FAIL、修复后 PASS。
+    """
+    m = await _add_master(session, code="600000")
+    provider = SecuritiesDataProvider(
+        id=_uid(), name="腾讯", access_method=QuoteProviderAccessMethod.SDK,
+        config={}, enabled=True,
+    )
+    itf = QuoteInterface(
+        id=_uid(), provider_id=provider.id, category_id=QUOTE_CAT_ID,
+        name="腾讯-历史行情", endpoint="stock_zh_a_hist_tx", http_method="GET",
+        enabled=True, priority=1,
+        # 声明英文响应列：code/price/date 三槽齐全（见 response_path.compile_spec）
+        response_fields=[
+            {"key": "code", "slot": "code", "source": "code"},
+            {"key": "close", "slot": "price", "source": "close"},
+            {"key": "date", "slot": "date", "source": "date"},
+        ],
+        params={},
+    )
+    session.add(provider)
+    await session.flush()  # 提供方先落库，接口 provider_id 外键才有归属
+    session.add(InterfaceCategory(id=QUOTE_CAT_ID, label="证券行情", system=True))
+    await session.flush()
+    session.add(itf)
+    await session.commit()
+
+    async def _fake_sdk(self, itf_obj, params, codes):
+        # 英文列：旧硬编码实现下每行日期取不到 → trace 空 → 静默 0 写入（修复前必 FAIL）
+        return [{"date": "2024-01-02", "close": "10.50"}]
+
+    monkeypatch.setattr(MarketDataSyncService, "_fetch_sdk_raw", _fake_sdk)
+    # 退避常量归零：保持测试秒级
+    monkeypatch.setattr("app.services.market_daily_price_sync._BACKFILL_BACKOFFS", (0,))
+
+    result = await backfill_historical(session, itf, [m.id], date(2024, 1, 1))
+
+    assert "历史回补完成" in result
+    rows = (await session.execute(select(MarketSecurityDailyPrice))).scalars().all()
+    hit = [
+        r for r in rows if r.master_id == m.id and r.trade_date == date(2024, 1, 2)
+    ]
+    assert len(hit) == 1, "按声明列回补须写入历史日线（修复前为静默 0 写入）"
+    assert hit[0].close == Decimal("10.50")
+
+
 # ───────────────────────── 回补断点判定（P1-3，§6.2/A15） ─────────────────────────
 @pytest.mark.asyncio
 async def test_backfill_gap_security_not_skipped(session, monkeypatch):

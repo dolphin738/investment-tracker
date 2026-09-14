@@ -83,7 +83,9 @@ _BACKFILL_FETCH_TIMEOUT = 60.0
 # （停牌、退市后无行情等），继续重试只会每天重复消耗额度。
 _GAP_MAX_ATTEMPTS = 2
 
-# stock_zh_a_hist 返回中文列名（§6.2 行解析）
+# 旧列兜底：仅用于**未声明** date/price 槽的历史 SDK 接口（未配置 response_fields 时的
+# 旧列合成路径，此时 date 槽为空）。新注册接口应声明 date/price 槽，取值走 resolve_fields；
+# 此处中文列名不再写死使用。
 _COL_HIST_DATE = "日期"
 _COL_HIST_CLOSE = "收盘"
 
@@ -338,7 +340,12 @@ class MarketDailyPriceSyncService:
         backfill_note = ""
         backfill_start_raw = (getattr(cfg, "params", None) or {}).get("backfill_start")
         if backfill_start_raw:
-            backfill_note = await self._run_backfill(itf, code_map, backfill_start_raw)
+            backfill_note = await self._run_backfill(
+                itf,
+                code_map,
+                backfill_start_raw,
+                adjust=getattr(settings, "price_backfill_adjust", "") or "",
+            )
 
         # 在途回补任务（形态 A）：每日额度分批补完即清空（§6.2 在途任务）。
         # 仅在存在在途任务时调用——无在途任务为纯 no-op（不发请求、不改数据），
@@ -364,9 +371,18 @@ class MarketDailyPriceSyncService:
         return result
 
     async def _run_backfill(
-        self, itf: QuoteInterface, code_map: dict[str, str], backfill_start_raw: str
+        self,
+        itf: QuoteInterface,
+        code_map: dict[str, str],
+        backfill_start_raw: str,
+        *,
+        adjust: str = "",
     ) -> str:
-        """解析 backfill_start 并执行历史回补（fail fast 抛错由任务层落 FAILED）。"""
+        """解析 backfill_start 并执行历史回补（fail fast 抛错由任务层落 FAILED）。
+
+        ``adjust``（'' 不复权 | qfq 前复权 | hfq 后复权）来自全局配置，透传给
+        ``backfill_historical`` 作为 akshare ``stock_zh_a_hist`` 的 ``adjust`` 入参。
+        """
         try:
             start = date.fromisoformat(str(backfill_start_raw).strip())
         except ValueError as exc:
@@ -380,7 +396,9 @@ class MarketDailyPriceSyncService:
                 f"当前接口 {itf.name!r} 的提供方不符"
             )
         master_ids = list(dict.fromkeys(code_map.values()))
-        return await backfill_historical(self.session, itf, master_ids, start)
+        return await backfill_historical(
+            self.session, itf, master_ids, start, adjust=adjust
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -393,10 +411,13 @@ async def backfill_historical(
     start_date: date,
     *,
     force: bool = False,
+    adjust: str = "",
 ) -> str:
     """用 akshare ``stock_zh_a_hist`` 回补证券历史日线，按证券独立 commit、断点续跑。
 
     - ``itf`` 须为配置好的 SDK 行情接口（endpoint=``stock_zh_a_hist``），access_method=sdk；
+    - ``adjust``（'' 不复权 | qfq 前复权 | hfq 后复权）为 akshare 复权方式入参，
+      由全局配置 ``price_backfill_adjust`` 驱动（历史口径硬编码 ''，现改为可配）；
     - 断点即数据本身：进度 = 该证券在 ``market_security_daily_prices`` 已存在的最早
       ``trade_date``，起点已覆盖 ``start_date`` 的证券跳过（无额外游标表）；
       ``force=True``（严格补洞 gap 模式）时**不做该跳过**——洞恰恰出现在「起点已覆盖」
@@ -413,6 +434,13 @@ async def backfill_historical(
     # 后续成功分支再读 itf.name 触发惰性重载（异步会话下报 MissingGreenlet）。
     # itf 其余属性（provider_id / endpoint / timeout）由循环内的「按需 refresh」保障，见下。
     source = itf.name
+    # 同理，在循环前一次性解析出 date/price 槽位字段：resolve_fields 读的是
+    # itf.response_fields（普通映射列属性，不触库），但单只失败时循环内会
+    # session.rollback() → itf 过期 → 那时再读同样会 MissingGreenlet。故必须放在循环**外**。
+    # 未声明 date/price 槽时取 None，由 _upsert_hist_rows 兜底旧中文列名（存量 SDK 接口兼容）。
+    _fields = index_by_slot(resolve_fields(itf, include_legacy_code_fallback=False))
+    hist_date_field = _fields.get(SLOT_DATE)
+    hist_price_field = _fields.get(SLOT_PRICE)
     today = today_app_tz()
     start_fmt = start_date.strftime("%Y%m%d")
     end_fmt = today.strftime("%Y%m%d")
@@ -455,7 +483,7 @@ async def backfill_historical(
                 "symbol": re.sub(r"\D", "", sec.code),
                 "start_date": start_fmt,
                 "end_date": end_fmt,
-                "adjust": "",
+                "adjust": adjust,
             }
             # 上一只失败时上面的 `session.rollback()` 会让**外层会话**的所有 ORM 对象过期
             # （`expire_on_commit=False` 只挡 commit，挡不住 rollback）。而接下来
@@ -490,7 +518,10 @@ async def backfill_historical(
                     )
                     await asyncio.sleep(wait)
                     continue
-                hist_written = await _upsert_hist_rows(session, mid, rows, source)
+                hist_written = await _upsert_hist_rows(
+                    session, mid, rows, source,
+                    date_field=hist_date_field, price_field=hist_price_field,
+                )
                 await session.commit()
                 written += hist_written
                 succeeded = True
@@ -582,20 +613,39 @@ async def _set_last_error(session, message: Optional[str]) -> None:
     )
 
 
-async def _upsert_hist_rows(session, master_id: str, rows: list[dict], source: str) -> int:
-    """把 ``stock_zh_a_hist`` 返回行（``日期``/``收盘`` 中文列）幂等 upsert 进日线表。"""
+async def _upsert_hist_rows(
+    session,
+    master_id: str,
+    rows: list[dict],
+    source: str,
+    *,
+    date_field: Optional[CompiledField] = None,
+    price_field: Optional[CompiledField] = None,
+) -> int:
+    """把历史日线返回行幂等 upsert 进 ``market_security_daily_prices``，返回写入行数。
+
+    取值优先级：优先按接口声明的 ``date``/``price`` 槽（``resolve_fields`` 编译的
+    ``CompiledField``，兼容任意响应列名，如腾讯源的 ``date``/``close``）；未声明对应槽
+    （``date_field``/``price_field`` 为 ``None``，存量未配置 ``response_fields`` 的 SDK 接口）
+    时兜底旧中文列名（``日期``/``收盘``）。
+    """
     if not rows:
         return 0
     trace: dict[date, Decimal] = {}
     for r in rows:
-        d = parse_date(r.get(_COL_HIST_DATE))
+        raw_date = date_field.get(r) if date_field is not None else None
+        if raw_date is None:
+            raw_date = r.get(_COL_HIST_DATE)
+        d = parse_date(raw_date)
         if d is None:
             continue
-        raw = r.get(_COL_HIST_CLOSE)
-        if raw is None:
+        raw_close = price_field.get(r) if price_field is not None else None
+        if raw_close is None:
+            raw_close = r.get(_COL_HIST_CLOSE)
+        if raw_close is None:
             continue
         try:
-            trace[d] = Decimal(str(raw))
+            trace[d] = Decimal(str(raw_close))
         except (InvalidOperation, ValueError, TypeError):
             continue
     if not trace:
@@ -1030,7 +1080,12 @@ async def run_pending_price_backfill(session) -> str:
     await session.commit()
     try:
         batch_note = await backfill_historical(
-            session, itf, pending, start_date, force=force
+            session,
+            itf,
+            pending,
+            start_date,
+            force=force,
+            adjust=(settings.price_backfill_adjust or ""),
         )
     except RuntimeError as exc:
         # 熔断/接口不可达：把失败原因回写 settings，供前端在「在途」旁直接展示；
