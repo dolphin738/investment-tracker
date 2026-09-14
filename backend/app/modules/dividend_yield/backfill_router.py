@@ -31,6 +31,7 @@ from app.services.auth import CurrentUser, require_admin
 from app.services.log import record
 from app.services.market_daily_price_sync import (
     _select_pending_backfill_masters,
+    _skip_exchange_for_source,
     clear_price_backfill_gaps,
 )
 
@@ -181,6 +182,8 @@ async def backfill_prices(
             message="历史行情回补接口不存在",
             status_code=400,
         )
+    # 方案 D：腾讯历史行情接口（stock_zh_a_hist_tx）不含京A数据 → 回补名单自动跳过 BJ
+    skip_exchange = _skip_exchange_for_source(itf)
     provider = await db.get(SecuritiesDataProvider, itf.provider_id)
     if provider is None or provider.access_method != QuoteProviderAccessMethod.SDK:
         raise BusinessException(
@@ -224,7 +227,7 @@ async def backfill_prices(
     await db.commit()
 
     # 本批将处理的只数（精确选出未覆盖，限当日剩余额度），用于响应语义
-    pending = await _select_pending_backfill_masters(db, start, remaining)
+    pending = await _select_pending_backfill_masters(db, start, remaining, skip_exchange)
 
     # fire-and-forget：独立会话内跑首批（持有强引用防 GC 回收）
     track_task(asyncio.create_task(_run_price_backfill()))

@@ -16,6 +16,8 @@ from sqlalchemy import select
 from app.core.date_utils import today_app_tz
 from app.models import (
     DividendYieldSettings,
+    GAP_STATUS_PENDING,
+    MarketPriceBackfillGap,
     MarketSecurityDailyPrice,
     MarketTradeCalendar,
     QuoteInterface,
@@ -33,6 +35,8 @@ from app.services.market_data_sync import (
 )
 from app.services.market_daily_price_sync import (
     MarketDailyPriceSyncService,
+    _select_gap_backfill_masters,
+    _select_pending_backfill_masters,
     backfill_historical,
     run_pending_price_backfill,
     _BACKFILL_BACKOFFS,
@@ -972,3 +976,129 @@ async def test_rerun_clears_previous_last_error(session, monkeypatch):
 
     s2 = (await session.execute(select(DividendYieldSettings).limit(1))).scalar_one()
     assert s2.price_backfill_last_error is None, "续跑开始即清空旧失败原因"
+
+
+# ───────────────────────── 方案 D：腾讯源自动跳过京A（BJ） ─────────────────────────
+@pytest.mark.asyncio
+async def test_select_pending_backfill_masters_skips_bj(session):
+    """守护方案 D：传 skip_exchange='BJ' 时京A证券不入选；不传则照常入选（对照组）。"""
+    bj = Security(id=_uid(), code="830799", name="北交所A", asset_class=SecurityType.STOCK, exchange="BJ")
+    sh = Security(id=_uid(), code="600000", name="浦发银行", asset_class=SecurityType.STOCK, exchange="SH")
+    session.add_all([bj, sh])
+    await session.flush()
+    for m in (bj, sh):
+        session.add(SecurityDividend(
+            master_id=m.id, report_year=2024, report_quarter=1,
+            period_type=ReportPeriodType.ANNUAL,
+            cash_per_share=Decimal("1.0"), status=DividendStatus.PAID,
+        ))
+    await session.commit()
+
+    # 有跳过：BJ 被排除，SH 保留
+    pending = await _select_pending_backfill_masters(
+        session, date(2024, 1, 1), 10, skip_exchange="BJ"
+    )
+    assert bj.id not in pending
+    assert sh.id in pending
+
+    # 对照组：不传 skip_exchange，BJ 也入选
+    pending_all = await _select_pending_backfill_masters(session, date(2024, 1, 1), 10)
+    assert bj.id in pending_all and sh.id in pending_all
+
+
+@pytest.mark.asyncio
+async def test_select_gap_backfill_masters_skips_bj(session):
+    """守护方案 D：gap 口径下，腾讯源的 BJ 洞（gapped 腿）同样被排除。"""
+    bj = Security(id=_uid(), code="830799", name="北交所A", asset_class=SecurityType.STOCK, exchange="BJ")
+    sh = Security(id=_uid(), code="600000", name="浦发银行", asset_class=SecurityType.STOCK, exchange="SH")
+    session.add_all([bj, sh])
+    await session.flush()
+    for m in (bj, sh):
+        session.add(SecurityDividend(
+            master_id=m.id, report_year=2024, report_quarter=1,
+            period_type=ReportPeriodType.ANNUAL,
+            cash_per_share=Decimal("1.0"), status=DividendStatus.PAID,
+        ))
+    # 交易日历覆盖窗口两端，使 sync_price_backfill_gaps 返回非 None（不回落 legacy）。
+    # 上界取远日期，避免依赖测试机「今日」导致 hi_covered=False。
+    session.add(MarketTradeCalendar(trade_date=date(2024, 1, 1)))
+    session.add(MarketTradeCalendar(trade_date=date(2026, 9, 12)))
+    session.add(MarketTradeCalendar(trade_date=date(2030, 12, 31)))
+    # 手动植入 pending 洞（落在窗口内，不会被 sync 的日期范围 DELETE 清掉）
+    for m in (bj, sh):
+        session.add(MarketPriceBackfillGap(
+            master_id=m.id, gap_date=date(2024, 6, 1),
+            status=GAP_STATUS_PENDING, attempts=0,
+        ))
+    await session.commit()
+
+    result, calendar_ok = await _select_gap_backfill_masters(
+        session, date(2024, 1, 1), 10, skip_exchange="BJ"
+    )
+    assert calendar_ok is True
+    assert bj.id not in result
+    assert sh.id in result
+
+
+@pytest.mark.asyncio
+async def test_run_pending_price_backfill_skips_bj_for_tencent_source(session, monkeypatch):
+    """守护方案 D 端到端：回补源为腾讯历史行情接口（stock_zh_a_hist_tx）时，京A证券不被请求。"""
+    bj = Security(id=_uid(), code="830799", name="北交所A", asset_class=SecurityType.STOCK, exchange="BJ")
+    sh = Security(id=_uid(), code="600000", name="浦发银行", asset_class=SecurityType.STOCK, exchange="SH")
+    session.add_all([bj, sh])
+    await session.flush()
+    for m in (bj, sh):
+        session.add(SecurityDividend(
+            master_id=m.id, report_year=2024, report_quarter=1,
+            period_type=ReportPeriodType.ANNUAL,
+            cash_per_share=Decimal("1.0"), status=DividendStatus.PAID,
+        ))
+    provider = SecuritiesDataProvider(
+        id=_uid(), name="akshare-tx", access_method=QuoteProviderAccessMethod.SDK,
+        config={}, enabled=True,
+    )
+    session.add(provider)
+    await session.flush()  # provider 先落库（id 由 DB 端 gen_random_uuid 生成）
+    session.add(InterfaceCategory(id=QUOTE_CAT_ID, label="证券行情", system=True))
+    await session.flush()
+    itf = QuoteInterface(
+        id=_uid(), provider_id=provider.id, category_id=QUOTE_CAT_ID,
+        name="腾讯-历史行情", endpoint="stock_zh_a_hist_tx", http_method="GET",
+        enabled=True, priority=1,
+        # 声明英文响应列：code/price/date 三槽齐全
+        response_fields=[
+            {"key": "code", "slot": "code", "source": "code"},
+            {"key": "close", "slot": "price", "source": "close"},
+            {"key": "date", "slot": "date", "source": "date"},
+        ],
+        params={},
+    )
+    session.add(itf)
+    await session.flush()
+    settings = DividendYieldSettings(
+        green_threshold=Decimal("0.05"), red_threshold=Decimal("0.03"),
+        price_source_interface_id=itf.id,
+        price_backfill_source_interface_id=itf.id,
+        price_backfill_start_date=date(2024, 1, 1),
+        price_backfill_quota=10,
+    )
+    session.add(settings)
+    await session.commit()
+
+    fetched: list[str] = []
+
+    async def _fake_sdk(self, itf_obj, params, codes):
+        fetched.append(params["symbol"])
+        return [{"date": "2024-01-02", "close": "10.50"}]
+
+    monkeypatch.setattr(MarketDataSyncService, "_fetch_sdk_raw", _fake_sdk)
+    monkeypatch.setattr("app.services.market_daily_price_sync._BACKFILL_BACKOFFS", (0,))
+    monkeypatch.setattr("app.services.market_daily_price_sync._BACKFILL_COOLDOWN_MIN", 0)
+    monkeypatch.setattr("app.services.market_daily_price_sync._BACKFILL_COOLDOWN_MAX", 0)
+
+    await run_pending_price_backfill(session)
+
+    # 腾讯源不含京A数据 → BJ 代码 830799 不应被请求；沪市 600000 正常回补
+    assert "830799" not in fetched
+    assert "600000" in fetched
+

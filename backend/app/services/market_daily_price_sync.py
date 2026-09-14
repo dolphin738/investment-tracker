@@ -690,8 +690,22 @@ async def _upsert_hist_rows(
 # --------------------------------------------------------------------------- #
 # 在途回补任务（形态 A，用户裁决方案）：摊到多天、按每日额度分批、补完即清空终态
 # --------------------------------------------------------------------------- #
+# 腾讯历史行情接口（akshare stock_zh_a_hist_tx）不含京A（北交所 BJ）数据；
+# 该接口回补时须自动跳过京A证券，否则空耗额度/报错。以接口的 endpoint 标识该源，
+# 属「接口级」跳过（方案 D）——切回含 BJ 数据的接口（如东财 stock_zh_a_hist）即自动
+# 恢复，无需人工改配置（区别于全局池级排除方案 C）。
+_TX_HIST_ENDPOINT = "stock_zh_a_hist_tx"
+
+
+def _skip_exchange_for_source(itf: Optional["QuoteInterface"]) -> Optional[str]:
+    """回补源为腾讯历史行情接口时返回须跳过的交易所代码（'BJ'），否则 None。"""
+    if itf is None:
+        return None
+    return "BJ" if itf.endpoint == _TX_HIST_ENDPOINT else None
+
+
 async def _select_pending_backfill_masters(
-    session, start_date: date, quota: int
+    session, start_date: date, quota: int, skip_exchange: Optional[str] = None
 ) -> list[str]:
     """精确选出未覆盖证券的 master_id 列表（限 quota 只，按 master_id 稳定排序）。
 
@@ -714,6 +728,12 @@ async def _select_pending_backfill_masters(
         .order_by(SecurityDividend.master_id)
         .limit(quota)
     )
+    if skip_exchange is not None:
+        # 方案 D：跳过指定交易所（如腾讯历史行情不含京A → 排除 BJ）。
+        # 交易所未知（NULL）的证券保留，避免误伤无法判定者。
+        stmt = stmt.join(Security, Security.id == SecurityDividend.master_id).where(
+            Security.exchange.is_(None) | (Security.exchange != skip_exchange)
+        )
     return list((await session.execute(stmt)).scalars().all())
 
 
@@ -844,7 +864,7 @@ async def sync_price_backfill_gaps(
 
 
 async def _select_gap_backfill_masters(
-    session, start_date: date, quota: int
+    session, start_date: date, quota: int, skip_exchange: Optional[str] = None
 ) -> tuple[list[str], bool]:
     """gap 模式待补名单：``起点未覆盖`` ∪ ``有未耗尽洞``（限 quota 只，按 master_id 排序）。
 
@@ -855,24 +875,29 @@ async def _select_gap_backfill_masters(
     if synced is None:
         return [], False
     # 起点未覆盖（legacy 口径）：兜住完全无数据 / 起点之前无数据的证券
-    uncovered = await _select_pending_backfill_masters(session, start_date, quota)
-    # 有洞且未耗尽：attempts 达阈值的已置 exhausted，不在此列（护栏二）
-    gapped = list(
-        (
-            await session.execute(
-                select(MarketPriceBackfillGap.master_id)
-                .where(
-                    MarketPriceBackfillGap.status == GAP_STATUS_PENDING,
-                    MarketPriceBackfillGap.attempts < _GAP_MAX_ATTEMPTS,
-                )
-                .distinct()
-                .order_by(MarketPriceBackfillGap.master_id)
-                .limit(quota)
-            )
-        )
-        .scalars()
-        .all()
+    uncovered = await _select_pending_backfill_masters(
+        session, start_date, quota, skip_exchange
     )
+    # 有洞且未耗尽：attempts 达阈值的已置 exhausted，不在此列（护栏二）
+    gapped_stmt = (
+        select(MarketPriceBackfillGap.master_id)
+        .where(
+            MarketPriceBackfillGap.status == GAP_STATUS_PENDING,
+            MarketPriceBackfillGap.attempts < _GAP_MAX_ATTEMPTS,
+        )
+        .distinct()
+        .order_by(MarketPriceBackfillGap.master_id)
+        .limit(quota)
+    )
+    if skip_exchange is not None:
+        # 方案 D：gapped 腿同样跳过腾讯源无数据的交易所（如 BJ），
+        # 直接 JOIN securities 在 SQL 端排除，避免把已跳过洞计入配额。
+        gapped_stmt = gapped_stmt.join(
+            Security, Security.id == MarketPriceBackfillGap.master_id
+        ).where(
+            Security.exchange.is_(None) | (Security.exchange != skip_exchange)
+        )
+    gapped = list((await session.execute(gapped_stmt)).scalars().all())
     return sorted(set(uncovered) | set(gapped))[:quota], True
 
 
@@ -1007,6 +1032,9 @@ async def run_pending_price_backfill(session) -> str:
         raise RuntimeError(
             f"历史行情回补接口不存在/分类不符/未启用（{interface_id}），在途回补任务中止"
         )
+    # 方案 D：腾讯历史行情接口（stock_zh_a_hist_tx）不含京A（北交所 BJ）数据，
+    # 回补时自动跳过该交易所证券，避免空耗额度/报错；切回含 BJ 数据的接口即自动恢复。
+    skip_exchange = _skip_exchange_for_source(itf)
     provider = await session.get(SecuritiesDataProvider, itf.provider_id)
     if provider is None or provider.access_method != QuoteProviderAccessMethod.SDK:
         raise RuntimeError(
@@ -1024,7 +1052,7 @@ async def run_pending_price_backfill(session) -> str:
     gap_active = False
     if mode == PRICE_BACKFILL_MODE_GAP:
         pending, calendar_ok = await _select_gap_backfill_masters(
-            session, start_date, remaining
+            session, start_date, remaining, skip_exchange
         )
         if calendar_ok:
             force = True
@@ -1036,10 +1064,12 @@ async def run_pending_price_backfill(session) -> str:
                 start_date.isoformat(),
             )
             pending = await _select_pending_backfill_masters(
-                session, start_date, remaining
+                session, start_date, remaining, skip_exchange
             )
     else:
-        pending = await _select_pending_backfill_masters(session, start_date, remaining)
+        pending = await _select_pending_backfill_masters(
+            session, start_date, remaining, skip_exchange
+        )
 
     if not pending:
         # 全部已覆盖 → 补完，清空在途状态（终态），此后不再跑。
