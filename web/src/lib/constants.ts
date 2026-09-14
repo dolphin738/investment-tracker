@@ -73,6 +73,27 @@ export const PRICE_BACKFILL_MODE_OPTIONS = [
   { value: PRICE_BACKFILL_MODE_GAP, label: '严格补洞（按交易日历逐日补齐）' },
 ] as const;
 
+// ===== 历史行情回补「复权方式」（与后端 PRICE_BACKFILL_ADJUSTS 对齐，迁移 0022） =====
+/**
+ * 回补抓取传给 akshare ``stock_zh_a_hist`` 的 ``adjust`` 入参：
+ * - 不复权（默认，``''``）：原始成交价（含除权跳空），与既有行为零差异；
+ * - 前复权（``qfq``）：保持当前价、历史价时变；
+ * - 后复权（``hfq``）：保持历史价、反映长期真实收益。
+ *
+ * ⚠️ reka-ui ``<SelectItem />`` 禁止 ``value=""``（空串），故「不复权」在 UI 用
+ * ``SELECT_EMPTY_VALUE`` 哨兵表示，表单内部仍存服务端值（``''``），做双向映射。
+ *
+ * 后端对越界值 400，前端下拉只给这三项，故无需再校验。
+ */
+export const PRICE_BACKFILL_ADJUST_NONE = '';
+export const PRICE_BACKFILL_ADJUST_QFQ = 'qfq';
+export const PRICE_BACKFILL_ADJUST_HFQ = 'hfq';
+export const PRICE_BACKFILL_ADJUST_OPTIONS = [
+  { value: PRICE_BACKFILL_ADJUST_NONE, label: '不复权（默认）' },
+  { value: PRICE_BACKFILL_ADJUST_QFQ, label: '前复权' },
+  { value: PRICE_BACKFILL_ADJUST_HFQ, label: '后复权' },
+] as const;
+
 // ===== 查询维度选项（用于 UI 下拉/Tab） =====
 export const GRANULARITY_OPTIONS = [
   { value: 'day', label: '按日' },

@@ -100,6 +100,13 @@ const ENDPOINT_PARAM_HINTS: Record<string, Record<string, string>> = {
     adjust: "复权：留空=不复权；qfq=前复权；hfq=后复权",
     timeout: "可选，请求超时秒数；留空=不设置",
   },
+  stock_zh_a_hist_tx: {
+    symbol: "股票代码，带市场前缀（如 sz000001）或纯数字（如 000001）；历史回补由系统按证券代码自动填入",
+    start_date: "开始日期，形如 20240101；留空=用函数默认（19000101，全量）",
+    end_date: "结束日期，形如 20240528；留空=用函数默认（20500101）",
+    adjust: "复权：留空=不复权；qfq=前复权；hfq=后复权",
+    timeout: "可选，请求超时秒数；留空=不设置",
+  },
 };
 
 /** 识别接口参数模板里的占位符默认值（如 string / 示例 / example），留空时不作为真实参数发送 */
