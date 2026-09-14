@@ -267,8 +267,7 @@ async def test_p1a_partial_calendar_coverage_returns_none(session):
     m = await _add_master(session)
     await _add_dividend(session, m.id)
     start = date(2024, 1, 1)
-    upper = _window_upper()
-    # 日历覆盖下界（start）及窗口内若干天，但尾部断层：无任何 ``>= upper`` 的交易日
+    # 日历覆盖下界（start）及窗口内若干天，但尾部断层：无任何 ``>= 窗口上界`` 的交易日
     # → 上界未覆盖 → 部分覆盖 → 无从判定洞
     for d in (start, date(2024, 1, 2), date(2024, 1, 3)):
         session.add(MarketTradeCalendar(trade_date=d))
@@ -433,7 +432,7 @@ async def test_legacy_zero_regression_force_false_skips_covered(session, monkeyp
     calls, _fake = _sdk_returning([{"日期": gap_day.isoformat(), "收盘": "10.5"}])
     monkeypatch.setattr(MarketDataSyncService, "_fetch_sdk_raw", _fake)
 
-    msg = await run_pending_price_backfill(session)
+    await run_pending_price_backfill(session)
     # legacy 不发起请求（起点已覆盖 → 整只跳过）
     assert calls["n"] == 0
     # legacy 不走 sync，不凭空造洞
