@@ -296,7 +296,7 @@ async def test_gap_mode_falls_back_to_legacy_when_calendar_missing(session, monk
     # 日历为空 → sync 无从判定
     assert await sync_price_backfill_gaps(session, start) is None
 
-    msg = await run_pending_price_backfill(session)
+    await run_pending_price_backfill(session)
     assert calls["n"] == 1  # 回落后仍处理了该证券（legacy 口径：完全未覆盖）
     assert await _gap_rows(session) == []  # gap 分支没有凭空造洞
     settings = (
@@ -365,6 +365,123 @@ async def test_settings_put_backfill_mode_validation(session, client):
     status, code, data, _ = env(r)
     assert status == 200 and code == 0
     assert data["price_backfill_mode"] == PRICE_BACKFILL_MODE_LEGACY
+
+
+# ─────────────── 日期字段「显式提交」语义 + 配置组合校验 ───────────────
+@pytest.mark.asyncio
+async def test_settings_put_explicit_null_clears_dates(session, client):
+    """守护修复：两个日期字段改为「显式提交」语义——显式 null = 清除（恢复默认）。
+
+    旧口径（None = 不改）会让「用户清空日期想恢复默认」保存无效（前端 watch 又回填
+    旧值），与「回补起始日期无法保存」的原始缺陷同源。修复后：显式提供（含 null）即
+    覆盖；未提供 = 不改（见下一条测试）。
+    """
+    admin = await _make_admin(session, client)
+    h = auth(admin["token"])
+    base = {"green_threshold": "0.05", "red_threshold": "0.03"}
+
+    # 先各设一个日期
+    r = await client.put(
+        "/api/dividend-yield/settings",
+        json={
+            **base,
+            "price_backfill_default_start_date": "2024-01-01",
+            "trade_calendar_start_date": "2024-01-01",
+        },
+        headers=h,
+    )
+    assert r.status_code == 200
+
+    # 显式 null → 清除（GET 回 null）
+    r = await client.put(
+        "/api/dividend-yield/settings",
+        json={
+            **base,
+            "price_backfill_default_start_date": None,
+            "trade_calendar_start_date": None,
+        },
+        headers=h,
+    )
+    assert r.status_code == 200
+    r = await client.get("/api/dividend-yield/settings", headers=h)
+    data = r.json()["data"]
+    assert data["price_backfill_default_start_date"] is None
+    assert data["trade_calendar_start_date"] is None
+
+
+@pytest.mark.asyncio
+async def test_settings_put_omitting_dates_keeps_value(session, client):
+    """未提供（请求体不含该字段）= 不改：与「显式 null 清除」构成完整三态语义。"""
+    admin = await _make_admin(session, client)
+    h = auth(admin["token"])
+    base = {"green_threshold": "0.05", "red_threshold": "0.03"}
+
+    r = await client.put(
+        "/api/dividend-yield/settings",
+        json={**base, "trade_calendar_start_date": "2024-06-01"},
+        headers=h,
+    )
+    assert r.status_code == 200
+
+    # 不含该字段的保存（如只改阈值）不得清掉已存日期
+    r = await client.put("/api/dividend-yield/settings", json=base, headers=h)
+    assert r.status_code == 200
+    r = await client.get("/api/dividend-yield/settings", headers=h)
+    assert r.json()["data"]["trade_calendar_start_date"] == "2024-06-01"
+
+
+@pytest.mark.asyncio
+async def test_settings_put_rejects_calendar_start_after_backfill_start(session, client):
+    """配置组合显性化：交易日历起始日期晚于回补起始日期 → 400 中文。
+
+    该组合下日历覆盖不到回补窗口下界，gap 模式每轮静默回落 legacy（用户切了 gap
+    却不生效只能靠后端日志发现）。校验用「提交后生效值」组合判断：显式提供用提交值，
+    未提供用库中现值。
+    """
+    admin = await _make_admin(session, client)
+    h = auth(admin["token"])
+    base = {"green_threshold": "0.05", "red_threshold": "0.03"}
+
+    # 场景 1：同一次 PUT 内组合越界
+    r = await client.put(
+        "/api/dividend-yield/settings",
+        json={
+            **base,
+            "price_backfill_default_start_date": "2024-01-01",
+            "trade_calendar_start_date": "2025-01-01",
+        },
+        headers=h,
+    )
+    status, _code, _data, message = env(r)
+    assert status == 400
+    assert "交易日历起始日期须不晚于回补起始日期" in (message or "")
+
+    # 场景 2：库里已存回补起点 2024-01-01，本次只把日历起始改得更晚 → 生效值组合越界
+    r = await client.put(
+        "/api/dividend-yield/settings",
+        json={**base, "price_backfill_default_start_date": "2024-01-01"},
+        headers=h,
+    )
+    assert r.status_code == 200
+    r = await client.put(
+        "/api/dividend-yield/settings",
+        json={**base, "trade_calendar_start_date": "2025-01-01"},
+        headers=h,
+    )
+    status, _code, _data, _message = env(r)
+    assert status == 400
+
+    # 场景 3：合法组合（日历起始 <= 回补起点）应通过
+    r = await client.put(
+        "/api/dividend-yield/settings",
+        json={
+            **base,
+            "price_backfill_default_start_date": "2024-01-01",
+            "trade_calendar_start_date": "2024-01-01",
+        },
+        headers=h,
+    )
+    assert r.status_code == 200
 
 
 # ───────────────────────── ⑥ 补上即删 + 终态清标记 ─────────────────────────

@@ -282,6 +282,30 @@ async def put_dividend_yield_settings(
 
     row = await load_settings(db)
     is_new = row.id is None  # 空默认（无持久化行）时插入，否则更新既有行
+    # 配置组合显性化（严格补洞的前置条件）：交易日历的刷新窗口下限必须**不晚于**回补起点，
+    # 否则日历覆盖不到回补窗口下界，gap 模式每轮都会回落 legacy（仅后端 warning，用户无感知）。
+    # 用「提交后生效值」组合判断：显式提供的用提交值，未提供的用库中现值。
+    provided = body.model_fields_set
+    eff_cal = (
+        body.trade_calendar_start_date
+        if "trade_calendar_start_date" in provided
+        else row.trade_calendar_start_date
+    )
+    eff_start = (
+        body.price_backfill_default_start_date
+        if "price_backfill_default_start_date" in provided
+        else row.price_backfill_default_start_date
+    )
+    if eff_cal is not None and eff_start is not None and eff_cal > eff_start:
+        raise BusinessException(
+            code=BusinessErrorCode.VALIDATION_FAILED,
+            message=(
+                "交易日历起始日期须不晚于回补起始日期"
+                f"（{eff_cal.isoformat()} > {eff_start.isoformat()}），"
+                "否则严格补洞模式会因交易日历未覆盖回补窗口而自动回落常规模式"
+            ),
+            status_code=400,
+        )
     before_detail = {
         "green_threshold": str(row.green_threshold),
         "red_threshold": str(row.red_threshold),
@@ -313,14 +337,17 @@ async def put_dividend_yield_settings(
     # 仅当请求体显式给出额度时才覆盖（None = 不改）；before 已记录旧值供审计
     if body.price_backfill_quota is not None:
         row.price_backfill_quota = body.price_backfill_quota
-    # 回补起始日期配置默认值：与额度同口径（None = 不改），与在途标记解耦
-    if body.price_backfill_default_start_date is not None:
+    # 回补起始日期配置默认值：**显式提交语义** —— 请求体中出现该字段即覆盖（含显式
+    # null = 清除、运行时回落「一年前」默认）；未提供 = 不改。旧口径（None = 不改）会让
+    # 「用户清空日期想恢复默认」保存无效（watch 又回填旧值），故用 model_fields_set
+    # 区分「未提供」与「显式 null」。额度/模式无「清除」概念，保持 None = 不改 口径。
+    if "price_backfill_default_start_date" in body.model_fields_set:
         row.price_backfill_default_start_date = body.price_backfill_default_start_date
     # 历史行情回补模式：与额度同口径（None = 不改），值域已在上面校验
     if body.price_backfill_mode is not None:
         row.price_backfill_mode = body.price_backfill_mode
-    # 交易日历刷新起始日期：与额度/回补起点同口径（None = 不改）
-    if body.trade_calendar_start_date is not None:
+    # 交易日历刷新起始日期：同回补起点的显式提交语义（显式 null = 清除 → 用默认下限）
+    if "trade_calendar_start_date" in body.model_fields_set:
         row.trade_calendar_start_date = body.trade_calendar_start_date
     row.updated_by = admin.user_id
     if is_new:
