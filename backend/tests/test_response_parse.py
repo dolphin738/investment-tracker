@@ -137,7 +137,7 @@ async def test_fetch_https_inline_code_param_and_text_split(session) -> None:
     await session.flush()
 
     fake = _FakeClient(_FakeResp(text=_tencent_sample()))
-    import app.services.market_data_sync as mds
+    import app.services.market_data_fetch as mds
 
     original = mds._get_shared_http_client
     mds._get_shared_http_client = lambda: fake  # type: ignore[misc,assignment]
@@ -178,7 +178,7 @@ async def test_fetch_https_json_default(session) -> None:
 
     body = {"code": 0, "msg": "ok", "data": [{"code": "sz000001", "price": "15.00"}]}
     fake = _FakeClient(_FakeResp(json_data=body))
-    import app.services.market_data_sync as mds
+    import app.services.market_data_fetch as mds
 
     original = mds._get_shared_http_client
     mds._get_shared_http_client = lambda: fake  # type: ignore[misc,assignment]
@@ -196,7 +196,7 @@ async def test_fetch_https_json_default(session) -> None:
 
 async def test_is_placeholder_param_value() -> None:
     """占位符识别：模板示例值判定为占位符，真实业务值不判定。"""
-    import app.services.market_data_sync as mds
+    import app.services.market_data_fetch as mds
 
     for v in ["string", "String ", "示例", "EXAMPLE", "占位符", "placeholder", "xxx"]:
         assert mds._is_placeholder_param_value(v) is True
@@ -229,7 +229,7 @@ async def test_fetch_https_skips_placeholder_params(session) -> None:
     await session.flush()
 
     fake = _FakeClient(_FakeResp(json_data={"code": 200, "data": []}))
-    import app.services.market_data_sync as mds
+    import app.services.market_data_fetch as mds
 
     original = mds._get_shared_http_client
     mds._get_shared_http_client = lambda: fake  # type: ignore[misc,assignment]
@@ -300,7 +300,7 @@ async def test_infer_cn_exchange() -> None:
 
 async def test_apply_code_prefix_auto() -> None:
     """auto 模式：纯数字补前缀；已带前缀 / 非数字 / 其他模式原样返回。"""
-    import app.services.market_data_sync as mds
+    import app.services.market_data_fetch as mds
 
     # 6 位纯数字 → 按首位补 sh/sz/bj（A股/场内基金）
     assert mds._apply_code_prefix("600519", "auto") == "sh600519"
@@ -351,7 +351,7 @@ async def test_fetch_https_auto_code_prefix(session) -> None:
     await session.flush()
 
     fake = _FakeClient(_FakeResp(json_data={"code": 0, "data": []}))
-    import app.services.market_data_sync as mds
+    import app.services.market_data_fetch as mds
 
     original = mds._get_shared_http_client
     mds._get_shared_http_client = lambda: fake  # type: ignore[misc,assignment]
@@ -382,7 +382,7 @@ async def _fetch_and_capture(
     """用 q= 内联 + code_prefix=auto 的接口发一次请求，返回 (最终 URL, 告警消息列表)。"""
     import logging
 
-    import app.services.market_data_sync as mds
+    import app.services.market_data_fetch as mds
 
     provider = SecuritiesDataProvider(
         name="腾讯财经", access_method="https", config={"base_url": "https://qt.gtimg.cn"}

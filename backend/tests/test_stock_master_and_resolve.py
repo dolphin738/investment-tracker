@@ -1273,7 +1273,7 @@ async def test_upsert_masters_warns_on_zero_output_with_rows(session, caplog):
     """
     svc = MarketDataSyncService(session)
     rows = [{"代码": "600000", "名称": "浦发银行"}]  # 源站实际列名（中文），无 'code' 键
-    caplog.set_level("WARNING", logger="app.services.market_data_sync")
+    caplog.set_level("WARNING", logger="app.services.market_data_master")
     n = await svc._upsert_masters(_FakeMismatchedInterface(), rows)
     assert n == 0
     assert any(

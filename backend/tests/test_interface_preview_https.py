@@ -1,6 +1,6 @@
 """HTTPS 提供方的新增态实调预览（preview_https_interface / preview 端点）。
 
-覆盖（mock 点统一为 market_data_sync._get_shared_http_client，不触网）：
+覆盖（mock 点统一为 market_data_fetch._get_shared_http_client，不触网）：
 - JSON 成功：_normalize_rows 解 data 包 + httpStatus=200 + rowCount；
 - text_split 成功：腾讯财经 ``q=`` 内联形态 + gbk 解码 + 行提取正则；
 - 缺 base_url / 非法 scheme（SSRF 拦截）→ ok:false + 中文原因，不 500；
@@ -23,7 +23,7 @@ import httpx
 import pytest
 from sqlalchemy import func, select, update
 
-import app.services.market_data_sync as mds
+import app.services.market_data_fetch as mds
 from app.models import User
 from app.models.enums import QuoteProviderAccessMethod
 from app.models.quote_interface import QuoteInterface
