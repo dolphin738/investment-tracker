@@ -64,6 +64,12 @@ class Settings(BaseSettings):
     # 启动时从库中加载全部 enabled 任务注册为 cron job，运行时写 job_run_logs 日志。
     SCHEDULER_ENABLED: bool = True
 
+    # 应用日志级别（装配期由 app/main.py 调 core/logging_setup.setup_logging 用于设置 root
+    # logger 级别并安装带时间戳/级别的 stderr handler）。缺省 INFO；非法值回退 INFO 且告警一次。
+    # 背景：此前后端无任何 logging handler，应用日志只剩 message（无时间戳/级别），
+    # 2026-09-15 收盘价故障因此无法事后自证。
+    LOG_LEVEL: str = "INFO"
+
     # 启动期安全配置严格模式（REP-002）。
     # 检测到弱密钥/弱默认时直接拒绝启动（fail-secure，生产与本地均生效；
     # 本地 .env 已配置强 JWT_SECRET，不受影响）。

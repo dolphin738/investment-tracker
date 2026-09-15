@@ -27,6 +27,7 @@ from app.core.exceptions import (
     validation_exception_handler,
 )
 from app.core.log_sink import set_error_log_sink
+from app.core.logging_setup import setup_logging
 from app.services.log import record as record_app_log
 from app.services.market_daily_price_sync import reset_backfill_lease
 from app.services.scheduler import shutdown_scheduler, start_scheduler
@@ -54,6 +55,12 @@ settings = get_settings()
 # 处理器与 core/bg.py 的后台任务收尾均经 core/log_sink.emit_error_log 走到它。
 # 全局注入一次；未注入时（如不 import app.main 的单测）落库静默跳过、不影响主流程。
 set_error_log_sink(record_app_log)
+
+# 应用级日志初始化（装配期一次）：给 root logger 安装带时间戳/级别的 stderr handler。
+# 动机：此前后端**从未配置任何 logging handler**，app.services.* 的 logger.warning 只能走
+# root 的 lastResort 兜底——输出只剩 message、**无时间戳、无 level**，2026-09-15 收盘价抓取
+# 6 批次全失败因此无法事后自证。此处按 LOG_LEVEL 配置 root 级别（幂等，可安全重复调用）。
+setup_logging(settings.LOG_LEVEL)
 
 
 @asynccontextmanager
