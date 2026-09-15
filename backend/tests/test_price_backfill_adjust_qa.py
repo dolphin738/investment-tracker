@@ -116,7 +116,8 @@ async def test_price_backfill_adjust_drives_fetch_params(
     session, client, monkeypatch, send_adjust, expected_param, label
 ):
     """核心实证：回补链路把配置值透传到 akshare ``adjust`` 入参。"""
-    import app.services.market_daily_price_sync as mds
+    import app.services.market_price_backfill_engine as mds
+    from app.services.market_daily_price_sync import run_pending_price_backfill
 
     captured: list[dict] = []
 
@@ -157,7 +158,7 @@ async def test_price_backfill_adjust_drives_fetch_params(
     settings.price_backfill_start_date = date(2024, 1, 1)
     await session.commit()
 
-    await mds.run_pending_price_backfill(session)
+    await run_pending_price_backfill(session)
 
     assert captured, f"[{label}] 应发生历史回补抓取请求"
     assert captured[0]["adjust"] == expected_param, (

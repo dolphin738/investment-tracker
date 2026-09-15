@@ -5,45 +5,26 @@
 """
 from __future__ import annotations
 
-import asyncio
 import uuid
 from datetime import date
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import select, text
 
-from app.core.date_utils import today_app_tz
 from app.models import (
-    DividendYieldSettings,
     GAP_STATUS_PENDING,
     MarketPriceBackfillGap,
-    MarketSecurityDailyPrice,
     MarketTradeCalendar,
-    QuoteInterface,
-    SecuritiesDataProvider,
     Security,
     SecurityDividend,
 )
-from app.models.enums import DividendStatus, QuoteProviderAccessMethod, ReportPeriodType, SecurityType
-from app.models.interface_category import InterfaceCategory
+from app.models.enums import DividendStatus, ReportPeriodType, SecurityType
 from app.services.market_data_sync import (
-    QUOTE_CAT_ID,
-    MarketDataSyncService,
     _normalize_master_code,
     infer_exchange,
 )
 from app.services.market_daily_price_sync import (
-    MarketDailyPriceSyncService,
-    _acquire_backfill_lease,
     _select_gap_backfill_masters,
-    _select_pending_backfill_masters,
-    backfill_historical,
-    run_pending_price_backfill,
-    _BACKFILL_BACKOFFS,
-    _BACKFILL_BURST,
-    _BACKFILL_COOLDOWN_MAX,
-    _BACKFILL_COOLDOWN_MIN,
 )
 
 

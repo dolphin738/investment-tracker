@@ -153,9 +153,9 @@ async def _seed_settings(
 
 def _no_wait(monkeypatch) -> None:
     """去掉回补的冷却与退避等待，让测试不必真睡几十秒。"""
-    monkeypatch.setattr("app.services.market_daily_price_sync._BACKFILL_BACKOFFS", (0,))
-    monkeypatch.setattr("app.services.market_daily_price_sync._BACKFILL_COOLDOWN_MIN", 0)
-    monkeypatch.setattr("app.services.market_daily_price_sync._BACKFILL_COOLDOWN_MAX", 0)
+    monkeypatch.setattr("app.services.market_price_backfill_engine._BACKFILL_BACKOFFS", (0,))
+    monkeypatch.setattr("app.services.market_price_backfill_engine._BACKFILL_COOLDOWN_MIN", 0)
+    monkeypatch.setattr("app.services.market_price_backfill_engine._BACKFILL_COOLDOWN_MAX", 0)
 
 
 def _sdk_returning(rows):
@@ -551,9 +551,9 @@ async def test_rebuild_mode_advances_cursor_then_finishes(session, monkeypatch):
         return [{"日期": "2024-01-02", "收盘": "10.5"}]
 
     monkeypatch.setattr(MarketDataSyncService, "_fetch_sdk_raw", _fake)
-    monkeypatch.setattr("app.services.market_daily_price_sync._BACKFILL_BACKOFFS", (0,))
-    monkeypatch.setattr("app.services.market_daily_price_sync._BACKFILL_COOLDOWN_MIN", 0)
-    monkeypatch.setattr("app.services.market_daily_price_sync._BACKFILL_COOLDOWN_MAX", 0)
+    monkeypatch.setattr("app.services.market_price_backfill_engine._BACKFILL_BACKOFFS", (0,))
+    monkeypatch.setattr("app.services.market_price_backfill_engine._BACKFILL_COOLDOWN_MIN", 0)
+    monkeypatch.setattr("app.services.market_price_backfill_engine._BACKFILL_COOLDOWN_MAX", 0)
 
     # 第一批（quota=2）：抓 2 只（起点已覆盖也被抓 → 证明 rebuild 强制重抓），游标推进、仍在途
     await run_pending_price_backfill(session)

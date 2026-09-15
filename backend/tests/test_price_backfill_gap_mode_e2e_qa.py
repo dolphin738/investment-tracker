@@ -149,13 +149,13 @@ async def _seed_settings(
 def _no_wait(monkeypatch) -> None:
     """去掉回补冷却/退避等待，避免测试真睡几十秒。"""
     monkeypatch.setattr(
-        "app.services.market_daily_price_sync._BACKFILL_BACKOFFS", (0,)
+        "app.services.market_price_backfill_engine._BACKFILL_BACKOFFS", (0,)
     )
     monkeypatch.setattr(
-        "app.services.market_daily_price_sync._BACKFILL_COOLDOWN_MIN", 0
+        "app.services.market_price_backfill_engine._BACKFILL_COOLDOWN_MIN", 0
     )
     monkeypatch.setattr(
-        "app.services.market_daily_price_sync._BACKFILL_COOLDOWN_MAX", 0
+        "app.services.market_price_backfill_engine._BACKFILL_COOLDOWN_MAX", 0
     )
 
 

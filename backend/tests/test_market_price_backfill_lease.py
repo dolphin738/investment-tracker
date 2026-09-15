@@ -13,13 +13,9 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import select, text
 
-from app.core.date_utils import today_app_tz
 from app.models import (
     DividendYieldSettings,
-    GAP_STATUS_PENDING,
-    MarketPriceBackfillGap,
     MarketSecurityDailyPrice,
-    MarketTradeCalendar,
     QuoteInterface,
     SecuritiesDataProvider,
     Security,
@@ -35,19 +31,14 @@ from app.services.market_data_sync import (
 )
 from app.services.market_daily_price_sync import (
     MarketDailyPriceSyncService,
-    _acquire_backfill_lease,
-    _select_gap_backfill_masters,
-    _select_pending_backfill_masters,
-    backfill_historical,
     run_pending_price_backfill,
-    _abort_summary,
-    _BACKFILL_BACKOFFS,
-    _BACKFILL_BURST,
-    _BACKFILL_COOLDOWN_MAX,
-    _BACKFILL_COOLDOWN_MIN,
 )
-
-from app.services.market_price_backfill_lease import AbortSummary
+from app.services.market_price_backfill_engine import backfill_historical
+from app.services.market_price_backfill_lease import (
+    AbortSummary,
+    _abort_summary,
+    _acquire_backfill_lease,
+)
 
 
 
@@ -111,11 +102,11 @@ async def test_backfill_failure_breaker_aborts_at_threshold(session, monkeypatch
     monkeypatch.setattr(MarketDataSyncService, "_fetch_sdk_raw", _fake_sdk_always_fail)
     # 退避常量归零：失败立即计为失败，不真实 sleep 60/120/300s
     monkeypatch.setattr(
-        "app.services.market_daily_price_sync._BACKFILL_BACKOFFS", (0,)
+        "app.services.market_price_backfill_engine._BACKFILL_BACKOFFS", (0,)
     )
     # 阈值压到 3，便于秒级验证熔断点
     monkeypatch.setattr(
-        "app.services.market_daily_price_sync._BACKFILL_FAILURE_BREAKER", 3
+        "app.services.market_price_backfill_engine._BACKFILL_FAILURE_BREAKER", 3
     )
 
     with pytest.raises(RuntimeError) as excinfo:
@@ -153,10 +144,10 @@ async def test_backfill_failure_counter_reset_on_success(session, monkeypatch):
 
     monkeypatch.setattr(MarketDataSyncService, "_fetch_sdk_raw", _fake_sdk)
     monkeypatch.setattr(
-        "app.services.market_daily_price_sync._BACKFILL_BACKOFFS", (0,)
+        "app.services.market_price_backfill_engine._BACKFILL_BACKOFFS", (0,)
     )
     monkeypatch.setattr(
-        "app.services.market_daily_price_sync._BACKFILL_FAILURE_BREAKER", 3
+        "app.services.market_price_backfill_engine._BACKFILL_FAILURE_BREAKER", 3
     )
 
     # 不抛 RuntimeError 即证明未误触发熔断
@@ -191,10 +182,10 @@ async def test_backfill_breaker_keeps_written_rows_resumable(session, monkeypatc
 
     monkeypatch.setattr(MarketDataSyncService, "_fetch_sdk_raw", _fake_sdk)
     monkeypatch.setattr(
-        "app.services.market_daily_price_sync._BACKFILL_BACKOFFS", (0,)
+        "app.services.market_price_backfill_engine._BACKFILL_BACKOFFS", (0,)
     )
     monkeypatch.setattr(
-        "app.services.market_daily_price_sync._BACKFILL_FAILURE_BREAKER", 3
+        "app.services.market_price_backfill_engine._BACKFILL_FAILURE_BREAKER", 3
     )
 
     with pytest.raises(RuntimeError):
@@ -240,9 +231,9 @@ async def test_breaker_still_counts_burst_quota_and_writes_last_error(session, m
         raise RuntimeError("数据源定向拒连（模拟）")
 
     monkeypatch.setattr(MarketDataSyncService, "_fetch_sdk_raw", _always_fail)
-    monkeypatch.setattr("app.services.market_daily_price_sync._BACKFILL_BACKOFFS", (0,))
+    monkeypatch.setattr("app.services.market_price_backfill_engine._BACKFILL_BACKOFFS", (0,))
     monkeypatch.setattr(
-        "app.services.market_daily_price_sync._BACKFILL_FAILURE_BREAKER", 3
+        "app.services.market_price_backfill_engine._BACKFILL_FAILURE_BREAKER", 3
     )
 
     with pytest.raises(RuntimeError):
@@ -288,7 +279,7 @@ async def test_backfill_aborts_when_run_token_invalidated(
         return [{"日期": "2024-01-02", "收盘": "10.50"}]
 
     monkeypatch.setattr(MarketDataSyncService, "_fetch_sdk_raw", _fake_sdk)
-    monkeypatch.setattr("app.services.market_daily_price_sync._BACKFILL_BACKOFFS", (0,))
+    monkeypatch.setattr("app.services.market_price_backfill_engine._BACKFILL_BACKOFFS", (0,))
 
     msg = await backfill_historical(
         session, itf, [m.id for m in masters], date(2024, 1, 1),
@@ -322,7 +313,7 @@ async def test_backfill_ignores_cancellation_without_run_token(session, monkeypa
         return [{"日期": "2024-01-02", "收盘": "10.50"}]
 
     monkeypatch.setattr(MarketDataSyncService, "_fetch_sdk_raw", _fake_sdk)
-    monkeypatch.setattr("app.services.market_daily_price_sync._BACKFILL_BACKOFFS", (0,))
+    monkeypatch.setattr("app.services.market_price_backfill_engine._BACKFILL_BACKOFFS", (0,))
 
     msg = await backfill_historical(
         session, itf, [m.id for m in masters], date(2024, 1, 1), force=True,
@@ -391,7 +382,7 @@ async def test_run_pending_price_backfill_lease_blocks_concurrent(session, monke
         return [{"日期": "2024-01-02", "收盘": "10.50"}]
 
     monkeypatch.setattr(MarketDataSyncService, "_fetch_sdk_raw", _fake_sdk)
-    monkeypatch.setattr("app.services.market_daily_price_sync._BACKFILL_BACKOFFS", (0,))
+    monkeypatch.setattr("app.services.market_price_backfill_engine._BACKFILL_BACKOFFS", (0,))
 
     msg = await run_pending_price_backfill(session)
     assert "已有回补任务正在执行中" in msg
@@ -443,9 +434,9 @@ async def test_run_pending_price_backfill_lease_released_on_success_and_breaker(
         return [{"日期": "2024-01-02", "收盘": "10.50"}]
 
     monkeypatch.setattr(MarketDataSyncService, "_fetch_sdk_raw", _ok)
-    monkeypatch.setattr("app.services.market_daily_price_sync._BACKFILL_BACKOFFS", (0,))
-    monkeypatch.setattr("app.services.market_daily_price_sync._BACKFILL_COOLDOWN_MIN", 0)
-    monkeypatch.setattr("app.services.market_daily_price_sync._BACKFILL_COOLDOWN_MAX", 0)
+    monkeypatch.setattr("app.services.market_price_backfill_engine._BACKFILL_BACKOFFS", (0,))
+    monkeypatch.setattr("app.services.market_price_backfill_engine._BACKFILL_COOLDOWN_MIN", 0)
+    monkeypatch.setattr("app.services.market_price_backfill_engine._BACKFILL_COOLDOWN_MAX", 0)
 
     await run_pending_price_backfill(session)
     cur = (await session.execute(select(DividendYieldSettings).limit(1))).scalar_one()
@@ -460,7 +451,7 @@ async def test_run_pending_price_backfill_lease_released_on_success_and_breaker(
         raise RuntimeError("数据源定向拒连（模拟）")
 
     monkeypatch.setattr(MarketDataSyncService, "_fetch_sdk_raw", _always_fail)
-    monkeypatch.setattr("app.services.market_daily_price_sync._BACKFILL_FAILURE_BREAKER", 1)
+    monkeypatch.setattr("app.services.market_price_backfill_engine._BACKFILL_FAILURE_BREAKER", 1)
 
     with pytest.raises(RuntimeError):
         await run_pending_price_backfill(session)
@@ -500,7 +491,7 @@ async def test_run_backfill_skips_when_lease_held(session, monkeypatch):
         raise AssertionError("租约被占时不得进入 backfill_historical")
 
     monkeypatch.setattr(
-        "app.services.market_daily_price_sync.backfill_historical", _should_not_enter
+        "app.services.market_price_backfill_engine.backfill_historical", _should_not_enter
     )
 
     svc = MarketDailyPriceSyncService(session)
@@ -529,7 +520,7 @@ async def test_run_backfill_runs_when_lease_free_and_releases(session, monkeypat
         return "历史回补完成（桩）"
 
     monkeypatch.setattr(
-        "app.services.market_daily_price_sync.backfill_historical", _record
+        "app.services.market_price_backfill_engine.backfill_historical", _record
     )
 
     svc = MarketDailyPriceSyncService(session)
@@ -553,7 +544,7 @@ async def test_run_backfill_releases_lease_on_error(session, monkeypatch):
     async def _boom(*args, **kwargs):
         raise RuntimeError("熔断（模拟）")
 
-    monkeypatch.setattr("app.services.market_daily_price_sync.backfill_historical", _boom)
+    monkeypatch.setattr("app.services.market_price_backfill_engine.backfill_historical", _boom)
 
     svc = MarketDailyPriceSyncService(session)
     with pytest.raises(RuntimeError, match="熔断"):

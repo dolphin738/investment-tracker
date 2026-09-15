@@ -31,11 +31,12 @@ from app.modules.dividend_yield.settings_router import load_settings
 from app.services.auth import CurrentUser, require_admin
 from app.services.log import record
 from app.services.market_daily_price_sync import (
-    _BACKFILL_LEASE_WAIT_SECONDS,
     _select_pending_backfill_masters,
     _skip_exchange_for_source,
     clear_price_backfill_gaps,
 )
+# 租约等待常量归 market_price_backfill_lease（决策 5：门面不得出现任何 _BACKFILL_*）。
+from app.services.market_price_backfill_lease import _BACKFILL_LEASE_WAIT_SECONDS
 
 router_backfill = APIRouter(route_class=EnvelopeRoute)
 

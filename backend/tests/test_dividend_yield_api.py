@@ -864,7 +864,7 @@ async def test_backfill_prices_rejects_non_sdk_provider(session, client):
 async def test_backfill_prices_triggers_async_when_configured(session, client, monkeypatch):
     """守护 /backfill-prices：admin 配置 sdk 接口后触发成功 → 200 + security_count，
     且 fire-and-forget 任务被触发（不阻塞，monkeypatch backfill_historical 为即时桩）。"""
-    import app.services.market_daily_price_sync as mds
+    import app.services.market_price_backfill_engine as mds
 
     captured: list[tuple] = []
 
@@ -936,7 +936,7 @@ async def test_backfill_prices_rotates_run_token_and_cancel_clears_it(
     则「取消后立刻重新触发」时老批次会看到标记重新变成非 NULL → 误判自己仍有效 →
     与新批次并发抓同一池子（这正是只看「标记是否为 NULL」的缺陷）。
     """
-    import app.services.market_daily_price_sync as mds
+    import app.services.market_price_backfill_engine as mds
 
     async def _noop(
         session, itf, master_ids, start_date, *,
@@ -998,7 +998,7 @@ async def test_backfill_prices_trigger_clears_gap_state(session, client, monkeyp
     exhausted 的洞不会自动重试（护栏二），此前触发/取消都不清空 → 数据源恢复后也没有
     任何途径让它们重新入批。此处在 POST 事务内清空，验证旧洞（含已放弃的）被清掉。
     """
-    import app.services.market_daily_price_sync as mds
+    import app.services.market_price_backfill_engine as mds
 
     async def _noop(
         session, itf, master_ids, start_date, *, force: bool = False, replace: bool = False, run_token=None, adjust: str = ""
@@ -1052,7 +1052,7 @@ async def test_backfill_prices_trigger_resets_rebuild_cursor(session, client, mo
 
     游标只单向前进，不清零的话新一轮会从上次中断处继续 → 池首那批证券被永久跳过。
     """
-    import app.services.market_daily_price_sync as mds
+    import app.services.market_price_backfill_engine as mds
 
     async def _noop(
         session, itf, master_ids, start_date, *, force: bool = False, replace: bool = False, run_token=None, adjust: str = ""
@@ -1172,7 +1172,7 @@ async def test_backfill_adjust_drives_fetch_params(session, client, monkeypatch)
     背景：历史上回补抓取的 ``adjust`` 硬编码为空串。本用例把配置设为 ``hfq`` 后跑在途
     回补，monkeypatch ``_fetch_sdk_raw`` 捕获实际入参，断言 ``params["adjust"] == "hfq"``。
     """
-    import app.services.market_daily_price_sync as mds
+    import app.services.market_price_backfill_engine as mds
 
     captured: list[dict] = []
 
@@ -1221,7 +1221,9 @@ async def test_backfill_adjust_drives_fetch_params(session, client, monkeypatch)
     settings.price_backfill_start_date = date(2024, 1, 1)
     await session.commit()
 
-    await mds.run_pending_price_backfill(session)
+    from app.services.market_daily_price_sync import run_pending_price_backfill
+
+    await run_pending_price_backfill(session)
 
     assert captured, "应发生历史回补抓取请求"
     assert captured[0]["adjust"] == "hfq"  # 配置真正驱动抓取入参

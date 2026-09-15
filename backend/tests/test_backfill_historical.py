@@ -11,15 +11,11 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import select, text
+from sqlalchemy import select
 
-from app.core.date_utils import today_app_tz
 from app.models import (
     DividendYieldSettings,
-    GAP_STATUS_PENDING,
-    MarketPriceBackfillGap,
     MarketSecurityDailyPrice,
-    MarketTradeCalendar,
     QuoteInterface,
     SecuritiesDataProvider,
     Security,
@@ -34,21 +30,13 @@ from app.services.market_data_sync import (
     infer_exchange,
 )
 from app.services.market_daily_price_sync import (
-    MarketDailyPriceSyncService,
-    _acquire_backfill_lease,
-    _select_gap_backfill_masters,
-    _select_pending_backfill_masters,
-    backfill_historical,
     run_pending_price_backfill,
-    _BACKFILL_BACKOFFS,
-    _BACKFILL_BURST,
-    _BACKFILL_COOLDOWN_MAX,
-    _BACKFILL_COOLDOWN_MIN,
 )
+from app.services.market_price_backfill_engine import backfill_historical
 
 
 
-from app.services.market_daily_price_sync import _COL_HIST_CLOSE, _COL_HIST_DATE, _upsert_hist_rows
+from app.services.market_daily_price_writer import _COL_HIST_CLOSE, _COL_HIST_DATE, _upsert_hist_rows
 from app.models.dividend_yield import PRICE_BACKFILL_MODE_REBUILD
 
 def _uid() -> str:
@@ -106,7 +94,7 @@ async def test_backfill_strips_exchange_prefix_from_symbol(session, monkeypatch)
 
     monkeypatch.setattr(MarketDataSyncService, "_fetch_sdk_raw", _fake_sdk)
     # 退避常量归零：mock 失败时也不真实 sleep 60/120/300s（保持测试秒级）
-    monkeypatch.setattr("app.services.market_daily_price_sync._BACKFILL_BACKOFFS", (0,))
+    monkeypatch.setattr("app.services.market_price_backfill_engine._BACKFILL_BACKOFFS", (0,))
 
     result = await backfill_historical(session, itf, [m.id], date(2024, 1, 1))
 
@@ -156,7 +144,7 @@ async def test_backfill_uses_declared_english_response_fields(session, monkeypat
 
     monkeypatch.setattr(MarketDataSyncService, "_fetch_sdk_raw", _fake_sdk)
     # 退避常量归零：保持测试秒级
-    monkeypatch.setattr("app.services.market_daily_price_sync._BACKFILL_BACKOFFS", (0,))
+    monkeypatch.setattr("app.services.market_price_backfill_engine._BACKFILL_BACKOFFS", (0,))
 
     result = await backfill_historical(session, itf, [m.id], date(2024, 1, 1))
 
@@ -226,7 +214,7 @@ async def test_backfill_replace_window_clears_stale_rows(
 
     monkeypatch.setattr(MarketDataSyncService, "_fetch_sdk_raw", _fake_sdk)
     # 退避常量归零：mock 失败时也不真实 sleep（保持测试秒级）
-    monkeypatch.setattr("app.services.market_daily_price_sync._BACKFILL_BACKOFFS", (0,))
+    monkeypatch.setattr("app.services.market_price_backfill_engine._BACKFILL_BACKOFFS", (0,))
 
     # force=True（rebuild/gap 的选批前提）+ 被测开关 replace
     await backfill_historical(
@@ -314,7 +302,7 @@ async def test_backfill_replace_widens_window_to_earliest_existing(
 
     monkeypatch.setattr(MarketDataSyncService, "_fetch_sdk_raw", _fake_sdk)
     # 退避常量归零：mock 失败时也不真实 sleep（保持测试秒级）
-    monkeypatch.setattr("app.services.market_daily_price_sync._BACKFILL_BACKOFFS", (0,))
+    monkeypatch.setattr("app.services.market_price_backfill_engine._BACKFILL_BACKOFFS", (0,))
 
     await backfill_historical(
         session, itf, [m.id], date(2024, 1, 1), force=True, replace=replace
@@ -384,14 +372,14 @@ async def test_backfill_gap_security_not_skipped(session, monkeypatch):
 
     monkeypatch.setattr(MarketDataSyncService, "_fetch_sdk_raw", _fake_sdk)
     monkeypatch.setattr(
-        "app.services.market_daily_price_sync._BACKFILL_BACKOFFS", (0,)
+        "app.services.market_price_backfill_engine._BACKFILL_BACKOFFS", (0,)
     )
     # 批间冷却归零，保持测试秒级
     monkeypatch.setattr(
-        "app.services.market_daily_price_sync._BACKFILL_COOLDOWN_MIN", 0
+        "app.services.market_price_backfill_engine._BACKFILL_COOLDOWN_MIN", 0
     )
     monkeypatch.setattr(
-        "app.services.market_daily_price_sync._BACKFILL_COOLDOWN_MAX", 0
+        "app.services.market_price_backfill_engine._BACKFILL_COOLDOWN_MAX", 0
     )
 
     result = await backfill_historical(
@@ -457,17 +445,17 @@ async def test_backfill_single_fetch_timeout_marks_failed_and_proceeds(session, 
     monkeypatch.setattr(MarketDataSyncService, "_fetch_sdk_raw", _fake_sdk_sleep_forever)
     # 超时上界压到极小，避免测试真实等待 60s
     monkeypatch.setattr(
-        "app.services.market_daily_price_sync._BACKFILL_FETCH_TIMEOUT", 0.05
+        "app.services.market_price_backfill_engine._BACKFILL_FETCH_TIMEOUT", 0.05
     )
     # 退避常量归零：超时后重试不真实 sleep 60/120/300s（保持测试秒级）
     monkeypatch.setattr(
-        "app.services.market_daily_price_sync._BACKFILL_BACKOFFS", (0,)
+        "app.services.market_price_backfill_engine._BACKFILL_BACKOFFS", (0,)
     )
     monkeypatch.setattr(
-        "app.services.market_daily_price_sync._BACKFILL_COOLDOWN_MIN", 0
+        "app.services.market_price_backfill_engine._BACKFILL_COOLDOWN_MIN", 0
     )
     monkeypatch.setattr(
-        "app.services.market_daily_price_sync._BACKFILL_COOLDOWN_MAX", 0
+        "app.services.market_price_backfill_engine._BACKFILL_COOLDOWN_MAX", 0
     )
 
     result = await backfill_historical(session, itf, [m.id], date(2024, 1, 1))
@@ -532,7 +520,7 @@ async def test_rebuild_abort_does_not_advance_cursor(session, monkeypatch):
         return [{"日期": "2024-01-02", "收盘": "10.50"}]
 
     monkeypatch.setattr(MarketDataSyncService, "_fetch_sdk_raw", _fake_sdk)
-    monkeypatch.setattr("app.services.market_daily_price_sync._BACKFILL_BACKOFFS", (0,))
+    monkeypatch.setattr("app.services.market_price_backfill_engine._BACKFILL_BACKOFFS", (0,))
 
     msg = await run_pending_price_backfill(session)
 
@@ -556,9 +544,9 @@ async def test_rebuild_success_advances_cursor(session, monkeypatch):
         return [{"日期": "2024-01-02", "收盘": "10.50"}]
 
     monkeypatch.setattr(MarketDataSyncService, "_fetch_sdk_raw", _fake_sdk)
-    monkeypatch.setattr("app.services.market_daily_price_sync._BACKFILL_BACKOFFS", (0,))
-    monkeypatch.setattr("app.services.market_daily_price_sync._BACKFILL_COOLDOWN_MIN", 0)
-    monkeypatch.setattr("app.services.market_daily_price_sync._BACKFILL_COOLDOWN_MAX", 0)
+    monkeypatch.setattr("app.services.market_price_backfill_engine._BACKFILL_BACKOFFS", (0,))
+    monkeypatch.setattr("app.services.market_price_backfill_engine._BACKFILL_COOLDOWN_MIN", 0)
+    monkeypatch.setattr("app.services.market_price_backfill_engine._BACKFILL_COOLDOWN_MAX", 0)
 
     msg = await run_pending_price_backfill(session)
 
@@ -593,7 +581,7 @@ async def test_rebuild_cancel_during_last_fetch_still_does_not_advance_cursor(
         return [{"日期": "2024-01-02", "收盘": "10.50"}]
 
     monkeypatch.setattr(MarketDataSyncService, "_fetch_sdk_raw", _fake_sdk)
-    monkeypatch.setattr("app.services.market_daily_price_sync._BACKFILL_BACKOFFS", (0,))
+    monkeypatch.setattr("app.services.market_price_backfill_engine._BACKFILL_BACKOFFS", (0,))
 
     msg = await run_pending_price_backfill(session)
 
@@ -628,9 +616,9 @@ async def test_rebuild_cursor_advances_without_run_token_even_if_token_changed(
         return [{"日期": "2024-01-02", "收盘": "10.50"}]
 
     monkeypatch.setattr(MarketDataSyncService, "_fetch_sdk_raw", _fake_sdk)
-    monkeypatch.setattr("app.services.market_daily_price_sync._BACKFILL_BACKOFFS", (0,))
-    monkeypatch.setattr("app.services.market_daily_price_sync._BACKFILL_COOLDOWN_MIN", 0)
-    monkeypatch.setattr("app.services.market_daily_price_sync._BACKFILL_COOLDOWN_MAX", 0)
+    monkeypatch.setattr("app.services.market_price_backfill_engine._BACKFILL_BACKOFFS", (0,))
+    monkeypatch.setattr("app.services.market_price_backfill_engine._BACKFILL_COOLDOWN_MIN", 0)
+    monkeypatch.setattr("app.services.market_price_backfill_engine._BACKFILL_COOLDOWN_MAX", 0)
 
     msg = await run_pending_price_backfill(session)
 
@@ -657,9 +645,9 @@ async def test_rebuild_cursor_advances_when_token_still_valid(session, monkeypat
         return [{"日期": "2024-01-02", "收盘": "10.50"}]
 
     monkeypatch.setattr(MarketDataSyncService, "_fetch_sdk_raw", _fake_sdk)
-    monkeypatch.setattr("app.services.market_daily_price_sync._BACKFILL_BACKOFFS", (0,))
-    monkeypatch.setattr("app.services.market_daily_price_sync._BACKFILL_COOLDOWN_MIN", 0)
-    monkeypatch.setattr("app.services.market_daily_price_sync._BACKFILL_COOLDOWN_MAX", 0)
+    monkeypatch.setattr("app.services.market_price_backfill_engine._BACKFILL_BACKOFFS", (0,))
+    monkeypatch.setattr("app.services.market_price_backfill_engine._BACKFILL_COOLDOWN_MIN", 0)
+    monkeypatch.setattr("app.services.market_price_backfill_engine._BACKFILL_COOLDOWN_MAX", 0)
 
     msg = await run_pending_price_backfill(session)
 
