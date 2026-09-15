@@ -86,6 +86,13 @@ CHAIN_BUDGET: int = 8
 RETRY_BACKOFF_BASE: float = 0.5
 RETRY_BACKOFF_CAP: float = 5.0
 
+# HTTPS 请求「长度」告警阈值（字符）。**仅用于捕捉「配置被改到远超当前量级」的极端情形**，
+# 并非「长度本身会致故障」——实测正常日抓 800 只内联 URL = **7221 字符**仍 HTTP 200（395KB /
+# 436ms），长度问题已证伪。取 8192（>7221 留余量）：正常批量**不误报**；只有把
+# ``max_codes_per_request`` 提到约 1000+ 只（URL ≈ 9000+）时才告警。不改请求形态——分片会
+# 牵动 ``max_codes_per_request`` 语义与大量既有测试，另行评估。
+_URL_LENGTH_WARN_THRESHOLD: int = 8192
+
 # 固定接口分类 id（接口分类改版：分类即用途，见 plan-interface-category-reform-2026-08-15）。
 # 与迁移 o3d4e5f6a7b8_reform_2_categories 中 INSERT 的显式 id 保持一致；路由按此硬编码选源。
 # 列是 String(36)（非 PG 原生 UUID 类型），故用简短数字 id，不依赖 gen_random_uuid()。
@@ -546,6 +553,18 @@ class MarketDataSyncService:
             else:
                 params[code_param or "code"] = joined
                 url = base_url.rstrip("/") + "/" + itf.endpoint.lstrip("/")
+            # 批量拼接长度防护：仅告警、不改请求形态（见 _URL_LENGTH_WARN_THRESHOLD）。
+            # 内联形态 URL 直接膨胀；非内联形态 URL 不变但查询串膨胀，故按 URL + 代码串合计计。
+            effective_len = len(url) + (0 if inline else len(joined))
+            if effective_len > _URL_LENGTH_WARN_THRESHOLD:
+                logger.warning(
+                    "HTTPS 请求行过长（当前约 %d 字符，阈值 %d；代码 %d 只）："
+                    "疑似 response_parse.max_codes_per_request 被调到远超当前量级"
+                    "（正常 800 只约 7221 字符），请核对配置",
+                    effective_len,
+                    _URL_LENGTH_WARN_THRESHOLD,
+                    len(codes),
+                )
         else:
             url = base_url.rstrip("/") + "/" + itf.endpoint.lstrip("/")
         timeout = clamp_timeout(itf.timeout or DEFAULT_TIMEOUT)

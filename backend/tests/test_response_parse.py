@@ -364,3 +364,77 @@ async def test_fetch_https_auto_code_prefix(session) -> None:
 
     method, url, params = fake.last
     assert params == {"code": "sh600519,sz000001,sh600519"}
+
+
+# --------------------------------------------------------------------------- #
+# 3) 批量拼接长度防护（D5）：仅在「远超当前量级」时告警，真实日抓量级不得误报
+# --------------------------------------------------------------------------- #
+def _make_text_split_rp_with_prefix() -> dict:
+    """腾讯 q= 真实形态：内联 + code_prefix=auto（6 位数字补 sh/sz 前缀，约 9 字符/只）。"""
+    rp = _make_text_split_rp()
+    rp["code_prefix"] = "auto"
+    return rp
+
+
+async def _fetch_and_capture(
+    session, caplog, codes: list[str]
+) -> tuple[str, list[str]]:
+    """用 q= 内联 + code_prefix=auto 的接口发一次请求，返回 (最终 URL, 告警消息列表)。"""
+    import logging
+
+    import app.services.market_data_sync as mds
+
+    provider = SecuritiesDataProvider(
+        name="腾讯财经", access_method="https", config={"base_url": "https://qt.gtimg.cn"}
+    )
+    session.add(provider)
+    await session.flush()
+    itf = QuoteInterface(
+        provider_id=provider.id,
+        name="腾讯实时行情",
+        endpoint="q=",
+        http_method="GET",
+        enabled=True,
+        direction="in",
+        resp_code_field="_code",
+        resp_price_field="3",
+        response_parse=_make_text_split_rp_with_prefix(),
+    )
+    session.add(itf)
+    await session.flush()
+
+    fake = _FakeClient(_FakeResp(text=""))
+    original = mds._get_shared_http_client
+    mds._get_shared_http_client = lambda: fake  # type: ignore[misc,assignment]
+    try:
+        with caplog.at_level(logging.WARNING):
+            await MarketDataSyncService(session)._fetch_https_raw(itf, {}, codes)
+    finally:
+        mds._get_shared_http_client = original  # type: ignore[assignment]
+
+    _, url, _ = fake.last
+    return url, [r.getMessage() for r in caplog.records]
+
+
+async def test_fetch_https_warns_when_request_line_too_long(session, caplog) -> None:
+    """守护 D5：请求行**远超当前量级**（1000 只 → URL 9021 字符 > 8192）时必须告警。"""
+    codes = [f"{600000 + i}" for i in range(1000)]  # 均补 sh 前缀 → 8 字符/只
+    url, msgs = await _fetch_and_capture(session, caplog, codes)
+
+    assert len(url) == 9021  # 22（base+/q=）+ 1000×8 + 999 个逗号
+    assert len(url) > 8192
+    assert any("请求行过长" in m for m in msgs), msgs
+
+
+async def test_fetch_https_no_warning_at_real_daily_batch_size(session, caplog) -> None:
+    """关键回归护栏：真实日抓量级（800 只内联 → **7221 字符**）**不得**误报。
+
+    7221 与实库实测的每日收盘价批次 URL 完全一致。若阈值被改回会误报的值（如 4096），
+    则 `len(url) <= 8192` 与 `not any(...)` 两处断言都会失败。
+    """
+    codes = [f"{600000 + i}" for i in range(800)]
+    url, msgs = await _fetch_and_capture(session, caplog, codes)
+
+    assert len(url) == 7221  # 22 + 800×8 + 799 个逗号（对齐实库实测）
+    assert len(url) <= 8192
+    assert not any("请求行过长" in m for m in msgs), msgs
