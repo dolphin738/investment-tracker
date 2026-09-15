@@ -582,9 +582,10 @@ async def test_rebuild_mode_advances_cursor_then_finishes(session, monkeypatch):
     assert s3.price_backfill_rebuild_cursor is None
     assert s3.price_backfill_start_date is None
 
-    # 端到端接线断言「清空后重建」：预置的 2024-01-01 旧行落在窗口内、且源如今不返回
-    # → rebuild 必须把它清掉；源返回的 2024-01-02 必须写入。若 run_pending_price_backfill
-    # 漏传 replace=rebuild_active（退化为纯 upsert），这里是唯一会 FAIL 的断言。
+    # 端到端接线断言「清空后重建」：源返回的 2024-01-02 必须写入；预置的 2024-01-01 旧行
+    # 落在窗口头部——源本次仅返回 2024-01-02（头部截断），按 P2-6 防护该头部行不删、保留旧值，
+    # 避免「删了却补不回来」的净数据丢失。若 run_pending_price_backfill 漏传
+    # replace=rebuild_active（退化为纯 upsert）或 P2-6 头部防护失效，这里会 FAIL。
     for m in masters:
         dates = set(
             (
@@ -595,7 +596,10 @@ async def test_rebuild_mode_advances_cursor_then_finishes(session, monkeypatch):
                 )
             ).scalars().all()
         )
-        assert dates == {date(2024, 1, 2)}, f"{m.code} 重建后应只剩源返回的日期：{dates}"
+        assert dates == {
+            date(2024, 1, 1),
+            date(2024, 1, 2),
+        }, f"{m.code} 重建后头部截断行(2024-01-01)应保留、源返回行(2024-01-02)应写入：{dates}"
 
 
 # ───────────────────────── ⑥ 补上即删 + 终态清标记 ─────────────────────────
