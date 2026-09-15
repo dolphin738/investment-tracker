@@ -243,8 +243,6 @@ export interface InterfaceTestResponse {
   elapsedMs: number;
   /** 原始响应（HTTPS: resp.json()；SDK: list[dict]） */
   raw: unknown;
-  /** 按 resp_code_field / resp_price_field 解析出的 {code → price}（旧渲染契约，原样保留） */
-  parsed: Record<string, string> | null;
   /** 逐槽位命中率（P1 新增；仅统计有 slot 的字段，展示字段不出现） */
   fieldHits?: InterfaceTestFieldHit[];
   /** 命中行数（P1 新增；解析失败 / 异常时缺省） */
@@ -264,7 +262,7 @@ export function fetchResponseFieldSchema(): Promise<ResponseFieldSchema> {
 /**
  * 单接口测试：POST /api/admin/quote-interfaces/{id}/test
  *
- * 用调用方传入的 params 调用接口，原样回传 raw + parsed（不计入 consecutive_failures）。
+ * 用调用方传入的 params 调用接口，原样回传 raw + fieldHits（不计入 consecutive_failures）。
  * 对应后端 modules/admin/router.py 的 test_quote_interface。
  */
 export function testInterface(

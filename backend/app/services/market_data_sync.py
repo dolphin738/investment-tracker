@@ -10,7 +10,7 @@
 - ``sync_security_masters(asset_class?)`` / ``sync_all_security_masters()``：配置驱动同步
   系统级证券主数据（purpose=MASTER_LIST 接口，复用 priority 降级链，零硬编码数据源）。
 - ``test_single_interface(interface_id, params, codes)``：用调用方 params 单接口测试，
-  原样回传 raw+parsed，不计入 consecutive_failures。
+  原样回传 raw+fieldHits，不计入 consecutive_failures。
 
 失败计数与告警去重均落 DB（多实例安全）：
 - 失败：``consecutive_failures`` 原子自增。
@@ -721,27 +721,6 @@ class MarketDataSyncService:
                 continue
         return out
 
-    def _parse_test_rows(self, itf: QuoteInterface, rows: list[Any]) -> dict[str, str]:
-        """测试端点解析：{code→price 字符串}（走 resolve_fields 的 code/price 槽）。
-
-        code 槽同样禁用 F4 中文兜底，与 HEAD ``_parse_test_rows`` 单候选语义等价（D2）；
-        试调端点**不计入** consecutive_failures（既有约定），故 required 仅计数告警。
-        """
-        compiled = resolve_fields(itf, include_legacy_code_fallback=False)
-        rows, _dropped = self._filter_required_rows(itf, compiled, rows)
-        fields = index_by_slot(compiled)
-        code_field = fields.get(SLOT_CODE)
-        price_field = fields.get(SLOT_PRICE)
-        out: dict[str, str] = {}
-        for r in rows:
-            code = code_field.get(r) if code_field else None
-            price = price_field.get(r) if price_field else None
-            if code is None or price is None:
-                continue
-            # 测试端点解析同样规范为「交易所前缀 + 数字」，与同步/价格口径一致
-            out[_normalize_master_code(str(code))] = str(price)
-        return out
-
     # ------------------------------------------------------------------ #
     # required 槽缺失 → 整行丢弃 + 计数（边界 6）
     # ------------------------------------------------------------------ #
@@ -1339,7 +1318,7 @@ class MarketDataSyncService:
     async def test_single_interface(
         self, interface_id: str, params: Optional[dict[str, Any]], codes: Optional[list[str]]
     ) -> dict[str, Any]:
-        """用调用方 params 调用单接口并原样回传 raw+parsed；不计入 consecutive_failures。"""
+        """用调用方 params 调用单接口并原样回传 raw+fieldHits；不计入 consecutive_failures。"""
         itf = await self.session.get(QuoteInterface, interface_id)
         if itf is None:
             return {
@@ -1347,7 +1326,6 @@ class MarketDataSyncService:
                 "status": "error",
                 "elapsedMs": 0.0,
                 "raw": None,
-                "parsed": None,
                 "fieldHits": [],
                 "error": "接口不存在",
                 "interfaceId": interface_id,
@@ -1364,16 +1342,15 @@ class MarketDataSyncService:
                 "httpStatus": self._last_http_status,
                 "elapsedMs": round(elapsed * 1000, 2),
                 "raw": None,
-                "parsed": None,
                 "fieldHits": [],
                 # 兜底：异常消息可能为空字符串，回退到异常类型名，避免前端显示「未知错误」
                 "error": str(exc) or type(exc).__name__,
                 "interfaceId": interface_id,
             }
         elapsed = time.perf_counter() - start
-        parsed = self._parse_test_rows(itf, rows)
-        # 逐槽位命中率（方案步骤 2）：先加新字段，不拆旧 parsed（前端任务再迁移）。
-        # code 槽与 _parse_test_rows 同口径（禁用 F4 中文兜底），避免命中率与 parsed 相互矛盾。
+        # 逐槽位命中率：code 槽禁用 F4 中文兜底（与 _parse_price_rows 同口径，D2）。
+        # 旧 parsed 字段（code 到 price 的逐条映射）已于 2026-09-16 随前端迁移完成下线；
+        # 试调面板改由 fieldHits（汇总命中率与每槽位示例）和 raw（原文）承载。
         field_hits = compute_slot_hit_rates(
             resolve_fields(itf, include_legacy_code_fallback=False), rows
         )
@@ -1383,7 +1360,6 @@ class MarketDataSyncService:
             "httpStatus": self._last_http_status,
             "elapsedMs": round(elapsed * 1000, 2),
             "raw": rows,
-            "parsed": parsed,
             "fieldHits": field_hits,
             "rowCount": len(rows),
             "interfaceId": interface_id,

@@ -3,7 +3,7 @@
 覆盖：
 - GET  /api/admin/securities/masters：分页 + q 搜索（code / name / 拼音首字母）；仅返回 portfolio_id IS NULL 主数据行。
 - POST /api/admin/securities/sync：触发 sync_all_security_masters（这里以无 MASTER_LIST 接口 → synced=0 验证契约）。
-- POST /api/admin/quote-interfaces/{id}/test：单接口测试回传 raw + parsed（monkeypatch 网络）。
+- POST /api/admin/quote-interfaces/{id}/test：单接口测试回传 raw + fieldHits（monkeypatch 网络）。
 - POST /api/portfolios/{pid}/securities/resolve：幂等 upsert by (portfolio_id, code)
   （命中组合行 → isNew=false；以主数据行模板 → isNew=true；兜底请求体 → isNew=true）。
 
@@ -280,7 +280,7 @@ async def test_sync_security_masters_no_master_interfaces(client, session):
 
 
 # --------------------------------------------------------------------------- #
-# POST /api/admin/quote-interfaces/{id}/test：单接口测试回传 raw+parsed
+# POST /api/admin/quote-interfaces/{id}/test：单接口测试回传 raw+fieldHits
 # --------------------------------------------------------------------------- #
 async def test_quote_interface_test_returns_raw_and_parsed(client, monkeypatch, session):
     token = await _admin_token(client, "sm_admin_4@example.com")
@@ -310,7 +310,6 @@ async def test_quote_interface_test_returns_raw_and_parsed(client, monkeypatch, 
         {"code": "600000", "price": "12.34"},
         {"code": "000001", "price": "9.87"},
     ]
-    assert data["parsed"] == {"sh600000": "12.34", "sz000001": "9.87"}
     assert data["elapsedMs"] >= 0
     assert "error" not in data or data.get("error") is None
 
@@ -497,7 +496,6 @@ async def test_quote_interface_test_dispatch_uses_provider_access_method(
     status, code, data, _ = env(r)
     assert status == 200 and code == 0
     assert data["ok"] is True
-    assert data["parsed"] == {"sh600000": "12.34"}
 
 
 async def test_quote_interface_create_update_master_list_fields(client):

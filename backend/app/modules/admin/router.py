@@ -876,7 +876,7 @@ async def test_quote_interface(
     current: CurrentUser = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """单接口测试：用调用方传入的 params 调用，原样回传 raw+parsed（不计入 consecutive_failures）。"""
+    """单接口测试：用调用方传入的 params 调用，原样回传 raw+fieldHits（不计入 consecutive_failures）。"""
     result = await MarketDataSyncService(db).test_single_interface(
         interface_id, body.params, body.codes
     )

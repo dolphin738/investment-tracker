@@ -113,7 +113,7 @@ def _code_candidates(
     - ``"3"``（分红列表，F9.5 ``dividend_sync._code_of``）：``resp_code_field``
       **优先**（**空值跳过**），再试中文列名「代码」；
     - 其余（主数据 / 行情 / 试调）：仅 ``resp_code_field or "code"``，**无**中文兜底
-      （HEAD ``_prepare_master_rows`` / ``_parse_price_rows`` / ``_parse_test_rows`` 语义）。
+      （HEAD ``_prepare_master_rows`` / ``_parse_price_rows`` 语义）。
 
     ``include_legacy_code_fallback=False`` 强制返回单候选 ``resp_code_field or "code"``，
     供主数据 / 行情 / 试调链路**显式关闭** F4 中文兜底，避免兜底外溢（D2）。

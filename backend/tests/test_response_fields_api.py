@@ -218,9 +218,7 @@ async def test_test_endpoint_reports_field_hits(session, client, monkeypatch):
     )
     status, _, data, _ = env(resp)
     assert status == 200 and data["ok"] is True
-    # 向后兼容：parsed 仍在
-    assert data["parsed"] == {"sh600000": "12.34"}
-    # 新字段：逐槽位命中率
+    # 逐槽位命中率
     hits = {h["slot"]: h for h in data["fieldHits"]}
     assert hits["code"]["hit"] == 2 and hits["code"]["missing"] == 0
     assert hits["price"]["hit"] == 1 and hits["price"]["missing"] == 1

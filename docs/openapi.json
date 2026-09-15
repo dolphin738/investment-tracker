@@ -635,7 +635,7 @@
           "admin"
         ],
         "summary": "Test Quote Interface",
-        "description": "单接口测试：用调用方传入的 params 调用，原样回传 raw+parsed（不计入 consecutive_failures）。",
+        "description": "单接口测试：用调用方传入的 params 调用，原样回传 raw+fieldHits（不计入 consecutive_failures）。",
         "operationId": "test_quote_interface_api_admin_quote_interfaces__interface_id__test_post",
         "security": [
           {
