@@ -8,7 +8,8 @@
 - ``app/services/response_fields.py``（旧列合成 + 折叠 / 派生）
 - ``app/services/quote_interface.py``（Expand 双写镜像写入）
 - ``app/models/quote_interface.py``（列定义本体）
-- ``app/modules/admin/router.py``（API schema 向后兼容透传）
+- ``app/modules/admin/schemas.py``（API schema 向后兼容透传：旧 4 列字段声明）
+- ``app/modules/admin/quote_router.py``（创建接口端点向 service 透传旧列）
 
 6 个消费点及其余 service 一律不得直接引用旧列名。
 """
@@ -34,7 +35,8 @@ _ALLOWED = {
     "services/response_fields.py",
     "services/quote_interface.py",
     "models/quote_interface.py",
-    "modules/admin/router.py",
+    "modules/admin/quote_router.py",
+    "modules/admin/schemas.py",
 }
 
 # F4「中文列名兜底」token 与各自**允许出现**的文件（D8）。
