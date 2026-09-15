@@ -6,9 +6,6 @@ from app.models.calc import DailyNav, DailyXirr
 from app.models.cashflow import CashBalance, CashFlow
 from app.models.dividend import DividendRecord
 from app.models.dividend_yield import (
-    GAP_STATUS_EXHAUSTED,
-    GAP_STATUS_PENDING,
-    GAP_STATUSES,
     PRICE_BACKFILL_ADJUST_HFQ,
     PRICE_BACKFILL_ADJUST_NONE,
     PRICE_BACKFILL_ADJUST_QFQ,
@@ -18,7 +15,6 @@ from app.models.dividend_yield import (
     PRICE_BACKFILL_MODE_REBUILD,
     PRICE_BACKFILL_MODES,
     DividendYieldSettings,
-    MarketPriceBackfillGap,
     MarketSecurityDailyPrice,
     MarketTradeCalendar,
     SecurityDividend,
@@ -44,6 +40,12 @@ from app.models.enums import (
 from app.models.interface_category import InterfaceCategory
 from app.models.job import JobConfig, JobRunLog
 from app.models.log import AppLog
+from app.models.market_price_backfill_gap import (
+    GAP_STATUS_EXHAUSTED,
+    GAP_STATUS_PENDING,
+    GAP_STATUSES,
+    MarketPriceBackfillGap,
+)
 from app.models.notification import Notification
 from app.models.portfolio import Portfolio
 from app.models.quote_interface import QuoteInterface
