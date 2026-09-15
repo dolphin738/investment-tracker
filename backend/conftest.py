@@ -117,6 +117,31 @@ async def _clean_db(_engine):
         await session.commit()
 
 
+@pytest_asyncio.fixture(autouse=True)
+async def _isolate_module_sessionmakers(_engine):
+    """全局隔离：把各 app 模块在 import 期绑定的 ``AsyncSessionLocal`` 别名重绑到测试库 maker。
+
+    ``_engine`` 只 patch ``app.db.database`` 上的属性名；而 ``app.services.log`` /
+    ``app.services.scheduler`` 等模块是用 ``from app.db.database import AsyncSessionLocal``
+    在 import 期绑定**模块级别名**的——别名不会随 patch 更新，于是这些模块里「自建会话」
+    的代码（``record`` / ``_run_job_inner`` 等）会**静默写开发库**，违反「禁止改动开发库」硬约束。
+
+    本夹具依赖 ``_engine``（保证 patch 先生效），扫描全部 app 模块重绑，测试结束逐条还原。
+    纯逻辑见 ``tests/_sessionmaker_isolation.py``（可被测试直接调用做非空洞断言）。
+    """
+    from tests._sessionmaker_isolation import (
+        rebind_sessionmakers,
+        restore_sessionmakers,
+    )
+
+    changes = rebind_sessionmakers(dbmod.AsyncSessionLocal)
+    try:
+        yield changes
+    finally:
+        restore_sessionmakers(changes)
+
+
+
 @pytest_asyncio.fixture
 async def client(_engine):
     from httpx import AsyncClient, ASGITransport

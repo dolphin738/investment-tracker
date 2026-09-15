@@ -11,8 +11,6 @@ import pytest
 from datetime import datetime, timedelta, timezone
 from sqlalchemy import func, select
 
-import pytest_asyncio
-
 import app.db.database as dbmod
 from app.core.security import hash_password
 from app.models.log import AppLog
@@ -21,21 +19,6 @@ from app.services.log import record
 from tests.helpers import auth, register_login
 
 pytestmark = pytest.mark.asyncio
-
-
-@pytest_asyncio.fixture(autouse=True)
-async def _bind_test_sessionmaker(_engine):
-    """conftest 在每个测试前把 dbmod.AsyncSessionLocal patch 成测试库引擎，但
-    app.services.log / app.services.scheduler 在模块加载期就绑定了旧的 AsyncSessionLocal，
-    导致 record() 与 _log_cleanup 实际落到开发库。这里把它们的模块级引用重绑到
-    当前（测试库）maker，既让本模块测试可观测，也避免清理逻辑误删开发库数据。
-    """
-    import app.services.scheduler as scheduler_mod
-    import app.services.log as log_mod
-
-    log_mod.AsyncSessionLocal = dbmod.AsyncSessionLocal
-    scheduler_mod.AsyncSessionLocal = dbmod.AsyncSessionLocal
-    yield
 
 
 # --------------------------------------------------------------------------- #
