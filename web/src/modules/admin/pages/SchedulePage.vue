@@ -18,6 +18,7 @@ import { formatDateTime } from '@/lib/utils';
 import { Loader2, Pencil, Play, Plus, ScrollText, Trash2, ListTodo, Settings2 } from 'lucide-vue-next';
 import TableSkeleton from '@/components/common/TableSkeleton.vue';
 import PageHeader from '@/components/common/PageHeader.vue';
+import EmptyState from '@/components/common/EmptyState.vue';
 import { Button } from '@/components/ui/button';
 import { Badge, type BadgeVariants } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
