@@ -331,7 +331,8 @@ async def cancel_price_backfill(
     return {
         "message": (
             f"已取消在途回补任务（原起点 {cancelled.isoformat()}）；"
-            "正在运行的当前批次会跑完本批后停止，此后不再续跑，已补数据保留"
+            "正在抓取的这一只会跑完、随后立即停止（协作式取消，不再等整批），"
+            "剩余证券不再抓取；已补数据保留"
         ),
         "cancelled_start_date": cancelled.isoformat(),
     }

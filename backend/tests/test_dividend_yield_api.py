@@ -1307,6 +1307,11 @@ async def test_cancel_price_backfill_clears_start_date(session, client):
     assert status == 200
     assert data["cancelled_start_date"] == "2021-01-01"
     assert "已取消" in data["message"]  # 业务文案在 payload，envelope message 是状态 'ok'
+    # 文案防漂移（2026-09-15 P1 回归）：用户看到的 toast 就是本 payload message
+    # （前端 useCancelPriceBackfill 的 onSuccess 直接弹它），须与「协作式取消：
+    # 当前一只跑完即停」的新语义一致，不得回退到已失真的「跑完本批后停止」。
+    assert "跑完、随后立即停止" in data["message"], data["message"]
+    assert "跑完本批" not in data["message"], data["message"]
 
     row = (await session.execute(select(DividendYieldSettings).limit(1))).scalar_one()
     assert row.price_backfill_start_date is None
