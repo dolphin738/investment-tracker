@@ -5,11 +5,8 @@
 """
 from __future__ import annotations
 
-import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
-
-from sqlalchemy import text as sa_text
 
 from fastapi import FastAPI, HTTPException
 from fastapi.exceptions import HTTPException as StarletteHTTPException
@@ -30,8 +27,8 @@ from app.core.exceptions import (
     validation_exception_handler,
 )
 from app.core.log_sink import set_error_log_sink
-from app.db.database import AsyncSessionLocal
 from app.services.log import record as record_app_log
+from app.services.market_daily_price_sync import reset_backfill_lease
 from app.services.scheduler import shutdown_scheduler, start_scheduler
 from app.modules import (
     admin,
@@ -59,37 +56,12 @@ settings = get_settings()
 set_error_log_sink(record_app_log)
 
 
-async def _reset_backfill_lease() -> None:
-    """把回补执行租约（``price_backfill_running``）复位为 false。
-
-    兜底场景：进程在回补执行期间被强杀 / 崩溃，租约会残留 true，此后**所有**回补
-    （含每日收盘价抓取的续跑）都会被永久挡住。启动时此刻本进程必无任何回补在跑，
-    无条件复位是安全的。
-
-    失败只告警不阻断：迁移 0024 尚未执行时该列不存在（老环境滚动升级的中间态），
-    不该让应用起不来。
-    """
-    try:
-        async with AsyncSessionLocal() as session:
-            await session.execute(
-                sa_text(
-                    "UPDATE dividend_yield_settings SET price_backfill_running = false"
-                )
-            )
-            await session.commit()
-    except Exception:  # noqa: BLE001  复位失败不阻断启动（列可能尚未迁移）
-        logging.getLogger(__name__).warning(
-            "回补执行租约复位失败（不阻断启动，但若残留 true 会挡住回补）",
-            exc_info=True,
-        )
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # 启动期安全配置哨兵（REP-002）：弱密钥默认拒绝启动（ALLOW_WEAK_SECRETS=1 降级告警）
     validate_security_config()
-    # 回补执行租约复位：清掉上次异常退出可能残留的占用（见 _reset_backfill_lease 文档串）
-    await _reset_backfill_lease()
+    # 回补执行租约复位：清掉上次异常退出可能残留的占用（见 reset_backfill_lease 文档串）
+    await reset_backfill_lease()
     # 启动：受 SCHEDULER_ENABLED 总开关控制，从 job_configs 加载 enabled 任务注册调度
     # （懒导入 apscheduler，未安装 / 未启用环境启动直接跳过）。
     await start_scheduler()
