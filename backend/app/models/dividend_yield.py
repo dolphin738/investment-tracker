@@ -132,9 +132,11 @@ class MarketSecurityDailyPrice(Base, CreatedAtMixin):
     """市场级日线收盘价表（§5.2，不复权）。唯一键 ``(master_id, trade_date)``。"""
 
     __tablename__ = "market_security_daily_prices"
+    # 唯一约束在 PG 内部即一棵唯一 btree 索引，与同列的普通索引完全等价，
+    # 故不再重复声明普通索引（原 ix_market_daily_price_master_date 已由 0025 下线）：
+    # 少维护一棵 btree，每年省约 70MB，且不影响 (master_id, trade_date) 的任何查询计划。
     __table_args__ = (
         UniqueConstraint("master_id", "trade_date", name="uq_market_daily_price_master_date"),
-        Index("ix_market_daily_price_master_date", "master_id", "trade_date"),
     )
 
     id: Mapped[str] = pk_uuid()
