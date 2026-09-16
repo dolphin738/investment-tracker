@@ -22,11 +22,16 @@
  * 4. 录入弹窗：现金余额新增改为弹出对话框；编辑同一弹窗复用 CashBalanceForm。
  *
  * 筛选/排序/分页仍全部写入 URL query（FLOW-P0-02 验收2：刷新/分享保持）。
+ *
+ * 拆分说明：统一筛选器 → TransactionsFilterBar；现金余额页签内容 →
+ * TransactionsBalancePanel；两个录入弹窗 → TransactionsEntryDialogs。
+ * 全部数据 hook（usePortfolios / useLatestCashBalance / useDefaultDateRange /
+ * usePersistentTab）与 URL 状态仍保留在本门面，子组件纯展示（props 进 / emit 出）。
  */
 
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { Info, Plus, RotateCcw } from 'lucide-vue-next';
+import { Plus } from 'lucide-vue-next';
 import {
   Card,
   CardContent,
@@ -35,34 +40,13 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Label } from '@/components/ui/label';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Skeleton } from '@/components/ui/skeleton';
 import EmptyState from '@/components/common/EmptyState.vue';
 import PageHeader from '@/components/common/PageHeader.vue';
-import HelpTip from '@/components/common/HelpTip.vue';
-import DateRangeQuickPicker from '@/components/date/DateRangeQuickPicker.vue';
-import CashflowForm from '../components/CashflowForm.vue';
 import CashflowList from '../components/CashflowList.vue';
-import CashBalanceForm from '@/modules/cash-balance/components/CashBalanceForm.vue';
-import CashBalanceHistory from '@/modules/cash-balance/components/CashBalanceHistory.vue';
 import {
   parseTransactionSearchParams,
-  SORT_OPTIONS,
-  TRANSACTION_TYPE_OPTIONS,
   typesToParam,
   type TransactionTypeOption,
 } from '../query-params';
@@ -80,8 +64,10 @@ import {
   ENTRY_BUTTON_SIZE,
   ENTRY_BUTTON_VARIANT,
 } from '@/constants/entry-button-labels';
-import { formatCurrency, formatDate } from '@/lib/utils';
 import type { CashBalanceResponse, TransactionQuery } from '@/api/types';
+import TransactionsFilterBar from '../components/TransactionsFilterBar.vue';
+import TransactionsBalancePanel from '../components/TransactionsBalancePanel.vue';
+import TransactionsEntryDialogs from '../components/TransactionsEntryDialogs.vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -311,82 +297,17 @@ onBeforeUnmount(() => {
     </PageHeader>
 
     <!-- ============ 统一筛选器（两个页签共享，变更即写入 URL query） ============ -->
-    <Card>
-      <CardHeader class="pb-3">
-        <CardTitle class="text-base">筛选</CardTitle>
-        <div class="flex items-center gap-1.5 text-sm text-muted-foreground">
-          <span>统一筛选器</span>
-          <HelpTip text="日期范围对「出入金流水」与「现金余额」同时生效；类型与排序仅作用于出入金流水。">
-            <template #content>
-              <p>日期范围对「出入金流水」与「现金余额」同时生效。</p>
-              <p class="mt-1">类型与排序仅作用于出入金流水。</p>
-            </template>
-          </HelpTip>
-        </div>
-      </CardHeader>
-      <CardContent>
-        <div class="flex flex-wrap items-end gap-3">
-          <!--
-            问题⑥：把「不勾选 = 全部」并入 Label，使「类型」这一列与其它列
-            都是「Label + h-9 控件」的等高结构，items-end 下天然对齐。
-          -->
-          <div class="space-y-1.5">
-            <Label class="text-xs">类型（不勾选 = 全部 · 仅流水）</Label>
-            <div class="flex h-9 items-center gap-4 rounded-md border border-input px-3">
-              <label
-                v-for="t in TRANSACTION_TYPE_OPTIONS"
-                :key="t"
-                class="flex cursor-pointer items-center gap-1.5 text-sm"
-              >
-                <input
-                  type="checkbox"
-                  class="h-4 w-4 accent-primary"
-                  :checked="parsed.types.includes(t)"
-                  @change="handleToggleType(t)"
-                />
-                <span :class="t === 'BUY' ? 'text-up' : 'text-down'">
-                  {{ t === 'BUY' ? '存入' : '取出' }}
-                </span>
-              </label>
-            </div>
-          </div>
-          <!-- 问题⑤⑥：接入共享快捷范围控件，与资产记录页同一实现 -->
-          <DateRangeQuickPicker
-            :quick="quickValue"
-            :start-date="filterStartDate"
-            :end-date="filterEndDate"
-            :all-range-start="baseDate"
-            @change="handleRangeChange"
-          />
-          <div class="space-y-1.5">
-            <Label class="text-xs">排序（仅流水）</Label>
-            <Select
-              :model-value="`${parsed.sortBy}:${parsed.sortOrder}`"
-              @update:model-value="handleSortChange"
-            >
-              <SelectTrigger class="w-[130px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem
-                  v-for="opt in SORT_OPTIONS"
-                  :key="opt.value"
-                  :value="opt.value"
-                >
-                  {{ opt.label }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div class="flex gap-2">
-            <Button size="sm" variant="outline" @click="handleResetFilter">
-              <RotateCcw class="mr-1 h-3.5 w-3.5" />
-              重置
-            </Button>
-          </div>
-        </div>
-      </CardContent>
-    </Card>
+    <TransactionsFilterBar
+      :parsed="parsed"
+      :quick-value="quickValue"
+      :filter-start-date="filterStartDate"
+      :filter-end-date="filterEndDate"
+      :base-date="baseDate"
+      @toggle-type="handleToggleType"
+      @range-change="handleRangeChange"
+      @sort-change="handleSortChange"
+      @reset-filter="handleResetFilter"
+    />
 
     <!-- ============ 页签：出入金流水 / 现金余额 ============ -->
     <Tabs v-model="tab">
@@ -421,100 +342,36 @@ onBeforeUnmount(() => {
 
       <!-- ---------- 现金余额（版式参照「买卖明细」：上当前值 + 下变更历史） ---------- -->
       <TabsContent value="balance" class="mt-4">
-        <Card>
-          <CardHeader>
-            <CardTitle class="text-base">现金余额（手工维护）</CardTitle>
-            <CardDescription>
-              维护组合现金余额，生效日起前向沿用；保存/删除均触发净值/XIRR 重算
-            </CardDescription>
-          </CardHeader>
-          <CardContent class="space-y-4">
-            <!-- 当前余额展示行（CASH-P0-02 验收1）；录入入口已统一到页头按钮组 -->
-            <div class="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-muted/40 p-4">
-              <div>
-                <p class="text-xs text-muted-foreground">当前余额</p>
-                <p class="mt-1 text-xl font-bold tabular-nums">
-                  <template v-if="cashBalance !== undefined && cashBalance !== null">
-                    {{ formatCurrency(cashBalance, 2, { thousands: amountThousands, abbreviate: amountAbbrev }) }}
-                  </template>
-                  <template v-else>未维护，请点击右上角「录入现金余额」</template>
-                </p>
-                <p
-                  v-if="cashBalance !== undefined && cashBalance !== null && latestBalance.data.value"
-                  class="mt-0.5 text-xs text-muted-foreground"
-                >
-                  自 {{ formatDate(latestBalance.data.value.asOf) }} 起沿用
-                </p>
-              </div>
-            </div>
-
-            <!-- CASH-P0-03 两条提示 -->
-            <ul class="space-y-1.5 text-xs text-muted-foreground">
-              <li class="flex items-start gap-1.5">
-                <Info class="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                <span>存取与证券买卖不会自动调整此值，请在操作后自行更新。</span>
-              </li>
-              <li class="flex items-start gap-1.5">
-                <Info class="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                <span>修改后自该日起的自动总资产记录将重新计算（您手工记录的日期会被跳过）。</span>
-              </li>
-            </ul>
-
-            <!-- 余额变更历史（受顶部统一筛选器的日期范围约束，每条可编辑/删除） -->
-            <div>
-              <p class="mb-2 text-sm font-medium">余额变更历史</p>
-              <CashBalanceHistory
-                :portfolio-id="currentPortfolioId"
-                :start-date="filterStartDate"
-                :end-date="filterEndDate"
-                :on-edit="openEditBalance"
-                :on-clear-filter="handleResetFilter"
-              />
-            </div>
-          </CardContent>
-        </Card>
+        <TransactionsBalancePanel
+          :current-portfolio-id="currentPortfolioId"
+          :filter-start-date="filterStartDate"
+          :filter-end-date="filterEndDate"
+          :cash-balance="cashBalance"
+          :latest-balance-data="latestBalance.data.value"
+          :amount-thousands="amountThousands"
+          :amount-abbrev="amountAbbrev"
+          @edit-balance="openEditBalance"
+          @clear-filter="handleResetFilter"
+        />
       </TabsContent>
     </Tabs>
 
-    <!-- 录入/编辑出入金弹窗 -->
-    <Dialog
-      :open="open"
-      @update:open="(o) => { open = o; }"
-    >
-      <DialogContent class="max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>{{ ENTRY_BUTTON_LABELS.cashFlow }}</DialogTitle>
-        </DialogHeader>
-        <CashflowForm
-          :portfolio-id="currentPortfolioId"
-          :on-success="() => { open = false; }"
-        />
-      </DialogContent>
-    </Dialog>
-
-    <!-- 录入/编辑现金余额弹窗（新增与编辑复用同一表单组件） -->
-    <Dialog
-      :open="balanceDialogOpen"
-      @update:open="(o) => {
+    <!-- 录入/编辑出入金弹窗 + 录入/编辑现金余额弹窗（开关状态与回调逻辑留在门面） -->
+    <TransactionsEntryDialogs
+      :cashflow-open="open"
+      :balance-open="balanceDialogOpen"
+      :editing-balance="editingBalance"
+      :current-portfolio-id="currentPortfolioId"
+      :on-cashflow-success="() => { open = false; }"
+      :on-balance-success="() => {
+        balanceDialogOpen = false;
+        editingBalance = null;
+      }"
+      @cashflow-open-change="(o) => { open = o; }"
+      @balance-open-change="(o) => {
         balanceDialogOpen = o;
         if (!o) editingBalance = null;
       }"
-    >
-      <DialogContent class="max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>
-            {{ editingBalance ? '编辑现金余额' : ENTRY_BUTTON_LABELS.cashBalance }}
-          </DialogTitle>
-        </DialogHeader>
-        <CashBalanceForm
-          :portfolio-id="currentPortfolioId"
-          :balance="editingBalance"
-          :on-success="() => {
-            balanceDialogOpen = false;
-            editingBalance = null;
-          }"
-        />
-      </DialogContent>
-    </Dialog>
+    />
   </div>
 </template>
