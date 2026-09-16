@@ -1,26 +1,22 @@
 <script setup lang="ts">
 /**
- * modules/admin/components/StockListPanel.vue — 左栏：系统级证券主数据
+ * modules/admin/components/StockListPanel.vue — 左栏：系统级证券主数据（门面）
  *
  * 平移自 React 版 features/admin/stock-list-test-section.tsx 的 StockListPanel，行为契约一致。
  * 只读浏览（由接口同步）、关键字搜索（防抖 300ms）、分页、类别/交易所筛选、
  * 批量/单行删除（仅管理员，被组合持仓引用的跳过）。
+ *
+ * 拆分说明：表格区域（loading / error / empty / Table）已下放到 StockListTable.vue。
+ * useSecurityMasters 等数据拉取仍保留在本门面，items 以 props 下传，
+ * 避免「子组件挂载依赖数据 → 数据请求永不触发」的死锁。
  */
 
-import { computed, onBeforeUnmount, ref, type ComponentPublicInstance } from 'vue';
-import { ArrowRight, Loader2, RefreshCw, Trash2 } from 'lucide-vue-next';
+import { computed, onBeforeUnmount, ref } from 'vue';
+import { RefreshCw, Trash2 } from 'lucide-vue-next';
 import { toast } from '@/composables/use-toast';
 import { cn } from '@/lib/utils';
-import { EXCHANGE_LABELS, SECURITY_TYPE_LABELS, securityTypeLabel } from '@/lib/types';
+import { EXCHANGE_LABELS, SECURITY_TYPE_LABELS } from '@/lib/types';
 import { Button } from '@/components/ui/button';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
 import {
   Card,
   CardContent,
@@ -57,6 +53,7 @@ import type {
   SecurityMaster,
   SecurityMasterDeleteParams,
 } from '@/api/security-master.api';
+import StockListTable from './StockListTable.vue';
 
 const PAGE_SIZE = 20;
 
@@ -135,28 +132,6 @@ const { data, isLoading, isError } = useSecurityMasters(query);
 const items = computed<SecurityMaster[]>(() => data.value?.items ?? []);
 const total = computed(() => data.value?.total ?? 0);
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / PAGE_SIZE)));
-// 当前页已选行数（用于表头 checkbox 三态：全选 / 半选 / 未选）
-const pageSelectedCount = computed(
-  () => items.value.filter((s) => selectedIds.value.has(s.id)).length,
-);
-const allPageSelected = computed(
-  () => items.value.length > 0 && pageSelectedCount.value === items.value.length,
-);
-const somePageSelected = computed(
-  () => pageSelectedCount.value > 0 && pageSelectedCount.value < items.value.length,
-);
-/** 表头 checkbox 的 DOM 半选态（indeterminate 非受控，须直设 DOM） */
-function setHeaderIndeterminate(
-  el: Element | ComponentPublicInstance | null,
-): void {
-  if (el instanceof HTMLInputElement) {
-    el.indeterminate = !selectAll.value && somePageSelected.value;
-  }
-}
-/** 行 checkbox 的 DOM 半选态（行恒无半选，仅保证 ref 集合触发） */
-function noopRef(el: Element | ComponentPublicInstance | null): void {
-  void el; /* 空实现：仅占位，避免 :ref 数组重复触发 */
-}
 
 function openBatchDelete(): void {
   if (selectAll.value) {
@@ -224,15 +199,6 @@ function handleRowSelect(s: SecurityMaster, v: boolean): void {
     if (!stillOnPage) pn.delete(page.value);
   }
   selectedPages.value = pn;
-}
-
-/** 跳转页码（跳至输入框 Enter / Blur） */
-/** 交易所字母大写：仅把代码开头的字母前缀转为大写，数字与后缀不动。
- * 仅作用于展示；填入右侧测试仍使用原始 code。 */
-function formatExchangeCode(code: string): string {
-  const m = code.match(/^[a-zA-Z]+/);
-  if (!m) return code;
-  return code.slice(0, m[0].length).toUpperCase() + code.slice(m[0].length);
 }
 </script>
 
@@ -362,92 +328,18 @@ function formatExchangeCode(code: string): string {
         </Button>
       </div>
 
-      <div
-        v-if="isLoading"
-        class="flex items-center gap-2 py-8 text-sm text-muted-foreground"
-      >
-        <Loader2 class="h-4 w-4 animate-spin" /> 加载中…
-      </div>
-      <p v-else-if="isError" class="py-8 text-center text-sm text-red-500">
-        加载失败，请刷新重试
-      </p>
-      <p
-        v-else-if="!isLoading && !isError && items.length === 0"
-        class="py-8 text-center text-sm text-muted-foreground"
-      >
-        暂无主数据，点击右上角「同步」拉取
-      </p>
-
-      <Table v-if="!isLoading && !isError && items.length > 0">
-        <TableHeader>
-          <TableRow>
-            <TableHead class="w-12">
-              <input
-                type="checkbox"
-                class="h-4 w-4 rounded border-input accent-primary"
-                :checked="selectAll || allPageSelected"
-                :ref="setHeaderIndeterminate"
-                @change="
-                  ($event) =>
-                    handleHeaderSelect(($event.target as HTMLInputElement).checked)
-                "
-              />
-            </TableHead>
-            <TableHead class="w-12">#</TableHead>
-            <TableHead class="w-28">代码</TableHead>
-            <TableHead>名称</TableHead>
-            <TableHead class="w-20">类别</TableHead>
-            <TableHead class="w-16 text-right">操作</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          <TableRow
-            v-for="(s, index) in items"
-            :key="s.id"
-            :class="selectAll || selectedIds.has(s.id) ? 'bg-muted/40' : ''"
-          >
-            <TableCell>
-              <input
-                type="checkbox"
-                class="h-4 w-4 rounded border-input accent-primary"
-                :checked="selectAll || selectedIds.has(s.id)"
-                :disabled="selectAll"
-                :ref="noopRef"
-                @change="
-                  ($event) =>
-                    handleRowSelect(s, ($event.target as HTMLInputElement).checked)
-                "
-              />
-            </TableCell>
-            <TableCell class="text-muted-foreground">{{ index + 1 }}</TableCell>
-            <TableCell class="font-mono">{{ formatExchangeCode(s.code) }}</TableCell>
-            <TableCell class="truncate">{{ s.name }}</TableCell>
-            <TableCell>{{ securityTypeLabel(s.assetClass) }}</TableCell>
-            <TableCell class="text-right">
-              <div class="flex items-center justify-end gap-1">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  title="填入右侧测试"
-                  @click="emit('pickCode', s.code)"
-                >
-                  <ArrowRight class="h-3.5 w-3.5" />
-                </Button>
-                <Button
-                  v-if="isAdmin"
-                  variant="ghost"
-                  size="icon"
-                  title="删除"
-                  class="text-red-600 hover:text-red-700"
-                  @click="openSingleDelete(s)"
-                >
-                  <Trash2 class="h-4 w-4" />
-                </Button>
-              </div>
-            </TableCell>
-          </TableRow>
-        </TableBody>
-      </Table>
+      <StockListTable
+        :items="items"
+        :is-loading="isLoading"
+        :is-error="isError"
+        :select-all="selectAll"
+        :selected-ids="selectedIds"
+        :is-admin="isAdmin"
+        @pick-code="emit('pickCode', $event)"
+        @single-delete="openSingleDelete"
+        @header-select="handleHeaderSelect"
+        @row-select="handleRowSelect"
+      />
 
       <!-- 删除确认弹窗（批量/单行共用） -->
       <AlertDialog :open="confirmOpen" @update:open="confirmOpen = !!$event">
