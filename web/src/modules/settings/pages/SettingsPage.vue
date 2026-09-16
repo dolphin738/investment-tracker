@@ -16,19 +16,16 @@
  * - 服务端偏好加载后写入 preference.store（全站共享），并回填本地表单；
  * - 修改后点「保存偏好」乐观更新（失败回滚），成功后覆盖偏好 store 并切默认组合；
  * - QUICK_RANGE_OPTIONS / RESOLVED 统一取自 '@/modules/query/quick-range'（唯一真相源）。
+ *
+ * 拆分说明：账户页签 → SettingsAccountTab；数据管理页签 → SettingsDataTab；
+ * 危险操作区页签 → SettingsDangerTab。全部数据 hook（useProfile /
+ * usePortfolios / useDeleteAccount / useClearPortfolioData）与弹窗开关状态
+ * 仍保留在本门面，子组件纯展示（props 进 / emit 出）。
  */
 import { computed, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { Loader2, Lock, LogOut, Mail, Pencil } from 'lucide-vue-next';
+import { Loader2 } from 'lucide-vue-next';
 import PageHeader from '@/components/common/PageHeader.vue';
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -47,21 +44,14 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import UserAvatar from '@/components/common/UserAvatar.vue';
-import ExportPanel from '@/modules/data-transfer/components/ExportPanel.vue';
 import ImportDialog from '@/modules/data-transfer/components/ImportDialog.vue';
-import ImportTemplateButtons from '@/modules/data-transfer/components/ImportTemplateButtons.vue';
 import ChangeEmailDialog from '@/modules/account/components/ChangeEmailDialog.vue';
 import ChangePasswordDialog from '@/modules/account/components/ChangePasswordDialog.vue';
 import EditProfileDialog from '@/modules/account/components/EditProfileDialog.vue';
-import AssetOverviewCard from '@/modules/account/components/AssetOverviewCard.vue';
-import StatsOverviewCard from '@/modules/account/components/StatsOverviewCard.vue';
-import PortfolioManagementCard from '@/modules/account/components/PortfolioManagementCard.vue';
 import AutoSyncCard from '@/modules/account/components/AutoSyncCard.vue';
 import { useAuthStore } from '@/stores/auth.store';
 import { usePortfolioStore } from '@/stores/portfolio.store';
 import { useProfile } from '@/modules/auth/composables/use-auth';
-import { formatDate } from '@/lib/utils';
 import {
   useClearPortfolioData,
   usePortfolios,
@@ -69,6 +59,9 @@ import {
 import { useDeleteAccount } from '@/modules/account/composables/use-account';
 import { ROUTE_PATH } from '@/lib/constants';
 import SettingsPreferencesTab from '../components/SettingsPreferencesTab.vue';
+import SettingsAccountTab from '../components/SettingsAccountTab.vue';
+import SettingsDataTab from '../components/SettingsDataTab.vue';
+import SettingsDangerTab from '../components/SettingsDangerTab.vue';
 
 const router = useRouter();
 const route = useRoute();
@@ -161,83 +154,14 @@ function confirmClearData(): void {
 
       <!-- 账户（账户中心已整体并入本页签：信息摘要 + 安全操作 + 资产/统计 + 组合管理） -->
       <TabsContent value="account" class="space-y-6">
-      <Card>
-      <CardHeader>
-        <CardTitle class="text-base">账户</CardTitle>
-        <CardDescription>当前登录用户信息与安全设置</CardDescription>
-      </CardHeader>
-      <CardContent class="space-y-4">
-        <!-- 头像 + 昵称 + 邮箱 -->
-        <div class="flex flex-col gap-4 sm:flex-row sm:items-center">
-          <UserAvatar
-            size="lg"
-            :src="currentUser?.avatar"
-            :name="currentUser?.name"
-            :email="currentUser?.email ?? ''"
-          />
-          <div class="min-w-0">
-            <p class="truncate text-base font-medium">
-              {{ currentUser?.name || '未设置' }}
-            </p>
-            <p class="truncate text-sm text-muted-foreground">
-              {{ currentUser?.email ?? '-' }}
-            </p>
-          </div>
-        </div>
-
-        <!-- 资料明细（含原账户页个人信息卡特有的「注册时间」） -->
-        <div class="grid grid-cols-1 gap-4 text-sm sm:grid-cols-3">
-          <div>
-            <Label class="text-xs text-muted-foreground">手机号</Label>
-            <p class="mt-1 font-mono">{{ maskedPhone }}</p>
-          </div>
-          <div>
-            <Label class="text-xs text-muted-foreground">注册时间</Label>
-            <p class="mt-1">{{ formatDate(currentUser?.createdAt) }}</p>
-          </div>
-          <div>
-            <Label class="text-xs text-muted-foreground">个人简介</Label>
-            <p class="mt-1 whitespace-pre-wrap break-words">
-              {{ currentUser?.bio || '-' }}
-            </p>
-          </div>
-        </div>
-
-        <!-- 操作区 -->
-        <div class="flex flex-wrap gap-2">
-          <Button variant="outline" size="sm" @click="emailDialogOpen = true">
-            <Mail class="mr-2 h-4 w-4" />
-            修改邮箱
-          </Button>
-          <Button variant="outline" size="sm" @click="passwordDialogOpen = true">
-            <Lock class="mr-2 h-4 w-4" />
-            修改密码
-          </Button>
-          <Button variant="outline" size="sm" @click="profileDialogOpen = true">
-            <Pencil class="mr-2 h-4 w-4" />
-            编辑资料
-          </Button>
-          <Button variant="outline" size="sm" @click="handleLogout">
-            <LogOut class="mr-2 h-4 w-4" />
-            退出登录
-          </Button>
-        </div>
-
-        <!-- 头像修改提示（§7.8 L1318-1319） -->
-        <p class="text-xs text-muted-foreground">
-          Ⓘ 头像修改在「编辑资料」卡片内完成（本地上传 与 头像 URL 并列）；本区只展示头像，不提供独立的「头像 URL」输入框
-        </p>
-      </CardContent>
-    </Card>
-
-      <!-- 原账户页只读聚合卡（ACC-P0-03 / ACC-P0-06）：资产全景 + 数据统计 -->
-      <div class="grid grid-cols-1 gap-6 xl:grid-cols-12">
-        <AssetOverviewCard class="xl:col-span-5" />
-        <StatsOverviewCard class="xl:col-span-7" />
-      </div>
-
-      <!-- 我的组合：全站唯一组合管理平面（ACC-P0-04，可写），独占整行 -->
-      <PortfolioManagementCard />
+        <SettingsAccountTab
+          :current-user="currentUser"
+          :masked-phone="maskedPhone"
+          @open-email-dialog="emailDialogOpen = true"
+          @open-password-dialog="passwordDialogOpen = true"
+          @open-profile-dialog="profileDialogOpen = true"
+          @logout="handleLogout"
+        />
       </TabsContent>
 
       <!-- 偏好设置（含持仓行情同步卡） -->
@@ -249,48 +173,10 @@ function confirmClearData(): void {
 
     <!-- 数据管理（T05 · SET-P0-03 导出 / SET-P0-04 导入 / FLOW-P1-01） -->
       <TabsContent value="data">
-      <Card>
-      <CardHeader>
-        <CardTitle class="text-base">数据管理</CardTitle>
-        <CardDescription>
-          CSV / Excel 导出与导入（导入支持 .csv / .xlsx / .xls）
-        </CardDescription>
-      </CardHeader>
-      <CardContent class="space-y-4">
-        <!-- 导出（SET-P0-03）：7 类多选 + 格式 + 串行下载 -->
-        <div class="space-y-2">
-          <Label class="text-sm">导出</Label>
-          <ExportPanel
-            v-if="currentPortfolio"
-            :portfolio-id="currentPortfolio.id"
-            :portfolio-name="currentPortfolio.name"
-          />
-          <p v-else class="text-xs text-muted-foreground">
-            请先在顶部选择一个投资组合
-          </p>
-        </div>
-
-        <!-- 导入（SET-P0-04 / FLOW-P1-01）：预览 → 提交 -->
-        <div class="space-y-2">
-          <Label class="text-sm">导入</Label>
-          <div class="flex flex-wrap items-center gap-2">
-            <ImportTemplateButtons />
-            <Button
-              variant="outline"
-              size="sm"
-              :disabled="!currentPortfolio"
-              @click="importOpen = true"
-            >
-              选择文件并导入…
-            </Button>
-          </div>
-        </div>
-
-        <p class="text-xs text-muted-foreground">
-          Ⓘ 导入前建议先「导出」备份；证券买卖 / 出入金为追加写入，资产快照按日期覆盖。
-        </p>
-      </CardContent>
-    </Card>
+        <SettingsDataTab
+          :current-portfolio="currentPortfolio"
+          @open-import-dialog="importOpen = true"
+        />
       </TabsContent>
 
     <!-- 导入对话框 -->
@@ -302,58 +188,17 @@ function confirmClearData(): void {
 
     <!-- 危险操作区（SET-P0-05 清空数据 + SET-P1-06 注销账户） -->
       <TabsContent value="danger">
-      <Card class="border-destructive/40">
-      <CardHeader>
-        <CardTitle class="text-base text-destructive">危险操作区</CardTitle>
-        <CardDescription>以下操作不可恢复或代价极高，请谨慎执行</CardDescription>
-      </CardHeader>
-      <CardContent class="space-y-4">
-        <!-- 清空当前组合数据（SET-P0-05）：只清数据、保留组合 -->
-        <div class="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <p class="text-sm font-medium">清空当前组合数据</p>
-            <p class="text-xs text-muted-foreground">
-              删除当前组合的全部出入金、证券买卖、净值与 XIRR 等数据，
-              但保留组合本身（SET-P0-05）
-            </p>
-          </div>
-          <Button
-            variant="outline"
-            size="sm"
-            class="text-destructive hover:text-destructive"
-            :disabled="!currentPortfolio"
-            :title="currentPortfolio ? undefined : '请先在顶部选择一个组合'"
-            @click="
-              clearDataConfirmName = '';
-              clearDataOpen = true;
-            "
-          >
-            清空数据
-          </Button>
-        </div>
-
-        <!-- 注销账户（SET-P1-06）：软删除账户本身及全部数据 -->
-        <div class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-3">
-          <div>
-            <p class="text-sm font-semibold text-destructive">注销账户</p>
-            <p class="text-xs text-muted-foreground">
-              软删除账户本身及全部组合；30 天内可在登录页用原邮箱 + 密码自助恢复，
-              超期由系统彻底删除（SET-P1-06）
-            </p>
-          </div>
-          <Button
-            variant="destructive"
-            size="sm"
-            @click="
-              deleteAccountEmail = '';
-              deleteAccountOpen = true;
-            "
-          >
-            注销账户
-          </Button>
-        </div>
-      </CardContent>
-        </Card>
+        <SettingsDangerTab
+          :current-portfolio="currentPortfolio"
+          @open-clear-dialog="() => {
+            clearDataConfirmName = '';
+            clearDataOpen = true;
+          }"
+          @open-delete-dialog="() => {
+            deleteAccountEmail = '';
+            deleteAccountOpen = true;
+          }"
+        />
       </TabsContent>
     </Tabs>
 
