@@ -96,6 +96,10 @@ const ENDPOINT_PARAM_HINTS: Record<string, Record<string, string>> = {
     adjust: "复权：留空=不复权；qfq=前复权；hfq=后复权",
     timeout: "可选，请求超时秒数；留空=不设置",
   },
+  stock_individual_info_em: {
+    symbol: '股票代码，纯数字（如 603777 / 000001）；查询指定个股的基础信息（最新价/总股本/流通股/总市值/流通市值/行业/上市时间）',
+    timeout: '可选，请求超时秒数；留空=不设置',
+  },
 };
 
 /** 识别接口参数模板里的占位符默认值（如 string / 示例 / example），留空时不作为真实参数发送 */
