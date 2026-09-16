@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * modules/security-trade/components/SecurityTradeForm.vue — 证券买卖录入/编辑弹窗表单
+ * modules/security-trade/components/SecurityTradeForm.vue — 证券买卖录入/编辑弹窗表单（门面）
  *
  * 平移自 React 版 features/security-trade/security-trade-form.tsx,
  * schema 与错误消息逐字一致,录入 / 编辑共用同一 schema + 同一布局。
@@ -17,26 +17,18 @@
  * (桥接函数见 lib/zod-typed-schema),校验规则与提示文案不变。
  *
  * INC-04 物理并表:费用明细直接承载于 security_trades 一行,feeTotal = 三列之和。
+ *
+ * §4 单文件 ≤400 行纯位置拆分（零行为变更）：schema/选项/回填工具 → security-trade-schema.ts；
+ * 基础字段块 → SecurityTradeCoreFields.vue；费用/成本价/备注/提示尾部区块 → SecurityTradeFeeFields.vue。
+ * 子组件均为纯展示（props 进 / emit 出,不新建数据 hook）;门面保留全部数据 hook 与提交逻辑。
  */
 
 import { computed, ref, watch } from 'vue';
 import { useForm } from 'vee-validate';
 import { useMutation, useQuery } from '@tanstack/vue-query';
-import { z } from 'zod';
 import { Loader2 } from 'lucide-vue-next';
 import { toast } from '@/composables/use-toast';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import SecuritySearchCombobox from '@/components/common/SecuritySearchCombobox.vue';
 import {
   useCreateSecurityTrade,
   useUpdateSecurityTrade,
@@ -46,92 +38,16 @@ import { resolveSecurity, updateSecurity, getSecurity } from '@/api/security.api
 import type { SecurityDetailResponse } from '@/api/security.api';
 import { toIsoDate } from '@/lib/constants';
 import { SecuritySide, SecurityType, sumMoney } from '@/lib/types';
-import { formatCurrency } from '@/lib/utils';
 import { zodToTypedSchema } from '@/lib/zod-typed-schema';
 import type {
   CreateSecurityTradeRequest,
   SecurityTradeResponse,
   UpdateSecurityDto,
 } from '@/api/types';
-
-/** 资产类型选项(供手动修改使用),与 React 版逐字一致 */
-const SECURITY_TYPE_OPTIONS: ReadonlyArray<{ value: SecurityType; label: string }> = [
-  { value: SecurityType.STOCK, label: '股票' },
-  { value: SecurityType.ON_EXCHANGE_FUND, label: '场内基金' },
-  { value: SecurityType.OFF_EXCHANGE_FUND, label: '场外基金' },
-  { value: SecurityType.BOND, label: '债券' },
-  { value: SecurityType.CONVERTIBLE_BOND, label: '可转债' },
-  { value: SecurityType.INDEX, label: '指数' },
-  { value: SecurityType.HK_STOCK, label: '港股' },
-  { value: SecurityType.OTHER, label: '其他' },
-  // 后端可合法下发 UNCATEGORIZED（代码无法可靠归类时的兜底类型）。必须纳入下拉项，
-  // 否则该标的值命中时 reka-ui Select 无匹配项、回退显示「无法推断类型」占位符（见 BugFix）。
-  { value: SecurityType.UNCATEGORIZED, label: '未分类' },
-];
-
-/** 费用字段:可选、非负、最多 2 位小数 */
-const feeFieldSchema = z
-  .string()
-  .optional()
-  .refine((v) => !v || /^\d+(\.\d{1,2})?$/.test(v), '费用最多 2 位小数')
-  .refine((v) => !v || Number(v) >= 0, '费用不能为负');
-
-/** 公共字段:方向 / 日期 / 标的 / 数量 / 备注 */
-const baseFields = {
-  date: z
-    .string()
-    .min(1, '请选择日期')
-    .refine((v) => v <= toIsoDate(new Date()), '日期不能为未来'),
-  side: z.nativeEnum(SecuritySide),
-  securityId: z.string().min(1, '请选择标的'),
-  // Vue 对 type=number 输入的 v-model 会自动把值转为数字,
-  // 此处先归一为字符串,保持与 React 版 z.string() 同口径(错误消息不变)
-  quantity: z.preprocess(
-    (v) => (typeof v === 'number' ? String(v) : v),
-    z
-      .string()
-      .min(1, '请输入数量')
-      .refine((v) => Number(v) > 0, '数量必须大于 0'),
-  ),
-  note: z.string().max(200, '备注最多 200 字').optional(),
-};
-
-/**
- * 单一 schema(录入 / 编辑共用)。
- *
- * 成交额允许最多 6 位小数:录入态用户通常输入 2 位金额;编辑态回填 q × costPrice −/+ feeTotal
- * 可能产生 3~6 位小数(costPrice 为 6 位小数),若截断到 2 位会破坏「不改动即成本守恒」。
- */
-const tradeSchema = z
-  .object({
-    ...baseFields,
-    tradeAmount: z
-      .string()
-      .min(1, '请输入成交额')
-      .refine((v) => /^\d+(\.\d{1,6})?$/.test(v), '成交额最多 6 位小数')
-      .refine((v) => Number(v) > 0, '成交额必须大于 0'),
-    commission: feeFieldSchema,
-    stampTax: feeFieldSchema,
-    other: feeFieldSchema,
-  })
-  // 卖出费用合计 > 成交额 → 阻止(C-7 前端闸 + 后端 costPrice>0 DTO 兜底)
-  .superRefine((data, ctx) => {
-    if (data.side !== SecuritySide.SELL_SEC) return;
-    const feeTotal = sumMoney([
-      data.commission || '0',
-      data.stampTax || '0',
-      data.other || '0',
-    ]);
-    if (Number(feeTotal) > Number(data.tradeAmount || '0')) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['tradeAmount'],
-        message: '费用合计不能超过成交额',
-      });
-    }
-  });
-
-type TradeFormValues = z.infer<typeof tradeSchema>;
+import { createResetDefaults, toPrecision6, tradeSchema } from './security-trade-schema';
+import type { TradeFormValues } from './security-trade-schema';
+import SecurityTradeCoreFields from './SecurityTradeCoreFields.vue';
+import SecurityTradeFeeFields from './SecurityTradeFeeFields.vue';
 
 const props = defineProps<{
   portfolioId: string;
@@ -141,12 +57,6 @@ const props = defineProps<{
 
 /** 提交成功后回调(关闭弹窗) */
 const emit = defineEmits<{ success: [] }>();
-
-/** 6 位小数字符串(编辑态成交额回填用;去除尾随零避免输入框显示 123.450000) */
-function toPrecision6(n: number): string {
-  if (!Number.isFinite(n) || n <= 0) return '';
-  return String(Math.round(n * 1e6) / 1e6);
-}
 
 const isEdit = computed(() => Boolean(props.trade));
 const createMutation = useCreateSecurityTrade();
@@ -179,7 +89,6 @@ const resolvedSecurity = ref<{
   code: string;
   type: SecurityType;
 } | null>(null);
-
 const {
   handleSubmit,
   resetForm,
@@ -210,7 +119,6 @@ const [commissionModel, commissionAttrs] = defineField('commission');
 const [stampTaxModel, stampTaxAttrs] = defineField('stampTax');
 const [otherModel, otherAttrs] = defineField('other');
 const [noteModel, noteAttrs] = defineField('note');
-
 /**
  * 编辑态回填(I-01 验收 3/4):
  * - 费用三框直接取自 trade.commission/stampTax/other(INC-04 物理并表,无独立费用表)
@@ -292,32 +200,11 @@ watch(
 );
 
 /**
- * 当前选中标的的展示文本(编辑态回显,INC-02 保底语义):
- * - 列表已到且含当前标的 → 名称(代码)
- * - resolve 缓存的选中元数据命中 → 名称(代码)（标的不在组合字典也能正常显示）
- * - 列表未到 → 当前标的(加载中…)
- * - 列表已到但当前标的不在 → 当前标的(已不在可选列表)
- */
-const selectedSecurityLabel = computed(() => {
-  if (!selectedSecurityId.value) return '';
-  const found = (securities.value ?? []).find(
-    (s) => s.id === selectedSecurityId.value,
-  );
-  if (found) return `${found.name}（${found.code}）`;
-  if (resolvedSecurity.value?.id === selectedSecurityId.value) {
-    return `${resolvedSecurity.value.name}（${resolvedSecurity.value.code}）`;
-  }
-  return secLoading.value || secDetailLoading.value
-    ? '当前标的（加载中…）'
-    : '当前标的（已不在可选列表）';
-});
-
-/**
  * 编辑态标的详情兜底拉取：当 trade.securityId 不在组合证券字典（securities 列表）内时
  * （如录入时 resolve 懒实例化的新标的、列表分页未覆盖、或缓存滞后），按 id 主动拉取该标的
  * 详情并回填 resolvedSecurity，驱动「标的名称」「资产类型」正确显示，彻底消除
  * 「已不在可选列表 / 无法推断类型」。列表字典已含该标的时 disabled，不发起多余请求
- * （交给 selectedSecurityLabel / currentSecurityType 既有的 find 逻辑）。
+ * （交给子组件 selectedSecurityLabel / 门面 currentSecurityType 既有的 find 逻辑）。
  */
 const secDetailQuery = useQuery<SecurityDetailResponse>({
   queryKey: ['security', 'detail', props.portfolioId, selectedSecurityId],
@@ -395,61 +282,11 @@ function handleSecurityTypeChange(newType: SecurityType): void {
   );
 }
 
-/** 费用合计(两态统一;输入未成型时 null) */
-const feeTotal = computed(() => {
-  const inputs: Array<string | number | undefined> = [
-    commissionModel.value,
-    stampTaxModel.value,
-    otherModel.value,
-  ];
-  if (
-    inputs.some(
-      (v) =>
-        v != null && String(v) !== '' && !/^\d+(\.\d{1,2})?$/.test(String(v)),
-    )
-  ) {
-    return null;
-  }
-  return sumMoney(inputs.map((v) => String(v ?? '').trim() || '0'));
-});
-
-const sideValue = computed(() => sideModel.value as SecuritySide);
-
-/** 成本价(含费单价,只读实时预览,两态一致,K-3):买入=(成交额+合计)/数量;卖出=(成交额−合计)/数量 */
-const derivedPrice = computed(() => {
-  if (feeTotal.value === null) return null;
-  const qty = Number(quantityModel.value);
-  const amount = Number(tradeAmountModel.value);
-  if (!quantityModel.value || !tradeAmountModel.value || Number.isNaN(qty) || Number.isNaN(amount)) {
-    return null;
-  }
-  if (qty <= 0 || amount <= 0) return null;
-  const raw =
-    (sideValue.value === SecuritySide.BUY_SEC
-      ? amount + Number(feeTotal.value)
-      : amount - Number(feeTotal.value)) / qty;
-  if (raw <= 0) return null;
-  // K-3/U-3:单价收敛到 6 位小数后按现有 number 契约提交
-  return Number(raw.toFixed(6));
-});
-
-/** 新建成功后的表单重置值(录入 / 编辑共用) */
-const resetDefaults = {
-  date: today,
-  side: SecuritySide.BUY_SEC,
-  securityId: '',
-  quantity: '',
-  tradeAmount: '',
-  commission: '',
-  stampTax: '',
-  other: '',
-  note: '',
-};
-
 /**
  * 统一保存流程(I-01 验收 6,两态对称):提交单笔 /security-trades,
  * INC-04 物理并表承载 { date, side, securityId, quantity, costPrice(含费单价),
  * commission, stampTax, other, feeTotal }。
+ * 成功后以 createResetDefaults(today) 同帧构造重置值（原 resetDefaults 常量,行为不变）。
  */
 const onSubmit = handleSubmit((values) => {
   submitting.value = true;
@@ -486,7 +323,7 @@ const onSubmit = handleSubmit((values) => {
     toast.error('保存失败，请稍后重试');
   };
   const handleSuccess = (): void => {
-    resetForm({ values: resetDefaults });
+    resetForm({ values: createResetDefaults(today) });
     emit('success');
   };
 
@@ -515,207 +352,41 @@ const onSubmit = handleSubmit((values) => {
 <template>
   <form @submit="onSubmit">
     <div class="space-y-4">
-      <!-- 方向 -->
-      <div class="space-y-2">
-        <Label for="st-side">方向 *</Label>
-        <Select v-model="sideModel">
-          <SelectTrigger id="st-side">
-            <SelectValue placeholder="选择方向" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem :value="SecuritySide.BUY_SEC">买入</SelectItem>
-            <SelectItem :value="SecuritySide.SELL_SEC">卖出</SelectItem>
-          </SelectContent>
-        </Select>
-        <p v-if="errors.side" class="text-xs text-destructive">{{ errors.side }}</p>
-      </div>
-
-      <!-- 日期 -->
-      <div class="space-y-2">
-        <Label for="st-date">日期 *</Label>
-        <Input
-          id="st-date"
-          v-model="dateModel"
-          v-bind="dateAttrs"
-          type="date"
-          :max="today"
-        />
-        <p v-if="errors.date" class="text-xs text-destructive">{{ errors.date }}</p>
-      </div>
-
-      <!-- 标的:证券搜索选择(不再支持「新建标的」) -->
-      <div class="space-y-2">
-        <Label for="st-security">标的 *</Label>
-        <SecuritySearchCombobox
-          id="st-security"
-          :value="selectedSecurityLabel"
-          :placeholder="secLoading ? '加载中…' : '搜索代码 / 名称 / 拼音首字母'"
-          :disabled="secLoading && !selectedSecurityId"
-          @select="handleSelectMaster"
-          @clear="handleClear"
-        />
-        <p v-if="errors.securityId" class="text-xs text-destructive">
-          {{ errors.securityId }}
-        </p>
-      </div>
-
-      <!-- 资产类型:选中证券后自动带出,可手动修改 -->
-      <div class="space-y-2">
-        <Label for="st-security-type">资产类型（可修改）</Label>
-        <Select
-          :model-value="currentSecurityType ?? undefined"
-          @update:model-value="(v: string) => handleSecurityTypeChange(v as SecurityType)"
-          :disabled="!selectedSecurityId || updateSecurityPending"
-        >
-          <SelectTrigger id="st-security-type">
-            <SelectValue
-              :placeholder="
-                selectedSecurityId
-                  ? secLoading || secDetailLoading
-                    ? '加载中…'
-                    : '无法推断类型'
-                  : '请先选择标的'
-              "
-            />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem
-              v-for="opt in SECURITY_TYPE_OPTIONS"
-              :key="opt.value"
-              :value="opt.value"
-            >
-              {{ opt.label }}
-            </SelectItem>
-          </SelectContent>
-        </Select>
-        <p v-if="updateSecurityPending" class="text-xs text-muted-foreground">
-          更新中...
-        </p>
-      </div>
-
-      <!-- 数量 -->
-      <div class="space-y-2">
-        <Label for="st-quantity">数量 *</Label>
-        <Input
-          id="st-quantity"
-          v-model="quantityModel"
-          v-bind="quantityAttrs"
-          type="number"
-          step="0.000001"
-          min="0"
-          placeholder="0"
-        />
-        <p v-if="errors.quantity" class="text-xs text-destructive">
-          {{ errors.quantity }}
-        </p>
-      </div>
-
-      <!-- 成交额(两态统一输入) -->
-      <div class="space-y-2">
-        <Label for="st-trade-amount">成交额（元）*</Label>
-        <Input
-          id="st-trade-amount"
-          v-model="tradeAmountModel"
-          v-bind="tradeAmountAttrs"
-          type="text"
-          inputmode="decimal"
-          placeholder="0.00"
-        />
-        <p v-if="errors.tradeAmount" class="text-xs text-destructive">
-          {{ errors.tradeAmount }}
-        </p>
-      </div>
-
-      <!-- 费用三框并列(两态统一) -->
-      <div class="space-y-2">
-        <Label>费用（元）</Label>
-        <div class="grid grid-cols-3 gap-2">
-          <div class="space-y-1">
-            <Label for="st-commission" class="text-xs">佣金</Label>
-            <Input
-              id="st-commission"
-              v-model="commissionModel"
-              v-bind="commissionAttrs"
-              type="text"
-              inputmode="decimal"
-              placeholder="0.00"
-            />
-            <p v-if="errors.commission" class="text-xs text-destructive">
-              {{ errors.commission }}
-            </p>
-          </div>
-          <div class="space-y-1">
-            <Label for="st-stamp-tax" class="text-xs">印花税</Label>
-            <Input
-              id="st-stamp-tax"
-              v-model="stampTaxModel"
-              v-bind="stampTaxAttrs"
-              type="text"
-              inputmode="decimal"
-              placeholder="0.00"
-            />
-            <p v-if="errors.stampTax" class="text-xs text-destructive">
-              {{ errors.stampTax }}
-            </p>
-          </div>
-          <div class="space-y-1">
-            <Label for="st-other" class="text-xs">其他</Label>
-            <Input
-              id="st-other"
-              v-model="otherModel"
-              v-bind="otherAttrs"
-              type="text"
-              inputmode="decimal"
-              placeholder="0.00"
-            />
-            <p v-if="errors.other" class="text-xs text-destructive">
-              {{ errors.other }}
-            </p>
-          </div>
-        </div>
-        <p
-          class="rounded-md border bg-muted/40 px-3 py-2 text-sm tabular-nums"
-          data-testid="fee-total"
-        >
-          费用合计（自动）=
-          {{ feeTotal !== null ? formatCurrency(Number(feeTotal)) : '¥0.00' }}
-        </p>
-      </div>
-
-      <!-- 成本价实时展示(K-3,两态统一只读预览) -->
-      <div class="space-y-2">
-        <Label>成本价（自动，含费）</Label>
-        <div class="rounded-md border bg-muted/40 px-3 py-2 text-sm tabular-nums">
-          <template v-if="derivedPrice !== null">
-            {{ formatCurrency(derivedPrice, 6) }}
-            <span class="ml-2 text-xs text-muted-foreground">
-              = (成交额{{ sideValue === SecuritySide.BUY_SEC ? '+' : '−' }}费用合计)/数量
-            </span>
-          </template>
-          <span v-else class="text-muted-foreground">
-            填写数量、成交额与费用后自动计算
-          </span>
-        </div>
-      </div>
-
-      <!-- 备注 -->
-      <div class="space-y-2">
-        <Label for="st-note">备注（可选）</Label>
-        <Textarea
-          id="st-note"
-          v-model="noteModel"
-          v-bind="noteAttrs"
-          placeholder="如：建仓 / 加仓 / 止盈"
-          rows="2"
-        />
-        <p v-if="errors.note" class="text-xs text-destructive">{{ errors.note }}</p>
-      </div>
-
-      <!-- 提示 -->
-      <p class="flex items-start gap-1.5 text-xs text-muted-foreground">
-        组合内部买卖，不计入出入金现金流；持仓由买卖流水实时推导。佣金 / 印花税 /
-        其他费用已并入含费成本价（INC-04 物理并表至证券买卖流水）。
-      </p>
+      <SecurityTradeCoreFields
+        v-model:side-model="sideModel"
+        v-model:date-model="dateModel"
+        :date-attrs="dateAttrs"
+        v-model:quantity-model="quantityModel"
+        :quantity-attrs="quantityAttrs"
+        v-model:trade-amount-model="tradeAmountModel"
+        :trade-amount-attrs="tradeAmountAttrs"
+        :errors="errors"
+        :max-date="today"
+        :securities="securities"
+        :sec-loading="secLoading"
+        :sec-detail-loading="secDetailLoading"
+        :selected-security-id="selectedSecurityId"
+        :resolved-security="resolvedSecurity"
+        :current-security-type="currentSecurityType"
+        :update-security-pending="updateSecurityPending"
+        @select-master="handleSelectMaster"
+        @clear="handleClear"
+        @security-type-change="handleSecurityTypeChange"
+      />
+      <SecurityTradeFeeFields
+        v-model:commission-model="commissionModel"
+        :commission-attrs="commissionAttrs"
+        v-model:stamp-tax-model="stampTaxModel"
+        :stamp-tax-attrs="stampTaxAttrs"
+        v-model:other-model="otherModel"
+        :other-attrs="otherAttrs"
+        v-model:note-model="noteModel"
+        :note-attrs="noteAttrs"
+        :quantity-model="quantityModel"
+        :trade-amount-model="tradeAmountModel"
+        :side-model="sideModel"
+        :errors="errors"
+      />
     </div>
 
     <div class="mt-6 flex justify-end gap-2">
