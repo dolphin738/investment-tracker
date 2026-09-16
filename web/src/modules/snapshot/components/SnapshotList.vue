@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * modules/snapshot/components/SnapshotList.vue — 资产快照记录表格（PRD §7.3）
+ * modules/snapshot/components/SnapshotList.vue — 资产快照记录表格（PRD §7.3，门面）
  *
  * 平移自 React 版 web/src/features/snapshot/snapshot-list.tsx，行为契约一致：
  * - 列：日期/总资产/持仓/现金/来源（自动/手工）/系统自动值+差异/备注/操作
@@ -9,40 +9,22 @@
  * - 筛选行：日期范围 + 来源 checkbox（自动/手工）+ [重置]
  * - 顶部差异提示条：「当前有 N 条手工记录，其中 M 条与自动值差异 > 1%」+ [仅看手工]
  * - 手工行差异列：系统自动计算值 + 差异金额 +（差异%）
+ *
+ * 拆分说明（纯位置拆分，零行为变更）：
+ * - components/SnapshotTable        列表表格（loading/error/empty 三态 + 行渲染）
+ * - components/SnapshotDeleteDialog 删除确认弹窗（confirm / update:open 上抛）
+ * - components/SnapshotResetDialog  重置确认弹窗（confirm / update:open 上抛）
+ * 数据 hook（useSnapshots / useDeleteSnapshot / useResetSnapshot / useRangePreferenceSync）
+ * 与全部状态保留在本门面，子组件仅经 props 接收、经 emit 回传，避免「子组件挂载
+ * 依赖数据 → 请求永不触发」的死锁式重复请求。
  */
 
 import { computed, ref, watch, type Ref } from 'vue';
-import {
-  AlertTriangle,
-  Loader2,
-  Pencil,
-  RotateCcw,
-  Trash2,
-} from 'lucide-vue-next';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import { Badge } from '@/components/ui/badge';
+import { AlertTriangle } from 'lucide-vue-next';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import Pagination from '@/components/common/Pagination.vue';
 import DateRangeQuickPicker from '@/components/date/DateRangeQuickPicker.vue';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
-import { Skeleton } from '@/components/ui/skeleton';
 import { resolveQuickRange } from '@/modules/query/quick-range';
 import { useRangePreferenceSync } from '@/modules/analysis/composables/use-range-preference-sync';
 import {
@@ -52,14 +34,12 @@ import {
 } from '../composables/use-snapshots';
 import { usePortfolioStore } from '@/stores/portfolio.store';
 import { usePreferenceStore } from '@/stores/preference.store';
-import {
-  computeManualDiffStats,
-  formatAmountChange,
-  formatCurrency,
-  formatDate,
-} from '@/lib/utils';
+import { computeManualDiffStats } from '@/lib/utils';
 import type { SnapshotQuery, SnapshotResponse } from '@/api/types';
 import { SnapshotSource, type AssetSnapshot } from '@/lib/types';
+import SnapshotTable from './SnapshotTable.vue';
+import SnapshotDeleteDialog from './SnapshotDeleteDialog.vue';
+import SnapshotResetDialog from './SnapshotResetDialog.vue';
 
 const props = withDefaults(
   defineProps<{
@@ -156,13 +136,6 @@ const items = computed(() => data.value?.items ?? []);
 const total = computed(() => data.value?.total ?? 0);
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / PAGE_SIZE)));
 
-/** 系统自动计算值（AL-054 · Q-1甲）：直接读列表行内 derivedTotalAsset（后端已实时回填） */
-function systemValOf(s: SnapshotResponse): number | null {
-  if (s.derivedTotalAsset == null) return null;
-  const n = Number(s.derivedTotalAsset);
-  return Number.isFinite(n) ? n : null;
-}
-
 // 差异提示条统计（SNAP-P0-07 / F5）：以当前列表行为准（分页 20 条/页），
 // 系统值取行内 derivedTotalAsset（后端实时值，非 NAV x 份额近似）。
 const navMap = computed(() => {
@@ -178,16 +151,6 @@ const navMap = computed(() => {
 const manualStats = computed(() =>
   computeManualDiffStats(items.value, navMap.value),
 );
-
-/** 行差异率（仅手工行且有系统值时计算） */
-function diffRateOf(s: SnapshotResponse): number | null {
-  const manual = s.source === 'MANUAL';
-  const systemVal = systemValOf(s);
-  const totalAssetNum = Number(s.totalAsset) || 0;
-  return manual && systemVal !== null && systemVal !== 0
-    ? (totalAssetNum - systemVal) / systemVal
-    : null;
-}
 
 function resetFilters(): void {
   // 重置 = 用户主动改范围，必须标记交互，否则会被偏好对齐 watch 二次覆盖
@@ -327,111 +290,16 @@ function handleResetDialogOpenChange(o: boolean): void {
       </Button>
     </div>
 
-    <div v-if="isLoading" class="space-y-2">
-      <Skeleton v-for="i in 5" :key="i" class="h-12 w-full" />
-    </div>
-    <div v-else-if="isError" class="py-10 text-center text-sm text-muted-foreground">
-      加载失败，请稍后重试
-    </div>
-    <div v-else-if="items.length === 0" class="py-10 text-center text-sm text-muted-foreground">
-      {{ props.emptyText }}
-    </div>
-    <div v-else class="overflow-x-auto">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead class="sticky left-0 z-10 w-[100px] bg-background">日期</TableHead>
-            <TableHead class="text-right">总资产</TableHead>
-            <TableHead class="text-right">持仓</TableHead>
-            <TableHead class="text-right">现金</TableHead>
-            <TableHead class="w-[90px]">来源</TableHead>
-            <TableHead>系统自动值（差异）</TableHead>
-            <TableHead class="w-[110px]">备注</TableHead>
-            <TableHead class="w-[110px] text-right">操作</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          <TableRow v-for="s in items" :key="s.id">
-            <TableCell class="sticky left-0 z-10 whitespace-nowrap bg-background font-mono text-sm tabular-nums">
-              {{ formatDate(s.date) }}
-            </TableCell>
-            <TableCell class="whitespace-nowrap text-right font-mono tabular-nums">
-              {{ formatCurrency(s.totalAsset, 2, fmtOpts) }}
-            </TableCell>
-            <TableCell class="whitespace-nowrap text-right font-mono text-sm tabular-nums">
-              {{ s.marketValue !== null ? formatCurrency(s.marketValue, 2, fmtOpts) : '-' }}
-            </TableCell>
-            <TableCell class="whitespace-nowrap text-right font-mono text-sm tabular-nums">
-              {{ s.cashBalance !== null ? formatCurrency(s.cashBalance, 2, fmtOpts) : '-' }}
-            </TableCell>
-            <TableCell>
-              <Badge
-                v-if="s.source === 'MANUAL'"
-                variant="secondary"
-                class="bg-up-soft text-up"
-              >
-                手工
-              </Badge>
-              <Badge v-else variant="outline">自动</Badge>
-            </TableCell>
-            <TableCell class="text-sm">
-              <template v-if="s.source === 'MANUAL'">
-                <span v-if="systemValOf(s) !== null" class="text-muted-foreground">
-                  系统 {{ formatCurrency(systemValOf(s)!, 2, fmtOpts) }}
-                  <span
-                    :class="
-                      diffRateOf(s) !== null && diffRateOf(s)! >= 0
-                        ? 'ml-1 text-up'
-                        : 'ml-1 text-down'
-                    "
-                  >
-                    （{{
-                      diffRateOf(s) !== null
-                        ? formatAmountChange(Number(s.totalAsset) || 0, systemValOf(s)!, 2, fmtOpts)
-                        : '-'
-                    }}）
-                  </span>
-                </span>
-                <span v-else class="text-muted-foreground">-</span>
-              </template>
-              <span v-else class="text-xs text-muted-foreground">系统计算</span>
-            </TableCell>
-            <TableCell class="max-w-[100px] truncate text-sm text-muted-foreground">
-              {{ s.note || '-' }}
-            </TableCell>
-            <TableCell class="whitespace-nowrap text-right">
-              <div class="flex justify-end gap-0.5">
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  title="编辑（变手工）"
-                  @click="emit('edit', s)"
-                >
-                  <Pencil class="h-4 w-4" />
-                </Button>
-                <Button
-                  v-if="s.source === 'MANUAL'"
-                  size="icon"
-                  variant="ghost"
-                  title="重置为系统自动值"
-                  @click="resetting = s"
-                >
-                  <RotateCcw class="h-4 w-4" />
-                </Button>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  title="删除"
-                  @click="deleting = s"
-                >
-                  <Trash2 class="h-4 w-4 text-red-500" />
-                </Button>
-              </div>
-            </TableCell>
-          </TableRow>
-        </TableBody>
-      </Table>
-    </div>
+    <SnapshotTable
+      :items="items"
+      :is-loading="isLoading"
+      :is-error="isError"
+      :empty-text="props.emptyText"
+      :fmt-opts="fmtOpts"
+      @edit="(s) => emit('edit', s)"
+      @delete="(s) => (deleting = s)"
+      @reset="(s) => (resetting = s)"
+    />
 
     <!-- 分页 -->
     <Pagination
@@ -442,69 +310,22 @@ function handleResetDialogOpenChange(o: boolean): void {
       @page-change="(p: number) => (page = p)"
     />
 
-    <!-- 删除确认（SNAP-P0-06 ⑤⑥：删除这条记录，事件日系统会重新生成自动值） -->
-    <AlertDialog :open="Boolean(deleting)" @update:open="handleDeleteDialogOpenChange">
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>确认删除该条资产记录？</AlertDialogTitle>
-          <AlertDialogDescription>
-            删除后，若该日为事件日（有交易/余额/价格数据）将自动重新生成系统计算值；
-            否则该日记录将被移除，并从该日期起的净值与 XIRR 将被重算。
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel :disabled="deleteMutation.isPending.value">
-            取消
-          </AlertDialogCancel>
-          <AlertDialogAction
-            :disabled="deleteMutation.isPending.value"
-            class="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            @click="handleConfirmDelete"
-          >
-            <Loader2
-              v-if="deleteMutation.isPending.value"
-              class="mr-2 h-4 w-4 animate-spin"
-            />
-            确认删除
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+    <!-- 删除确认（SNAP-P0-06 ⑤⑥） -->
+    <SnapshotDeleteDialog
+      :open="Boolean(deleting)"
+      :pending="deleteMutation.isPending.value"
+      @confirm="handleConfirmDelete"
+      @update:open="handleDeleteDialogOpenChange"
+    />
 
-    <!-- 重置确认（SNAP-P0-07：撤销手工修改，恢复系统计算值 + 将恢复值展示） -->
-    <AlertDialog :open="Boolean(resetting)" @update:open="handleResetDialogOpenChange">
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>重置为系统自动计算值？</AlertDialogTitle>
-          <AlertDialogDescription>
-            <template v-if="resetting">
-              {{ formatDate(resetting.date) }} 的手工记录将被系统自动计算值取代，无法撤销。
-              <template v-if="systemValOf(resetting) !== null">
-                将恢复为系统自动计算值
-                {{ formatCurrency(systemValOf(resetting)!, 2, fmtOpts) }}。
-              </template>
-            </template>
-            <template v-else>
-              手工记录将被系统自动计算值取代，无法撤销。
-            </template>
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel :disabled="resetMutation.isPending.value">
-            取消
-          </AlertDialogCancel>
-          <AlertDialogAction
-            :disabled="resetMutation.isPending.value"
-            @click="handleConfirmReset"
-          >
-            <Loader2
-              v-if="resetMutation.isPending.value"
-              class="mr-2 h-4 w-4 animate-spin"
-            />
-            确认重置
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+    <!-- 重置确认（SNAP-P0-07） -->
+    <SnapshotResetDialog
+      :open="Boolean(resetting)"
+      :target="resetting"
+      :pending="resetMutation.isPending.value"
+      :fmt-opts="fmtOpts"
+      @confirm="handleConfirmReset"
+      @update:open="handleResetDialogOpenChange"
+    />
   </div>
 </template>
