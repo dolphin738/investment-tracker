@@ -19,31 +19,24 @@
  * - 空态引导按钮 → 打开录入弹窗（与出入金页完全解耦）
  *
  * 排序（决策 Q-5 甲）：列表在前端按市值降序展示，不依赖后端排序参数。
+ *
+ * 拆分说明：持仓 Tab 内容（汇总 5 卡 / 加载失败 / 加载中 / 空态 / 11 列持仓表）
+ * 已下放到 HoldingsContent.vue。useHoldings / useSecurities 等数据拉取仍保留在
+ * 本门面，items / aggregate 以 props 下传，交互以 emit 回传门面既有处理函数，
+ * 避免「子组件挂载依赖数据 → 数据请求永不触发」的死锁。
  */
 import { computed, ref, watch } from 'vue';
-import { PackageOpen, Plus, AlertTriangle } from 'lucide-vue-next';
+import { Plus, AlertTriangle } from 'lucide-vue-next';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import { Badge } from '@/components/ui/badge';
-import { Progress } from '@/components/ui/progress';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import TableSkeleton from '@/components/common/TableSkeleton.vue';
 import EmptyState from '@/components/common/EmptyState.vue';
 import PageHeader from '@/components/common/PageHeader.vue';
-import MetricCard from '@/components/common/MetricCard.vue';
-import ErrorState from '@/components/common/ErrorState.vue';
 import HoldingsToolbar from '../components/HoldingsToolbar.vue';
-import InlinePriceEditor from '../components/InlinePriceEditor.vue';
 import PriceFreshnessBadge from '../components/PriceFreshnessBadge.vue';
+import HoldingsContent from '../components/HoldingsContent.vue';
 import { createHoldingsSchema } from '../query-params';
 import type { HoldingsFilterState } from '../query-params';
 import { deriveTradeSecurityFilter } from '../trade-security-filter';
@@ -69,17 +62,6 @@ import { todayInAppTzIso, toIsoDate } from '@/lib/constants';
 import { useUrlState } from '@/lib/url-query';
 import type { SecurityTradeQuery } from '@/api/types';
 import { SecuritySide } from '@/lib/types';
-import { formatCurrency, formatPercent, cn } from '@/lib/utils';
-
-// ===== 常量 =====
-const SECURITY_TYPE_LABEL: Record<string, string> = {
-  STOCK: '股票',
-  ON_EXCHANGE_FUND: '场内基金',
-  OFF_EXCHANGE_FUND: '场外基金',
-  BOND: '债券',
-  CASH: '现金',
-  OTHER: '其他',
-};
 
 const portfolioStore = usePortfolioStore();
 const currentPortfolioId = computed(() => portfolioStore.currentPortfolioId);
@@ -270,7 +252,7 @@ const securityList = computed(() => securities.data.value ?? []);
 const holdingsLoading = computed(() => holdings.isLoading.value);
 const holdingsError = computed(() => holdings.isError.value);
 
-/** 重新加载持仓（错误态按钮） */
+/** 重新加载持仓（错误态按钮，由 HoldingsContent 的 refetch 事件触发） */
 function refetchHoldings(): void {
   holdings.refetch();
 }
@@ -341,191 +323,19 @@ function refetchHoldings(): void {
 
       <!-- ============ 持仓 Tab ============ -->
       <TabsContent value="holdings" class="mt-4 space-y-6">
-        <!-- 【A】汇总（HOLD-B-P0-06：含总盈亏率共 5 项；随筛选动态变化） -->
-        <div v-if="aggregate" class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-          <MetricCard
-            label="总市值"
-            :value="formatCurrency(aggregate.totalMarketValue, 2, { thousands: amountThousands, abbreviate: amountAbbrev })"
-          />
-          <MetricCard
-            label="总成本"
-            :value="formatCurrency(aggregate.totalCost, 2, { thousands: amountThousands, abbreviate: amountAbbrev })"
-          />
-          <MetricCard
-            label="浮盈"
-            :value="(aggregate.totalProfit >= 0 ? '+' : '') + formatCurrency(aggregate.totalProfit, 2, { thousands: amountThousands, abbreviate: amountAbbrev })"
-            :value-class-name="aggregate.totalProfit >= 0 ? 'text-up' : 'text-down'"
-          />
-          <!-- 【A3】总盈亏率（HOLD-B-P0-06）：红涨绿跌（§9.5） -->
-          <MetricCard
-            label="总盈亏率"
-            :value="formatPercent(aggregate.totalProfitRate, 2, { decimals: xirrDecimals })"
-            :value-class-name="aggregate.totalProfitRate >= 0 ? 'text-up' : 'text-down'"
-          />
-          <MetricCard
-            label="标的数"
-            :value="String(aggregate.securityCount)"
-          />
-        </div>
-
-        <!-- 【B】持仓列表：加载失败 -->
-        <ErrorState
-          v-if="holdingsError"
-          title="数据加载失败"
-          description="持仓数据加载出错，请重试"
-        >
-          <template #action>
-            <Button variant="outline" size="sm" @click="refetchHoldings">
-              重新加载
-            </Button>
-          </template>
-        </ErrorState>
-
-        <TableSkeleton v-if="holdingsLoading" :rows="5" :cols="11" />
-
-        <!-- 无结果空态 -->
-        <EmptyState
-          v-if="!holdingsLoading && !holdingsError && sortedItems.length === 0"
-          title="暂无持仓数据"
-          :description="
-            securityList.length === 0
-              ? '请先在「录入买卖」中搜索并选择标的，再录入买卖流水；持仓将自动推导'
-              : '持仓由证券买卖流水实时推导，点击下方按钮录入第一笔买卖'
-          "
-        >
-          <template #icon>
-            <PackageOpen class="h-12 w-12" />
-          </template>
-          <template #action>
-            <!-- INC-05：空态尺寸豁免，variant/图标/文案与页头主入口一致 -->
-            <Button
-              :variant="ENTRY_BUTTON_VARIANT"
-              @click="tradeDialogOpen = true"
-            >
-              <Plus :class="ENTRY_BUTTON_ICON_CLASS" />
-              {{ ENTRY_BUTTON_LABELS.securityTrade }}
-            </Button>
-          </template>
-        </EmptyState>
-
-        <!-- 持仓表：PRD §5.2.3 全 11 列，顺序不可调整 -->
-        <Card v-if="!holdingsLoading && !holdingsError && sortedItems.length > 0">
-          <div class="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead class="sticky left-0 z-10 bg-background">标的</TableHead>
-                  <TableHead>代码</TableHead>
-                  <TableHead>类型</TableHead>
-                  <TableHead class="text-right">数量</TableHead>
-                  <TableHead class="text-right">成本价</TableHead>
-                  <TableHead class="text-right">现价</TableHead>
-                  <TableHead class="text-right">成本额</TableHead>
-                  <TableHead class="text-right">市值</TableHead>
-                  <TableHead class="text-right">浮动盈亏</TableHead>
-                  <TableHead class="text-right">盈亏率</TableHead>
-                  <TableHead class="text-right">占比</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                <TableRow v-for="h in sortedItems" :key="h.securityId">
-                  <TableCell class="sticky left-0 z-10 bg-background font-medium">
-                    <div class="flex items-center gap-2">
-                      {{ h.securityName }}
-                      <Badge
-                        v-if="h.quantity === 0"
-                        variant="outline"
-                        class="text-[10px] text-muted-foreground"
-                        title="已清仓标的（数量为 0）"
-                      >
-                        已清仓
-                      </Badge>
-                      <Badge
-                        v-if="h.flag === 'COST_BASED'"
-                        variant="outline"
-                        class="text-[10px] text-muted-foreground"
-                        title="无现价记录，按成本价估值"
-                      >
-                        成本估值
-                      </Badge>
-                    </div>
-                  </TableCell>
-                  <TableCell class="text-muted-foreground">
-                    {{ h.securityCode }}
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant="secondary" class="text-xs">
-                      {{ SECURITY_TYPE_LABEL[h.securityType] || h.securityType }}
-                    </Badge>
-                  </TableCell>
-                  <TableCell class="text-right tabular-nums">
-                    {{ h.quantity.toLocaleString('zh-CN', { maximumFractionDigits: 4 }) }}
-                  </TableCell>
-                  <TableCell class="text-right tabular-nums">
-                    {{ formatCurrency(h.avgCost, 2, { thousands: amountThousands, abbreviate: amountAbbrev }) }}
-                  </TableCell>
-                  <TableCell class="text-right">
-                    <InlinePriceEditor
-                      :portfolio-id="currentPortfolioId"
-                      :security-id="h.securityId"
-                      :value="h.marketPrice"
-                      :price-as-of="h.priceAsOf"
-                      :flag="h.flag"
-                    />
-                  </TableCell>
-                  <!-- 【A2】成本额 -->
-                  <TableCell class="text-right tabular-nums">
-                    {{ formatCurrency(h.costTotal, 2, { thousands: amountThousands, abbreviate: amountAbbrev }) }}
-                  </TableCell>
-                  <TableCell class="text-right tabular-nums">
-                    {{ formatCurrency(h.marketValue, 2, { thousands: amountThousands, abbreviate: amountAbbrev }) }}
-                  </TableCell>
-                  <!-- 【A2】浮动盈亏：带正负号，红涨绿跌（§9.5） -->
-                  <TableCell
-                    :class="cn(
-                      'text-right tabular-nums',
-                      h.pnl >= 0 ? 'text-up' : 'text-down',
-                    )"
-                  >
-                    {{ h.pnl >= 0 ? '+' : '' }}{{ formatCurrency(h.pnl, 2, { thousands: amountThousands, abbreviate: amountAbbrev }) }}
-                  </TableCell>
-                  <!-- 【A2】盈亏率：红涨绿跌（§9.5） -->
-                  <TableCell
-                    :class="cn(
-                      'text-right tabular-nums',
-                      h.pnlRate >= 0 ? 'text-up' : 'text-down',
-                    )"
-                  >
-                    {{ formatPercent(h.pnlRate, 2, { decimals: xirrDecimals }) }}
-                  </TableCell>
-                  <!-- 【A5】占比：数值 + 横向进度条（HOLD-B-P0-04 验收5） -->
-                  <TableCell class="text-right tabular-nums">
-                    <div class="flex flex-col items-end gap-1">
-                      <span>{{ formatPercent(
-                        aggregate && aggregate.totalMarketValue > 0
-                          ? h.marketValue / aggregate.totalMarketValue
-                          : 0,
-                      ) }}</span>
-                      <Progress
-                        :value="
-                          aggregate && aggregate.totalMarketValue > 0
-                            ? (h.marketValue / aggregate.totalMarketValue) * 100
-                            : 0
-                        "
-                        class="h-1.5 w-16"
-                        :aria-label="`占比 ${formatPercent(
-                          aggregate && aggregate.totalMarketValue > 0
-                            ? h.marketValue / aggregate.totalMarketValue
-                            : 0,
-                        )}`"
-                      />
-                    </div>
-                  </TableCell>
-                </TableRow>
-              </TableBody>
-            </Table>
-          </div>
-        </Card>
+        <HoldingsContent
+          :aggregate="aggregate"
+          :sorted-items="sortedItems"
+          :holdings-loading="holdingsLoading"
+          :holdings-error="holdingsError"
+          :security-list="securityList"
+          :current-portfolio-id="currentPortfolioId"
+          :amount-thousands="amountThousands"
+          :amount-abbrev="amountAbbrev"
+          :xirr-decimals="xirrDecimals"
+          @refetch="refetchHoldings"
+          @open-trade-dialog="tradeDialogOpen = true"
+        />
       </TabsContent>
 
       <!-- ============ 买卖明细 Tab（security-trade 模块） ============ -->
