@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * components/DividendList.vue — 分红记录列表 / 汇总（持仓页「分红」Tab，HOLD-B-P0-10）
+ * components/DividendList.vue — 分红记录列表 / 汇总（持仓页「分红」Tab，HOLD-B-P0-10，门面）
  *
  * 平移自 React 版 features/security-income/dividend-fee-section.tsx，行为契约一致：
  * - 区块标题「分红记录」+ 提示「独立记录，不参与 XIRR 与净值计算」+「录入分红」入口
@@ -11,20 +11,17 @@
  * 口径：分红**不参与收益计算**，写入后仅失效 ['dividends'] 自身缓存（use-dividends 内处理）。
  *
  * I-05：标的多选 / 日期范围由页面统一筛选器派生，经 props 传入。
+ *
+ * 拆分说明（纯位置拆分，零行为变更）：
+ * - components/DividendDetailCard   [分红记录 ▾] 明细折叠卡（open 经 v-model:open，edit/delete 上抛）
+ * - components/DividendDeleteDialog 删除确认弹窗（confirm / update:open 上抛）
+ * 数据 hook（useDividends / useDeleteDividend）与全部状态保留在本门面，子组件仅经 props
+ * 接收、经 emit 回传，避免「子组件挂载依赖数据 → 请求永不触发」的死锁式重复请求。
  */
 
 import { computed, ref } from 'vue';
-import {
-  ChevronDown,
-  ChevronRight,
-  Coins,
-  Info,
-  Pencil,
-  Plus,
-  Trash2,
-} from 'lucide-vue-next';
+import { Coins, Info, Plus } from 'lucide-vue-next';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Card, CardContent } from '@/components/ui/card';
 import {
@@ -41,16 +38,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
 import EmptyState from '@/components/common/EmptyState.vue';
 import {
   ENTRY_BUTTON_ICON_CLASS,
@@ -59,13 +46,14 @@ import {
 } from '@/constants/entry-button-labels';
 import { usePreferenceStore } from '@/stores/preference.store';
 import {
-  DIVIDEND_TYPE_LABEL,
   useDeleteDividend,
   useDividends,
 } from '../composables/use-dividends';
-import { formatCurrency, formatDate } from '@/lib/utils';
+import { formatCurrency } from '@/lib/utils';
 import type { DividendRecord } from '@/api/types';
 import DividendForm from './DividendForm.vue';
+import DividendDetailCard from './DividendDetailCard.vue';
+import DividendDeleteDialog from './DividendDeleteDialog.vue';
 
 /** 分红净额 = amount − tax（number，K-2） */
 function netAmountOf(item: { amount: string; tax?: string | null }): number {
@@ -306,92 +294,13 @@ function handleRetry(): void {
       </Card>
 
       <!-- [分红记录 ▾] 明细（R-3：三列 金额/所得税/净额 + 编辑入口；I-02 tax/type 修复） -->
-      <Card>
-        <CardContent class="p-0">
-          <button
-            type="button"
-            class="flex w-full items-center justify-between px-4 py-3 text-sm font-medium hover:bg-muted/50"
-            :aria-expanded="dividendOpen"
-            @click="dividendOpen = !dividendOpen"
-          >
-            <span class="flex items-center gap-2">
-              <ChevronDown v-if="dividendOpen" class="h-4 w-4" />
-              <ChevronRight v-else class="h-4 w-4" />
-              分红记录
-              <Badge variant="secondary" class="text-xs">{{ dividendList.length }}</Badge>
-            </span>
-          </button>
-
-          <div v-if="dividendOpen" class="overflow-x-auto border-t">
-            <p v-if="dividendList.length === 0" class="px-4 py-6 text-center text-sm text-muted-foreground">
-              暂无分红记录
-            </p>
-            <Table v-else data-testid="dividend-detail-table">
-              <TableHeader>
-                <TableRow>
-                  <TableHead class="sticky left-0 z-10 bg-background">日期</TableHead>
-                  <TableHead class="sticky left-0 z-10 bg-background">标的</TableHead>
-                  <TableHead>类型</TableHead>
-                  <TableHead class="text-right">金额</TableHead>
-                  <TableHead class="text-right">所得税</TableHead>
-                  <TableHead class="text-right">净额</TableHead>
-                  <TableHead>备注</TableHead>
-                  <TableHead class="w-24 text-right">操作</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                <TableRow v-for="item in dividendList" :key="item.id">
-                  <TableCell class="sticky left-0 z-10 bg-background tabular-nums">{{ formatDate(item.date) }}</TableCell>
-                  <TableCell>
-                    {{ item.securityName }}
-                    <span class="ml-1 text-xs text-muted-foreground">{{ item.securityCode }}</span>
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant="secondary" class="text-xs">
-                      {{ DIVIDEND_TYPE_LABEL[item.type] ?? item.type }}
-                    </Badge>
-                  </TableCell>
-                  <TableCell class="text-right tabular-nums text-up">
-                    {{ formatCurrency(item.amount, 2, moneyOpts) }}
-                  </TableCell>
-                  <TableCell class="text-right tabular-nums text-muted-foreground">
-                    {{ formatCurrency(item.tax ?? '0', 2, moneyOpts) }}
-                  </TableCell>
-                  <TableCell class="text-right tabular-nums text-up">
-                    {{ formatCurrency(Number(item.amount) - Number(item.tax ?? 0), 2, moneyOpts) }}
-                  </TableCell>
-                  <TableCell class="max-w-[200px] truncate text-muted-foreground">
-                    {{ item.note ?? '-' }}
-                  </TableCell>
-                  <TableCell class="text-right">
-                    <div class="flex justify-end gap-0.5">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        aria-label="编辑分红记录"
-                        title="编辑"
-                        @click="editing = item"
-                      >
-                        <Pencil class="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        aria-label="删除分红记录"
-                        title="删除"
-                        class="text-destructive"
-                        @click="requestDelete(item.id)"
-                      >
-                        <Trash2 class="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              </TableBody>
-            </Table>
-          </div>
-        </CardContent>
-      </Card>
+      <DividendDetailCard
+        v-model:open="dividendOpen"
+        :dividend-list="dividendList"
+        :money-opts="moneyOpts"
+        @edit="(item) => (editing = item)"
+        @delete="requestDelete"
+      />
     </template>
 
     <!-- 录入 / 编辑弹窗（仅分红） -->
@@ -411,19 +320,10 @@ function handleRetry(): void {
     </Dialog>
 
     <!-- 删除确认 -->
-    <AlertDialog :open="Boolean(deleting)" @update:open="handleDeleteDialogOpenChange">
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>确认删除分红记录？</AlertDialogTitle>
-          <AlertDialogDescription>
-            删除后不可恢复。该记录不参与收益计算，删除不会影响净值与 XIRR。
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel>取消</AlertDialogCancel>
-          <AlertDialogAction @click="handleConfirmDelete">删除</AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+    <DividendDeleteDialog
+      :open="Boolean(deleting)"
+      @confirm="handleConfirmDelete"
+      @update:open="handleDeleteDialogOpenChange"
+    />
   </div>
 </template>
