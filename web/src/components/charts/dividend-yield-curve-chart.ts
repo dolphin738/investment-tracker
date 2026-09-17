@@ -123,7 +123,8 @@ export function buildDividendYieldCurveOption(
         symbolSize: 5,
         lineStyle: { width: 2, color: theme.line },
         itemStyle: { color: theme.line },
-        // 高股息线参考线（虚线）：显式绑定左轴（股息率 %），标签置于绘图区内左端
+        // 高股息线参考线（虚线）：显式绑定左轴（股息率 %）。标签置于绘图区内左端且位于
+        // 线**上方**（insideStartTop）——用 insideStart 会让文字与虚线垂直居中重合而糊成一片。
         markLine: {
           silent: true,
           symbol: ['none', 'none'],
@@ -131,7 +132,10 @@ export function buildDividendYieldCurveOption(
           label: {
             show: true,
             formatter: `高股息线 ${pivot}%`,
-            position: 'insideStart',
+            position: 'insideStartTop',
+            // ⚠️ 不要再加 `distance`：实测其纵向分量方向与预期相反且非线性
+            // （无 → 线上 5px；[0,3] → 线上 3px；[0,-3] → 线下 3px），会把标签推回线上。
+            // insideStartTop 本身已让文字底边正好落在线上方，无字形被虚线穿过。
             color: theme.manual,
             fontSize: 10,
           },

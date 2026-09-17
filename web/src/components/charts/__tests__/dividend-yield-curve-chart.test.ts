@@ -66,7 +66,7 @@ describe('buildDividendYieldCurveOption — 三态对应 option 结构（双轴 
     expect(undef.series).toHaveLength(2);
   });
 
-  it('高股息线参考线：落在左轴(yAxisIndex:0)的虚线 markLine，标签「高股息线 5%」且置于绘图区内左端', () => {
+  it('高股息线参考线：落在左轴(yAxisIndex:0)的虚线 markLine，标签「高股息线 5%」且置于绘图区内左端、位于线之上', () => {
     const option = buildDividendYieldCurveOption({ items: CURVE_DATA });
     const series = option.series as any[];
     const ml = series[0]?.markLine;
@@ -74,7 +74,7 @@ describe('buildDividendYieldCurveOption — 三态对应 option 结构（双轴 
     expect(ml.data[0].yAxis).toBe(HIGH_YIELD_PIVOT);
     expect(ml.lineStyle?.type).toBe('dashed');
     expect(ml.label?.formatter).toBe(`高股息线 ${HIGH_YIELD_PIVOT}%`);
-    expect(ml.label?.position).toBe('insideStart');
+    expect(ml.label?.position).toBe('insideStartTop');
     // 左轴 max 必须为函数且 ≥5，防止数据峰值<5 时参考线被自动缩放裁掉
     const maxFn = (option.yAxis as any[])[0].max;
     expect(typeof maxFn).toBe('function');
