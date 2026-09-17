@@ -14,7 +14,6 @@ import importlib.util
 import sys
 import types
 from datetime import date, datetime, timedelta, timezone
-from decimal import Decimal
 from pathlib import Path
 
 import pytest

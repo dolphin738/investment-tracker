@@ -14,7 +14,6 @@
 from __future__ import annotations
 
 import uuid
-from decimal import Decimal
 
 from app.models import (
     DividendYieldSettings,

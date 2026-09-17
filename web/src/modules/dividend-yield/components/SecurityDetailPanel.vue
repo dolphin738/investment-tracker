@@ -49,7 +49,7 @@ const pivotPercent = computed<number>(() =>
 );
 
 /**
- * 近一年双轴曲线 option：左轴 股息率(%)、右轴 收盘价(¥)，含高股息线虚线（阈值跟随全局设置）。
+ * 近一年双轴曲线 option：左轴 股息率(%)、右轴 收盘价(¥)，含高股息线虚线（阈值跟随账号偏好）。
  * 经 useChartTheme() 建立响应式依赖，明暗主题切换时自动重算配色（修复旧内联硬编码回归）。
  */
 const curveOption = computed<EChartsOption>(() =>

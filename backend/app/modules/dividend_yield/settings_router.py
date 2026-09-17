@@ -1,8 +1,8 @@
 """股息率全局配置端点（方案 §9，阶段 4；自 router.py 拆分而来）。
 
 仅承载配置读写两类端点与配套 helper：
-- GET  /api/dividend-yield/settings   登录读取全局配置（§9：阈值标色需要）
-- PUT  /api/dividend-yield/settings   admin 更新全局配置（阈值 + 接口三重校验）
+- GET  /api/dividend-yield/settings   登录读取全局配置（数据源接口 / 回补参数；标色阈值已迁用户偏好）
+- PUT  /api/dividend-yield/settings   admin 更新全局配置（接口三重校验 + 回补参数）
 
 口径/计算复用 services 纯函数，本模块仅编排查询与校验；``load_settings``
 作为跨模块公共 API 供 backfill_router 消费（见其文档串）。
@@ -13,7 +13,7 @@ from datetime import date
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -45,6 +45,10 @@ router_settings = APIRouter(route_class=EnvelopeRoute)
 class SettingsUpdateBody(BaseModel):
     # 注：股息率标色阈值已迁至「用户偏好」（user_preferences，见 0026 迁移）；
     # 本端点不再接受阈值字段（对应全局两列已由 0027 迁移删除）。
+    # extra="forbid"：Pydantic 默认 extra='ignore' 会让陈旧客户端发来的 green_threshold 静默不生效
+    # （返 200 却什么都没改），改为显式 400 —— 避免「以为改了其实没改」。
+    model_config = ConfigDict(extra="forbid")
+
     dividend_report_source_interface_id: Optional[str] = None
     dividend_detail_source_interface_id: Optional[str] = None
     price_source_interface_id: Optional[str] = None
@@ -152,7 +156,7 @@ async def _validate_backfill_interface(db: AsyncSession, interface_id: Optional[
 
 
 async def load_settings(db: AsyncSession) -> DividendYieldSettings:
-    """读取单行配置；无行时返回空默认（阈值 0.05/0.03、三接口 null）。
+    """读取单行配置；无行时返回空默认（各数据源接口 null；标色阈值已迁用户偏好，不在本表）。
 
     跨模块复用即公共 API（被 backfill_router 消费）。
     """
@@ -225,7 +229,7 @@ async def get_dividend_yield_settings(
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """读取全局配置（登录即可读，§9：仅 PUT 收 admin——非 admin 拿到阈值才能标色）。"""
+    """读取全局配置（登录即可读，§9：仅 PUT 收 admin；标色阈值已迁用户偏好，本端点不返回）。"""
     row = await load_settings(db)
     return await _settings_out(db, row)
 
@@ -371,21 +375,21 @@ async def put_dividend_yield_settings(
                 "dividend_detail_source_interface_id": body.dividend_detail_source_interface_id,
                 "price_source_interface_id": body.price_source_interface_id,
                 "announcement_source_interface_id": body.announcement_source_interface_id,
-            "price_backfill_source_interface_id": body.price_backfill_source_interface_id,
-            "price_backfill_quota": row.price_backfill_quota,
-            "price_backfill_mode": row.price_backfill_mode,
-            "price_backfill_adjust": row.price_backfill_adjust,
-            "price_backfill_default_start_date": (
-                row.price_backfill_default_start_date.isoformat()
-                if row.price_backfill_default_start_date is not None
-                else None
-            ),
-            "trade_calendar_start_date": (
-                row.trade_calendar_start_date.isoformat()
-                if row.trade_calendar_start_date is not None
-                else None
-            ),
-        },
+                "price_backfill_source_interface_id": body.price_backfill_source_interface_id,
+                "price_backfill_quota": row.price_backfill_quota,
+                "price_backfill_mode": row.price_backfill_mode,
+                "price_backfill_adjust": row.price_backfill_adjust,
+                "price_backfill_default_start_date": (
+                    row.price_backfill_default_start_date.isoformat()
+                    if row.price_backfill_default_start_date is not None
+                    else None
+                ),
+                "trade_calendar_start_date": (
+                    row.trade_calendar_start_date.isoformat()
+                    if row.trade_calendar_start_date is not None
+                    else None
+                ),
+            },
         },
         user_id=admin.user_id,
     )

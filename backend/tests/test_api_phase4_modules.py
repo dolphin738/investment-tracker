@@ -199,6 +199,15 @@ async def test_preference_dividend_thresholds(client):
     )
     assert st == 400 and code == 2000, (st, code, msg)
 
+    # 畸形输入：非数字字符串 / bool / 半成品科学计数 / NaN / Infinity → 400（不得落 500）
+    for bad in ("abc", True, "1e", "NaN", "Infinity"):
+        st, code, _, msg = env(
+            await client.patch(
+                "/api/users/preferences", headers=h, json={"greenThreshold": bad}
+            )
+        )
+        assert st == 400 and code == 2000, (bad, st, code, msg)
+
     # 校验失败不得污染库中值（仍为 0.09 / 0.04）
     st, code, pref, msg = env(await client.get("/api/users/preferences", headers=h))
     assert st == 200 and code == 0

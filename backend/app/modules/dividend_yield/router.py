@@ -6,8 +6,8 @@
 - GET   /api/dividend-yield/{master_id}/dividends 单证券分红明细（按报告期，仅列有分红的期次）
 - GET   /api/dividend-yield/{master_id}/curve     单证券过去一年每日股息率曲线（§9 逐点现算）
 - GET   /api/dividend-yield/{master_id}/implied-price 反推价格（§9）
-- GET   /api/dividend-yield/settings     登录读取全局配置（§9：阈值标色需要）
-- PUT   /api/dividend-yield/settings     admin 更新全局配置（阈值 + 接口三重校验）
+- GET   /api/dividend-yield/settings     登录读取全局配置（数据源接口 / 回补参数）
+- PUT   /api/dividend-yield/settings     admin 更新全局配置（接口三重校验 + 回补参数）
 
 口径/计算全部复用纯函数（services/dividend_yield.py），不在此重写计算逻辑；
 分页枚举 bounds 沿用既有模块（page>=1、pageSize 1~200）；模块内仅编排查询与序列化。
@@ -295,6 +295,9 @@ async def list_security_dividends(
     只列**有分红**的期次（``cash_per_share > 0``），按报告期倒序：
     - ``periodLabel``：2025年报 / 2025半年报 / 2025三季报 / 2023特别分配（§5.1 命名）；
     - ``planLabel``：每股金额折算回源站口径「10派X元」。
+
+    契约：证券不存在时返回 **200 + 空 items**（不 404）——与 ``/curve`` 的存在性校验**有意不同**：
+    本端点语义是「该标的有哪些分红」，无记录与无标的是同一展示结果（面板只在已有榜单行上打开）。
     """
     rows = (
         await db.execute(

@@ -6,8 +6,9 @@
 
 - upgrade：drop ``green_threshold`` / ``red_threshold``（**不可逆**：列内数据随之丢弃；
   用户的阈值已各自存于 ``user_preferences``，不受影响）。
-- downgrade：按 0004 的原始定义加回两列（``NOT NULL`` + ``server_default`` 0.05/0.03），
-  使本步在发布前仍可回滚。
+- downgrade：加回两列（``NOT NULL`` + ``server_default`` 0.05/0.03）以支持回滚。
+  注：0004 的原始定义**没有** server_default；此处必须补上——向已有数据的表加 ``NOT NULL``
+  列若无默认值，downgrade 会直接失败。
 
 口径决策：D1 = 本轮删除（用户 2026-09-17 裁决）。
 """

@@ -7,7 +7,7 @@
 """
 from __future__ import annotations
 
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from sqlalchemy import select
 
@@ -22,6 +22,30 @@ _DATE_RANGES = ["1w", "1m", "3m", "6m", "1y", "ytd", "all"]
 _GRANULARITIES = ["day", "week", "month", "year"]
 _AGGREGATIONS = ["last", "avg"]
 _THEMES = ["system", "light", "dark"]
+
+
+def _threshold_decimal(value: object) -> Decimal:
+    """阈值入参 → Decimal；畸形值一律 400。
+
+    不包 try/except 的话，``Decimal(str("abc"))`` / ``str(True)`` / ``"1e"`` 会抛
+    ``InvalidOperation``，落到全局兜底处理器变成 **500**（而非校验类 400）。
+    另拦住 NaN / Infinity：非有限值无法参与 ``0 < red < green <= 1`` 比较，须显式拒绝。
+    """
+    try:
+        d = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise BusinessException(
+            code=BusinessErrorCode.VALIDATION_FAILED,
+            message="股息率阈值须为数字",
+            status_code=400,
+        ) from exc
+    if not d.is_finite():
+        raise BusinessException(
+            code=BusinessErrorCode.VALIDATION_FAILED,
+            message="股息率阈值须为有限数字",
+            status_code=400,
+        )
+    return d
 
 
 def _snake(camel: str) -> str:
@@ -95,9 +119,15 @@ class PreferenceService(PortfolioChildService):
             eff_green = body.get("greenThreshold")
             eff_red = body.get("redThreshold")
             eff_green = (
-                Decimal(str(eff_green)) if eff_green is not None else pref.green_threshold
+                _threshold_decimal(eff_green)
+                if eff_green is not None
+                else pref.green_threshold
             )
-            eff_red = Decimal(str(eff_red)) if eff_red is not None else pref.red_threshold
+            eff_red = (
+                _threshold_decimal(eff_red)
+                if eff_red is not None
+                else pref.red_threshold
+            )
             if not (Decimal("0") < eff_red < eff_green <= Decimal("1")):
                 raise BusinessException(
                     code=BusinessErrorCode.VALIDATION_FAILED,
@@ -138,8 +168,8 @@ class PreferenceService(PortfolioChildService):
             elif key == "theme":
                 _validate("theme", value, _THEMES)
             elif key in ("greenThreshold", "redThreshold"):
-                # Numeric 列：经 str 转 Decimal，避免 float 二进制尾差
-                setattr(pref, _snake(key), Decimal(str(value)))
+                # Numeric 列：经 str 转 Decimal，避免 float 二进制尾差；畸形值 → 400
+                setattr(pref, _snake(key), _threshold_decimal(value))
                 continue
             # 其余字段按类型直接赋值（由 ORM/DB 约束保证合法）
             setattr(pref, _snake(key), value)

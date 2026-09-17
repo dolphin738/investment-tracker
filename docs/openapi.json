@@ -2475,7 +2475,7 @@
           "dividend-yield"
         ],
         "summary": "Get Dividend Yield Settings",
-        "description": "读取全局配置（登录即可读，§9：仅 PUT 收 admin——非 admin 拿到阈值才能标色）。",
+        "description": "读取全局配置（登录即可读，§9：仅 PUT 收 admin；标色阈值已迁用户偏好，本端点不返回）。",
         "operationId": "get_dividend_yield_settings_api_dividend_yield_settings_get",
         "responses": {
           "200": {
@@ -2626,7 +2626,7 @@
           "dividend-yield"
         ],
         "summary": "List Security Dividends",
-        "description": "单证券分红明细（按报告期，供详情面板展示）。\n\n只列**有分红**的期次（``cash_per_share > 0``），按报告期倒序：\n- ``periodLabel``：2025年报 / 2025半年报 / 2025三季报 / 2023特别分配（§5.1 命名）；\n- ``planLabel``：每股金额折算回源站口径「10派X元」。",
+        "description": "单证券分红明细（按报告期，供详情面板展示）。\n\n只列**有分红**的期次（``cash_per_share > 0``），按报告期倒序：\n- ``periodLabel``：2025年报 / 2025半年报 / 2025三季报 / 2023特别分配（§5.1 命名）；\n- ``planLabel``：每股金额折算回源站口径「10派X元」。\n\n契约：证券不存在时返回 **200 + 空 items**（不 404）——与 ``/curve`` 的存在性校验**有意不同**：\n本端点语义是「该标的有哪些分红」，无记录与无标的是同一展示结果（面板只在已有榜单行上打开）。",
         "operationId": "list_security_dividends_api_dividend_yield__master_id__dividends_get",
         "security": [
           {
@@ -10824,6 +10824,7 @@
             "title": "Trade Calendar Start Date"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "title": "SettingsUpdateBody"
       },
