@@ -14,7 +14,7 @@
  * 下放到 PreferencesToggleFields.vue。prefForm 状态与 immediate 回填 watch 仍保留在
  * 本门面，同一 reactive 对象以 props 下发（子组件写回同一对象，行为不变）。
  */
-import { computed, reactive, watch } from 'vue';
+import { computed, reactive, ref, watch } from 'vue';
 import { Loader2 } from 'lucide-vue-next';
 import {
   Card,
@@ -24,6 +24,7 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import HelpTip from '@/components/common/HelpTip.vue';
@@ -74,6 +75,52 @@ const prefForm = reactive({
   amountAbbrev: DEFAULT_PREFERENCES.amountAbbrev,
 });
 
+// 股息率标色阈值（随账号存储）：UI 以「百分数字符串」绑定（可自由输入中间态，如 "0."），
+// 保存时再转小数比率。与 prefForm 分开持有，避免把非 DTO 字段混进 PATCH payload。
+const greenPercent = ref('');
+const redPercent = ref('');
+
+/** 小数比率 → 百分数字符串（0.05 → '5'）；非法 / 缺省返回空串 */
+function ratioToPercentStr(v: number | string | null | undefined): string {
+  if (v === null || v === undefined) return '';
+  const n = Number(v);
+  return Number.isFinite(n) ? String(Number((n * 100).toFixed(4))) : '';
+}
+
+/**
+ * 百分数字符串 → 小数比率（空串 / 非法返回 null）。
+ *
+ * ⚠️ 入参必须容忍 number：`<Input type="number">` 经 Vue 的 vModelText 会把值**自动转成
+ * number**（castToNumber = type === 'number'），若在此直接 `t.trim()` 会抛 TypeError，
+ * 进而使整块「偏好设置」渲染崩溃（2026-09-17 表现：一输入数字，面板即消失）。
+ */
+function percentStrToRatio(t: string | number | null | undefined): number | null {
+  const s = String(t ?? '').trim();
+  if (s === '') return null;
+  const n = Number(s);
+  return Number.isFinite(n) ? n / 100 : null;
+}
+
+/** 输入框回传值归一化为字符串（number 输入框可能回传 number） */
+function onGreenPercentInput(v: string | number): void {
+  greenPercent.value = String(v ?? '');
+}
+
+function onRedPercentInput(v: string | number): void {
+  redPercent.value = String(v ?? '');
+}
+
+/** 阈值校验（与后端同口径 0 < red < green <= 1）：返回错误文案，null = 合法 */
+const thresholdError = computed<string | null>(() => {
+  const g = percentStrToRatio(greenPercent.value);
+  const r = percentStrToRatio(redPercent.value);
+  if (g === null || r === null) return '阈值须为有效数字';
+  if (r <= 0) return '低股息线阈值须大于 0';
+  if (g > 1) return '高股息线阈值须不大于 100（%）';
+  if (r >= g) return '低股息线阈值须小于高股息线阈值';
+  return null;
+});
+
 // 同步服务端偏好：写入本地 store + 回填表单（immediate：TAB 重建后立即回填）
 watch(
   serverPrefs,
@@ -93,6 +140,12 @@ watch(
     prefForm.cashHintOnTrade = prefs.cashHintOnTrade;
     prefForm.amountThousands = prefs.amountThousands;
     prefForm.amountAbbrev = prefs.amountAbbrev;
+    greenPercent.value = ratioToPercentStr(
+      prefs.greenThreshold ?? DEFAULT_PREFERENCES.greenThreshold,
+    );
+    redPercent.value = ratioToPercentStr(
+      prefs.redThreshold ?? DEFAULT_PREFERENCES.redThreshold,
+    );
   },
   { immediate: true },
 );
@@ -114,7 +167,11 @@ const hasPrefChanges = computed(() => {
     prefForm.cashHintOnCashflow !== prefs.cashHintOnCashflow ||
     prefForm.cashHintOnTrade !== prefs.cashHintOnTrade ||
     prefForm.amountThousands !== prefs.amountThousands ||
-    prefForm.amountAbbrev !== prefs.amountAbbrev
+    prefForm.amountAbbrev !== prefs.amountAbbrev ||
+    greenPercent.value !==
+      ratioToPercentStr(prefs.greenThreshold ?? DEFAULT_PREFERENCES.greenThreshold) ||
+    redPercent.value !==
+      ratioToPercentStr(prefs.redThreshold ?? DEFAULT_PREFERENCES.redThreshold)
   );
 });
 
@@ -126,6 +183,8 @@ const hasPrefChanges = computed(() => {
  * 切到新的默认组合，符合用户预期（React 版同口径）。
  */
 function handleSavePreferences(): void {
+  // 阈值非法时不发请求（错误文案已就地提示，保存按钮也已禁用）
+  if (thresholdError.value) return;
   const nextDefault =
     prefForm.defaultPortfolioId === '' ? null : prefForm.defaultPortfolioId;
   const payload: UpdatePreferenceDto = {
@@ -133,6 +192,8 @@ function handleSavePreferences(): void {
     // 空字符串视为 null
     defaultPortfolioId:
       prefForm.defaultPortfolioId === '' ? null : prefForm.defaultPortfolioId,
+    greenThreshold: percentStrToRatio(greenPercent.value) ?? undefined,
+    redThreshold: percentStrToRatio(redPercent.value) ?? undefined,
   };
   updatePrefsMutation.mutate(payload, {
     onSuccess: () => {
@@ -164,6 +225,43 @@ function handleSavePreferences(): void {
       />
       <PreferencesToggleFields :pref-form="prefForm" />
 
+      <!-- 股息率标色阈值（随账号存储；原「设置 → 股息率」的全局阈值迁至此） -->
+      <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div class="space-y-2">
+          <Label for="pref-green-threshold">高股息线阈值（%）</Label>
+          <Input
+            id="pref-green-threshold"
+            type="number"
+            min="0"
+            max="100"
+            step="0.1"
+            class="w-full"
+            :model-value="greenPercent"
+            @update:model-value="onGreenPercentInput"
+          />
+          <p class="text-xs text-muted-foreground">
+            股息率 ≥ 此值视为「高股息」（标红），并作为股息率曲线图的高股息线
+          </p>
+        </div>
+
+        <div class="space-y-2">
+          <Label for="pref-red-threshold">低股息线阈值（%）</Label>
+          <Input
+            id="pref-red-threshold"
+            type="number"
+            min="0"
+            max="100"
+            step="0.1"
+            class="w-full"
+            :model-value="redPercent"
+            @update:model-value="onRedPercentInput"
+          />
+          <p class="text-xs text-muted-foreground">
+            股息率 ≤ 此值视为「低股息」（标绿），须小于高股息线阈值
+          </p>
+        </div>
+      </div>
+
       <!-- 货币 / 语言（待后端集成：降级为 1 行 muted 文本 + HelpTip，删除无交互 disabled 控件） -->
       <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div class="space-y-2">
@@ -188,7 +286,7 @@ function handleSavePreferences(): void {
       <!-- 保存按钮 -->
       <div class="flex items-center gap-3 pt-2">
         <Button
-          :disabled="!hasPrefChanges || updatePending"
+          :disabled="!hasPrefChanges || updatePending || !!thresholdError"
           @click="handleSavePreferences"
         >
           <Loader2
@@ -202,6 +300,9 @@ function handleSavePreferences(): void {
           class="text-xs text-muted-foreground"
         >
           已是最新
+        </span>
+        <span v-if="thresholdError" class="text-xs text-red-500">
+          {{ thresholdError }}
         </span>
         <span v-if="updateError" class="text-xs text-red-500">
           保存失败，请重试

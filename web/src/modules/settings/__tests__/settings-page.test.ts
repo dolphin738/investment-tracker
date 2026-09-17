@@ -43,6 +43,8 @@ const SERVER_PREFS: UserPreference = {
   cashHintOnTrade: true,
   amountThousands: true,
   amountAbbrev: false,
+  greenThreshold: 0.05,
+  redThreshold: 0.03,
   createdAt: '2026-01-01T00:00:00Z',
   updatedAt: '2026-01-01T00:00:00Z',
 };
@@ -366,6 +368,34 @@ describe('SettingsPage 偏好保存与同步', () => {
     expect(preferenceStore.preferences?.cashHintOnCashflow).toBe(false);
     // 未被本次 payload 覆盖的字段保持服务端原值
     expect(preferenceStore.preferences?.defaultDateRange).toBe('1y');
+
+    wrapper.unmount();
+  });
+
+  it('股息率阈值：输入百分数可保存为小数比率，且输入不导致面板崩溃（回归 2026-09-17）', async () => {
+    const wrapper = await mountPage();
+
+    // 默认回填 5 / 3（服务端桩缺该字段 → 走 DEFAULT_PREFERENCES 兜底）
+    expect((wrapper.find('#pref-green-threshold').element as HTMLInputElement).value).toBe('5');
+    expect((wrapper.find('#pref-red-threshold').element as HTMLInputElement).value).toBe('3');
+
+    // 模拟 <input type="number"> 的真实行为：input 后 vModelText 会把值自动转成 number
+    const greenInput = wrapper.find('#pref-green-threshold');
+    (greenInput.element as HTMLInputElement).value = '8';
+    await greenInput.trigger('input');
+    await nextTick();
+
+    // 关键回归：面板不得崩溃（曾因把 number 当字符串 .trim() 抛错，整块「偏好设置」消失）
+    expect(wrapper.find('#pref-green-threshold').exists()).toBe(true);
+    expect(saveButton(wrapper).attributes('disabled')).toBeUndefined();
+
+    await saveButton(wrapper).trigger('click');
+    await flushPromises();
+
+    const { updatePreferences } = await import('@/api/preference.api');
+    const payload = (updatePreferences as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(payload.greenThreshold).toBeCloseTo(0.08, 6);
+    expect(payload.redThreshold).toBeCloseTo(0.03, 6);
 
     wrapper.unmount();
   });

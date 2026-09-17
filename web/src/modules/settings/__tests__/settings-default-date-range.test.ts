@@ -44,6 +44,8 @@ const SERVER_PREFS: UserPreference = {
   cashHintOnTrade: true,
   amountThousands: true,
   amountAbbrev: false,
+  greenThreshold: 0.05,
+  redThreshold: 0.03,
   createdAt: '2026-01-01T00:00:00Z',
   updatedAt: '2026-01-01T00:00:00Z',
 };

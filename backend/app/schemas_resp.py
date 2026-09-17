@@ -188,6 +188,8 @@ class PreferenceOut(BaseModel):
     cashHintOnTrade: bool
     amountThousands: bool
     amountAbbrev: bool
+    greenThreshold: float
+    redThreshold: float
     dashboardLayout: str
 
 

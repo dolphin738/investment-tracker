@@ -226,7 +226,8 @@ def test_serializers_keys_match_schemas_resp():
         id="pf1", default_portfolio_id="p1", default_granularity="day", default_date_range="1m",
         aggregation="sum", week_starts_on=1, nav_decimals=2, xirr_decimals=2, theme="light",
         stale_days=7, show_liquidated=False, cost_basis_view="cost", cash_hint_on_cashflow=True,
-        cash_hint_on_trade=False, amount_thousands=True, amount_abbrev=False, dashboard_layout="{}",
+        cash_hint_on_trade=False, amount_thousands=True, amount_abbrev=False,
+        green_threshold=Decimal("0.05"), red_threshold=Decimal("0.03"), dashboard_layout="{}",
     )
     user = _ns(
         id="u1", email="a@b.com", name="N", avatar=None, phone=None, bio=None,

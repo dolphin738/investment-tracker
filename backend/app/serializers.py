@@ -213,6 +213,8 @@ def serialize_preference(p) -> dict:
         "cashHintOnTrade": p.cash_hint_on_trade,
         "amountThousands": p.amount_thousands,
         "amountAbbrev": p.amount_abbrev,
+        "greenThreshold": p.green_threshold,
+        "redThreshold": p.red_threshold,
         "dashboardLayout": p.dashboard_layout,
     }
 

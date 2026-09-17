@@ -30,14 +30,13 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ROUTE_PATH } from '@/lib/constants';
 import { cn, formatPercent, formatCurrency } from '@/lib/utils';
-import { useIsAdmin } from '@/stores/auth.store';
 import { useTop20 } from '../composables/use-dividend-yield';
 import { useYieldThresholds } from '../composables/use-yield-thresholds';
 import SecurityDetailPanel from '../components/SecurityDetailPanel.vue';
 import type { DividendYieldMode } from '@/api/types';
 
 const router = useRouter();
-const { thresholds, yieldClass } = useYieldThresholds(() => useIsAdmin());
+const { thresholds, yieldClass } = useYieldThresholds();
 
 const top20 = useTop20();
 const topItems = computed(() => top20.data.value?.top ?? []);
@@ -240,10 +239,7 @@ function modeLabel(mode: DividendYieldMode): string {
     />
 
     <!-- 阈值图例（A 股「红涨绿跌」语义，字段名沿用服务端契约） -->
-    <p
-      v-if="thresholds && (thresholds.green_threshold != null || thresholds.red_threshold != null)"
-      class="flex items-center gap-4 text-xs text-muted-foreground"
-    >
+    <p class="flex items-center gap-4 text-xs text-muted-foreground">
       <span class="flex items-center gap-1.5">
         <span class="inline-block h-3 w-3 rounded-sm" style="background: hsl(var(--color-up))" />
         税前股息率 ≥ {{ formatPercent(thresholds.green_threshold ?? 0) }}（红）

@@ -7,6 +7,8 @@
 """
 from __future__ import annotations
 
+from decimal import Decimal
+
 from sqlalchemy import select
 
 from app.core.enums import BusinessErrorCode
@@ -76,6 +78,8 @@ class PreferenceService(PortfolioChildService):
             "cashHintOnTrade",
             "amountThousands",
             "amountAbbrev",
+            "greenThreshold",
+            "redThreshold",
         }
         unknown = set(body.keys()) - allowed
         if unknown:
@@ -84,6 +88,22 @@ class PreferenceService(PortfolioChildService):
                 message=f"未知偏好字段：{', '.join(sorted(unknown))}",
                 status_code=400,
             )
+
+        # 股息率阈值成对约束（0 < red < green <= 1）：允许只传其一，但必须与既有值
+        # 合成后再校验，否则"只改 green"之类的部分更新可绕过约束。
+        if "greenThreshold" in body or "redThreshold" in body:
+            eff_green = body.get("greenThreshold")
+            eff_red = body.get("redThreshold")
+            eff_green = (
+                Decimal(str(eff_green)) if eff_green is not None else pref.green_threshold
+            )
+            eff_red = Decimal(str(eff_red)) if eff_red is not None else pref.red_threshold
+            if not (Decimal("0") < eff_red < eff_green <= Decimal("1")):
+                raise BusinessException(
+                    code=BusinessErrorCode.VALIDATION_FAILED,
+                    message="阈值须满足 0 < red_threshold < green_threshold <= 1",
+                    status_code=400,
+                )
 
         for key, value in body.items():
             if key == "defaultPortfolioId":
@@ -117,6 +137,10 @@ class PreferenceService(PortfolioChildService):
                 _validate("aggregation", value, _AGGREGATIONS)
             elif key == "theme":
                 _validate("theme", value, _THEMES)
+            elif key in ("greenThreshold", "redThreshold"):
+                # Numeric 列：经 str 转 Decimal，避免 float 二进制尾差
+                setattr(pref, _snake(key), Decimal(str(value)))
+                continue
             # 其余字段按类型直接赋值（由 ORM/DB 约束保证合法）
             setattr(pref, _snake(key), value)
 

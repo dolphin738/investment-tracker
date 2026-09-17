@@ -142,6 +142,70 @@ async def test_preference_get_default_and_patch(client):
     assert st == 400 and code == 2000, (st, code, msg)
 
 
+async def test_preference_dividend_thresholds(client):
+    """股息率标色阈值随账号存储：默认值 / 合法更新 / 成对约束 0<red<green<=1 / 部分更新合成。"""
+    u = await register_login(client)
+    h = auth(u["token"])
+
+    # 默认：green 0.05 / red 0.03（与模型 server_default 一致）
+    st, code, pref, msg = env(await client.get("/api/users/preferences", headers=h))
+    assert st == 200 and code == 0, (st, code, msg)
+    assert float(pref["greenThreshold"]) == 0.05, pref
+    assert float(pref["redThreshold"]) == 0.03, pref
+
+    # 合法更新（green 0.08 / red 0.04）
+    st, code, pref, msg = env(
+        await client.patch(
+            "/api/users/preferences",
+            headers=h,
+            json={"greenThreshold": 0.08, "redThreshold": 0.04},
+        )
+    )
+    assert st == 200 and code == 0, (st, code, msg)
+    assert float(pref["greenThreshold"]) == 0.08
+    assert float(pref["redThreshold"]) == 0.04
+
+    # 部分更新：只传 green，与库中 red(0.04) 合成后仍合法 → 200
+    st, code, pref, msg = env(
+        await client.patch("/api/users/preferences", headers=h, json={"greenThreshold": 0.09})
+    )
+    assert st == 200 and code == 0, (st, code, msg)
+    assert float(pref["greenThreshold"]) == 0.09
+    assert float(pref["redThreshold"]) == 0.04
+
+    # 部分更新：只传 green 但低于库中 red → 合成后非法 → 400
+    st, code, pref, msg = env(
+        await client.patch("/api/users/preferences", headers=h, json={"greenThreshold": 0.01})
+    )
+    assert st == 400 and code == 2000, (st, code, msg)
+
+    # red >= green → 400
+    st, code, pref, msg = env(
+        await client.patch(
+            "/api/users/preferences",
+            headers=h,
+            json={"greenThreshold": 0.03, "redThreshold": 0.05},
+        )
+    )
+    assert st == 400 and code == 2000, (st, code, msg)
+
+    # green > 1 → 400
+    st, code, pref, msg = env(
+        await client.patch(
+            "/api/users/preferences",
+            headers=h,
+            json={"greenThreshold": 1.2, "redThreshold": 0.05},
+        )
+    )
+    assert st == 400 and code == 2000, (st, code, msg)
+
+    # 校验失败不得污染库中值（仍为 0.09 / 0.04）
+    st, code, pref, msg = env(await client.get("/api/users/preferences", headers=h))
+    assert st == 200 and code == 0
+    assert float(pref["greenThreshold"]) == 0.09
+    assert float(pref["redThreshold"]) == 0.04
+
+
 # ───────────────────────── upload §19 ─────────────────────────
 PNG_SIG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 20
 PDF_BYTES = b"%PDF-1.4 fake content not an image"

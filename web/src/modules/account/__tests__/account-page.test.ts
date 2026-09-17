@@ -115,6 +115,8 @@ const fixtures = vi.hoisted(() => {
     cashHintOnTrade: true,
     amountThousands: true,
     amountAbbrev: false,
+    greenThreshold: 0.05,
+    redThreshold: 0.03,
     createdAt: '2024-01-01T00:00:00.000Z',
     updatedAt: '2024-01-01T00:00:00.000Z',
   };

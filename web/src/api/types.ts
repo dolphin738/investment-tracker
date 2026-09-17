@@ -109,6 +109,10 @@ export interface UserPreference {
   amountThousands: boolean;
   /** 金额万 / 亿缩写（SET-P1-03） */
   amountAbbrev: boolean;
+  /** 股息率「高股息」线阈值（小数比率，0.05 = 5%）：随账号存储，供榜单标色 + 曲线参考线 */
+  greenThreshold: number;
+  /** 股息率「低股息」线阈值（小数比率，0.03 = 3%） */
+  redThreshold: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -130,6 +134,9 @@ export interface UpdatePreferenceDto {
   cashHintOnTrade?: boolean;
   amountThousands?: boolean;
   amountAbbrev?: boolean;
+  /** 股息率标色阈值（小数比率）：成对约束 0 < red < green <= 1 */
+  greenThreshold?: number;
+  redThreshold?: number;
 }
 
 // ============================================================================

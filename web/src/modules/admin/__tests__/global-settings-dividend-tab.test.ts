@@ -346,8 +346,8 @@ describe('GlobalSettingsPage — 顶层 TAB 与全局设置', () => {
     expect(mutateSpy).toHaveBeenCalledTimes(1);
     const payload = mutateSpy.mock.calls[0][0];
     expect(payload.price_backfill_adjust).toBe('hfq');
-    // 保存是全字段 PUT：仍带阈值与四源字段
-    expect(payload).toHaveProperty('green_threshold');
+    // 保存是全字段 PUT：带四源与回补字段（阈值已迁「个人中心 → 偏好设置」，不再出现在本 payload）
+    expect(payload).not.toHaveProperty('green_threshold');
     expect(payload).toHaveProperty('price_backfill_mode');
 
     wrapper.unmount();

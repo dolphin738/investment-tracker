@@ -47,7 +47,6 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { cn, formatPercent, formatCurrency } from '@/lib/utils';
-import { useIsAdmin } from '@/stores/auth.store';
 import { useRank } from '../composables/use-dividend-yield';
 import { useYieldThresholds } from '../composables/use-yield-thresholds';
 import SecurityDetailDialog from '../components/SecurityDetailDialog.vue';
@@ -55,8 +54,7 @@ import ImpliedPriceCalculator from '../components/ImpliedPriceCalculator.vue';
 import type { DividendYieldSort } from '@/api/types';
 
 const route = useRoute();
-const isAdmin = computed(() => useIsAdmin());
-const { thresholds, yieldClass } = useYieldThresholds(() => useIsAdmin());
+const { thresholds, yieldClass } = useYieldThresholds();
 
 // ── 过滤 / 排序 / 分页状态 ──
 const allPage = ref(1);
@@ -367,10 +365,7 @@ const activeTab = ref<string>('rank');
     <SecurityDetailDialog :security="selected" @update:open="closeDetail" />
 
     <!-- 阈值图例（A 股「红涨绿跌」语义，字段名沿用服务端契约） -->
-    <p
-      v-if="thresholds && (thresholds.green_threshold != null || thresholds.red_threshold != null)"
-      class="flex items-center gap-4 text-xs text-muted-foreground"
-    >
+    <p class="flex items-center gap-4 text-xs text-muted-foreground">
       <span class="flex items-center gap-1.5">
         <span class="inline-block h-3 w-3 rounded-sm" style="background: hsl(var(--color-up))" />
         税前股息率 ≥ {{ formatPercent(thresholds.green_threshold ?? 0) }}（红）
@@ -379,9 +374,7 @@ const activeTab = ref<string>('rank');
         <span class="inline-block h-3 w-3 rounded-sm" style="background: hsl(var(--color-down))" />
         股息率 ≤ {{ formatPercent(thresholds.red_threshold ?? 0) }}（绿）
       </span>
-      <span v-if="!isAdmin">
-        （阈值由管理员在「设置 → 股息率」配置）
-      </span>
+      <span>（阈值可在「个人中心 → 偏好设置」按账号配置）</span>
     </p>
   </div>
 </template>

@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Numeric, String, UniqueConstraint
 from sqlalchemy import JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -62,5 +63,14 @@ class UserPreference(Base, TimestampMixin):
     amount_thousands: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     amount_abbrev: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     dashboard_layout: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # 股息率标色阈值（小数比率，0.05 = 5%）：随账号存储。原全局
+    # dividend_yield_settings.green/red_threshold 迁至用户偏好（见 0026 迁移）；
+    # green = 「高股息」线阈值、red = 「低股息」线阈值，口径 0 < red < green <= 1。
+    green_threshold: Mapped[Decimal] = mapped_column(
+        Numeric(5, 4), nullable=False, server_default="0.05", default=Decimal("0.05")
+    )
+    red_threshold: Mapped[Decimal] = mapped_column(
+        Numeric(5, 4), nullable=False, server_default="0.03", default=Decimal("0.03")
+    )
 
     user: Mapped["User"] = relationship(back_populates="preference")

@@ -209,9 +209,9 @@ describe('QA · 全局设置页 Tab 重构独立验证', () => {
     await wrapper.find('#dy-backfill-adjust').setValue('qfq');
     await flushPromises();
 
-    // 切到股息率 TAB：改绿色阈值
+    // 切到股息率 TAB：把「行情源接口」改为「不设置」
     await switchTab(wrapper, 'dividend');
-    await wrapper.find('input#dy-green').setValue('8');
+    await wrapper.find('#dy-price-source').setValue(SELECT_EMPTY_VALUE);
     await flushPromises();
 
     // 切回初始化：额度与复权值仍在
@@ -219,9 +219,9 @@ describe('QA · 全局设置页 Tab 重构独立验证', () => {
     expect((wrapper.find('input#dy-price-backfill-quota').element as HTMLInputElement).value).toBe('1234');
     expect((wrapper.find('#dy-backfill-adjust').element as HTMLSelectElement).value).toBe('qfq');
 
-    // 再切到股息率：阈值仍在
+    // 再切到股息率：行情源改动仍在
     await switchTab(wrapper, 'dividend');
-    expect((wrapper.find('input#dy-green').element as HTMLInputElement).value).toBe('8');
+    expect((wrapper.find('#dy-price-source').element as HTMLSelectElement).value).toBe(SELECT_EMPTY_VALUE);
 
     // 保存一次
     await saveButton(wrapper).trigger('click');
@@ -231,7 +231,9 @@ describe('QA · 全局设置页 Tab 重构独立验证', () => {
     const payload = mutateSpy.mock.calls[0][0];
     expect(payload.price_backfill_adjust).toBe('qfq');
     expect(payload.price_backfill_quota).toBe(1234);
-    expect(payload.green_threshold).toBeCloseTo(0.08, 6);
+    // 「不设置」哨兵 → 提交 null；阈值字段已迁「个人中心 → 偏好设置」，不再出现在本页 payload
+    expect(payload.price_source_interface_id).toBeNull();
+    expect(payload).not.toHaveProperty('green_threshold');
     wrapper.unmount();
   });
 

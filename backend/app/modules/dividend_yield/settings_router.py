@@ -44,8 +44,10 @@ router_settings = APIRouter(route_class=EnvelopeRoute)
 
 
 class SettingsUpdateBody(BaseModel):
-    green_threshold: Decimal
-    red_threshold: Decimal
+    # 阈值已迁至用户偏好（见 0026 迁移）：本端点仅保留兼容——字段改为可选，
+    # 仅当请求体显式提供时才校验并写入；未提供 = 不改（旧列标 deprecated）。
+    green_threshold: Optional[Decimal] = None
+    red_threshold: Optional[Decimal] = None
     dividend_report_source_interface_id: Optional[str] = None
     dividend_detail_source_interface_id: Optional[str] = None
     price_source_interface_id: Optional[str] = None
@@ -242,14 +244,7 @@ async def put_dividend_yield_settings(
     admin: CurrentUser = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    """更新全局配置（§5.4/§6.6：非 admin 403；阈值 0<red<green<=1；接口四重校验 400 不落库；AppLog 审计）。"""
-    green, red = body.green_threshold, body.red_threshold
-    if not (Decimal("0") < red < green <= Decimal("1")):
-        raise BusinessException(
-            code=BusinessErrorCode.VALIDATION_FAILED,
-            message="阈值须满足 0 < red_threshold < green_threshold <= 1",
-            status_code=400,
-        )
+    """更新全局配置（§5.4/§6.6：非 admin 403；接口四重校验 400 不落库；AppLog 审计）。"""
     await _validate_interface(
         db, body.dividend_report_source_interface_id, DIVIDEND_LIST_CAT_ID, require_per_symbol=False
     )
@@ -300,6 +295,19 @@ async def put_dividend_yield_settings(
 
     row = await load_settings(db)
     is_new = row.id is None  # 空默认（无持久化行）时插入，否则更新既有行
+    # 阈值已迁至用户偏好（见 0026 迁移），本端点仅保留兼容：仅当请求体显式提供阈值时
+    # 才校验并写入；未提供 = 不改。校验需与库中现值合成（允许只传其一），故置于载入之后。
+    green, red = body.green_threshold, body.red_threshold
+    eff_green = green if green is not None else row.green_threshold
+    eff_red = red if red is not None else row.red_threshold
+    if (green is not None or red is not None) and not (
+        Decimal("0") < eff_red < eff_green <= Decimal("1")
+    ):
+        raise BusinessException(
+            code=BusinessErrorCode.VALIDATION_FAILED,
+            message="阈值须满足 0 < red_threshold < green_threshold <= 1",
+            status_code=400,
+        )
     # 配置组合显性化（严格补洞的前置条件）：交易日历的刷新窗口下限必须**不晚于**回补起点，
     # 否则日历覆盖不到回补窗口下界，gap 模式每轮都会回落 legacy（仅后端 warning，用户无感知）。
     # 用「提交后生效值」组合判断：显式提供的用提交值，未提供的用库中现值。
@@ -346,8 +354,11 @@ async def put_dividend_yield_settings(
             else None
         ),
     }
-    row.green_threshold = green
-    row.red_threshold = red
+    # 阈值：仅显式提供时覆盖（None = 不改；阈值已迁用户偏好，此处保留兼容）
+    if green is not None:
+        row.green_threshold = green
+    if red is not None:
+        row.red_threshold = red
     row.dividend_report_source_interface_id = body.dividend_report_source_interface_id
     row.dividend_detail_source_interface_id = body.dividend_detail_source_interface_id
     row.price_source_interface_id = body.price_source_interface_id
@@ -384,8 +395,8 @@ async def put_dividend_yield_settings(
         detail={
             "before": before_detail,
             "after": {
-                "green_threshold": str(green),
-                "red_threshold": str(red),
+                "green_threshold": str(row.green_threshold),
+                "red_threshold": str(row.red_threshold),
                 "dividend_report_source_interface_id": body.dividend_report_source_interface_id,
                 "dividend_detail_source_interface_id": body.dividend_detail_source_interface_id,
                 "price_source_interface_id": body.price_source_interface_id,

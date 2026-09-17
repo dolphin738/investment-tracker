@@ -86,11 +86,9 @@ const providerNameById = computed(() => {
 });
 
 // ───────────────────────── 表单（唯一状态源） ─────────────────────────
-// 阈值以**百分数**存储（5 = 5%），提交时转小数（P2-8 / §2.4）。
+// 注：股息率标色阈值已迁至「个人中心 → 偏好设置」（随账号存储），本页不再承载。
 // 接口下拉的「不设置」用 SELECT_EMPTY_VALUE 表示（reka-ui 禁止 value=""）。
 const settingsForm = reactive({
-  greenPercent: '',
-  redPercent: '',
   dividendReportSourceInterfaceId: SELECT_EMPTY_VALUE,
   dividendDetailSourceInterfaceId: SELECT_EMPTY_VALUE,
   priceSourceInterfaceId: SELECT_EMPTY_VALUE,
@@ -123,19 +121,12 @@ function oneYearAgoIso(): string {
   return d.toISOString().slice(0, 10);
 }
 
-/** 小数比率 → 百分数字符串（0.05 → "5"） */
-function ratioToPercent(v: number | null): string {
-  return v != null ? String(Number((v * 100).toFixed(4))) : '';
-}
-
 // immediate 必填：服务端数据到达（或缓存命中重挂载）时须立即回填表单。
 // 非 immediate 的 watch 在缓存命中重挂载时不会触发（同 SettingsPreferencesTab 已修的坑）。
 watch(
   dividendSettings,
   (s) => {
     if (!s) return;
-    settingsForm.greenPercent = ratioToPercent(s.green_threshold);
-    settingsForm.redPercent = ratioToPercent(s.red_threshold);
     settingsForm.dividendReportSourceInterfaceId =
       s.dividend_report_source?.id ?? SELECT_EMPTY_VALUE;
     settingsForm.dividendDetailSourceInterfaceId =
@@ -162,15 +153,6 @@ watch(
   { immediate: true },
 );
 
-/** 百分数字符串 → 小数比率 / null（空串视为 null；非法输入返回 undefined 触发校验错误） */
-function percentToRatio(v: string): { ratio: number | null; invalid: boolean } {
-  const t = v.trim();
-  if (t === '') return { ratio: null, invalid: false };
-  const n = Number(t);
-  if (!Number.isFinite(n)) return { ratio: null, invalid: true };
-  return { ratio: n / 100, invalid: false };
-}
-
 /** 每日回补额度字符串 → number | null（空串视为 null；非整数返回 invalid 触发校验错误） */
 function quotaToValue(v: string): { value: number | null; invalid: boolean } {
   const t = v.trim();
@@ -180,18 +162,8 @@ function quotaToValue(v: string): { value: number | null; invalid: boolean } {
   return { value: n, invalid: false };
 }
 
-/** 阈值前置校验（后端也会 400：0 < red < green <= 1，即百分数 0 < red% < green% <= 100） */
+/** 设置前置校验（阈值已迁「个人中心 → 偏好设置」，此处只剩额度校验） */
 function validateSettings(): string | null {
-  const green = percentToRatio(settingsForm.greenPercent);
-  const red = percentToRatio(settingsForm.redPercent);
-  if (green.invalid || red.invalid) return '阈值须为有效数字';
-  if (green.ratio !== null && green.ratio <= 0) return '绿色阈值须大于 0';
-  if (green.ratio !== null && green.ratio > 1) return '绿色阈值须不大于 100（%）';
-  if (red.ratio !== null && red.ratio <= 0) return '红色阈值须大于 0';
-  if (red.ratio !== null && red.ratio > 1) return '红色阈值须不大于 100（%）';
-  if (red.ratio !== null && green.ratio !== null && red.ratio >= green.ratio) {
-    return '红色阈值须小于绿色阈值';
-  }
   // 每日回补额度（只/天）：后端校验 1..2000 整数，越界返回 400；空串视为 null（用后端默认）
   const q = quotaToValue(settingsForm.priceBackfillQuota);
   if (q.invalid) return '每日回补额度须为整数';
@@ -201,13 +173,11 @@ function validateSettings(): string | null {
   return null;
 }
 
-/** 是否有本地变更（与服务端对比，阈值按百分数口径比较） */
+/** 是否有本地变更（与服务端对比） */
 const settingsHasChanges = computed(() => {
   const s = dividendSettings.value;
   if (!s) return false;
   return (
-    settingsForm.greenPercent !== ratioToPercent(s.green_threshold) ||
-    settingsForm.redPercent !== ratioToPercent(s.red_threshold) ||
     settingsForm.dividendReportSourceInterfaceId !==
       (s.dividend_report_source?.id ?? SELECT_EMPTY_VALUE) ||
     settingsForm.dividendDetailSourceInterfaceId !==
@@ -245,8 +215,6 @@ function handleSaveSettings(): void {
   settingsFormError.value = '';
   const q = quotaToValue(settingsForm.priceBackfillQuota);
   const payload: UpdateDividendYieldSettingsDto = {
-    green_threshold: percentToRatio(settingsForm.greenPercent).ratio,
-    red_threshold: percentToRatio(settingsForm.redPercent).ratio,
     dividend_report_source_interface_id: toInterfaceIdOrNull(
       settingsForm.dividendReportSourceInterfaceId,
     ),
@@ -326,11 +294,9 @@ function handleSaveSettings(): void {
           </CardContent>
         </Card>
 
-        <!-- 股息率 TAB：阈值 + 四源接口 -->
+        <!-- 股息率 TAB：四源接口（阈值已迁「个人中心 → 偏好设置」，本页不再承载） -->
         <GlobalSettingsDividendTab
           v-else
-          v-model:green-percent="settingsForm.greenPercent"
-          v-model:red-percent="settingsForm.redPercent"
           v-model:dividend-report-source-interface-id="
             settingsForm.dividendReportSourceInterfaceId
           "

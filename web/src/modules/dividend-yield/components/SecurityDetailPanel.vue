@@ -26,6 +26,7 @@ import {
 import { useChartTheme } from '@/lib/chart-theme';
 import { formatPercent } from '@/lib/utils';
 import { useCurve } from '../composables/use-dividend-yield';
+import { useYieldThresholds } from '../composables/use-yield-thresholds';
 
 const props = defineProps<{
   security: { master_id: string; code: string | null; name: string | null };
@@ -34,44 +35,27 @@ const props = defineProps<{
 const emit = defineEmits<{ close: [] }>();
 
 const curve = useCurve(computed(() => props.security.master_id));
+const theme = useChartTheme();
+// 高股息阈值随账号存储（用户偏好，见 0026 迁移）：全局偏好由 PreferenceBootstrap 首屏加载，
+// 登录即可读、无 admin 门控；缺失时 composable 回退默认 0.05。
+const { thresholds } = useYieldThresholds();
 
-/** 近一年曲线 option（股息率 → 百分数；缺段断开，§3.5/§7 缺失语义） */
-const curveOption = computed<EChartsOption>(() => {
-  const items = curve.data.value?.items ?? [];
-  const x = items.map((i) => i.trade_date);
-  const y = items.map((i) =>
-    i.dividend_yield !== null
-      ? Number((i.dividend_yield * 100).toFixed(2))
-      : null,
-  );
-  return {
-    color: ['hsl(var(--primary))'],
-    tooltip: {
-      trigger: 'axis',
-      valueFormatter: (v) => `${v}%`,
-    },
-    grid: { left: 48, right: 16, top: 16, bottom: 24 },
-    xAxis: {
-      type: 'category',
-      data: x,
-      axisLabel: { fontSize: 10 },
-    },
-    yAxis: {
-      type: 'value',
-      axisLabel: { formatter: '{value}%' },
-    },
-    series: [
-      {
-        type: 'line',
-        data: y,
-        connectNulls: false,
-        smooth: true,
-        symbolSize: 4,
-        lineStyle: { width: 2 },
-      },
-    ],
-  };
-});
+/** 参考线阈值（百分数）：green_threshold 为小数比率（0.05）→ 5（恒有值，带默认兜底） */
+const pivotPercent = computed<number>(() =>
+  Number((thresholds.value.green_threshold * 100).toFixed(2)),
+);
+
+/**
+ * 近一年双轴曲线 option：左轴 股息率(%)、右轴 收盘价(¥)，含高股息线虚线（阈值跟随全局设置）。
+ * 经 useChartTheme() 建立响应式依赖，明暗主题切换时自动重算配色（修复旧内联硬编码回归）。
+ */
+const curveOption = computed<EChartsOption>(() =>
+  buildDividendYieldCurveOption({
+    items: curve.data.value?.items ?? [],
+    theme: theme.value,
+    pivotPercent: pivotPercent.value,
+  }),
+);
 </script>
 
 <template>
@@ -91,7 +75,7 @@ const curveOption = computed<EChartsOption>(() => {
           关闭
         </Button>
       </CardTitle>
-      <CardDescription>近一年股息率曲线</CardDescription>
+      <CardDescription>近一年股息率(%) 与 收盘价(¥) 双轴曲线</CardDescription>
     </CardHeader>
     <CardContent>
       <Skeleton v-if="curve.isLoading.value" class="h-[260px] w-full" />
@@ -105,7 +89,7 @@ const curveOption = computed<EChartsOption>(() => {
         v-else
         :option="curveOption"
         :height="260"
-        aria-label="近一年股息率曲线"
+        aria-label="近一年股息率与收盘价双轴曲线"
         :summary="`近一年股息率曲线，最新 ${formatPercent(curve.data.value.items[curve.data.value.items.length - 1]?.dividend_yield)}`"
       />
     </CardContent>

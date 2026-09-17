@@ -30,6 +30,8 @@ export const DEFAULT_PREFERENCES: Omit<
   cashHintOnTrade: true,
   amountThousands: true,
   amountAbbrev: false,
+  greenThreshold: 0.05,
+  redThreshold: 0.03,
 };
 
 export const usePreferenceStore = defineStore('preference', () => {
