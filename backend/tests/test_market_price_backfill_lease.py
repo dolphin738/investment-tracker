@@ -75,8 +75,7 @@ async def _seed_sdk_quote_source(session):
     await session.flush()
     session.add(itf)
     await session.flush()
-    session.add(DividendYieldSettings(green_threshold=Decimal("0.05"),
-                                      red_threshold=Decimal("0.03"),
+    session.add(DividendYieldSettings(
                                       price_source_interface_id=itf.id))
     return itf
 
@@ -352,7 +351,6 @@ async def _seed_backfill_run(session):
     await session.flush()
     session.add(
         DividendYieldSettings(
-            green_threshold=Decimal("0.05"), red_threshold=Decimal("0.03"),
             price_source_interface_id=itf.id,
             price_backfill_source_interface_id=itf.id,
             price_backfill_start_date=date(2024, 1, 1),

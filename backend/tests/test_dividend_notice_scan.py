@@ -292,7 +292,7 @@ async def test_resolve_notice_itf_uses_configured_source(session):
     """守护 §5.4：配置了 announcement_source_interface_id → 直接使用该接口。"""
     itf = await _seed_cat4(session, priority=2)
     session.add(DividendYieldSettings(
-        id=_uid(), announcement_source_interface_id=itf.id, green_threshold=0.05, red_threshold=0.03,
+        id=_uid(), announcement_source_interface_id=itf.id, 
     ))
     await session.commit()
     svc = DividendNoticeScanService(session)
@@ -306,7 +306,7 @@ async def test_resolve_notice_itf_configured_disabled_fails_closed(session):
     itf = await _seed_cat4(session, enabled=False)
     await _seed_cat4(session, priority=1, name="备用公告接口")  # 若静默回退会选中它
     session.add(DividendYieldSettings(
-        id=_uid(), announcement_source_interface_id=itf.id, green_threshold=0.05, red_threshold=0.03,
+        id=_uid(), announcement_source_interface_id=itf.id, 
     ))
     await session.commit()
     svc = DividendNoticeScanService(session)
@@ -341,7 +341,7 @@ async def test_resolve_notice_itf_provider_disabled_fails_closed(session):
     itf = await _seed_cat4(session, provider_enabled=False)
     await _seed_cat4(session, priority=1, name="备用公告接口")  # 若静默回退会选中它
     session.add(DividendYieldSettings(
-        id=_uid(), announcement_source_interface_id=itf.id, green_threshold=0.05, red_threshold=0.03,
+        id=_uid(), announcement_source_interface_id=itf.id, 
     ))
     await session.commit()
     svc = DividendNoticeScanService(session)
@@ -354,7 +354,7 @@ async def test_resolve_detail_itf_provider_disabled_returns_none(session):
     """补充源同口径：接口 enabled 但提供方停用 → 返回 None（记告警跳过，不逐只调用）。"""
     itf = await _seed_cat4(session, provider_enabled=False)
     session.add(DividendYieldSettings(
-        id=_uid(), dividend_detail_source_interface_id=itf.id, green_threshold=0.05, red_threshold=0.03,
+        id=_uid(), dividend_detail_source_interface_id=itf.id, 
     ))
     await session.commit()
     svc = DividendNoticeScanService(session)

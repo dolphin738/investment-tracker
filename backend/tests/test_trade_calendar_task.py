@@ -314,8 +314,6 @@ async def test_handler_uses_configured_calendar_start_date(session, monkeypatch)
     start = t - timedelta(days=100)
     session.add(
         DividendYieldSettings(
-            green_threshold=Decimal("0.05"),
-            red_threshold=Decimal("0.03"),
             trade_calendar_start_date=start,
         )
     )

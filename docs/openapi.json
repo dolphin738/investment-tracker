@@ -2244,7 +2244,7 @@
           "dividend-yield"
         ],
         "summary": "Cancel Price Backfill",
-        "description": "取消在途的历史行情回补（admin-only）：清空 ``price_backfill_start_date``。\n\n为什么需要本端点：在途标记由服务端管理（PUT /settings 不接受该字段），\n而 ``run_pending_price_backfill`` 仅在「选出 0 只」时才自动清标记。\n若数据源持续不可达，熔断会每天触发却永远清不掉标记 → 任务无限期在途、\n每天白烧额度，而 admin 无任何 API 手段停止（只能直接改库）。\n\n有了取消，「已有在途任务」的 400 与前端置灰才不会把人锁死，形成闭环：\n进行中 → 取消 → 重新填起点触发。\n\n**能力边界（诚实说明）**：本端点仅清标记，**不中断正在运行的后台批次**——\n当前批次会跑完本批（≤ quota 只）后自然停止，此后每日收盘价抓取不再续跑。\n已写入的日线行一律保留（upsert 幂等，重跑自动跳过已覆盖证券）。\n\n**同时清空严格补洞状态**：与清在途标记**同一事务**清空 ``market_price_backfill_gaps``\n（旧洞随取消一并失效、须由下次触发重建；也顺带重置 exhausted 状态）。\n⚠️ 清空仅限本端点与 ``POST /backfill-prices`` 两处；续跑链路**绝不**清空。",
+        "description": "取消在途的历史行情回补（admin-only）：清空 ``price_backfill_start_date``。\n\n为什么需要本端点：在途标记由服务端管理（PUT /settings 不接受该字段），\n而 ``run_pending_price_backfill`` 仅在「选出 0 只」时才自动清标记。\n若数据源持续不可达，熔断会每天触发却永远清不掉标记 → 任务无限期在途、\n每天白烧额度，而 admin 无任何 API 手段停止（只能直接改库）。\n\n有了取消，「已有在途任务」的 400 与前端置灰才不会把人锁死，形成闭环：\n进行中 → 取消 → 重新填起点触发。\n\n**取消语义（协作式，迁移 0024）**：本端点清在途标记 + **清世代标记**\n（``price_backfill_run_token`` → NULL）。正在运行的批次会在下一个取消检查点\n（每只证券开始前 / 退避 sleep 之后 / 批间冷却分片之间）察觉并**优雅中止**：\n不再抓取剩余证券，已写入的日线行一律保留（upsert 幂等，重跑自动跳过已覆盖证券）。\n此后每日收盘价抓取因在途标记已空而不再续跑。\n\n诚实边界：若此刻正卡在某一只的抓取里（``asyncio.to_thread`` 内的同步 HTTP 无法被\nasyncio 取消），这一只会跑完（≤ ``_BACKFILL_FETCH_TIMEOUT`` 秒）后才中止；\n另注：本端点**不释放执行租约**（``price_backfill_running``）——它仍由中止中的\n那个 run 在自己的 ``finally`` 里释放，避免此处释放后另一个 run 立刻插进来并发。\n\n**同时清空严格补洞状态**：与清在途标记**同一事务**清空 ``market_price_backfill_gaps``\n（旧洞随取消一并失效、须由下次触发重建；也顺带重置 exhausted 状态）。\n⚠️ 清空仅限本端点与 ``POST /backfill-prices`` 两处；续跑链路**绝不**清空。",
         "operationId": "cancel_price_backfill_api_dividend_yield_backfill_prices_delete",
         "responses": {
           "200": {
@@ -2498,7 +2498,7 @@
           "dividend-yield"
         ],
         "summary": "Put Dividend Yield Settings",
-        "description": "更新全局配置（§5.4/§6.6：非 admin 403；阈值 0<red<green<=1；接口四重校验 400 不落库；AppLog 审计）。",
+        "description": "更新全局配置（§5.4/§6.6：非 admin 403；接口四重校验 400 不落库；AppLog 审计）。",
         "operationId": "put_dividend_yield_settings_api_dividend_yield_settings_put",
         "requestBody": {
           "content": {
@@ -9561,6 +9561,14 @@
             "type": "boolean",
             "title": "Amountabbrev"
           },
+          "greenThreshold": {
+            "type": "number",
+            "title": "Greenthreshold"
+          },
+          "redThreshold": {
+            "type": "number",
+            "title": "Redthreshold"
+          },
           "dashboardLayout": {
             "type": "string",
             "title": "Dashboardlayout"
@@ -9583,6 +9591,8 @@
           "cashHintOnTrade",
           "amountThousands",
           "amountAbbrev",
+          "greenThreshold",
+          "redThreshold",
           "dashboardLayout"
         ],
         "title": "PreferenceOut"
@@ -10655,30 +10665,6 @@
       },
       "SettingsUpdateBody": {
         "properties": {
-          "green_threshold": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "string",
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
-              }
-            ],
-            "title": "Green Threshold"
-          },
-          "red_threshold": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "string",
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
-              }
-            ],
-            "title": "Red Threshold"
-          },
           "dividend_report_source_interface_id": {
             "anyOf": [
               {
@@ -10793,10 +10779,6 @@
           }
         },
         "type": "object",
-        "required": [
-          "green_threshold",
-          "red_threshold"
-        ],
         "title": "SettingsUpdateBody"
       },
       "SnapshotCreateReq": {

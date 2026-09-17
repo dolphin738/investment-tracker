@@ -137,8 +137,6 @@ async def test_price_backfill_adjust_drives_fetch_params(
     )
 
     body: dict = {
-        "green_threshold": "0.05",
-        "red_threshold": "0.03",
         "price_backfill_source_interface_id": itf.id,
     }
     if send_adjust is not _OMIT:
@@ -180,8 +178,6 @@ async def test_invalid_adjust_400_and_not_persisted(session, client):
     ok = await client.put(
         "/api/dividend-yield/settings",
         json={
-            "green_threshold": "0.05",
-            "red_threshold": "0.03",
             "price_backfill_source_interface_id": itf.id,
             "price_backfill_adjust": "qfq",
         },
@@ -193,8 +189,6 @@ async def test_invalid_adjust_400_and_not_persisted(session, client):
     bad = await client.put(
         "/api/dividend-yield/settings",
         json={
-            "green_threshold": "0.05",
-            "red_threshold": "0.03",
             "price_backfill_adjust": "xxx",
         },
         headers=h,

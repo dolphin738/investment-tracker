@@ -739,6 +739,10 @@ PG 原生枚举类型名 `interface_direction`（由迁移创建）。
         amountThousands: boolean;
         /** Amountabbrev */
         amountAbbrev: boolean;
+        /** Greenthreshold */
+        greenThreshold: number;
+        /** Redthreshold */
+        redThreshold: number;
         /** Dashboardlayout */
         dashboardLayout: string;
       };
@@ -1002,10 +1006,6 @@ type 为可选 override；不传则读取时由代码前缀推断（infer_securi
     SecurityType: 'STOCK' | 'ON_EXCHANGE_FUND' | 'BOND' | 'OTHER' | 'HK_STOCK' | 'CONVERTIBLE_BOND' | 'INDEX' | 'OFF_EXCHANGE_FUND' | 'UNCATEGORIZED';
     /** SettingsUpdateBody */
     SettingsUpdateBody: {
-        /** Green Threshold */
-        green_threshold: number | string;
-        /** Red Threshold */
-        red_threshold: number | string;
         /** Dividend Report Source Interface Id */
         dividend_report_source_interface_id?: string | null;
         /** Dividend Detail Source Interface Id */

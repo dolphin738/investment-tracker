@@ -44,8 +44,6 @@ const providers = vi.hoisted(() => [
 ]);
 
 const settings = vi.hoisted<DividendYieldSettingsOut>(() => ({
-  green_threshold: 0.05,
-  red_threshold: 0.03,
   dividend_report_source: { id: 'i1', name: '东财-分红配送' },
   dividend_detail_source: { id: 'i2', name: '新浪-分红配股' },
   price_source: { id: 'i3', name: '腾讯财经-A股行情' },

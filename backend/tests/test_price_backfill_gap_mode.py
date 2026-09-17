@@ -138,8 +138,6 @@ async def _seed_settings(
 ) -> DividendYieldSettings:
     """造单行全局配置（回补源 + 在途起点 + 模式 + 额度）。"""
     row = DividendYieldSettings(
-        green_threshold=Decimal("0.05"),
-        red_threshold=Decimal("0.03"),
         price_backfill_source_interface_id=itf.id,
         price_backfill_start_date=start_date,
         price_backfill_mode=mode,
@@ -326,8 +324,6 @@ async def test_settings_put_backfill_mode_validation(session, client):
     r = await client.put(
         "/api/dividend-yield/settings",
         json={
-            "green_threshold": "0.05",
-            "red_threshold": "0.03",
             "price_backfill_mode": "bogus",
         },
         headers=h,
@@ -339,8 +335,6 @@ async def test_settings_put_backfill_mode_validation(session, client):
     r = await client.put(
         "/api/dividend-yield/settings",
         json={
-            "green_threshold": "0.05",
-            "red_threshold": "0.03",
             "price_backfill_mode": PRICE_BACKFILL_MODE_GAP,
         },
         headers=h,
@@ -357,8 +351,6 @@ async def test_settings_put_backfill_mode_validation(session, client):
     r = await client.put(
         "/api/dividend-yield/settings",
         json={
-            "green_threshold": "0.05",
-            "red_threshold": "0.03",
             "price_backfill_mode": PRICE_BACKFILL_MODE_LEGACY,
         },
         headers=h,
@@ -379,7 +371,7 @@ async def test_settings_put_explicit_null_clears_dates(session, client):
     """
     admin = await _make_admin(session, client)
     h = auth(admin["token"])
-    base = {"green_threshold": "0.05", "red_threshold": "0.03"}
+    base = {}
 
     # 先各设一个日期
     r = await client.put(
@@ -415,7 +407,7 @@ async def test_settings_put_omitting_dates_keeps_value(session, client):
     """未提供（请求体不含该字段）= 不改：与「显式 null 清除」构成完整三态语义。"""
     admin = await _make_admin(session, client)
     h = auth(admin["token"])
-    base = {"green_threshold": "0.05", "red_threshold": "0.03"}
+    base = {}
 
     r = await client.put(
         "/api/dividend-yield/settings",
@@ -441,7 +433,7 @@ async def test_settings_put_rejects_calendar_start_after_backfill_start(session,
     """
     admin = await _make_admin(session, client)
     h = auth(admin["token"])
-    base = {"green_threshold": "0.05", "red_threshold": "0.03"}
+    base = {}
 
     # 场景 1：同一次 PUT 内组合越界
     r = await client.put(

@@ -24,13 +24,13 @@ export interface DividendYieldCurveOptionInput {
   theme?: ChartTheme;
   /**
    * 高股息参考线的股息率阈值（百分数，如 5 表示 5%）。
-   * 缺省用 HIGH_YIELD_PIVOT（5%）；由「设置 → 股息率」的 green_threshold 换算而来，
-   * 使曲线参考线跟随全局阈值设置。
+   * 缺省用 HIGH_YIELD_PIVOT（5%）；由「个人中心 → 偏好设置」的账号阈值
+   * （user_preferences.green_threshold）换算而来，使曲线参考线跟随账号阈值。
    */
   pivotPercent?: number;
 }
 
-/** 高股息线缺省阈值（股息率 %）；与后端 green_threshold 默认 0.05 一致，作兜底 */
+/** 高股息线缺省阈值（股息率 %）；与偏好默认 0.05（DEFAULT_PREFERENCES）一致，作兜底 */
 export const HIGH_YIELD_PIVOT = 5;
 
 /** 构建股息率双轴曲线图 option：左 股息率(%) / 右 收盘价(¥) + 高股息线虚线（阈值可配，缺省 5%） */

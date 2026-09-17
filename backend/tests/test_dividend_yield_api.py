@@ -233,19 +233,19 @@ async def test_top20_double_board_contract(session, client):
 # ───────────────────────── settings：GET 登录可读，PUT admin-only（§9，P1-1） ─────────────────────────
 @pytest.mark.asyncio
 async def test_settings_put_requires_admin(session, client):
-    """守护 §9/P1-1：GET /settings 登录即可读（非 admin 拿阈值标色）；PUT 仍 admin-only 403。"""
+    """守护 §9/P1-1：GET /settings 登录即可读；PUT 仍 admin-only 403。阈值已迁用户偏好（0026）。"""
     info = await register_login(client)
     h = auth(info["token"])
     assert (await client.get("/api/dividend-yield/settings", headers=h)).status_code == 200
     r = await client.put(
         "/api/dividend-yield/settings",
-        json={"green_threshold": "0.05", "red_threshold": "0.03"},
+        json={},
         headers=h,
     )
     assert r.status_code == 403
 
 
-# ───────────────────────── settings PUT：阈值 + 四重校验（§5.4，P1-4） ─────────────────────────
+# ───────────────────────── settings PUT：接口四重校验（§5.4，P1-4） ─────────────────────────
 async def _seed_category3_interfaces(session):
     """分类 3 + 主源（无 symbol）/ 补充源（含 symbol）两接口行，供四重校验测试。"""
     session.add(InterfaceCategory(id=_DIVIDEND_CAT_ID, label="股息列表", system=True))
@@ -290,25 +290,6 @@ async def _seed_category4_interface(session, *, enabled: bool = True):
 
 
 @pytest.mark.asyncio
-async def test_settings_put_threshold_validation(session, client):
-    """守护 §5.4/§12：阈值 0 < red < green <= 1，违规 400 不落库。"""
-    admin = await _make_admin(session, client)
-    h = auth(admin["token"])
-    r = await client.put(
-        "/api/dividend-yield/settings",
-        json={"green_threshold": "0.03", "red_threshold": "0.05"},  # red >= green
-        headers=h,
-    )
-    assert r.status_code == 400
-    r = await client.put(
-        "/api/dividend-yield/settings",
-        json={"green_threshold": "1.2", "red_threshold": "0.03"},  # green > 1
-        headers=h,
-    )
-    assert r.status_code == 400
-
-
-@pytest.mark.asyncio
 async def test_settings_put_interface_shape_validation(session, client):
     """守护 §5.4 四重校验（P1-4）：主源选逐只接口（params 含 symbol）→ 400；
     主源/补充源各归其位 → 200。"""
@@ -320,7 +301,6 @@ async def test_settings_put_interface_shape_validation(session, client):
     r = await client.put(
         "/api/dividend-yield/settings",
         json={
-            "green_threshold": "0.05", "red_threshold": "0.03",
             "dividend_report_source_interface_id": detail_itf.id,
         },
         headers=h,
@@ -331,7 +311,6 @@ async def test_settings_put_interface_shape_validation(session, client):
     r = await client.put(
         "/api/dividend-yield/settings",
         json={
-            "green_threshold": "0.05", "red_threshold": "0.03",
             "dividend_detail_source_interface_id": main_itf.id,
         },
         headers=h,
@@ -342,7 +321,6 @@ async def test_settings_put_interface_shape_validation(session, client):
     r = await client.put(
         "/api/dividend-yield/settings",
         json={
-            "green_threshold": "0.05", "red_threshold": "0.03",
             "dividend_report_source_interface_id": main_itf.id,
             "dividend_detail_source_interface_id": detail_itf.id,
         },
@@ -365,7 +343,6 @@ async def test_settings_put_announcement_source_valid(session, client):
     r = await client.put(
         "/api/dividend-yield/settings",
         json={
-            "green_threshold": "0.05", "red_threshold": "0.03",
             "announcement_source_interface_id": itf.id,
         },
         headers=h,
@@ -384,7 +361,6 @@ async def test_settings_put_announcement_source_wrong_category(session, client):
     r = await client.put(
         "/api/dividend-yield/settings",
         json={
-            "green_threshold": "0.05", "red_threshold": "0.03",
             "announcement_source_interface_id": main_itf.id,
         },
         headers=h,
@@ -403,7 +379,6 @@ async def test_settings_put_announcement_source_disabled(session, client):
     r = await client.put(
         "/api/dividend-yield/settings",
         json={
-            "green_threshold": "0.05", "red_threshold": "0.03",
             "announcement_source_interface_id": itf.id,
         },
         headers=h,
@@ -435,7 +410,6 @@ async def test_settings_put_saves_backfill_default_start_date(session, client):
     r = await client.put(
         "/api/dividend-yield/settings",
         json={
-            "green_threshold": "0.05", "red_threshold": "0.03",
             "price_backfill_default_start_date": "2020-06-01",
         },
         headers=h,
@@ -835,7 +809,6 @@ async def test_backfill_prices_rejects_non_sdk_provider(session, client):
     r = await client.put(
         "/api/dividend-yield/settings",
         json={
-            "green_threshold": "0.05", "red_threshold": "0.03",
             "price_backfill_source_interface_id": itf.id,
         },
         headers=h,
@@ -847,7 +820,6 @@ async def test_backfill_prices_rejects_non_sdk_provider(session, client):
 
     # ② 运行时防线：绕过 PUT 直插配置行（模拟历史脏数据/并发窗口），POST 仍拒
     session.add(DividendYieldSettings(
-        green_threshold=Decimal("0.05"), red_threshold=Decimal("0.03"),
         price_backfill_source_interface_id=itf.id,
     ))
     await session.commit()
@@ -885,7 +857,6 @@ async def test_backfill_prices_triggers_async_when_configured(session, client, m
     r = await client.put(
         "/api/dividend-yield/settings",
         json={
-            "green_threshold": "0.05", "red_threshold": "0.03",
             "price_backfill_source_interface_id": itf.id,
         },
         headers=h,
@@ -954,7 +925,6 @@ async def test_backfill_prices_rotates_run_token_and_cancel_clears_it(
     r = await client.put(
         "/api/dividend-yield/settings",
         json={
-            "green_threshold": "0.05", "red_threshold": "0.03",
             "price_backfill_source_interface_id": itf.id,
         },
         headers=h,
@@ -1015,7 +985,6 @@ async def test_backfill_prices_trigger_clears_gap_state(session, client, monkeyp
     r = await client.put(
         "/api/dividend-yield/settings",
         json={
-            "green_threshold": "0.05", "red_threshold": "0.03",
             "price_backfill_source_interface_id": itf.id,
         },
         headers=h,
@@ -1069,8 +1038,6 @@ async def test_backfill_prices_trigger_resets_rebuild_cursor(session, client, mo
     r = await client.put(
         "/api/dividend-yield/settings",
         json={
-            "green_threshold": "0.05",
-            "red_threshold": "0.03",
             "price_backfill_source_interface_id": itf.id,
         },
         headers=h,
@@ -1107,7 +1074,6 @@ async def test_settings_put_backfill_quota_out_of_range(session, client):
         r = await client.put(
             "/api/dividend-yield/settings",
             json={
-                "green_threshold": "0.05", "red_threshold": "0.03",
                 "price_backfill_quota": bad,
             },
             headers=h,
@@ -1131,7 +1097,6 @@ async def test_settings_put_backfill_adjust_validation_and_roundtrip(session, cl
     r = await client.put(
         "/api/dividend-yield/settings",
         json={
-            "green_threshold": "0.05", "red_threshold": "0.03",
             "price_backfill_adjust": "bad",
         },
         headers=h,
@@ -1150,7 +1115,6 @@ async def test_settings_put_backfill_adjust_validation_and_roundtrip(session, cl
         r = await client.put(
             "/api/dividend-yield/settings",
             json={
-                "green_threshold": "0.05", "red_threshold": "0.03",
                 "price_backfill_adjust": val,
             },
             headers=h,
@@ -1194,7 +1158,6 @@ async def test_backfill_adjust_drives_fetch_params(session, client, monkeypatch)
     r = await client.put(
         "/api/dividend-yield/settings",
         json={
-            "green_threshold": "0.05", "red_threshold": "0.03",
             "price_backfill_source_interface_id": itf.id,
             "price_backfill_adjust": "hfq",
         },
@@ -1250,7 +1213,6 @@ async def test_backfill_settings_accepts_symbol_params_sdk(session, client):
     r = await client.put(
         "/api/dividend-yield/settings",
         json={
-            "green_threshold": "0.05", "red_threshold": "0.03",
             "price_backfill_source_interface_id": itf.id,
         },
         headers=h,
@@ -1274,7 +1236,6 @@ async def test_backfill_prices_rejects_when_inflight(session, client):
     admin = await _make_admin(session, client)
     h = auth(admin["token"])
     session.add(DividendYieldSettings(
-        green_threshold=Decimal("0.05"), red_threshold=Decimal("0.03"),
         price_backfill_start_date=date(2021, 1, 1),
     ))
     await session.commit()
@@ -1299,7 +1260,6 @@ async def test_cancel_price_backfill_clears_start_date(session, client):
     admin = await _make_admin(session, client)
     h = auth(admin["token"])
     session.add(DividendYieldSettings(
-        green_threshold=Decimal("0.05"), red_threshold=Decimal("0.03"),
         price_backfill_start_date=date(2021, 1, 1),
     ))
     await session.commit()
@@ -1325,7 +1285,6 @@ async def test_cancel_price_backfill_also_clears_last_error(session, client):
     admin = await _make_admin(session, client)
     h = auth(admin["token"])
     session.add(DividendYieldSettings(
-        green_threshold=Decimal("0.05"), red_threshold=Decimal("0.03"),
         price_backfill_start_date=date(2021, 1, 1),
         price_backfill_last_error="回补连续失败熔断：连续失败 3 只",
     ))
@@ -1346,7 +1305,6 @@ async def test_cancel_price_backfill_400_when_no_inflight(session, client):
     admin = await _make_admin(session, client)
     h = auth(admin["token"])
     session.add(DividendYieldSettings(
-        green_threshold=Decimal("0.05"), red_threshold=Decimal("0.03"),
     ))
     await session.commit()
 
@@ -1377,7 +1335,6 @@ async def test_backfill_prices_allowed_after_cancel(session, client):
     admin = await _make_admin(session, client)
     h = auth(admin["token"])
     session.add(DividendYieldSettings(
-        green_threshold=Decimal("0.05"), red_threshold=Decimal("0.03"),
         price_backfill_start_date=date(2021, 1, 1),
     ))
     await session.commit()
@@ -1408,7 +1365,6 @@ async def test_backfill_prices_rejects_when_daily_quota_exhausted(session, clien
     # 需先有合法 sdk 回补源：端点校验顺序为「配置 → 额度」，配置错误优先（更可行动）
     itf = await _seed_category2_interface(session, access_method=QuoteProviderAccessMethod.SDK)
     session.add(DividendYieldSettings(
-        green_threshold=Decimal("0.05"), red_threshold=Decimal("0.03"),
         price_backfill_source_interface_id=itf.id,
         price_backfill_quota=10,
         price_backfill_last_run_date=today_app_tz(),

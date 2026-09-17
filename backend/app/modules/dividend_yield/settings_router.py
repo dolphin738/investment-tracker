@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 from datetime import date
-from decimal import Decimal
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends
@@ -44,10 +43,8 @@ router_settings = APIRouter(route_class=EnvelopeRoute)
 
 
 class SettingsUpdateBody(BaseModel):
-    # 阈值已迁至用户偏好（见 0026 迁移）：本端点仅保留兼容——字段改为可选，
-    # 仅当请求体显式提供时才校验并写入；未提供 = 不改（旧列标 deprecated）。
-    green_threshold: Optional[Decimal] = None
-    red_threshold: Optional[Decimal] = None
+    # 注：股息率标色阈值已迁至「用户偏好」（user_preferences，见 0026 迁移）；
+    # 本端点不再接受阈值字段（对应全局两列已由 0027 迁移删除）。
     dividend_report_source_interface_id: Optional[str] = None
     dividend_detail_source_interface_id: Optional[str] = None
     price_source_interface_id: Optional[str] = None
@@ -163,18 +160,13 @@ async def load_settings(db: AsyncSession) -> DividendYieldSettings:
         await db.execute(select(DividendYieldSettings).limit(1))
     ).scalar_one_or_none()
     if row is None:
-        return DividendYieldSettings(
-            green_threshold=Decimal("0.05"),
-            red_threshold=Decimal("0.03"),
-        )
+        return DividendYieldSettings()
     return row
 
 
 async def _settings_out(db: AsyncSession, row: DividendYieldSettings) -> dict[str, Any]:
-    """配置序列化：阈值 + resolve 后的三个接口 {id, name}。"""
+    """配置序列化：resolve 后的数据源接口 {id, name}（阈值已迁用户偏好，不在此返回）。"""
     return {
-        "green_threshold": row.green_threshold,
-        "red_threshold": row.red_threshold,
         "dividend_report_source": _interface_out(
             await _resolve_interface(db, row.dividend_report_source_interface_id)
         ),
@@ -295,19 +287,6 @@ async def put_dividend_yield_settings(
 
     row = await load_settings(db)
     is_new = row.id is None  # 空默认（无持久化行）时插入，否则更新既有行
-    # 阈值已迁至用户偏好（见 0026 迁移），本端点仅保留兼容：仅当请求体显式提供阈值时
-    # 才校验并写入；未提供 = 不改。校验需与库中现值合成（允许只传其一），故置于载入之后。
-    green, red = body.green_threshold, body.red_threshold
-    eff_green = green if green is not None else row.green_threshold
-    eff_red = red if red is not None else row.red_threshold
-    if (green is not None or red is not None) and not (
-        Decimal("0") < eff_red < eff_green <= Decimal("1")
-    ):
-        raise BusinessException(
-            code=BusinessErrorCode.VALIDATION_FAILED,
-            message="阈值须满足 0 < red_threshold < green_threshold <= 1",
-            status_code=400,
-        )
     # 配置组合显性化（严格补洞的前置条件）：交易日历的刷新窗口下限必须**不晚于**回补起点，
     # 否则日历覆盖不到回补窗口下界，gap 模式每轮都会回落 legacy（仅后端 warning，用户无感知）。
     # 用「提交后生效值」组合判断：显式提供的用提交值，未提供的用库中现值。
@@ -333,8 +312,6 @@ async def put_dividend_yield_settings(
             status_code=400,
         )
     before_detail = {
-        "green_threshold": str(row.green_threshold),
-        "red_threshold": str(row.red_threshold),
         "dividend_report_source_interface_id": row.dividend_report_source_interface_id,
         "dividend_detail_source_interface_id": row.dividend_detail_source_interface_id,
         "price_source_interface_id": row.price_source_interface_id,
@@ -354,11 +331,6 @@ async def put_dividend_yield_settings(
             else None
         ),
     }
-    # 阈值：仅显式提供时覆盖（None = 不改；阈值已迁用户偏好，此处保留兼容）
-    if green is not None:
-        row.green_threshold = green
-    if red is not None:
-        row.red_threshold = red
     row.dividend_report_source_interface_id = body.dividend_report_source_interface_id
     row.dividend_detail_source_interface_id = body.dividend_detail_source_interface_id
     row.price_source_interface_id = body.price_source_interface_id
@@ -395,8 +367,6 @@ async def put_dividend_yield_settings(
         detail={
             "before": before_detail,
             "after": {
-                "green_threshold": str(row.green_threshold),
-                "red_threshold": str(row.red_threshold),
                 "dividend_report_source_interface_id": body.dividend_report_source_interface_id,
                 "dividend_detail_source_interface_id": body.dividend_detail_source_interface_id,
                 "price_source_interface_id": body.price_source_interface_id,

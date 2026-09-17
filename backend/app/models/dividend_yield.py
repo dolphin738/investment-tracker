@@ -228,9 +228,8 @@ class DividendYieldSettings(Base, TimestampMixin):
     __tablename__ = "dividend_yield_settings"
 
     id: Mapped[str] = pk_uuid()
-    # 阈值（小数比率，0.03=3%，0.05=5%）
-    green_threshold: Mapped[Decimal] = mapped_column(Numeric(5, 4), nullable=False, default=Decimal("0.05"))
-    red_threshold: Mapped[Decimal] = mapped_column(Numeric(5, 4), nullable=False, default=Decimal("0.03"))
+    # 注：股息率标色阈值已迁至「用户偏好」user_preferences.green/red_threshold（0026 迁移），
+    # 本表不再承载；对应两列由 0027 迁移删除。
     # 主源（分类 3，按报告期全量形态）；补充源（分类 3，按证券逐只形态）；行情源（分类 2）
     dividend_report_source_interface_id: Mapped[Optional[str]] = mapped_column(
         String(36),

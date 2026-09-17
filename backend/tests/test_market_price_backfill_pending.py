@@ -326,7 +326,6 @@ async def test_run_pending_price_backfill_skips_bj_for_tencent_source(session, m
     session.add(itf)
     await session.flush()
     settings = DividendYieldSettings(
-        green_threshold=Decimal("0.05"), red_threshold=Decimal("0.03"),
         price_source_interface_id=itf.id,
         price_backfill_source_interface_id=itf.id,
         price_backfill_start_date=date(2024, 1, 1),

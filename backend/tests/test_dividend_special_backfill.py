@@ -124,7 +124,6 @@ async def _seed_detail(session, *, enabled=True, provider_enabled=True,
     if with_settings:
         session.add(DividendYieldSettings(
             id=_uid(), dividend_detail_source_interface_id=itf.id,
-            green_threshold=Decimal("0.05"), red_threshold=Decimal("0.03"),
         ))
     await session.commit()
     return itf
@@ -501,7 +500,7 @@ async def test_backfill_specials_raises_when_detail_source_missing(session):
     cur = today_app_tz().year
     session.add(_report_row(mid, "1.0", cur - 1, 4))
     session.add(DividendYieldSettings(
-        id=_uid(), green_threshold=Decimal("0.05"), red_threshold=Decimal("0.03"),
+        id=_uid(), 
     ))  # 未配置 dividend_detail_source_interface_id
     await session.commit()
 

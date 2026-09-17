@@ -76,8 +76,7 @@ async def test_daily_close_fetch_return_date_mismatch_skips_batch(session, monke
     await session.flush()
     session.add(itf)
     await session.flush()
-    session.add(DividendYieldSettings(green_threshold=Decimal("0.05"),
-                                      red_threshold=Decimal("0.03"),
+    session.add(DividendYieldSettings(
                                       price_source_interface_id=itf.id))
     await session.commit()
 
@@ -127,8 +126,7 @@ async def test_daily_close_fetch_writes_on_matching_date(session):
     await session.flush()
     session.add(itf)
     await session.flush()
-    session.add(DividendYieldSettings(green_threshold=Decimal("0.05"),
-                                      red_threshold=Decimal("0.03"),
+    session.add(DividendYieldSettings(
                                       price_source_interface_id=itf.id))
     await session.commit()
 
@@ -181,8 +179,7 @@ async def test_daily_close_fetch_mixed_dates_batch_rejected(session, monkeypatch
     await session.flush()
     session.add(itf)
     await session.flush()
-    session.add(DividendYieldSettings(green_threshold=Decimal("0.05"),
-                                      red_threshold=Decimal("0.03"),
+    session.add(DividendYieldSettings(
                                       price_source_interface_id=itf.id))
     await session.commit()
 
@@ -237,8 +234,7 @@ async def test_daily_close_fetch_backfill_entry_non_sdk_fails_fast(session):
     await session.flush()
     session.add(itf)
     await session.flush()
-    session.add(DividendYieldSettings(green_threshold=Decimal("0.05"),
-                                      red_threshold=Decimal("0.03"),
+    session.add(DividendYieldSettings(
                                       price_source_interface_id=itf.id))
     await session.commit()
 
