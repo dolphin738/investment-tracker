@@ -13,14 +13,17 @@ import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query';
 import SecurityDetailPanel from '../components/SecurityDetailPanel.vue';
 import type { SecurityDividendItem } from '@/api/dividend-yield.api';
 
-const dividendItems = vi.hoisted(() => ({ list: [] as SecurityDividendItem[] }));
+const dividendItems = vi.hoisted(() => ({
+  list: [] as SecurityDividendItem[],
+  fail: false,
+}));
 
 vi.mock('@/api/dividend-yield.api', () => ({
   getDividendYieldCurve: vi.fn(async () => ({ items: [] })),
-  getSecurityDividends: vi.fn(async () => ({
-    masterId: 'm-1',
-    items: dividendItems.list,
-  })),
+  getSecurityDividends: vi.fn(async () => {
+    if (dividendItems.fail) throw new Error('boom');
+    return { masterId: 'm-1', items: dividendItems.list };
+  }),
 }));
 
 function item(over: Partial<SecurityDividendItem>): SecurityDividendItem {
@@ -44,7 +47,14 @@ async function mountPanel() {
     global: {
       plugins: [
         createPinia(),
-        [VueQueryPlugin, { queryClient: new QueryClient() }],
+        [
+          VueQueryPlugin,
+          {
+            queryClient: new QueryClient({
+              defaultOptions: { queries: { retry: false } },
+            }),
+          },
+        ],
       ],
     },
   });
@@ -58,6 +68,7 @@ describe('SecurityDetailPanel 分红明细', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     dividendItems.list = [];
+    dividendItems.fail = false;
   });
 
   it('按报告期逐条渲染：报告期 + 分红方案（含三季报 / 特别分配命名）', async () => {
@@ -92,6 +103,14 @@ describe('SecurityDetailPanel 分红明细', () => {
     dividendItems.list = [];
     const wrapper = await mountPanel();
     expect(wrapper.text()).toContain('暂无分红记录');
+    expect(wrapper.findAll('li').length).toBe(0);
+  });
+
+  it('查询失败 → 显示「分红数据加载失败」，不再伪装成空数据（弱降级修正）', async () => {
+    dividendItems.fail = true;
+    const wrapper = await mountPanel();
+    expect(wrapper.text()).toContain('分红数据加载失败');
+    expect(wrapper.text()).not.toContain('暂无分红记录');
     expect(wrapper.findAll('li').length).toBe(0);
   });
 

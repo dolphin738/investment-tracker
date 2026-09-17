@@ -104,6 +104,12 @@ const curveOption = computed<EChartsOption>(() =>
         </div>
         <Skeleton v-if="dividends.isLoading.value" class="h-24 w-full" />
         <div
+          v-else-if="dividends.isError.value"
+          class="flex h-16 items-center justify-center text-sm text-red-500"
+        >
+          分红数据加载失败
+        </div>
+        <div
           v-else-if="dividendItems.length === 0"
           class="flex h-16 items-center justify-center text-sm text-muted-foreground"
         >
