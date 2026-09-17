@@ -1,8 +1,9 @@
 """股息率排名 API 与配置端点（方案 §9，阶段 4）。
 
-六个端点（全部走统一信封默认）：
+七个端点（全部走统一信封默认）：
 - GET   /api/dividend-yield/rankings             分红记录公司股息率分页排名（B2 排序白名单）
 - GET   /api/dividend-yield/top20                股息率前 20（A12 剔除 suspicious、A13 封顶 20）
+- GET   /api/dividend-yield/{master_id}/dividends 单证券分红明细（按报告期，仅列有分红的期次）
 - GET   /api/dividend-yield/{master_id}/curve     单证券过去一年每日股息率曲线（§9 逐点现算）
 - GET   /api/dividend-yield/{master_id}/implied-price 反推价格（§9）
 - GET   /api/dividend-yield/settings     登录读取全局配置（§9：阈值标色需要）
@@ -39,6 +40,7 @@ from app.models.enums import (
 )
 from app.services.auth import CurrentUser, get_current_user
 from app.services.base import paged
+from app.services.dividend_period import period_label, plan_label
 from app.services.dividend_yield import (
     compute_yield,
     compute_yield_at,
@@ -279,6 +281,61 @@ async def top20_dividend_yield(
     return {
         "top": [_serialize_rank(r, sec_map.get(r.master_id)) for r in top_rows],
         "consecutive": [_serialize_rank(r, sec_map.get(r.master_id)) for r in cons_rows],
+    }
+
+
+@router_dividend_yield.get("/{master_id}/dividends")
+async def list_security_dividends(
+    master_id: str = Path(...),
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """单证券分红明细（按报告期，供详情面板展示）。
+
+    只列**有分红**的期次（``cash_per_share > 0``），按报告期倒序：
+    - ``periodLabel``：2025年报 / 2025半年报 / 2025三季报 / 2023特别分配（§5.1 命名）；
+    - ``planLabel``：每股金额折算回源站口径「10派X元」。
+    """
+    rows = (
+        await db.execute(
+            select(SecurityDividend)
+            .where(
+                SecurityDividend.master_id == master_id,
+                SecurityDividend.cash_per_share > 0,
+            )
+            .order_by(
+                SecurityDividend.report_year.desc(),
+                SecurityDividend.report_quarter.desc(),
+                SecurityDividend.period_type.asc(),
+            )
+        )
+    ).scalars().all()
+
+    def _enum_value(v: Any) -> str:
+        return str(getattr(v, "value", v))
+
+    return {
+        "masterId": master_id,
+        "items": [
+            {
+                "reportYear": r.report_year,
+                "reportQuarter": r.report_quarter,
+                "periodType": _enum_value(r.period_type),
+                "periodLabel": period_label(
+                    r.report_year, r.report_quarter, r.period_type
+                ),
+                "planLabel": plan_label(r.cash_per_share),
+                "cashPerShare": str(r.cash_per_share),
+                "status": _enum_value(r.status),
+                "exDividendDate": (
+                    r.ex_dividend_date.isoformat() if r.ex_dividend_date else None
+                ),
+                "announcementDate": (
+                    r.announcement_date.isoformat() if r.announcement_date else None
+                ),
+            }
+            for r in rows
+        ],
     }
 
 

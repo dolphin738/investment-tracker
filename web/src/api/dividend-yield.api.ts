@@ -4,6 +4,7 @@
  * 对应后端 /api/dividend-yield/*（http 已按信封解包 data，url 相对 baseURL=/api）：
  * - GET  /dividend-yield/rankings              — 股息率榜单（分页/排序）
  * - GET  /dividend-yield/top20                 — Top20 股息率看板（后端剔除 suspicious、封顶 20）
+ * - GET  /dividend-yield/{master_id}/dividends  — 单证券分红明细（按报告期，仅有分红期次）
  * - GET  /dividend-yield/{master_id}/curve      — 单证券股息率曲线（近 days 天）
  * - GET  /dividend-yield/{master_id}/implied-price — 按目标收益率反推隐含价格
  * - GET  /dividend-yield/settings       — 阈值 + 三接口源设置（admin-only）
@@ -60,6 +61,38 @@ export function getDividendYieldCurve(
   return http.get<DividendYieldCurveResponse>(
     `/dividend-yield/${masterId}/curve`,
     { params: { days } },
+  );
+}
+
+/** 单条分红明细（按报告期） */
+export interface SecurityDividendItem {
+  reportYear: number;
+  reportQuarter: number;
+  periodType: 'ANNUAL' | 'INTERIM' | 'QUARTERLY' | 'SPECIAL';
+  /** 报告期展示名：2025年报 / 2025半年报 / 2025三季报 / 2023特别分配（§5.1 命名） */
+  periodLabel: string;
+  /** 分红方案展示名：源站口径「10派3元」（库内每股金额 ×10 折算） */
+  planLabel: string;
+  /** 每股现金分红（元；字符串防前端类型漂移） */
+  cashPerShare: string;
+  /** PROPOSED 预案 / PAID 已派发 / REJECTED 否决 */
+  status: string;
+  exDividendDate: string | null;
+  announcementDate: string | null;
+}
+
+/** 单证券分红明细响应（只含 cash_per_share > 0 的期次，按报告期倒序） */
+export interface SecurityDividendListResponse {
+  masterId: string;
+  items: SecurityDividendItem[];
+}
+
+/** 单证券分红明细（按报告期，供详情面板展示） */
+export function getSecurityDividends(
+  masterId: string,
+): Promise<SecurityDividendListResponse> {
+  return http.get<SecurityDividendListResponse>(
+    `/dividend-yield/${masterId}/dividends`,
   );
 }
 

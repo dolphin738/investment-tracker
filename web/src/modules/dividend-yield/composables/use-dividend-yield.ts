@@ -18,6 +18,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query';
 import { toast } from '@/composables/use-toast';
 import {
   getDividendYieldCurve,
+  getSecurityDividends,
   getDividendYieldImpliedPrice,
   getDividendYieldRank,
   getDividendYieldSettings,
@@ -93,6 +94,25 @@ export function useCurve(masterId: MaybeRefOrGetter<string | null>) {
     queryFn: () => getDividendYieldCurve(toValue(masterId)!),
     enabled: computed(() => Boolean(toValue(masterId))),
     staleTime: 60 * 1000,
+  });
+}
+
+/** 单证券分红明细（按报告期；后端已过滤掉无分红的期次） */
+export function useSecurityDividends(
+  masterId: MaybeRefOrGetter<string | null>,
+) {
+  return useQuery({
+    queryKey: computed(() => {
+      const id = toValue(masterId);
+      return [
+        ...DIVIDEND_YIELD_KEY,
+        'dividends',
+        id ?? 'disabled',
+      ];
+    }),
+    queryFn: () => getSecurityDividends(toValue(masterId)!),
+    enabled: computed(() => Boolean(toValue(masterId))),
+    staleTime: 5 * 60 * 1000,
   });
 }
 

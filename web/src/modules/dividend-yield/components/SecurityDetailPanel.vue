@@ -25,7 +25,7 @@ import {
 } from '@/components/charts/dividend-yield-curve-chart';
 import { useChartTheme } from '@/lib/chart-theme';
 import { formatPercent } from '@/lib/utils';
-import { useCurve } from '../composables/use-dividend-yield';
+import { useCurve, useSecurityDividends } from '../composables/use-dividend-yield';
 import { useYieldThresholds } from '../composables/use-yield-thresholds';
 
 const props = defineProps<{
@@ -35,6 +35,9 @@ const props = defineProps<{
 const emit = defineEmits<{ close: [] }>();
 
 const curve = useCurve(computed(() => props.security.master_id));
+// 分红明细（按报告期）：后端已过滤掉无分红的期次（cash_per_share > 0），按报告期倒序
+const dividends = useSecurityDividends(computed(() => props.security.master_id));
+const dividendItems = computed(() => dividends.data.value?.items ?? []);
 const theme = useChartTheme();
 // 高股息阈值随账号存储（用户偏好，见 0026 迁移）：全局偏好由 PreferenceBootstrap 首屏加载，
 // 登录即可读、无 admin 门控；缺失时 composable 回退默认 0.05。
@@ -92,6 +95,36 @@ const curveOption = computed<EChartsOption>(() =>
         aria-label="近一年股息率与收盘价双轴曲线"
         :summary="`近一年股息率曲线，最新 ${formatPercent(curve.data.value.items[curve.data.value.items.length - 1]?.dividend_yield)}`"
       />
+
+      <!-- 分红明细（按报告期；仅显示有分红的期次） -->
+      <div class="mt-4">
+        <div class="mb-2 flex items-center justify-between">
+          <span class="text-sm font-medium">分红明细</span>
+          <span class="text-xs text-muted-foreground">仅显示有分红的报告期</span>
+        </div>
+        <Skeleton v-if="dividends.isLoading.value" class="h-24 w-full" />
+        <div
+          v-else-if="dividendItems.length === 0"
+          class="flex h-16 items-center justify-center text-sm text-muted-foreground"
+        >
+          暂无分红记录
+        </div>
+        <ul v-else class="max-h-52 divide-y overflow-y-auto rounded-md border">
+          <li
+            v-for="d in dividendItems"
+            :key="`${d.reportYear}-${d.reportQuarter}-${d.periodType}`"
+            class="flex items-center justify-between gap-3 px-3 py-2 text-sm"
+          >
+            <span class="shrink-0">{{ d.periodLabel }}</span>
+            <span class="flex items-center gap-2">
+              <span v-if="d.status !== 'PAID'" class="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
+                {{ d.status === 'PROPOSED' ? '预案' : d.status === 'REJECTED' ? '否决' : d.status }}
+              </span>
+              <span class="font-medium">{{ d.planLabel }}</span>
+            </span>
+          </li>
+        </ul>
+      </div>
     </CardContent>
   </Card>
 </template>

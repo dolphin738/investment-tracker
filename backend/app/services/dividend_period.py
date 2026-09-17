@@ -90,3 +90,38 @@ def subtract_years(d: date, years: int) -> date:
         return d.replace(year=d.year - years)
     except ValueError:
         return d.replace(year=d.year - years, month=2, day=28)
+
+
+# ───────────────────────── 展示文案（§5.1 报告期命名） ─────────────────────────
+_QUARTER_CN = {1: "一", 2: "二", 3: "三", 4: "四"}
+
+
+def period_label(year: int, quarter: int, period_type: Any) -> str:
+    """报告期展示名：2025年报 / 2025半年报 / 2025三季报 / 2023特别分配。
+
+    ``period_type`` 为 ReportPeriodType 的值（ANNUAL/INTERIM/QUARTERLY/SPECIAL）；
+    为兼容脏数据，period_type 缺失或未知时按 ``report_quarter`` 回退判定。
+    """
+    # ReportPeriodType 是 str 枚举：直接 str() 会得到 "ReportPeriodType.ANNUAL"，
+    # 故先取 .value（普通字符串则用自身）。
+    raw = getattr(period_type, "value", period_type)
+    pt = str(raw) if raw is not None else ""
+    if pt == "SPECIAL":
+        return f"{year}特别分配"
+    if pt == "ANNUAL" or quarter == 4:
+        return f"{year}年报"
+    if pt == "INTERIM" or quarter == 2:
+        return f"{year}半年报"
+    return f"{year}{_QUARTER_CN.get(quarter, quarter)}季报"
+
+
+def plan_label(cash_per_share: Any) -> str:
+    """分红方案展示名：每股金额 → 「10派X元」（源站口径为「每 10 股派 X 元」）。"""
+    try:
+        per10 = Decimal(str(cash_per_share)) * 10
+    except (InvalidOperation, TypeError, ValueError):
+        return "—"
+    if per10.is_nan():
+        return "—"
+    s = f"{per10.quantize(Decimal('0.0001')):f}".rstrip("0").rstrip(".")
+    return f"10派{s}元"

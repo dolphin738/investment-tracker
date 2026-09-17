@@ -2620,6 +2620,52 @@
         }
       }
     },
+    "/api/dividend-yield/{master_id}/dividends": {
+      "get": {
+        "tags": [
+          "dividend-yield"
+        ],
+        "summary": "List Security Dividends",
+        "description": "单证券分红明细（按报告期，供详情面板展示）。\n\n只列**有分红**的期次（``cash_per_share > 0``），按报告期倒序：\n- ``periodLabel``：2025年报 / 2025半年报 / 2025三季报 / 2023特别分配（§5.1 命名）；\n- ``planLabel``：每股金额折算回源站口径「10派X元」。",
+        "operationId": "list_security_dividends_api_dividend_yield__master_id__dividends_get",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "master_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Master Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/dividend-yield/{master_id}/implied-price": {
       "get": {
         "tags": [
