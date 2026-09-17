@@ -357,6 +357,8 @@ def _register_job(sched: Any, cfg: JobConfig) -> None:
         CronTrigger.from_crontab(cfg.cron_expr, timezone=APP_TZ),
         args=[cfg.id, JobTriggerSource.SCHEDULED],
         id=str(cfg.id),
+        # name 仅用于日志展示，不参与 id 冲突判定；APScheduler 默认会退化成 "_run_job"
+        name=cfg.name or str(cfg.id),
         replace_existing=True,
     )
 
@@ -383,6 +385,8 @@ def _register_user_job(sched: Any, cfg: UserQuoteSyncConfig) -> None:
         trigger,
         args=[cfg.user_id],
         id=f"user:{cfg.user_id}",
+        # UserQuoteSyncConfig 没有可读 name 字段，用「类型 + user_id」拼一个可辨识串
+        name=f"行情同步:{cfg.user_id}",
         replace_existing=True,
     )
 
