@@ -108,6 +108,9 @@ const ENDPOINT_PARAM_HINTS: Record<string, Record<string, string>> = {
     start_date: '起始日期，形如 20230618（YYYYMMDD，无分隔符）',
     end_date: '结束日期，形如 20231219（YYYYMMDD，无分隔符）',
   },
+  stock_dividend_cninfo: {
+    symbol: '股票代码，如 600009（必填；单次返回该股全部历史分红方案）',
+  },
 };
 
 /** 识别接口参数模板里的占位符默认值（如 string / 示例 / example），留空时不作为真实参数发送 */
