@@ -31,7 +31,7 @@ pytestmark = pytest.mark.asyncio
 
 async def _admin_token(client, email: str) -> str:
     """注册用户 → 提权为 admin → 重新签发 token（role 变了必须重签）。"""
-    creds = await register_login(client, email=email, password="pw123456")
+    creds = await register_login(client, email=email)
     async with dbmod.AsyncSessionLocal() as s:
         u = (
             await s.execute(select(User).where(User.id == creds["user_id"]))
@@ -42,7 +42,7 @@ async def _admin_token(client, email: str) -> str:
 
 
 async def _user_token(client, email: str) -> str:
-    creds = await register_login(client, email=email, password="pw123456")
+    creds = await register_login(client, email=email)
     return create_access_token(creds["user_id"], creds["email"], UserRole.USER.value)
 
 

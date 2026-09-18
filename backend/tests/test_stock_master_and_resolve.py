@@ -51,7 +51,7 @@ INTERFACE_BASE = {
 
 
 async def _admin_token(client, email: str) -> str:
-    creds = await register_login(client, email=email, password="pw123456")
+    creds = await register_login(client, email=email)
     async with dbmod.AsyncSessionLocal() as s:
         u = (
             await s.execute(select(User).where(User.id == creds["user_id"]))
@@ -257,7 +257,7 @@ async def test_list_security_masters_allows_any_logged_in_user(client, session):
     主数据行是系统级公共字典（portfolio_id IS NULL），不含用户私有数据，
     故该端点从 require_admin 放宽为登录即可（同步/测试端点仍仅限管理员）。
     """
-    creds = await register_login(client, email="sm_user_1@example.com", password="pw123456")
+    creds = await register_login(client, email="sm_user_1@example.com")
     token = create_access_token(creds["user_id"], creds["email"], "user")
     r = await client.get("/api/admin/securities/masters", headers=auth(token))
     status, code, data, _ = env(r)
@@ -1092,7 +1092,7 @@ async def test_delete_security_master_empty_ids_returns_400(client, session):
 
 async def test_delete_security_master_requires_admin(client, session):
     """权限：非管理员（普通登录用户）删除主数据 → 403。"""
-    creds = await register_login(client, email="del_user_1@example.com", password="pw123456")
+    creds = await register_login(client, email="del_user_1@example.com")
     r = await _delete_masters(client, creds["token"], [str(uuid.uuid4())])
     assert r.status_code == 403
 
