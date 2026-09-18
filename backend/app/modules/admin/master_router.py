@@ -116,10 +116,10 @@ async def list_security_masters(
 
 @router_master.get("/securities/masters/stats")
 async def security_master_stats(
-    current: CurrentUser = Depends(get_current_user),
+    current: CurrentUser = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """系统级证券主数据按资产类别统计条数（公共字典统计，任意登录用户可读）。
+    """系统级证券主数据按资产类别统计条数（仅管理员可读，与 StockListPanel 管理页配套）。
 
     返回 ``{counts: {资产类别: 条数}}``；主数据行 asset_class 为 NULL 时归入
     ``UNCATEGORIZED``（未分类）以便前端与统一中文标签对齐。
