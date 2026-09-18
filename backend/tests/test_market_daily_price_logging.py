@@ -1,8 +1,8 @@
-"""回补常量 + 批次异常可观测性 + 失败聚合落 app_logs + 任务状态（mock 网络层）。
+"""批次异常可观测性 + 失败聚合落 app_logs + 任务状态（mock 网络层）。
 
 自 ``test_market_daily_price_sync.py`` 拆出（T04 测试拆分，每个文件 ≤400 行）。
-守护：附录 A.11 / 决策 A15 回补常量；D1/D2 批次异常类名与重试退避；T1-b 失败批次聚合落
-``app_logs``（每轮最多 1 条）；T2 零写入 → 任务状态落 FAILED（端到端）。
+守护：D1/D2 批次异常类名与重试退避；T1-b 失败批次聚合落 ``app_logs``（每轮最多 1 条）；
+T2 零写入 → 任务状态落 FAILED（端到端）。
 """
 from __future__ import annotations
 
@@ -31,25 +31,8 @@ from app.models.enums import (
 )
 from app.services.market_data_sync import MarketDataSyncService
 from app.services.market_daily_price_sync import MarketDailyPriceSyncService
-from app.services.market_price_backfill_engine import (
-    _BACKFILL_BACKOFFS,
-    _BACKFILL_BURST,
-    _BACKFILL_COOLDOWN_MAX,
-    _BACKFILL_COOLDOWN_MIN,
-)
 from app.services.scheduler import _run_job_inner
-from tests.helpers_price_backfill import add_master, seed_https_quote_source, uid
-
-
-# ───────────────────────── 回补常量（决策 A15 / 附录 A.11） ─────────────────────────
-
-def test_backfill_rate_constants():
-    """守护附录 A.11 / 决策 A15：burst≈10、冷却 60-120s、退避 60/120/300s。"""
-    assert _BACKFILL_BURST == 10
-    assert _BACKFILL_COOLDOWN_MIN <= _BACKFILL_COOLDOWN_MAX
-    assert _BACKFILL_COOLDOWN_MIN == 60.0
-    assert _BACKFILL_COOLDOWN_MAX == 120.0
-    assert _BACKFILL_BACKOFFS == (60, 120, 300)  # 指数退避，用尽即放弃该证券
+from tests.helpers import add_master, seed_https_quote_source, uid
 
 
 # ───────────────────── 批次异常可观测性 + 重试退避（D1 / D2） ─────────────────────

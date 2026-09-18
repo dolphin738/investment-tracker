@@ -19,7 +19,6 @@ const dividendItems = vi.hoisted(() => ({
 }));
 
 vi.mock('@/api/dividend-yield.api', () => ({
-  getDividendYieldCurve: vi.fn(async () => ({ items: [] })),
   getSecurityDividends: vi.fn(async () => {
     if (dividendItems.fail) throw new Error('boom');
     return { masterId: 'm-1', items: dividendItems.list };

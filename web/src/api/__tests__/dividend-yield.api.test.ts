@@ -20,19 +20,12 @@ vi.mock('@/lib/api-client', () => ({
 }));
 
 import {
-  getDividendYieldCurve,
   getDividendYieldImpliedPrice,
 } from '@/api/dividend-yield.api';
 
 describe('dividend-yield api 路径契约（P0-1）', () => {
   beforeEach(() => {
     gets.calls.length = 0;
-  });
-
-  it('curve 段序：/{masterId}/curve（id 在前）', async () => {
-    await getDividendYieldCurve('m-1', 365);
-    expect(gets.calls[0].url).toBe('/dividend-yield/m-1/curve');
-    expect(gets.calls[0].config).toEqual({ params: { days: 365 } });
   });
 
   it('implied-price 段序：/{masterId}/implied-price（id 在前）', async () => {

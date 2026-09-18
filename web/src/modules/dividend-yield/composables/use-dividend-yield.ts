@@ -4,7 +4,6 @@
  * 阶段5 股息率排名的数据层，供榜单页 / 设置页「股息率」TAB 复用：
  * - useTop20(): Top20 看板（后端封顶 + 剔除 suspicious）
  * - useRank(page,pageSize,sort,enabled): 榜单分页（按股息率 / 连续分红年数排序）
- * - useCurve(masterId): 单证券股息率曲线（近 days 天）
  * - useImpliedPrice(masterId,targetRatio,enabled): 目标收益率反推隐含价格
  * - useDividendYieldSettings(enabled): 阈值 + 接口源设置（admin-only，非 admin 传 enabled=false）
  * - useUpdateDividendYieldSettings(): 更新设置（admin-only）
@@ -17,7 +16,6 @@ import { computed, toValue, type MaybeRefOrGetter } from 'vue';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query';
 import { toast } from '@/composables/use-toast';
 import {
-  getDividendYieldCurve,
   getSecurityDividends,
   getDividendYieldImpliedPrice,
   getDividendYieldRank,
@@ -25,8 +23,6 @@ import {
   getDividendYieldTop20,
   rebuildDividendYield,
   backfillSpecialDividends,
-  backfillDailyPrices,
-  cancelPriceBackfill,
   updateDividendYieldSettings,
   type DividendYieldRankFilters,
 } from '@/api/dividend-yield.api';
@@ -76,23 +72,6 @@ export function useRank(
     queryFn: () =>
       getDividendYieldRank(toValue(page), toValue(pageSize), toValue(sort), toValue(filters)),
     enabled: computed(() => Boolean(toValue(enabled))),
-    staleTime: 60 * 1000,
-  });
-}
-
-/** 单证券股息率曲线（近 days 天） */
-export function useCurve(masterId: MaybeRefOrGetter<string | null>) {
-  return useQuery({
-    queryKey: computed(() => {
-      const id = toValue(masterId);
-      return [
-        ...DIVIDEND_YIELD_KEY,
-        'curve',
-        id ?? 'disabled',
-      ];
-    }),
-    queryFn: () => getDividendYieldCurve(toValue(masterId)!),
-    enabled: computed(() => Boolean(toValue(masterId))),
     staleTime: 60 * 1000,
   });
 }
@@ -151,13 +130,6 @@ export function useDividendYieldSettings(
     queryFn: () => getDividendYieldSettings(),
     enabled: computed(() => Boolean(toValue(enabled))),
     staleTime: 5 * 60 * 1000,
-    // 在途回补任务期间每 3s 轮询一次，使前端「今日已用 X/N」实时随后端每 burst 递增刷新；
-    // 任务结束（price_backfill_start_date 清空）即停止轮询，避免无谓请求。
-    refetchInterval: (query) =>
-      (query.state.data as { price_backfill_start_date?: string | null } | undefined)
-        ?.price_backfill_start_date
-        ? 3000
-        : false,
   });
 }
 
@@ -224,44 +196,5 @@ export function useBackfillSpecialDividends() {
       toast.success(data.message || '已触发特别分红历史回补，后台执行中');
     },
     onError: () => toast.error('特别分红历史回补触发失败，请稍后重试'),
-  });
-}
-
-/**
- * 手动触发历史行情缺口回补（初始化块；admin-only，冷启动/修复用）。
- * 后端为 fire-and-forget：本调用立即返回、任务在后台执行，
- * 进度经前端轮询 settings 的 price_backfill_used_today 实时展示（在途任务时每 3s 刷新），故此处不失效榜单查询。
- *
- * **必须失效 settings 查询**：响应带回服务端写入的 price_backfill_start_date，
- * 它是「是否有在途任务」的唯一数据源。若不刷新，按钮会一直显示可点，
- * 用户可连点第二次 → 正是「两个并发任务选中同一批证券」的场景。
- */
-export function useBackfillDividendPrices() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (startDate: string) => backfillDailyPrices(startDate),
-    onSuccess: (data) => {
-      toast.success(data.message || '已触发历史行情缺口回补，后台执行中');
-      queryClient.invalidateQueries({ queryKey: [DIVIDEND_YIELD_KEY[0], 'settings'] });
-    },
-    onError: () => toast.error('历史行情缺口回补触发失败，请稍后重试'),
-  });
-}
-
-/**
- * 取消在途的历史行情回补（admin-only）。
- *
- * 与「已有在途任务则禁止启动」成对存在：只禁不给退路，数据源故障时会把人锁死。
- * 取消后同样失效 settings 查询，使按钮恢复可点。
- */
-export function useCancelPriceBackfill() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: () => cancelPriceBackfill(),
-    onSuccess: (data) => {
-      toast.success(data.message || '已取消在途回补任务');
-      queryClient.invalidateQueries({ queryKey: [DIVIDEND_YIELD_KEY[0], 'settings'] });
-    },
-    onError: () => toast.error('取消在途回补失败，请稍后重试'),
   });
 }

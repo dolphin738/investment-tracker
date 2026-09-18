@@ -1,10 +1,9 @@
 """股息率排名 API 与配置端点（方案 §9，阶段 4）。
 
-七个端点（全部走统一信封默认）：
+六个端点（全部走统一信封默认）：
 - GET   /api/dividend-yield/rankings             分红记录公司股息率分页排名（B2 排序白名单）
 - GET   /api/dividend-yield/top20                股息率前 20（A12 剔除 suspicious、A13 封顶 20）
 - GET   /api/dividend-yield/{master_id}/dividends 单证券分红明细（按报告期，仅列有分红的期次）
-- GET   /api/dividend-yield/{master_id}/curve     单证券过去一年每日股息率曲线（§9 逐点现算）
 - GET   /api/dividend-yield/{master_id}/implied-price 反推价格（§9）
 - GET   /api/dividend-yield/settings     登录读取全局配置（数据源接口 / 回补参数）
 - PUT   /api/dividend-yield/settings     admin 更新全局配置（接口三重校验 + 回补参数）
@@ -15,7 +14,6 @@
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
 from decimal import Decimal
 from typing import Any, Optional
 
@@ -29,7 +27,6 @@ from app.core.envelope import EnvelopeRoute
 from app.core.exceptions import BusinessException
 from app.db.database import get_db
 from app.models import (
-    MarketSecurityDailyPrice,
     Security,
     SecurityDividend,
     SecurityDividendYield,
@@ -43,7 +40,6 @@ from app.services.base import paged
 from app.services.dividend_period import period_label, plan_label
 from app.services.dividend_yield import (
     compute_yield,
-    compute_yield_at,
     implied_price,
     to_cell,
 )
@@ -296,7 +292,7 @@ async def list_security_dividends(
     - ``periodLabel``：2025年报 / 2025半年报 / 2025三季报 / 2023特别分配（§5.1 命名）；
     - ``planLabel``：每股金额折算回源站口径「10派X元」。
 
-    契约：证券不存在时返回 **200 + 空 items**（不 404）——与 ``/curve`` 的存在性校验**有意不同**：
+    契约：证券不存在时返回 **200 + 空 items**（不 404）：
     本端点语义是「该标的有哪些分红」，无记录与无标的是同一展示结果（面板只在已有榜单行上打开）。
     """
     rows = (
@@ -339,69 +335,6 @@ async def list_security_dividends(
             }
             for r in rows
         ],
-    }
-
-
-@router_dividend_yield.get("/{master_id}/curve")
-async def curve_dividend_yield(
-    master_id: str = Path(...),
-    user: CurrentUser = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-    days: int = Query(365, ge=1, le=3650),  # 上限 10 年（P2-3：防 days 无界拉全量日线）
-):
-    """单证券每日股息率曲线（§9 逐点现算；末点 == 快照值由纯函数保证）。"""
-    sec = await db.get(Security, master_id)
-    yield_exists = (
-        await db.execute(
-            select(SecurityDividendYield.master_id).where(
-                SecurityDividendYield.master_id == master_id
-            )
-        )
-    ).scalar_one_or_none()
-    if sec is None and yield_exists is None:
-        raise BusinessException(
-            code=BusinessErrorCode.NOT_FOUND,
-            message="证券不存在",
-            status_code=404,
-        )
-
-    div_rows = (
-        await db.execute(
-            select(SecurityDividend).where(SecurityDividend.master_id == master_id)
-        )
-    ).scalars().all()
-    cells = [to_cell(r) for r in div_rows]
-
-    start = today_app_tz() - timedelta(days=days)
-    price_rows = (
-        await db.execute(
-            select(MarketSecurityDailyPrice)
-            .where(
-                MarketSecurityDailyPrice.master_id == master_id,
-                MarketSecurityDailyPrice.trade_date >= start,
-            )
-            .order_by(MarketSecurityDailyPrice.trade_date.asc())
-        )
-    ).scalars().all()
-
-    cur_year = today_app_tz().year
-    items: list[dict[str, Any]] = []
-    for pr in price_rows:
-        res = compute_yield_at(cells, pr.trade_date, pr.close, cur_year)
-        items.append(
-            {
-                "trade_date": pr.trade_date,
-                "close": pr.close,  # §9：供前端叠加「分子不变段」等提示
-                "numerator_per_share": res.numerator_per_share,  # §9：分子不变段提示
-                "dividend_yield": res.dividend_yield,
-                "mode": res.mode.value,
-            }
-        )
-    return {
-        "items": items,
-        "master_id": master_id,
-        "code": sec.code if sec else None,
-        "name": sec.name if sec else None,
     }
 
 

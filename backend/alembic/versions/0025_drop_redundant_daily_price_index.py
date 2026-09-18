@@ -22,7 +22,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "0025_drop_redundant_daily_price_index"
-down_revision: str | None = "0024_add_price_backfill_run_token_and_running"
+down_revision: str | None = "0021_add_price_backfill_gap_mode"
 branch_labels = None  # type: ignore[attr-defined]
 depends_on = None  # type: ignore[attr-defined]
 

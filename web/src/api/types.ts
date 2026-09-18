@@ -815,23 +815,6 @@ export interface DividendYieldTop20Response {
   consecutive: DividendYieldRankItem[];
 }
 
-/** 股息率曲线数据点（close/numerator_per_share 供「分子不变段」提示，§9） */
-export interface DividendYieldCurveItem {
-  trade_date: string;
-  close: number | null;
-  numerator_per_share: number | null;
-  dividend_yield: number | null;
-  mode: DividendYieldMode;
-}
-
-/** 股息率曲线响应 */
-export interface DividendYieldCurveResponse {
-  items: DividendYieldCurveItem[];
-  master_id: string;
-  code: string | null;
-  name: string | null;
-}
-
 /** 隐含股息收益率反推价格响应（含当前价/当前股息率对照，§9） */
 export interface ImpliedPriceResult {
   master_id: string;
@@ -857,26 +840,6 @@ export interface DividendYieldSettingsOut {
   price_source: DividendYieldSourceRef | null;
   /** 公司公告接口（§5.4；未配置为 null） */
   announcement_source: DividendYieldSourceRef | null;
-  /** 历史行情回补接口（初始化块；未配置为 null） */
-  price_backfill_source: DividendYieldSourceRef | null;
-  /** 每日回补额度（只/天）；后端默认 1000；不提交 price_backfill_start_date */
-  price_backfill_quota: number | null;
-  /** 在途回补任务目标起始日（YYYY-MM-DD）；非空 = 有在途回补任务 */
-  price_backfill_start_date: string | null;
-  /** 回补起始日期配置默认值（YYYY-MM-DD）：用户保存的偏好回补起点，触发回补以其为起点；
-   *  与在途标记 price_backfill_start_date 解耦；null = 未设置（前端回退一年前） */
-  price_backfill_default_start_date: string | null;
-  /** 当日已用回补额度（只）；后端回传的是**当日有效值**（跨日已归零），
-   *  前端无需自己判断跨日重置，直接用于「今日已用 X/N」与额度用尽时禁用触发 */
-  price_backfill_used_today: number;
-  /** 最近一次回补失败原因（熔断/接口不可达）；null = 无失败/已清空，前端在「在途」旁红字展示 */
-  price_backfill_last_error: string | null;
-  /** 历史行情回补模式：'legacy' = 起点覆盖即整只跳过（不补中间空洞，存量默认）；
-   *  'gap' = 严格补洞（按交易日历逐日回填）。后端列有默认值，理论非空；前端空值兜底 'legacy' */
-  price_backfill_mode: string;
-  /** 历史行情回补复权方式：''（不复权，默认）| 'qfq'（前复权）| 'hfq'（后复权）；
-   *  后端列有默认值（''），前端空值兜底 '' */
-  price_backfill_adjust: string;
   /** 交易日历刷新起始日期（YYYY-MM-DD）：「交易日历刷新」任务的窗口下限；
    *  null = 未配置（后端沿用默认「去年 1 月 1 日」）；结束上限受数据源限制为当年末，不暴露 */
   trade_calendar_start_date: string | null;
@@ -889,18 +852,6 @@ export interface UpdateDividendYieldSettingsDto {
   price_source_interface_id?: string | null;
   /** 公司公告接口（§5.4；null = 不设置） */
   announcement_source_interface_id?: string | null;
-  /** 历史行情回补接口（初始化块；null = 不设置） */
-  price_backfill_source_interface_id?: string | null;
-  /** 每日回补额度（只/天）；后端校验 1..2000 整数，越界返回 400；
-   *  ⚠️ price_backfill_start_date（在途标记）由服务端管理，前端不提交 */
-  price_backfill_quota?: number | null;
-  /** 回补起始日期配置默认值（YYYY-MM-DD）；与在途标记解耦，PUT 可写、随设置保存；
-   *  触发回补（POST /backfill-prices）以本值为起点；空串/不传 = 不改（保留既有值） */
-  price_backfill_default_start_date?: string | null;
-  /** 历史行情回补模式：'legacy' | 'gap'；后端值域校验，越界返回 400；不传 = 不改（保留既有值） */
-  price_backfill_mode?: string | null;
-  /** 历史行情回补复权方式：'' | 'qfq' | 'hfq'；后端值域校验，越界返回 400；不传 = 不改（保留既有值） */
-  price_backfill_adjust?: string | null;
   /** 交易日历刷新起始日期（YYYY-MM-DD）；空串/不传 = 不改（保留既有值）；
    *  结束上限受数据源限制为当年末，故前端不提供结束日期 */
   trade_calendar_start_date?: string | null;

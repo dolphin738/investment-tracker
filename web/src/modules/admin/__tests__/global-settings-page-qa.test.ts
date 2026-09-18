@@ -1,11 +1,14 @@
 /**
  * QA 独立验证：全局设置页「初始化」独立 Tab 重构（提交 c5d638e）。
  *
- * 本文件由独立 QA 编写，不复用工程师测试文件，独立断言需求 3 条：
+ * 本文件由独立 QA 编写，不复用工程师测试文件，独立断言需求：
  *  - [初始化][股息率] 顺序正确、默认激活「初始化」；
  *  - 唯一 settingsForm 状态源：跨 TAB 改动互不丢失，保存仅发一次 PUT；
- *  - 「不复权」哨兵双向映射：服务端 '' → 下拉显示「不复权」选中；选「不复权」→ 提交 ''（非哨兵）；
- *  - 「回补复权方式」与「回补模式」同一 2 列网格并排。
+ *  - 「交易日历起始日期」参与父组件 settings 保存（PUT 全字段）。
+ *
+ * 注：原「回补复权方式 / 回补模式 / 每日回补额度 / 回补行情缺口」等价格缺口回补配置
+ * 已随价格缺口回补功能下线一并移除，本文件相应用例（哨兵映射、额度越界、在途/取消
+ * 状态）已删去，仅保留与「单一状态源 / 单次 PUT」架构相关的验证。
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
@@ -30,15 +33,7 @@ const settings = vi.hoisted<DividendYieldSettingsOut>(() => ({
   dividend_detail_source: { id: 'i2', name: '新浪-分红配股' },
   price_source: { id: 'i3', name: '腾讯财经-A股行情' },
   announcement_source: null,
-  price_backfill_source: null,
-  price_backfill_start_date: null,
-  price_backfill_default_start_date: null,
-  price_backfill_quota: null,
-  price_backfill_used_today: 0,
-  price_backfill_last_error: null,
   trade_calendar_start_date: null,
-  price_backfill_mode: 'legacy',
-  price_backfill_adjust: '',
 }));
 
 const mutateSpy = vi.hoisted(() => vi.fn());
@@ -53,8 +48,6 @@ vi.mock('@/modules/dividend-yield/composables/use-dividend-yield', () => ({
   }),
   useRebuildDividendYield: () => ({ isPending: ref(false), isError: ref(false), mutate: vi.fn() }),
   useBackfillSpecialDividends: () => ({ isPending: ref(false), isError: ref(false), mutate: vi.fn() }),
-  useBackfillDividendPrices: () => ({ isPending: ref(false), isError: ref(false), mutate: vi.fn() }),
-  useCancelPriceBackfill: () => ({ isPending: ref(false), isError: ref(false), mutate: vi.fn() }),
 }));
 
 vi.mock('@/modules/admin/composables/use-quote-provider', () => ({
@@ -154,11 +147,7 @@ function saveButton(w: VueWrapper) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  settings.price_backfill_start_date = null;
-  settings.price_backfill_quota = null;
-  settings.price_backfill_used_today = 0;
-  settings.price_backfill_last_error = null;
-  settings.price_backfill_adjust = '';
+  settings.trade_calendar_start_date = null;
 });
 
 describe('QA · 全局设置页 Tab 重构独立验证', () => {
@@ -167,42 +156,17 @@ describe('QA · 全局设置页 Tab 重构独立验证', () => {
     const tabs = wrapper.findAll('[data-tab]');
     expect(tabs.map((t) => t.text())).toEqual(['初始化', '股息率']);
     expect(tabs.map((t) => t.attributes('data-tab'))).toEqual(['init', 'dividend']);
-    // 默认激活初始化：复权下拉可见、股息率内容不在 DOM
-    expect(wrapper.find('#dy-backfill-adjust').exists()).toBe(true);
+    // 默认激活初始化：交易日历输入可见、股息率内容不在 DOM
+    expect(wrapper.find('#dy-trade-calendar-start').exists()).toBe(true);
     expect(wrapper.find('#dy-report-source').exists()).toBe(false);
-    wrapper.unmount();
-  });
-
-  it('B1. 服务端 ""（不复权）→ 下拉显示「不复权」被选中（哨兵）', async () => {
-    settings.price_backfill_adjust = '';
-    wrapper = await mountPage();
-    const sel = wrapper.find('#dy-backfill-adjust');
-    expect((sel.element as HTMLSelectElement).value).toBe(SELECT_EMPTY_VALUE);
-    wrapper.unmount();
-  });
-
-  it('B2. 选「不复权」→ 提交服务端值为 ""（不是哨兵串）', async () => {
-    settings.price_backfill_adjust = 'qfq'; // 制造差异，使保存可用
-    wrapper = await mountPage();
-    await wrapper.find('#dy-backfill-adjust').setValue(SELECT_EMPTY_VALUE);
-    await flushPromises();
-
-    await saveButton(wrapper).trigger('click');
-    await flushPromises();
-
-    expect(mutateSpy).toHaveBeenCalledTimes(1);
-    const payload = mutateSpy.mock.calls[0][0];
-    expect(payload.price_backfill_adjust).toBe('');
-    expect(payload.price_backfill_adjust).not.toBe(SELECT_EMPTY_VALUE);
     wrapper.unmount();
   });
 
   it('C. 跨 TAB 状态不丢 + 保存仅发一次 PUT', async () => {
     wrapper = await mountPage();
 
-    // 初始化 TAB：改额度与复权方式
-    await wrapper.find('input#dy-price-backfill-quota').setValue('1234');
-    await wrapper.find('#dy-backfill-adjust').setValue('qfq');
+    // 初始化 TAB：改交易日历起始日期
+    await wrapper.find('input#dy-trade-calendar-start').setValue('2025-01-01');
     await flushPromises();
 
     // 切到股息率 TAB：把「行情源接口」改为「不设置」
@@ -210,14 +174,17 @@ describe('QA · 全局设置页 Tab 重构独立验证', () => {
     await wrapper.find('#dy-price-source').setValue(SELECT_EMPTY_VALUE);
     await flushPromises();
 
-    // 切回初始化：额度与复权值仍在
+    // 切回初始化：日期值仍在
     await switchTab(wrapper, 'init');
-    expect((wrapper.find('input#dy-price-backfill-quota').element as HTMLInputElement).value).toBe('1234');
-    expect((wrapper.find('#dy-backfill-adjust').element as HTMLSelectElement).value).toBe('qfq');
+    expect(
+      (wrapper.find('input#dy-trade-calendar-start').element as HTMLInputElement).value,
+    ).toBe('2025-01-01');
 
     // 再切到股息率：行情源改动仍在
     await switchTab(wrapper, 'dividend');
-    expect((wrapper.find('#dy-price-source').element as HTMLSelectElement).value).toBe(SELECT_EMPTY_VALUE);
+    expect(
+      (wrapper.find('#dy-price-source').element as HTMLSelectElement).value,
+    ).toBe(SELECT_EMPTY_VALUE);
 
     // 保存一次
     await saveButton(wrapper).trigger('click');
@@ -225,27 +192,10 @@ describe('QA · 全局设置页 Tab 重构独立验证', () => {
 
     expect(mutateSpy).toHaveBeenCalledTimes(1);
     const payload = mutateSpy.mock.calls[0][0];
-    expect(payload.price_backfill_adjust).toBe('qfq');
-    expect(payload.price_backfill_quota).toBe(1234);
+    expect(payload.trade_calendar_start_date).toBe('2025-01-01');
     // 「不设置」哨兵 → 提交 null；阈值字段已迁「个人中心 → 偏好设置」，不再出现在本页 payload
     expect(payload.price_source_interface_id).toBeNull();
     expect(payload).not.toHaveProperty('green_threshold');
-    wrapper.unmount();
-  });
-
-  it('D. 「回补复权方式」与「回补模式」在同一 2 列网格并排', async () => {
-    wrapper = await mountPage();
-    const modeSel = wrapper.find('#dy-backfill-mode');
-    const adjustSel = wrapper.find('#dy-backfill-adjust');
-    expect(modeSel.exists()).toBe(true);
-    expect(adjustSel.exists()).toBe(true);
-    const modeGrid = modeSel.element.closest('.grid');
-    const adjustGrid = adjustSel.element.closest('.grid');
-    expect(modeGrid).not.toBeNull();
-    expect(modeGrid).toBe(adjustGrid);
-    expect(modeGrid!.className).toContain('sm:grid-cols-2');
-    expect(modeSel.element.closest('.space-y-2')!.className).not.toContain('sm:col-span-2');
-    expect(adjustSel.element.closest('.space-y-2')!.className).not.toContain('sm:col-span-2');
     wrapper.unmount();
   });
 });

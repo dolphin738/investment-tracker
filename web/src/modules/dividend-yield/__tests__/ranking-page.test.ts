@@ -56,7 +56,6 @@ vi.mock('@/api/dividend-yield.api', () => ({
     },
   ),
   getDividendYieldSettings: vi.fn(async () => null),
-  getDividendYieldCurve: vi.fn(),
   getDividendYieldImpliedPrice: vi.fn(),
 }));
 vi.mock('@/api/quote-interface.api', () => ({

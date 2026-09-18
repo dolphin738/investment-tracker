@@ -13,7 +13,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision: str = "0015_remove_special_backfill_task"
-down_revision: str | None = "0014_add_price_backfill_quota"
+down_revision: str | None = "0012_add_response_fields"
 branch_labels = None  # type: ignore[attr-defined]
 depends_on = None  # type: ignore[attr-defined]
 

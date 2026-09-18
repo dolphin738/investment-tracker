@@ -29,7 +29,6 @@ from app.core.exceptions import (
 from app.core.log_sink import set_error_log_sink
 from app.core.logging_setup import setup_logging
 from app.services.log import record as record_app_log
-from app.services.market_daily_price_sync import reset_backfill_lease
 from app.services.scheduler import shutdown_scheduler, start_scheduler
 from app.modules import (
     admin,
@@ -67,8 +66,6 @@ setup_logging(settings.LOG_LEVEL)
 async def lifespan(app: FastAPI):
     # 启动期安全配置哨兵（REP-002）：弱密钥默认拒绝启动（ALLOW_WEAK_SECRETS=1 降级告警）
     validate_security_config()
-    # 回补执行租约复位：清掉上次异常退出可能残留的占用（见 reset_backfill_lease 文档串）
-    await reset_backfill_lease()
     # 启动：受 SCHEDULER_ENABLED 总开关控制，从 job_configs 加载 enabled 任务注册调度
     # （懒导入 apscheduler，未安装 / 未启用环境启动直接跳过）。
     await start_scheduler()

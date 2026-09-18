@@ -1,11 +1,10 @@
 """股息率全局配置端点（方案 §9，阶段 4；自 router.py 拆分而来）。
 
 仅承载配置读写两类端点与配套 helper：
-- GET  /api/dividend-yield/settings   登录读取全局配置（数据源接口 / 回补参数；标色阈值已迁用户偏好）
-- PUT  /api/dividend-yield/settings   admin 更新全局配置（接口三重校验 + 回补参数）
+- GET  /api/dividend-yield/settings   登录读取全局配置（数据源接口；标色阈值已迁用户偏好）
+- PUT  /api/dividend-yield/settings   admin 更新全局配置（接口三重校验）
 
-口径/计算复用 services 纯函数，本模块仅编排查询与校验；``load_settings``
-作为跨模块公共 API 供 backfill_router 消费（见其文档串）。
+口径/计算复用 services 纯函数，本模块仅编排查询与校验。
 """
 from __future__ import annotations
 
@@ -18,19 +17,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums import BusinessErrorCode
-from app.core.date_utils import today_app_tz
 from app.core.envelope import EnvelopeRoute
 from app.core.exceptions import BusinessException
 from app.db.database import get_db
 from app.models import (
-    PRICE_BACKFILL_ADJUSTS,
-    PRICE_BACKFILL_MODE_LEGACY,
-    PRICE_BACKFILL_MODES,
     DividendYieldSettings,
     QuoteInterface,
-    SecuritiesDataProvider,
 )
-from app.models.enums import QuoteProviderAccessMethod
 from app.services.auth import CurrentUser, get_current_user, require_admin
 from app.services.log import record
 from app.services.market_data_sync import (
@@ -53,19 +46,6 @@ class SettingsUpdateBody(BaseModel):
     dividend_detail_source_interface_id: Optional[str] = None
     price_source_interface_id: Optional[str] = None
     announcement_source_interface_id: Optional[str] = None
-    price_backfill_source_interface_id: Optional[str] = None
-    # 每日回补额度（只/天）：1..2000，越界 PUT 400。为 None 表示不改（保留既有值）。
-    # 注意：price_backfill_start_date（在途标记）不接受 PUT 设置（由触发/完成流程服务端管理，避免状态不一致）。
-    price_backfill_quota: Optional[int] = None
-    # 回补起始日期「配置默认值」（YYYY-MM-DD）：与在途标记解耦，PUT 可写、可保存。
-    # 为 None 表示不改（保留既有值）；触发回补（POST /backfill-prices）以本值为起点。
-    price_backfill_default_start_date: Optional[date] = None
-    # 历史行情回补模式：``legacy``（起点覆盖即整只跳过、不补中间空洞）或 ``gap``
-    #（严格补洞：按交易日历逐日回填）。None 表示不改（保留既有值）；越界 400。
-    price_backfill_mode: Optional[str] = None
-    # 历史行情回补复权方式：``""``（不复权，默认）| ``qfq``（前复权）| ``hfq``（后复权）。
-    # 回补抓取时作为 akshare stock_zh_a_hist 的 adjust 入参。None 表示不改（保留既有值）；越界 400。
-    price_backfill_adjust: Optional[str] = None
     # 交易日历刷新起始日期（YYYY-MM-DD）：refresh_trade_calendar 的窗口下限，决定
     # 「获取多长时间」（上限受数据源限制只到当年末，故不暴露）。None 表示不改。
     trade_calendar_start_date: Optional[date] = None
@@ -125,41 +105,8 @@ async def _validate_interface(
         )
 
 
-async def _validate_backfill_interface(db: AsyncSession, interface_id: Optional[str]) -> None:
-    """历史行情回补源校验：存在性 + 分类 2 + enabled + **接入方式 sdk**；缺省允许置空。
-
-    **不做**「params 是否含 symbol」的形态启发式——``stock_zh_a_hist`` 天然逐只入参
-    （params 必含 symbol 占位，实库 ``东财-历史行情`` 即如此），该启发式是为股息列表
-    分类（报告期全量 vs 按证券逐只）设计的，对回补源不适用；路线 B 的硬约束是
-    ``backfill_historical`` 要求 sdk 接入（与 ``/backfill-prices`` 运行时校验同口径）。
-    """
-    if not interface_id:
-        return
-    itf = await db.get(QuoteInterface, interface_id)
-    if itf is None or itf.category_id != QUOTE_CAT_ID or not itf.enabled:
-        raise BusinessException(
-            code=BusinessErrorCode.VALIDATION_FAILED,
-            message="接口不存在、分类不符或未启用",
-            status_code=400,
-        )
-    provider = await db.get(SecuritiesDataProvider, itf.provider_id)
-    if provider is None or provider.access_method != QuoteProviderAccessMethod.SDK:
-        raise BusinessException(
-            code=BusinessErrorCode.VALIDATION_FAILED,
-            message=(
-                "历史行情回补接口接入方式须为 sdk（akshare stock_zh_a_hist），"
-                f"当前接口 {itf.name!r} 的提供方接入方式为 "
-                f"{provider.access_method if provider else '未知'}"
-            ),
-            status_code=400,
-        )
-
-
 async def load_settings(db: AsyncSession) -> DividendYieldSettings:
-    """读取单行配置；无行时返回空默认（各数据源接口 null；标色阈值已迁用户偏好，不在本表）。
-
-    跨模块复用即公共 API（被 backfill_router 消费）。
-    """
+    """读取单行配置；无行时返回空默认（各数据源接口 null；标色阈值已迁用户偏好，不在本表）。"""
     row = (
         await db.execute(select(DividendYieldSettings).limit(1))
     ).scalar_one_or_none()
@@ -183,38 +130,6 @@ async def _settings_out(db: AsyncSession, row: DividendYieldSettings) -> dict[st
         "announcement_source": _interface_out(
             await _resolve_interface(db, row.announcement_source_interface_id)
         ),
-        "price_backfill_source": _interface_out(
-            await _resolve_interface(db, row.price_backfill_source_interface_id)
-        ),
-        # 每日回补额度（只/天）；在途回补起点日期——非空即表示存在在途回补任务
-        "price_backfill_quota": row.price_backfill_quota,
-        "price_backfill_start_date": (
-            row.price_backfill_start_date.isoformat()
-            if row.price_backfill_start_date is not None
-            else None
-        ),
-        # 回补起始日期配置默认值（可保存）：与在途标记解耦，前端设置页据此回填输入框
-        "price_backfill_default_start_date": (
-            row.price_backfill_default_start_date.isoformat()
-            if row.price_backfill_default_start_date is not None
-            else None
-        ),
-        # 当日已用额度：前端据此展示「今日已用 X/N」并在用尽时禁用触发按钮。
-        # 这里回传**当日有效值**（记账日不是今天则视为 0），避免前端重复实现跨日重置。
-        "price_backfill_used_today": (
-            row.price_backfill_used_today
-            if row.price_backfill_last_run_date == today_app_tz()
-            else 0
-        ),
-        # 最近一次回补失败原因（熔断/接口不可达）：非空 = 最近一次在途回补以失败告终，
-        # 前端在「在途」旁直接展示；续跑/补完/取消/重触发时清空。
-        "price_backfill_last_error": row.price_backfill_last_error,
-        # 历史行情回补模式（legacy | gap）：前端据此回填「回补模式」下拉框；
-        # 空值兜底 legacy（列有 server_default，理论非空，防御性兼容旧行）。
-        "price_backfill_mode": row.price_backfill_mode or PRICE_BACKFILL_MODE_LEGACY,
-        # 历史行情回补复权方式（'' 不复权 | qfq 前复权 | hfq 后复权）：前端据此回填
-        # 「回补复权方式」下拉框；空值兜底 ''（列有 server_default，防御性兼容旧行）。
-        "price_backfill_adjust": row.price_backfill_adjust or "",
         # 交易日历刷新起始日期（可保存）：None = 未配置 → 后端用默认下限「去年 1 月 1 日」
         "trade_calendar_start_date": (
             row.trade_calendar_start_date.isoformat()
@@ -254,81 +169,14 @@ async def put_dividend_yield_settings(
     await _validate_interface(
         db, body.announcement_source_interface_id, NOTICE_CAT_ID, require_per_symbol=True
     )
-    # 历史行情回补源：分类 2「证券行情」+ 接入方式 sdk（路线 B）；
-    # 不做 symbol 形态启发式（stock_zh_a_hist 天然逐只带 symbol，见 helper 文档串）
-    await _validate_backfill_interface(db, body.price_backfill_source_interface_id)
-
-    # 每日回补额度（只/天）：1..2000；为 None 表示不改（保留既有值）。越界 400 中文。
-    if body.price_backfill_quota is not None and not (1 <= body.price_backfill_quota <= 2000):
-        raise BusinessException(
-            code=BusinessErrorCode.VALIDATION_FAILED,
-            message="每日回补额度 price_backfill_quota 须为 1..2000（只/天）",
-            status_code=400,
-        )
-    # 历史行情回补模式：值域见 PRICE_BACKFILL_MODES（legacy | gap | rebuild，None = 不改）。
-    # 越界 400 中文——不拦住的话 services 侧分派会把未知值静默当 legacy，用户以为切了却没生效。
-    # 报错文案由常量元组拼出，避免新增模式时漏改（rebuild 就曾漏过一次）。
-    if body.price_backfill_mode is not None and body.price_backfill_mode not in PRICE_BACKFILL_MODES:
-        raise BusinessException(
-            code=BusinessErrorCode.VALIDATION_FAILED,
-            message=(
-                "历史行情回补模式 price_backfill_mode 须为 "
-                f"{'、'.join(PRICE_BACKFILL_MODES)} 之一"
-            ),
-            status_code=400,
-        )
-    # 历史行情回补复权方式：值域 '' | qfq | hfq（None = 不改）。越界 400 中文——
-    # 不拦住的话会原样透传给 akshare，抓取静默失败或口径错乱。
-    if body.price_backfill_adjust is not None and body.price_backfill_adjust not in PRICE_BACKFILL_ADJUSTS:
-        raise BusinessException(
-            code=BusinessErrorCode.VALIDATION_FAILED,
-            message=(
-                "历史行情回补复权方式 price_backfill_adjust 须为 ''（不复权）、"
-                "qfq（前复权）或 hfq（后复权）"
-            ),
-            status_code=400,
-        )
 
     row = await load_settings(db)
     is_new = row.id is None  # 空默认（无持久化行）时插入，否则更新既有行
-    # 配置组合显性化（严格补洞的前置条件）：交易日历的刷新窗口下限必须**不晚于**回补起点，
-    # 否则日历覆盖不到回补窗口下界，gap 模式每轮都会回落 legacy（仅后端 warning，用户无感知）。
-    # 用「提交后生效值」组合判断：显式提供的用提交值，未提供的用库中现值。
-    provided = body.model_fields_set
-    eff_cal = (
-        body.trade_calendar_start_date
-        if "trade_calendar_start_date" in provided
-        else row.trade_calendar_start_date
-    )
-    eff_start = (
-        body.price_backfill_default_start_date
-        if "price_backfill_default_start_date" in provided
-        else row.price_backfill_default_start_date
-    )
-    if eff_cal is not None and eff_start is not None and eff_cal > eff_start:
-        raise BusinessException(
-            code=BusinessErrorCode.VALIDATION_FAILED,
-            message=(
-                "交易日历起始日期须不晚于回补起始日期"
-                f"（{eff_cal.isoformat()} > {eff_start.isoformat()}），"
-                "否则严格补洞模式会因交易日历未覆盖回补窗口而自动回落常规模式"
-            ),
-            status_code=400,
-        )
     before_detail = {
         "dividend_report_source_interface_id": row.dividend_report_source_interface_id,
         "dividend_detail_source_interface_id": row.dividend_detail_source_interface_id,
         "price_source_interface_id": row.price_source_interface_id,
         "announcement_source_interface_id": row.announcement_source_interface_id,
-        "price_backfill_source_interface_id": row.price_backfill_source_interface_id,
-        "price_backfill_quota": row.price_backfill_quota,
-        "price_backfill_mode": row.price_backfill_mode,
-        "price_backfill_adjust": row.price_backfill_adjust,
-        "price_backfill_default_start_date": (
-            row.price_backfill_default_start_date.isoformat()
-            if row.price_backfill_default_start_date is not None
-            else None
-        ),
         "trade_calendar_start_date": (
             row.trade_calendar_start_date.isoformat()
             if row.trade_calendar_start_date is not None
@@ -339,23 +187,7 @@ async def put_dividend_yield_settings(
     row.dividend_detail_source_interface_id = body.dividend_detail_source_interface_id
     row.price_source_interface_id = body.price_source_interface_id
     row.announcement_source_interface_id = body.announcement_source_interface_id
-    row.price_backfill_source_interface_id = body.price_backfill_source_interface_id
-    # 仅当请求体显式给出额度时才覆盖（None = 不改）；before 已记录旧值供审计
-    if body.price_backfill_quota is not None:
-        row.price_backfill_quota = body.price_backfill_quota
-    # 回补起始日期配置默认值：**显式提交语义** —— 请求体中出现该字段即覆盖（含显式
-    # null = 清除、运行时回落「一年前」默认）；未提供 = 不改。旧口径（None = 不改）会让
-    # 「用户清空日期想恢复默认」保存无效（watch 又回填旧值），故用 model_fields_set
-    # 区分「未提供」与「显式 null」。额度/模式无「清除」概念，保持 None = 不改 口径。
-    if "price_backfill_default_start_date" in body.model_fields_set:
-        row.price_backfill_default_start_date = body.price_backfill_default_start_date
-    # 历史行情回补模式：与额度同口径（None = 不改），值域已在上面校验
-    if body.price_backfill_mode is not None:
-        row.price_backfill_mode = body.price_backfill_mode
-    # 历史行情回补复权方式：与模式同口径（None = 不改），值域已在上面校验
-    if body.price_backfill_adjust is not None:
-        row.price_backfill_adjust = body.price_backfill_adjust
-    # 交易日历刷新起始日期：同回补起点的显式提交语义（显式 null = 清除 → 用默认下限）
+    # 交易日历刷新起始日期：显式提交语义（显式 null = 清除 → 用默认下限）
     if "trade_calendar_start_date" in body.model_fields_set:
         row.trade_calendar_start_date = body.trade_calendar_start_date
     row.updated_by = admin.user_id
@@ -375,15 +207,6 @@ async def put_dividend_yield_settings(
                 "dividend_detail_source_interface_id": body.dividend_detail_source_interface_id,
                 "price_source_interface_id": body.price_source_interface_id,
                 "announcement_source_interface_id": body.announcement_source_interface_id,
-                "price_backfill_source_interface_id": body.price_backfill_source_interface_id,
-                "price_backfill_quota": row.price_backfill_quota,
-                "price_backfill_mode": row.price_backfill_mode,
-                "price_backfill_adjust": row.price_backfill_adjust,
-                "price_backfill_default_start_date": (
-                    row.price_backfill_default_start_date.isoformat()
-                    if row.price_backfill_default_start_date is not None
-                    else None
-                ),
                 "trade_calendar_start_date": (
                     row.trade_calendar_start_date.isoformat()
                     if row.trade_calendar_start_date is not None

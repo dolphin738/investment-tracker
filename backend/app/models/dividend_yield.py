@@ -39,42 +39,6 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.db.base import Base, CreatedAtMixin, TimestampMixin, pk_uuid
 from app.models.enums import DividendStatus, DividendYieldMode, ReportPeriodType
 
-# --------------------------------------------------------------------------- #
-# 历史行情回补模式（迁移 0021 引入）
-# --------------------------------------------------------------------------- #
-# 回补模式取值。``legacy`` = 原口径：只要该证券存在 ``trade_date <= start_date`` 的日线行
-# 就整只跳过（起点覆盖即视为完成），**中间的空洞永不回填**；``gap`` = 严格补洞：按交易日历
-# 比对回补窗口，逐个缺失交易日回填；``rebuild`` = 全量重抓：不做覆盖度筛选，对**全部**有分红
-# 记录的证券按 ``master_id`` 游标推进重抓整段区间，且为**清空后重建**（写前先删该证券窗口内
-# 既有日线，不留旧源/旧复权口径的数据；源给不到的日期宁可空缺），窗口下限取
-# ``min(配置起点, 该证券已有最早 trade_date)``，抓取同步下探到同一下限，用于统一复权口径等
-# 「整体重算」场景——因判据不收敛，靠 ``price_backfill_rebuild_cursor`` 游标才能判定终态。
-PRICE_BACKFILL_MODE_LEGACY = "legacy"
-PRICE_BACKFILL_MODE_GAP = "gap"
-PRICE_BACKFILL_MODE_REBUILD = "rebuild"
-PRICE_BACKFILL_MODES: tuple[str, ...] = (
-    PRICE_BACKFILL_MODE_LEGACY,
-    PRICE_BACKFILL_MODE_GAP,
-    PRICE_BACKFILL_MODE_REBUILD,
-)
-
-# --------------------------------------------------------------------------- #
-# 历史行情回补「复权方式」（迁移 0022 引入）
-# --------------------------------------------------------------------------- #
-# 回补抓取时传给 akshare ``stock_zh_a_hist`` 的 ``adjust`` 参数。历史口径硬编码不复权
-# （``adjust=""``），本配置把它显性化、可控：
-# - ``""``（不复权，默认）：原始成交价（含除权跳空），与既有行为**零差异**（存量默认）；
-# - ``qfq``（前复权）：保持当前价，历史价随时间变；
-# - ``hfq``（后复权）：保持历史价，反映长期真实收益。
-PRICE_BACKFILL_ADJUST_NONE = ""  # 不复权（akshare adjust=""）
-PRICE_BACKFILL_ADJUST_QFQ = "qfq"  # 前复权
-PRICE_BACKFILL_ADJUST_HFQ = "hfq"  # 后复权
-PRICE_BACKFILL_ADJUSTS: tuple[str, ...] = (
-    PRICE_BACKFILL_ADJUST_NONE,
-    PRICE_BACKFILL_ADJUST_QFQ,
-    PRICE_BACKFILL_ADJUST_HFQ,
-)
-
 
 class SecurityDividend(Base, TimestampMixin):
     """分红事件表（§5.1）。唯一键含 ``period_type``：SPECIAL 补充行与报告期行可同格并存。"""
@@ -251,89 +215,6 @@ class DividendYieldSettings(Base, TimestampMixin):
         String(36),
         ForeignKey("quote_provider_interfaces.id", ondelete="SET NULL"),
         nullable=True,
-    )
-    # 历史行情回补源（分类 2，证券行情；路线 B akshare stock_zh_a_hist 历史日线回补，
-    # 决策 A15，全池慢速，须接入方式 sdk）
-    price_backfill_source_interface_id: Mapped[Optional[str]] = mapped_column(
-        String(36),
-        ForeignKey("quote_provider_interfaces.id", ondelete="SET NULL"),
-        nullable=True,
-    )
-    # 每日回补额度（只/天）：把全池回补摊到多天、做成在途任务时，每日「收盘价抓取」
-    # 完成后按此额度续跑一批。非空、默认 1000（<=2000 封禁红线，由 PUT 校验约束）。
-    price_backfill_quota: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=1000, server_default="1000"
-    )
-    # 在途回补起点日期（"YYYY-MM-DD"）：非空即表示存在在途回补任务，由回补触发/完成流程
-    # 服务端管理（POST /backfill-prices 写入、补完清空），PUT 不接受设置以免状态不一致；
-    # 全部证券覆盖后由每日批次清空，任务结束、此后不再跑。
-    price_backfill_start_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
-    # 回补起始日期「配置默认值」（YYYY-MM-DD）：与在途标记 price_backfill_start_date 解耦。
-    # 用户可在全局设置中保存偏好的回补起点；触发回补（POST /backfill-prices）以本值为起点、
-    # 写入在途标记 price_backfill_start_date。本列为纯配置（PUT 可写），不参与在途标记逻辑，
-    # 修复「回补起始日期更改后无法保存」——此前该输入框是纯前端本地 ref、不进 PUT，改了等于没存。
-    price_backfill_default_start_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
-    # 当日记账（额度按**自然日**消耗，跨日自动重置）：
-    # - last_run_date：最近一次执行回补的自然日；不等于今天则把 used_today 归零；
-    # - used_today：今日已处理只数，按「本批实际处理只数」累加（**成败都计**——
-    #   数据源抖动时若失败不计，反复重试会把当天额度刷爆）；
-    # 同日再次执行只在 remaining = quota - used_today 范围内取批，余额为 0 则当日不再发请求。
-    price_backfill_last_run_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
-    price_backfill_used_today: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=0, server_default="0"
-    )
-    # 最近一次回补失败原因（熔断/接口不可达）：非空表示最近一次在途回补以失败告终，
-    # 前端在「在途」旁直接展示；续跑成功 / 补完 / 取消 / 重新触发时清空。
-    price_backfill_last_error: Mapped[Optional[str]] = mapped_column(
-        String(512), nullable=True
-    )
-    # 历史行情回补模式：``legacy``（起点覆盖即整只跳过，不补中间空洞，存量默认）、
-    # ``gap``（严格补洞：按交易日历比对 [start_date, 昨天] 逐日回填）或
-    # ``rebuild``（全量重抓：清空后重建，按 master_id 游标推进重抓整段区间）。
-    # 存量行由 server_default='legacy' 覆盖（迁移 0021 无需回填）；值域校验在
-    # PUT /settings 与运行时分派（market_daily_price_sync）双重把关。
-    price_backfill_mode: Mapped[str] = mapped_column(
-        String(16),
-        nullable=False,
-        default=PRICE_BACKFILL_MODE_LEGACY,
-        server_default=PRICE_BACKFILL_MODE_LEGACY,
-    )
-    # rebuild（全量重抓）模式的**游标**：上一批重抓完的最后一个 ``master_id``（迁移 0023）。
-    # 池按 master_id 升序推进，取不出下一批即池尾 → 终态（清游标 + 清在途标记）。
-    # 只有 rebuild 模式使用；由 POST /backfill-prices 重置（新起点 = 新一轮重抓）。
-    # 为 NULL = 未开始 / 无进行中的重抓。
-    price_backfill_rebuild_cursor: Mapped[Optional[str]] = mapped_column(
-        String(36), nullable=True
-    )
-    # 在途回补的**世代标记**（迁移 0024）：每次触发回补（POST /backfill-prices）写入新 UUID，
-    # 取消（DELETE）清空为 NULL。运行中的回补任务启动时快照自己的 token，循环里比对不一致
-    # 即优雅中止（见 backfill_historical 的取消检查点）。
-    # 为何不直接看「在途标记是否为 NULL」：取消后标记被清空，但用户可立刻重新触发 → 标记
-    # 又变成非 NULL，老批次无法区分「这是我自己的标记」还是「新批次的」→ 误判继续跑完，
-    # 且与新批次并发。世代标记让「被取消」与「被取代」两种作废状态都能被识别。
-    price_backfill_run_token: Mapped[Optional[str]] = mapped_column(
-        String(36), nullable=True
-    )
-    # 执行占用租约（迁移 0024）：true = 此刻正有一个回补 run 在抓取。
-    # 单轮回补可跑数小时（pending 上限 = 当日剩余额度，10 只/批 + 60~120s 批间冷却），
-    # 而 settings 行锁在第一次 commit 就已释放，拦不住「手动首批未跑完 + 15:05 每日续跑」
-    # 的并发。本租约保证同一时刻只有一个 run（抢不到即跳过，不发请求；异常/熔断亦在
-    # finally 释放）。进程重启时由应用启动流程复位，防异常退出导致租约卡死。
-    price_backfill_running: Mapped[bool] = mapped_column(
-        Boolean,
-        nullable=False,
-        default=False,
-        server_default=false(),
-    )
-    # 历史行情回补「复权方式」：``""``（不复权，默认，与既有行为零差异）| ``qfq``（前复权）
-    # | ``hfq``（后复权）。回补抓取时作为 akshare ``stock_zh_a_hist`` 的 ``adjust`` 入参，
-    # 真正驱动历史回补（此前该参数硬编码为空串）。存量行由 server_default='' 覆盖
-    # （迁移 0022 无需回填）；值域校验在 PUT /settings 与运行时分派双重把关。
-    price_backfill_adjust: Mapped[str] = mapped_column(
-        String(8),
-        nullable=False,
-        default=PRICE_BACKFILL_ADJUST_NONE,
-        server_default=PRICE_BACKFILL_ADJUST_NONE,
     )
     # 交易日历刷新起始日期（YYYY-MM-DD）：全局设置可配，决定 refresh_trade_calendar 的
     # 窗口下限（只落该日及之后的交易日）；None = 用默认下限「去年 1 月 1 日」。

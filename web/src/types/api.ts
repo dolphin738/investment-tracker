@@ -1014,16 +1014,6 @@ type 为可选 override；不传则读取时由代码前缀推断（infer_securi
         price_source_interface_id?: string | null;
         /** Announcement Source Interface Id */
         announcement_source_interface_id?: string | null;
-        /** Price Backfill Source Interface Id */
-        price_backfill_source_interface_id?: string | null;
-        /** Price Backfill Quota */
-        price_backfill_quota?: number | null;
-        /** Price Backfill Default Start Date */
-        price_backfill_default_start_date?: string | null;
-        /** Price Backfill Mode */
-        price_backfill_mode?: string | null;
-        /** Price Backfill Adjust */
-        price_backfill_adjust?: string | null;
         /** Trade Calendar Start Date */
         trade_calendar_start_date?: string | null;
       };

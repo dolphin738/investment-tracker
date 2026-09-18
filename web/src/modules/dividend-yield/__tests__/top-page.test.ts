@@ -20,7 +20,6 @@ const fixtures = vi.hoisted(() => ({
 vi.mock('@/api/dividend-yield.api', () => ({
   getDividendYieldTop20: vi.fn(async () => fixtures.top20),
   getDividendYieldSettings: vi.fn(async () => null),
-  getDividendYieldCurve: vi.fn(),
   getDividendYieldImpliedPrice: vi.fn(),
 }));
 vi.mock('@/api/quote-interface.api', () => ({

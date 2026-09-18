@@ -65,8 +65,6 @@ def test_metadata_tables_and_enums():
         "dividend_yield_settings",
         "market_security_daily_prices",
         "market_trade_calendar",
-        # 增量，历史行情回补「严格补洞」模式的洞状态表（迁移 0021）
-        "market_price_backfill_gaps",
     } == tables
 
     enums = {

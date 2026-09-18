@@ -81,3 +81,67 @@ async def seed_security(
     )
     assert r.status_code == 200, r.text
     return r.json()["data"]["id"]
+
+
+# ---------------------------------------------------------------------------
+# 以下 helper 原位于 tests/helpers_price_backfill.py，因 price-gap 回补子系统下线而迁入此
+# 共享模块（仅保留与日线抓取 / 行情源相关的非回补专用构造器；seed_sdk_quote_source 等
+# 纯回补专用构造器随子系统一并移除）。
+# ---------------------------------------------------------------------------
+from app.models import (
+    DividendYieldSettings,
+    QuoteInterface,
+    SecuritiesDataProvider,
+    Security,
+)
+from app.models.enums import QuoteProviderAccessMethod, SecurityType
+from app.models.interface_category import InterfaceCategory
+from app.services.market_data_sync import (
+    QUOTE_CAT_ID,
+    _normalize_master_code,
+    infer_exchange,
+)
+
+import uuid
+
+
+def uid() -> str:
+    return str(uuid.uuid4())
+
+
+async def add_master(session, code="600000"):
+    """造一只「证券」主数据（code 经 ``_normalize_master_code`` 规范化）。"""
+    norm = _normalize_master_code(code, infer_exchange(code))
+    m = Security(id=uid(), code=norm, name="浦发银行", asset_class=SecurityType.STOCK)
+    session.add(m)
+    await session.flush()
+    return m
+
+
+async def seed_https_quote_source(session, *, max_codes_per_request: int = 800):
+    """造 HTTPS 行情源 + 配置表（price_source_interface_id 指向它），返回 itf。
+
+    与既有内联造法等价，抽成辅助以复用；``max_codes_per_request`` 可控批次大小
+    （置 1 即「每批 1 只」→ 便于构造「部分失败」场景）。
+    """
+    provider = SecuritiesDataProvider(
+        id=uid(), name="腾讯", access_method=QuoteProviderAccessMethod.HTTPS,
+        config={"base_url": "https://qt.gtimg.cn"}, enabled=True,
+    )
+    itf = QuoteInterface(
+        id=uid(), provider_id=provider.id, category_id=QUOTE_CAT_ID, name="腾讯",
+        endpoint="/q", http_method="GET", enabled=True, priority=1,
+        resp_code_field="代码", resp_price_field="收盘",
+        response_parse={"resp_date_field": "日期", "max_codes_per_request": max_codes_per_request},
+        params={},
+    )
+    session.add(provider)
+    await session.flush()  # 提供方先落库，接口 provider_id 外键才有归属
+    session.add(InterfaceCategory(id=QUOTE_CAT_ID, label="证券行情", system=True))
+    await session.flush()
+    session.add(itf)
+    await session.flush()
+    session.add(DividendYieldSettings(
+                                      price_source_interface_id=itf.id))
+    await session.flush()
+    return itf

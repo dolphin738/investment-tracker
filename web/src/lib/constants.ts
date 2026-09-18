@@ -54,63 +54,6 @@ export const AUTH_RETURN_KEY = 'invest:auth-return';
  */
 export const SELECT_EMPTY_VALUE = '__none__';
 
-// ===== 历史行情回补模式（与后端 PRICE_BACKFILL_MODES 对齐，迁移 0021） =====
-/**
- * ``legacy``：起点覆盖即整只跳过（只看「该证券有没有早于起点的日线行」），
- *   **中间的空洞永不回填**——存量默认，改动前的行为。
- * ``gap``：严格补洞——按交易日历逐日比对「应有交易日 vs 已有日线」，缺失的日子
- *   逐个回填（会重新抓取起点已覆盖的证券，代价是重复消耗额度）。
- * ``rebuild``：全量重抓——**忽略覆盖度**，对全部有分红记录的证券按 master_id 游标推进；
- *   且为**清空后重建**：写前先删该证券在回补区间内的既有日线，再按当前源 + 复权口径整段
- *   写入，**不留旧源/旧复权口径的数据**（源如今给不到的日期宁可空缺）。区间下限取
- *   「配置起点与该证券已有最早日期中更早者」，故早于配置起点的存量历史也会被一并重建。
- *   走完证券池即结束。
- *
- * 后端对越界值 400，前端下拉只给这三个选项，故无需再校验。
- */
-export const PRICE_BACKFILL_MODE_LEGACY = 'legacy';
-export const PRICE_BACKFILL_MODE_GAP = 'gap';
-export const PRICE_BACKFILL_MODE_REBUILD = 'rebuild';
-export const PRICE_BACKFILL_MODE_OPTIONS = [
-  {
-    value: PRICE_BACKFILL_MODE_LEGACY,
-    label: '常规（起点覆盖即跳过，不补空洞）',
-  },
-  { value: PRICE_BACKFILL_MODE_GAP, label: '严格补洞（按交易日历逐日补齐）' },
-  {
-    value: PRICE_BACKFILL_MODE_REBUILD,
-    label: '全量重抓（清空区间后重建，不留旧数据）',
-  },
-] as const;
-
-/** 模式短标签（用于「当前模式：X」等展示位，避免长说明文案重复） */
-export const PRICE_BACKFILL_MODE_SHORT_LABEL: Record<string, string> = {
-  [PRICE_BACKFILL_MODE_LEGACY]: '常规',
-  [PRICE_BACKFILL_MODE_GAP]: '严格补洞',
-  [PRICE_BACKFILL_MODE_REBUILD]: '全量重抓',
-};
-
-// ===== 历史行情回补「复权方式」（与后端 PRICE_BACKFILL_ADJUSTS 对齐，迁移 0022） =====
-/**
- * 回补抓取传给 akshare ``stock_zh_a_hist`` 的 ``adjust`` 入参：
- * - 不复权（默认，``''``）：原始成交价（含除权跳空），与既有行为零差异；
- * - 前复权（``qfq``）：保持当前价、历史价时变；
- * - 后复权（``hfq``）：保持历史价、反映长期真实收益。
- *
- * ⚠️ reka-ui ``<SelectItem />`` 禁止 ``value=""``（空串），故「不复权」在 UI 用
- * ``SELECT_EMPTY_VALUE`` 哨兵表示，表单内部仍存服务端值（``''``），做双向映射。
- *
- * 后端对越界值 400，前端下拉只给这三项，故无需再校验。
- */
-export const PRICE_BACKFILL_ADJUST_NONE = '';
-export const PRICE_BACKFILL_ADJUST_QFQ = 'qfq';
-export const PRICE_BACKFILL_ADJUST_HFQ = 'hfq';
-export const PRICE_BACKFILL_ADJUST_OPTIONS = [
-  { value: PRICE_BACKFILL_ADJUST_NONE, label: '不复权（默认）' },
-  { value: PRICE_BACKFILL_ADJUST_QFQ, label: '前复权' },
-  { value: PRICE_BACKFILL_ADJUST_HFQ, label: '后复权' },
-] as const;
-
 // ===== 查询维度选项（用于 UI 下拉/Tab） =====
 export const GRANULARITY_OPTIONS = [
   { value: 'day', label: '按日' },

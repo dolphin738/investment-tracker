@@ -20,7 +20,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision: str = "0019_add_trade_calendar_refresh_task"
-down_revision: str | None = "0018_add_price_backfill_last_error"
+down_revision: str | None = "0015_remove_special_backfill_task"
 branch_labels = None  # type: ignore[attr-defined]
 depends_on = None  # type: ignore[attr-defined]
 
