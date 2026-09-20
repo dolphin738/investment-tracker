@@ -2195,31 +2195,6 @@
         ]
       }
     },
-    "/api/dividend-yield/backfill-specials": {
-      "post": {
-        "tags": [
-          "dividend-yield"
-        ],
-        "summary": "Backfill Special Dividends",
-        "description": "手动触发特别分红历史回补（§6.9；admin-only）。\n\n直接 fire-and-forget 调起服务函数（不再依赖迁移 0011 种子的系统任务），\n长耗时（12~25 分钟）不阻塞请求；进度与结果经应用日志查看。",
-        "operationId": "backfill_special_dividends_api_dividend_yield_backfill_specials_post",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "JWT-auth": []
-          }
-        ]
-      }
-    },
     "/api/dividend-yield/rankings": {
       "get": {
         "tags": [

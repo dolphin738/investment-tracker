@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import date
 from decimal import Decimal
 from typing import Any, Optional
 
@@ -70,9 +69,6 @@ _TITLE_CANCEL_RE = re.compile(r"取消|终止")
 # 东财公告 SDK（stock_notice_report）的公告标题列：展示字段（无 slot，不参与同步
 # 契约），仅作标题二筛取值来源；代码列已收敛到 response_fields 的 code 槽。
 _COL_NOTICE_TITLE = "公告标题"
-
-# 特别分红历史回补窗口（§6.9）：与 §6.3 留存窗口一致，保留最近 5 个财年
-_BACKFILL_YEARS = 5
 
 logger = logging.getLogger(__name__)
 
@@ -529,30 +525,6 @@ class DividendNoticeScanService:
             r.status = DividendStatus.REJECTED
         return len(rows)
 
-    # ------------------------------------------------------------------ #
-    # 特别分红历史回补（§6.9）：整段删除属 P2 批次（§4.1），此处保留符号以维持路由 /
-    # 任务接线，实现改为 fail fast —— 其数据源（新浪 stock_history_dividend_detail）
-    # 已随 §5 下线，若继续按新浪列名解析巨潮响应会静默「新写 0 行」，把「源已失效」
-    # 伪装成「无数据」。历史补齐改由巨潮播种路径（§5.7 seed_initial_dividends）承担。
-    # ------------------------------------------------------------------ #
-    async def backfill_specials(self, cfg: Any) -> str:
-        """特别分红历史回补：已随新浪明细源下线，fail fast（P2 整段删除）。"""
-        raise RuntimeError(
-            "特别分红历史回补（§6.9）已随新浪明细源下线：历史补齐改由巨潮播种路径"
-            "（§5.7 seed_initial_dividends）承担，本路径在 P2 批次整段删除"
-        )
-
-    async def _backfill_one(
-        self,
-        mid: str,
-        code: str,
-        detail: QuoteInterface,
-        today: date,
-        cutoff_year: int,
-        stats: dict,
-    ) -> bool:
-        """单只证券回补：已随新浪明细源下线，fail fast（P2 整段删除）。"""
-        raise RuntimeError("特别分红历史回补已下线：_backfill_one 不再可用（P2 整段删除）")
 
 
 async def run_dividend_notice_scan(cfg: Any) -> str:
@@ -561,15 +533,5 @@ async def run_dividend_notice_scan(cfg: Any) -> str:
 
     async with AsyncSessionLocal() as session:
         result = await DividendNoticeScanService(session).scan(cfg)
-        await session.commit()
-    return result
-
-
-async def run_dividend_special_backfill(cfg: Any) -> str:
-    """模块级 handler：特别分红历史回补（§6.9，P2 删除前保留接线）。"""
-    from app.db.database import AsyncSessionLocal
-
-    async with AsyncSessionLocal() as session:
-        result = await DividendNoticeScanService(session).backfill_specials(cfg)
         await session.commit()
     return result

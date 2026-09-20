@@ -176,10 +176,11 @@ class DividendSeedService:
 async def run_dividend_seed(cfg: Any) -> str:
     """模块级 handler：首跑播种（§5.7）。
 
-    会话建立写法与同仓库既有 handler 一致（``run_dividend_special_backfill`` /
-    ``run_dividend_yield_rebuild``）：handler 内部自建 ``AsyncSessionLocal``，
-    使后台执行的播种与请求会话完全隔离；``AsyncSessionLocal`` 在函数内 import，
-    避免装配期就把数据库引擎拉起（模块被 router 侧导入时亦然）。
+    会话建立写法与同仓库既有 handler 一致（``run_dividend_yield_rebuild`` 等同仓储
+    handler）：handler 内部自建 ``AsyncSessionLocal``，使后台执行的播种与请求会话完全
+    隔离；``AsyncSessionLocal`` 在函数内 import，避免装配期就把数据库引擎拉起（模块被
+    router 侧导入时亦然）。播种路径已取代旧特别分红回补 handler（原
+    ``run_dividend_special_backfill`` 在 P1 清理批次中已删除）。
 
     **不注册 JobType、不进 scheduler 的 ``_HANDLERS``、不开机自启**（§9.3-A7）：
     全市场约 19 小时且本质是一次性冷启动动作，进定时会每天重跑并打满

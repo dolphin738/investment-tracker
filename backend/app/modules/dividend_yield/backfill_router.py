@@ -1,7 +1,7 @@
 """股息率手工触发端点（方案 §9，阶段 4；自 router.py 拆分而来）。
 
-承载三类手动触发端点：全量重建 ``/rebuild``、特别分红回补 ``/backfill-specials``
-（P1 删除前保留并存）、全市场历史分红首跑播种 ``/seed-initial-dividends``。
+承载两类手动触发端点：全量重建 ``/rebuild``、全市场历史分红首跑播种
+``/seed-initial-dividends``。
 
 口径/校验复用 services 纯函数与 helper，本模块仅编排触发与后台任务托管。
 """
@@ -43,44 +43,6 @@ async def rebuild_dividend_yield(
         user_id=admin.user_id,
     )
     return {"summary": summary}
-
-
-# --------------------------------------------------------------------------- #
-# 特别分红历史回补（§6.9，冷启动一次性；异步后台执行、立即返回）
-# --------------------------------------------------------------------------- #
-async def _run_special_backfill() -> None:
-    """后台执行特别分红历史回补（独立会话，fire-and-forget，异步后台执行）。
-
-    直接复用 services 的 ``run_dividend_special_backfill(None)``（内部自建会话），
-    此处仅包裹为后台任务并持有强引用防 GC 回收。按钮版取代了原系统定时任务，
-    故不再依赖迁移 0011 种子的系统任务行。
-    """
-    from app.services.dividend_notice_scan import run_dividend_special_backfill
-
-    await run_dividend_special_backfill(None)
-
-
-@router_backfill.post("/backfill-specials")
-async def backfill_special_dividends(
-    admin: CurrentUser = Depends(require_admin),
-):
-    """手动触发特别分红历史回补（§6.9；admin-only）。
-
-    直接 fire-and-forget 调起服务函数（不再依赖迁移 0011 种子的系统任务），
-    长耗时（12~25 分钟）不阻塞请求；进度与结果经应用日志查看。
-    """
-    # fire-and-forget：立即返回，任务在后台执行
-    track_task(asyncio.create_task(_run_special_backfill()))
-    await record(
-        level="info",
-        scope="admin",
-        module="dividend_special_backfill",
-        message="特别分红历史回补（手动触发，异步后台执行）",
-        user_id=admin.user_id,
-    )
-    return {
-        "message": "已触发特别分红历史回补，后台执行中；进度见应用日志",
-    }
 
 
 # --------------------------------------------------------------------------- #
