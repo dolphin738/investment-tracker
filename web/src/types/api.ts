@@ -27,11 +27,6 @@ export interface components {
         accessToken: string;
         user: components['schemas']['UserPublicOut'];
       };
-    /** 回补请求体：起点日期（ISO YYYY-MM-DD，必填）。 */
-    BackfillPricesBody: {
-        /** Start Date */
-        start_date: string;
-      };
     /** Body_import_preview_api_portfolios__portfolio_id__import_preview_post */
     Body_import_preview_api_portfolios__portfolio_id__import_preview_post: {
         type: components['schemas']['ImportType'];

@@ -1344,7 +1344,7 @@
           "admin"
         ],
         "summary": "Security Master Stats",
-        "description": "系统级证券主数据按资产类别统计条数（公共字典统计，任意登录用户可读）。\n\n返回 ``{counts: {资产类别: 条数}}``；主数据行 asset_class 为 NULL 时归入\n``UNCATEGORIZED``（未分类）以便前端与统一中文标签对齐。",
+        "description": "系统级证券主数据按资产类别统计条数（仅管理员可读，与 StockListPanel 管理页配套）。\n\n返回 ``{counts: {资产类别: 条数}}``；主数据行 asset_class 为 NULL 时归入\n``UNCATEGORIZED``（未分类）以便前端与统一中文标签对齐。",
         "operationId": "security_master_stats_api_admin_securities_masters_stats_get",
         "responses": {
           "200": {
@@ -2195,74 +2195,6 @@
         ]
       }
     },
-    "/api/dividend-yield/backfill-prices": {
-      "post": {
-        "tags": [
-          "dividend-yield"
-        ],
-        "summary": "Backfill Prices",
-        "description": "手动触发历史行情回补（路线 B 形态 A；admin-only，fire-and-forget 在途任务）。\n\n行为变更（形态 A）：写入 ``price_backfill_start_date``（= 启动在途任务），立即跑第一批\n（run_pending_price_backfill，独立会话），补完自动停止、清状态。每日「收盘价抓取」任务\n完成后若存在在途任务会按每日额度续跑。\n\n保留既有 400 防线：未配置接口 / 接口不存在 / 非 sdk 接入方式；``price_backfill_start_date``\n不由 PUT 设置（服务端管理，避免状态不一致）。回补长耗时，故异步后台执行、立即返回，\n进度见应用日志。响应 ``security_count`` 语义改为「本批将处理的只数」（≤ 每日额度，\n不再是全池数）。\n\n**额度按自然日消耗**：同日的手动触发与每日「收盘价抓取」续跑共享 ``price_backfill_quota``，\n已用只数记在 ``price_backfill_used_today``（跨日自动归零）。余额 ≤ 0 时本端点 400，\n避免触发一个注定空跑的批次。\n\n**在途护栏（M-1）**：已有在途任务（``price_backfill_start_date`` 非空）时拒绝再次启动。\n前端会把按钮置灰，但那只是 UX 层——多标签页/多管理员/直接 curl 都能绕过，\n故本校验是唯一真正的护栏。取消请走 ``DELETE /backfill-prices``。\n\n**响应 ``security_count`` 为估算值**：本批名单在请求会话内算出，后台任务用独立会话\n重新选取，两者非原子，极端情况下与实际处理只数可能有偏差。",
-        "operationId": "backfill_prices_api_dividend_yield_backfill_prices_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/BackfillPricesBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "JWT-auth": []
-          }
-        ]
-      },
-      "delete": {
-        "tags": [
-          "dividend-yield"
-        ],
-        "summary": "Cancel Price Backfill",
-        "description": "取消在途的历史行情回补（admin-only）：清空 ``price_backfill_start_date``。\n\n为什么需要本端点：在途标记由服务端管理（PUT /settings 不接受该字段），\n而 ``run_pending_price_backfill`` 仅在「选出 0 只」时才自动清标记。\n若数据源持续不可达，熔断会每天触发却永远清不掉标记 → 任务无限期在途、\n每天白烧额度，而 admin 无任何 API 手段停止（只能直接改库）。\n\n有了取消，「已有在途任务」的 400 与前端置灰才不会把人锁死，形成闭环：\n进行中 → 取消 → 重新填起点触发。\n\n**取消语义（协作式，迁移 0024）**：本端点清在途标记 + **清世代标记**\n（``price_backfill_run_token`` → NULL）。正在运行的批次会在下一个取消检查点\n（每只证券开始前 / 退避 sleep 之后 / 批间冷却分片之间）察觉并**优雅中止**：\n不再抓取剩余证券，已写入的日线行一律保留（upsert 幂等，重跑自动跳过已覆盖证券）。\n此后每日收盘价抓取因在途标记已空而不再续跑。\n\n诚实边界：若此刻正卡在某一只的抓取里（``asyncio.to_thread`` 内的同步 HTTP 无法被\nasyncio 取消），这一只会跑完（≤ ``_BACKFILL_FETCH_TIMEOUT`` 秒）后才中止；\n另注：本端点**不释放执行租约**（``price_backfill_running``）——它仍由中止中的\n那个 run 在自己的 ``finally`` 里释放，避免此处释放后另一个 run 立刻插进来并发。\n\n**同时清空严格补洞状态**：与清在途标记**同一事务**清空 ``market_price_backfill_gaps``\n（旧洞随取消一并失效、须由下次触发重建；也顺带重置 exhausted 状态）。\n⚠️ 清空仅限本端点与 ``POST /backfill-prices`` 两处；续跑链路**绝不**清空。",
-        "operationId": "cancel_price_backfill_api_dividend_yield_backfill_prices_delete",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "JWT-auth": []
-          }
-        ]
-      }
-    },
     "/api/dividend-yield/backfill-specials": {
       "post": {
         "tags": [
@@ -2469,6 +2401,31 @@
         ]
       }
     },
+    "/api/dividend-yield/seed-initial-dividends": {
+      "post": {
+        "tags": [
+          "dividend-yield"
+        ],
+        "summary": "Seed Initial Dividends",
+        "description": "手动触发全市场历史分红播种（§5.7；admin-only）。\n\n遍历全市场约 11430 只，并按 rate_limit 串行逐只调巨潮，长耗时（约 19 小时）故\nfire-and-forget 立即返回；支持断点续跑（按「当前明细源 + 近 5 年」判定已覆盖者\n跳过），中途失败重跑会自动续跑。进度与结果经应用日志查看。",
+        "operationId": "seed_initial_dividends_api_dividend_yield_seed_initial_dividends_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ]
+      }
+    },
     "/api/dividend-yield/settings": {
       "get": {
         "tags": [
@@ -2562,71 +2519,13 @@
         ]
       }
     },
-    "/api/dividend-yield/{master_id}/curve": {
-      "get": {
-        "tags": [
-          "dividend-yield"
-        ],
-        "summary": "Curve Dividend Yield",
-        "description": "单证券每日股息率曲线（§9 逐点现算；末点 == 快照值由纯函数保证）。",
-        "operationId": "curve_dividend_yield_api_dividend_yield__master_id__curve_get",
-        "security": [
-          {
-            "JWT-auth": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "master_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Master Id"
-            }
-          },
-          {
-            "name": "days",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "maximum": 3650,
-              "minimum": 1,
-              "default": 365,
-              "title": "Days"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/dividend-yield/{master_id}/dividends": {
       "get": {
         "tags": [
           "dividend-yield"
         ],
         "summary": "List Security Dividends",
-        "description": "单证券分红明细（按报告期，供详情面板展示）。\n\n只列**有分红**的期次（``cash_per_share > 0``），按报告期倒序：\n- ``periodLabel``：2025年报 / 2025半年报 / 2025三季报 / 2023特别分配（§5.1 命名）；\n- ``planLabel``：每股金额折算回源站口径「10派X元」。\n\n契约：证券不存在时返回 **200 + 空 items**（不 404）——与 ``/curve`` 的存在性校验**有意不同**：\n本端点语义是「该标的有哪些分红」，无记录与无标的是同一展示结果（面板只在已有榜单行上打开）。",
+        "description": "单证券分红明细（按报告期，供详情面板展示）。\n\n只列**有分红**的期次（``cash_per_share > 0``），按报告期倒序：\n- ``periodLabel``：2025年报 / 2025半年报 / 2025三季报 / 2023特别分配（§5.1 命名）；\n- ``planLabel``：每股金额折算回源站口径「10派X元」。\n\n契约：证券不存在时返回 **200 + 空 items**（不 404）：\n本端点语义是「该标的有哪些分红」，无记录与无标的是同一展示结果（面板只在已有榜单行上打开）。",
         "operationId": "list_security_dividends_api_dividend_yield__master_id__dividends_get",
         "security": [
           {
@@ -7138,21 +7037,6 @@
         ],
         "title": "AuthTokenOut"
       },
-      "BackfillPricesBody": {
-        "properties": {
-          "start_date": {
-            "type": "string",
-            "format": "date",
-            "title": "Start Date"
-          }
-        },
-        "type": "object",
-        "required": [
-          "start_date"
-        ],
-        "title": "BackfillPricesBody",
-        "description": "回补请求体：起点日期（ISO YYYY-MM-DD，必填）。"
-      },
       "Body_import_preview_api_portfolios__portfolio_id__import_preview_post": {
         "properties": {
           "type": {
@@ -10754,62 +10638,6 @@
               }
             ],
             "title": "Announcement Source Interface Id"
-          },
-          "price_backfill_source_interface_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Price Backfill Source Interface Id"
-          },
-          "price_backfill_quota": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Price Backfill Quota"
-          },
-          "price_backfill_default_start_date": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Price Backfill Default Start Date"
-          },
-          "price_backfill_mode": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Price Backfill Mode"
-          },
-          "price_backfill_adjust": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Price Backfill Adjust"
           },
           "trade_calendar_start_date": {
             "anyOf": [
