@@ -90,6 +90,14 @@ class SecurityDividend(Base, TimestampMixin):
     record_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     # 来源接口名（不采信东财股息率，仅作附注）
     source: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    # 每股送股比例（送红股）：源站口径为「每 10 股送 X 股」，落库时已除以 10 折算为每股，
+    # 与 cash_per_share 的单位口径保持一致；巨潮无值或空/NaN 时为 NULL。
+    bonus_share_ratio: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(18, 6), nullable=True
+    )
+    # 每股转增比例（资本公积转增股本）：源站口径为「每 10 股转 X 股」，落库时已除以 10
+    # 折算为每股；巨潮无值或空/NaN 时为 NULL。用途见方案 §5.3.1（除权复权重述因子）。
+    convert_ratio: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 6), nullable=True)
 
 
 class MarketSecurityDailyPrice(Base, CreatedAtMixin):

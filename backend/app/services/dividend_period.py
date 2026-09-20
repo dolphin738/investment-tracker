@@ -7,12 +7,24 @@
 from __future__ import annotations
 
 import calendar
+import re
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Any, Optional
 
 # 报告期 → 季度（§6.1：0331 Q1 / 0630 Q2 / 0930 Q3 / 1231 Q4）
 _PERIOD_QUARTER = {3: 1, 6: 2, 9: 3, 12: 4}
+
+# 巨潮「报告时间」的中文报告期名 → 季度（「年」字可选：2024年报 / 2024年报 同形）
+_CN_PERIOD_QUARTER = {
+    "年报": 4,
+    "半年报": 2,
+    "一季报": 1,
+    "二季报": 2,
+    "三季报": 3,
+    "四季报": 4,
+}
+_CN_PERIOD_RE = re.compile(r"^(\d{4})\s*年?\s*(年报|半年报|[一二三四]季报)$")
 
 
 def parse_report_period(raw: Any) -> Optional[tuple[int, int]]:
@@ -28,6 +40,46 @@ def parse_report_period(raw: Any) -> Optional[tuple[int, int]]:
     except (ValueError, TypeError):
         return None
     quarter = _PERIOD_QUARTER.get(mm)
+    if quarter is None or year <= 0:
+        return None
+    return year, quarter
+
+
+def parse_report_period_cn(raw: Any) -> Optional[tuple[int, int]]:
+    """巨潮「报告时间」→ (report_year, report_quarter)；无法解析返回 None（跳行）。
+
+    与 ``parse_report_period``（东财 ``YYYYMM`` 前 6 位口径，被 dividend_sync 消费）
+    语义不同，**不可互换**。本函数兼容两类形态：
+
+    1. 中文报告期名（巨潮主形态）：「2024年报」→ (2024, 4)、「2025半年报」→ (2025, 2)、
+       「2024一季报」→ (2024, 1)、「2024三季报」→ (2024, 3)；「年」字可选。
+    2. 日期形态（兼容/兜底他源）：「2024-12-31」「20241231」「2024年12月31日」——
+       统一剥离非数字后取前 4 位为年、第 5~6 位为月，月按 ``_PERIOD_QUARTER``
+       映射季度（3/6/9/12 月 → 1/2/3/4 季）。
+
+    无法解析（None / 空串 / 长度不足 / 非法数字 / 月份不在季度末月 / 年份非正）→ None。
+    """
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    if not s:
+        return None
+    m = _CN_PERIOD_RE.match(s)
+    if m is not None:
+        year = int(m.group(1))
+        quarter = _CN_PERIOD_QUARTER.get(m.group(2))
+        if quarter is None or year <= 0:
+            return None
+        return year, quarter
+    digits = re.sub(r"\D", "", s)
+    if len(digits) < 6:
+        return None
+    try:
+        year = int(digits[:4])
+        month = int(digits[4:6])
+    except (ValueError, TypeError):
+        return None
+    quarter = _PERIOD_QUARTER.get(month)
     if quarter is None or year <= 0:
         return None
     return year, quarter

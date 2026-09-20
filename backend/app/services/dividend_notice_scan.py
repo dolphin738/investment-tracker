@@ -1,29 +1,32 @@
-"""每日公告扫描与特别分红补充服务（方案 §6.8，系统任务 DIVIDEND_NOTICE_SCAN）。
+"""每日公告扫描与巨潮历史分红采集服务（方案 §5，系统任务 DIVIDEND_NOTICE_SCAN）。
 
-东财按报告期接口（§6.1）系统性遗漏「无报告期归属的特别分红」（茅台实证，附录 A.6）。
-本服务用分类 4「沪深京 A 股公告」接口（SDK ``stock_notice_report``）按自然日扫描标题，
-发现候选特别分红后经补充源（settings.``dividend_detail_source_interface_id``，新浪
-``stock_history_dividend_detail``）逐只补充金额与实施事实，写入 SPECIAL 分红行。
+链路（§5.2）：分类 4 公告接口按自然日拉全市场公告 → 标题二筛得命中证券 → 按纯数字
+``symbol`` 调分类 3 明细源（巨潮 ``stock_dividend_cninfo``，由 settings.
+``dividend_detail_source_interface_id`` 配置）拉该股**全历史**分红 → 逐行映射
+（``dividend_cninfo_parse``）→ 真 5 年裁剪 → 按唯一键
+``(master_id, report_year, report_quarter, period_type)`` upsert。
 
-忠实实现 §6.8，不重写行情请求：
-- 公告源可配置化（§5.4/§6.8）：优先读全局配置 ``announcement_source_interface_id``
-  （存在性 + 分类 4 + enabled 三重校验，fail closed 不静默回退）；未配置时回退分类 4
-  enabled 接口按 priority 升序首个（``_interfaces_for_category``）。``symbol=财务报告``
-  一级分类预过滤，**不得**按公告类型列过滤；公告接口缺失/停用 → fail fast raise。
-- 标题正则二筛白名单 = 代码常量（``_TITLE_*_RE``），改模式须补单测。
-- 新浪逐只补充 = 复用 ``call_interface_raw``（串行 + ``_RATE_LIMITER`` 限速）。
-- SPECIAL 写入 = 西向去重 + PROPOSED→PAID + 取消置 REJECTED + 存量复查（§6.8 双向去重）。
-- 按证券独立 commit；单证券失败 rollback 续下一只（断点即数据本身）；变更集重算。
-  **注意**：``rollback()`` 会 expire 会话内全部 ORM 实例，故循环外解析的补充源
-  ``detail`` 在失败后必须重新解析（``_re_resolve_detail_after_rollback``），否则
-  后续证券读取 ``detail.params`` 会触发同步惰性加载 → MissingGreenlet 连锁失败。
+要点：
+- 公告源可配置化（§5.4）：读 ``announcement_source_interface_id``（存在性 + 分类 4
+  + enabled 三重校验，fail closed 不静默回退）；未配置回退分类 4 priority 升序首个。
+  ``symbol=财务报告`` 一级预过滤，**不得**按公告类型列过滤；缺失/停用 → fail fast。
+- 标题二筛白名单 = 代码常量（``_TITLE_*_RE``），改模式须补单测。§5.5 起候选放宽为
+  「命中分红正则 ∧ 非 cancel」（旧口径要求含「特别|中期」，会漏掉普通年度分红）。
+- 巨潮逐只调用复用 ``call_interface_raw``（串行 + 限流）；响应无代码列，证券代码取
+  自参数 ``code``（与旧新浪路径口径一致）。
+- upsert = 先按唯一键定位（命中即更新）→ 未命中经 ``_westward_dup`` 护栏后插入；
+  取消公告把该 master 的 PROPOSED 行置 REJECTED。
+- 按证券独立 commit；单只失败 rollback 续下一只（断点即数据本身）；变更集重算。
+  **注意**：``rollback()`` 会 expire 会话内全部 ORM 实例，故失败后必须重新解析
+  ``detail``（``_re_resolve_detail_after_rollback``），否则下一只读 ``detail.params``
+  会触发同步惰性加载 → MissingGreenlet 连锁失败。
 """
 from __future__ import annotations
 
 import logging
 import re
 from datetime import date
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from typing import Any, Optional
 
 from sqlalchemy import select
@@ -37,7 +40,11 @@ from app.models import (
     SecurityDividend,
 )
 from app.models.enums import DividendStatus, ReportPeriodType
-from app.core.date_utils import parse_date
+from app.services.dividend_cninfo_parse import (
+    CninfoDividendRow,
+    parse_cninfo_row,
+    retention_cutoff_year,
+)
 from app.services.dividend_yield_refresh import refresh_yields_for_masters
 from app.services.market_data_sync import (
     DIVIDEND_LIST_CAT_ID,
@@ -53,26 +60,16 @@ from app.services.response_fields import (
     resolve_fields,
 )
 
-# —— 标题正则二筛白名单（§6.8 第二步；改模式须补单测，禁止删改关键词）——
+# —— 标题正则二筛白名单（§5.5；改模式须补单测，禁止删改关键词）——
 _TITLE_DIVIDEND_RE = re.compile(r"分红|派息|权益分派|利润分配|分配方案")
+# 「特别|中期」：§5.5 起**不再**作为候选二筛（会漏掉普通年度分红公告），仅保留作
+# period_type 兜底提示——标题含「中期」而巨潮「分红类型」未收录时，可据此提示 INTERIM。
 _TITLE_SPECIAL_RE = re.compile(r"特别|中期")
 _TITLE_CANCEL_RE = re.compile(r"取消|终止")
 
-# 东财公告 SDK（stock_notice_report）列名（见 akshare stock_notice.py）
-# - 代码列（「代码」）已收敛到 app.services.response_fields：由 resolve_fields 的
-#   code 槽合成时统一尝试，公告行不再直接硬编码该列名。
-# - 公告标题为**展示字段**（无 slot，不参与同步契约），6 个消费点不消费其语义；
-#   此处保留历史列名作为标题二筛的取值来源（方案 §5.2）。
+# 东财公告 SDK（stock_notice_report）的公告标题列：展示字段（无 slot，不参与同步
+# 契约），仅作标题二筛取值来源；代码列已收敛到 response_fields 的 code 槽。
 _COL_NOTICE_TITLE = "公告标题"
-# 新浪分红 SDK（stock_history_dividend_detail）列名（见 akshare stock_finance_sina.py）
-# 注意：该接口**逐只查询**（代码由请求 params.symbol 传入），响应只有下列 4 个业务列
-# （公告日期/送股/转增/派息/进度/除权除息日/股权登记日/红股上市日），**不含代码列**。
-# 因此本模块解析新浪行一律走下列硬编码常量，**不读该接口的代码槽配置**——
-# 该行配置（seed 遗留）与源站无对应列，纯属历史占位，勿据此取值。
-_COL_SINA_ANN = "公告日期"
-_COL_SINA_CASH = "派息"
-_COL_SINA_PROGRESS = "进度"
-_COL_SINA_EXDATE = "除权除息日"
 
 # 特别分红历史回补窗口（§6.9）：与 §6.3 留存窗口一致，保留最近 5 个财年
 _BACKFILL_YEARS = 5
@@ -80,33 +77,13 @@ _BACKFILL_YEARS = 5
 logger = logging.getLogger(__name__)
 
 
-def _anchor(ann: date) -> tuple[int, int]:
-    """公告日期 → (report_year, report_quarter)：'SPECIAL 落格锚点'（§2.1 决策 A6）。
-
-    年 = 公告年；季 = 公告月份所在日历季度（``ceil(月/3)``）。
-    """
-    return ann.year, (ann.month - 1) // 3 + 1
-
-
-def _sina_cash(raw: Any) -> Optional[Decimal]:
-    """新浪 '派息'（每 10 股派 X 元）→ 每股金额（÷10）。
-
-    ``Decimal('NaN')`` 是合法构造（上游缺失金额可能返回 "NaN"/"nan" 等形态），
-    须显式判 ``is_nan`` 归为 None，避免 NaN 落库污染快照。
-    """
-    if raw in (None, "", "-", "nan", "None"):
-        return None
-    try:
-        d = Decimal(str(raw).strip())
-        if d.is_nan():
-            return None
-        return d / Decimal("10")
-    except (InvalidOperation, ValueError, TypeError):
-        return None
+def _bump(stats: dict, key: str, n: int = 1) -> None:
+    """统计计数累加（键缺失按 0 起算，兼容调用方自带的精简键集）。"""
+    stats[key] = stats.get(key, 0) + n
 
 
 class DividendNoticeScanService:
-    """公告扫描 + 特别分红补充（复用 market_data_sync 既有分派机制）。"""
+    """公告扫描 + 巨潮历史分红采集（复用 market_data_sync 既有分派机制）。"""
 
     def __init__(self, session) -> None:
         self.session = session
@@ -126,7 +103,7 @@ class DividendNoticeScanService:
     async def _resolve_detail_itf(
         self, settings: Optional[DividendYieldSettings]
     ) -> Optional[QuoteInterface]:
-        """解析补充源：存在性 + 分类 3 + 接口/提供方 enabled 校验；失败返回 None（记告警跳过）。"""
+        """解析明细源：存在性 + 分类 3 + 接口/提供方 enabled 校验；失败返回 None（记告警跳过）。"""
         iid = settings.dividend_detail_source_interface_id if settings else None
         if not iid:
             return None
@@ -141,71 +118,57 @@ class DividendNoticeScanService:
         return itf
 
     async def _re_resolve_detail_after_rollback(self) -> QuoteInterface:
-        """``rollback()`` 之后重新解析补充源（§6.8/§6.9「失败续下一只」的前置条件）。
+        """``rollback()`` 之后重新解析明细源（§5.2「失败续下一只」的前置条件）。
 
-        ``Session.rollback()`` 在有活动事务时会 expire 会话内**全部** ORM 实例
-        （这与 ``expire_on_commit=False`` 无关，无活动事务时为空操作不触发 expire）。
-        随之过期，下一只证券再读 ``detail.params`` / ``detail.name`` 会触发**同步**
-        惰性加载 → ``MissingGreenlet: greenlet_spawn has not been called``；该异常被
-        单证券 ``except Exception`` 吞掉计入失败 → 再次 ``rollback()`` → 其后**每一只**
-        证券连锁失败，「失败续下一只」的容错形同虚设（全量 4609 只串行时几乎必然触发）。
+        ``Session.rollback()`` 在有活动事务时会 expire 会话内**全部** ORM 实例（与
+        ``expire_on_commit=False`` 无关，无活动事务时为空操作）。随之过期后，下一只
+        再读 ``detail.params`` / ``detail.name`` 会触发**同步**惰性加载 →
+        ``MissingGreenlet``；该异常被单证券 ``except Exception`` 吞掉计入失败 → 再次
+        ``rollback()`` → 其后**每一只**连锁失败，「失败续下一只」形同虚设（4609 只
+        串行时几乎必然触发）。故失败路径必须重新解析（仅失败路径，避免无谓查询）。
 
-        故失败路径必须重新解析补充源。仅在失败路径重解析（而非每只都解析），避免为
-        4609 只引入同等数量的无谓查询。
-
-        重解析为 ``None``（补充源在执行过程中被停用/删除/提供方停用）→ **fail fast
-        raise**：否则「补充源失效」会被伪装成「每只都失败」，掩盖真实原因。
+        重解析为 ``None``（明细源执行中被停用/删除/提供方停用）→ **fail fast raise**：
+        否则「源失效」会被伪装成「每只都失败」，掩盖真实原因。
 
         Raises:
-            RuntimeError: 补充源在本次执行过程中变为不可用。
+            RuntimeError: 明细源在本次执行过程中变为不可用。
         """
         fresh = await self._resolve_detail_itf(await self._settings())
         if fresh is None:
             raise RuntimeError(
-                "补充源（新浪历史分红明细）在本次执行过程中变为不可用"
+                "明细源（巨潮历史分红）在本次执行过程中变为不可用"
                 "（接口被停用/删除、分类不符或提供方被停用），fail fast 终止："
-                "剩余证券无法继续逐只补充"
+                "剩余证券无法继续逐只采集"
             )
         return fresh
 
     async def _reresolve_detail_safe(self, idx: int, total: int) -> Optional[QuoteInterface]:
-        """失败后重解析补充源（L-3 韧性）。
+        """失败后重解析明细源（L-3 韧性）。
 
-        区分两类失败：
         - **真失效**：``_re_resolve_detail_after_rollback`` 抛 ``RuntimeError("…变为不可用")``
-          （补充源在执行中被停用/删除）→ 原样 raise，fail fast 终止（否则「源失效」被伪装成
-          「每只都失败」，掩盖真实原因）。
-        - **过程异常**：重解析本身抛其它异常（如 DB 瞬时抖动）→ 记日志返回 ``None``，
-          调用方据此按失败续下一只，**不终止整轮**——已提交部分保留，剩余证券在 DB 恢复后
-          经下一轮重解析自愈（避免一次抖动即前功尽弃）。
+          → 原样 raise，fail fast 终止（否则「源失效」被伪装成「每只都失败」）。
+        - **过程异常**：重解析本身抛其它异常（DB 瞬时抖动）→ 记日志返回 ``None``，
+          按失败续下一只，**不终止整轮**——剩余证券在 DB 恢复后经下一轮自愈。
         """
         try:
             return await self._re_resolve_detail_after_rollback()
-        except RuntimeError as e:
-            if "变为不可用" in str(e):
+        except Exception as e:
+            if isinstance(e, RuntimeError) and "变为不可用" in str(e):
                 raise
             logger.warning(
-                "回补/扫描第 %d/%d 只重解析补充源过程异常（按失败续下一只）：%s",
-                idx, total, e,
-            )
-            return None
-        except Exception as e:  # 过程异常兜底（DB 瞬时抖动等）
-            logger.warning(
-                "回补/扫描第 %d/%d 只重解析补充源过程异常（按失败续下一只）：%s",
-                idx, total, e,
+                "扫描第 %d/%d 只重解析明细源过程异常（按失败续下一只）：%s", idx, total, e,
             )
             return None
 
     async def _resolve_notice_itf(
         self, settings: Optional[DividendYieldSettings]
     ) -> QuoteInterface:
-        """解析公告源（§5.4 可配置化）：优先读全局配置，未配置回退分类 4 priority 最小。
+        """解析公告源（§5.4）：优先读全局配置，未配置回退分类 4 priority 最小。
 
         - 配置了 ``announcement_source_interface_id``：校验（存在性 + 分类 4 + 接口/
           提供方 enabled），任一不符 → fail fast raise，**不静默回退**——把失效/非公告
           接口悄悄换成其他分类 4 接口会掩盖配置错误（§5.4 fail closed 口径）。
-        - 未配置：回退分类 4 enabled 接口按 priority 升序首个（``_interfaces_for_category``
-          已按 priority 排序并连表过滤提供方 enabled）；分类 4 无可用接口 → fail fast raise。
+        - 未配置：回退分类 4 enabled 接口按 priority 升序首个；无可用接口 → fail fast。
         """
         iid = settings.announcement_source_interface_id if settings else None
         if iid:
@@ -226,29 +189,26 @@ class DividendNoticeScanService:
         return notice_itfs[0]
 
     async def scan(self, cfg: Any) -> str:
-        """每日公告扫描 + 特别分红补充（§6.8 全流程）。"""
+        """每日公告扫描 + 巨潮历史分红采集（§5 全流程）。"""
         day = today_app_tz()
-        # 第一步：公告源 = 全局配置 announcement_source_interface_id（§5.4 可配置化），
-        # 未配置回退分类 4 enabled 按 priority 升序首个；缺失/停用 → fail fast
+        # 第一步：公告源（§5.4 可配置化）；缺失/停用 → fail fast
         notice_itf = await self._resolve_notice_itf(await self._settings())
-
         params = {"symbol": "财务报告", "date": day.strftime("%Y%m%d")}
         # 异常计失败（≥3 发站内信）已下沉到 call_interface_raw（P1-4），此处不再手工接线
         notice_rows = await self._mds.call_interface_raw(notice_itf, params, None)
 
-        # 统计汇总
         stats = {
             "rows": len(notice_rows),
-            "hits": 0,  # 动作命中行数（候选特别分红 + 取消/终止）
-            "special_new": 0,
-            "special_upd": 0,
-            "anchor": 0,  # 同格已有 SPECIAL 行跳过数（不重复写，运维对账须可见）
-            "skipped": 0,  # 单证券失败续下一只数
+            "hits": 0,      # 动作命中行数（分红相关公告：候选 + 取消/终止）
+            "new": 0,       # 新增分红行
+            "upd": 0,       # 更新分红行（含取消置 REJECTED）
+            "anchor": 0,    # 西向去重跳过数（不重复写，运维对账须可见）
+            "skip": 0,      # 无派息（纯送转）或报告期不可解析而跳过的行
+            "window": 0,    # 真 5 年窗口外的行
+            "skipped": 0,   # 单证券失败续下一只数
         }
         candidate_mids: set[str] = set()
         cancel_mids: set[str] = set()
-
-        # 第二步 + 命中证券主键归一（并行解析公告行标题与代码）
         events = await self._classify_notices(notice_itf, notice_rows, stats)
         for mid, kind in events:
             if kind == "candidate":
@@ -256,15 +216,13 @@ class DividendNoticeScanService:
             elif kind == "cancel":
                 cancel_mids.add(mid)
 
-        # 第三/五步：存量 PROPOSED SPECIAL 所涉证券并入复查集合
+        # 存量 PROPOSED 所涉证券并入复查集合。新链路不再写 SPECIAL，故放宽为
+        # 「不限 period_type」（与 ``_reject_proposed`` 同口径）。
         proposed_mids = set(
             (
                 await self.session.execute(
                     select(SecurityDividend.master_id)
-                    .where(
-                        SecurityDividend.period_type == ReportPeriodType.SPECIAL,
-                        SecurityDividend.status == DividendStatus.PROPOSED,
-                    )
+                    .where(SecurityDividend.status == DividendStatus.PROPOSED)
                     .distinct()
                 )
             ).scalars().all()
@@ -279,38 +237,46 @@ class DividendNoticeScanService:
             code = sec_code.get(mid)
             if not code:
                 continue
-            is_candidate = mid in candidate_mids
             is_cancel = mid in cancel_mids
             # snapshot：rollback 会丢弃该只已累加的计数，须回退——
             # 摘要须等于实际落库结果，否则运维按摘要对账会偏大。
             snapshot = dict(stats)
             try:
-                mid_changed = await self._process_master(
-                    mid, code, detail, is_candidate, is_cancel, day, stats
-                )
+                dirty = False
+                if is_cancel and await self._reject_proposed(mid):
+                    _bump(stats, "upd")
+                    dirty = True
+                # 取消公告本身不触发采集（旧口径同：取消路径只置 REJECTED）；
+                # 同一证券若另有候选公告，仍须照常拉全历史。
+                want_fetch = (mid in candidate_mids) or (not is_cancel)
+                if want_fetch and detail is not None:
+                    if await self.fetch_and_upsert_master(mid, code, detail, stats):
+                        dirty = True
                 await self.session.commit()
-                changed.update(mid_changed)  # 仅提交成功后计入变更集
-            except Exception:  # 单证券失败：rollback 续下一只（断点即数据本身，§6.8）
+                if dirty:
+                    changed.add(mid)  # 仅提交成功后计入变更集
+            except Exception:  # 单证券失败：rollback 续下一只（断点即数据本身，§5.2）
                 await self.session.rollback()
                 stats.update(snapshot)
-                stats["skipped"] += 1
+                _bump(stats, "skipped")
                 # rollback() 会 expire 会话内实例 → detail 过期；须重新解析，否则下一只
-                # 在 _process_master 中读 detail.params / detail.name 会触发同步惰性加载
-                # → MissingGreenlet，把「源失效」伪装成「每只都失败」（详见
-                # ``_re_resolve_detail_after_rollback``）。补充源本就缺失（detail is None）
-                # 时无需重解析——此时 _process_master 不会触碰 detail。
+                # 读 detail.params / detail.name 会触发同步惰性加载 → MissingGreenlet，
+                # 把「源失效」伪装成「每只都失败」（详见
+                # ``_re_resolve_detail_after_rollback``）。明细源本就缺失时无需重解析。
                 if detail is not None:
                     # 源已失效则 fail fast raise；过程异常（DB 抖动）记日志续下一只（L-3）
                     detail = await self._reresolve_detail_safe(idx, len(all_mids)) or detail
 
-        # 完成后：仅变更集重算（§6.8 末步 / §7 变更集重算）
+        # 完成后：仅变更集重算（§5.2 末步 / §7 变更集重算）
         await refresh_yields_for_masters(self.session, list(changed))
         await self.session.commit()
-        note = "；补充源缺失跳过逐只补充" if (detail is None and (candidate_mids | proposed_mids)) else ""
+        no_source = detail is None and bool(candidate_mids | proposed_mids)
+        note = "；明细源缺失跳过逐只采集" if no_source else ""
         return (
             f"公告扫描完成{note}：公告{stats['rows']}条/命中{stats['hits']}；"
-            f"SPECIAL 新写{stats['special_new']}/更新{stats['special_upd']}；"
-            f"重算{len(changed)}只；锚点跳过{stats['anchor']}；失败{stats['skipped']}只"
+            f"分红行新写{stats['new']}/更新{stats['upd']}；"
+            f"窗口外{stats['window']}/无派息或报告期不可解析{stats['skip']}；"
+            f"重算{len(changed)}只；去重跳过{stats['anchor']}；失败{stats['skipped']}只"
         )
 
     async def _master_code_map(self, mids: set[str]) -> dict[str, str]:
@@ -325,25 +291,23 @@ class DividendNoticeScanService:
     async def _classify_notices(
         self, itf: QuoteInterface, rows: list[Any], stats: dict
     ) -> list[tuple[str, str]]:
-        """对公告行做标题二筛 + 证券主键归一；返回 [(master_id, kind)]。
+        """公告行标题二筛 + 证券主键归一；返回 [(master_id, kind)]。
 
-        kind: "candidate"（分红相关且含特别|中期）/ "cancel"（含取消|终止且分红）。
-        公告标题列取 ``公告标题``；若拿不到（行非 dict / 列缺失），退化为对整行文本
-        ``str(row)`` 跑同一正则（不臆造列名，§6.8 取舍）。
+        kind: "candidate"（分红相关且非取消）/ "cancel"（分红相关且含取消|终止）。
+        公告标题列取 ``公告标题``；取不到（行非 dict / 列缺失）退化为对整行文本
+        ``str(row)`` 跑同一正则（不臆造列名，§5.2 取舍）。
         """
         if not rows:
             return []
         total = len(rows)
-        # code 槽取 resolve_fields 默认：公告用途（cat=4）按 category_id 分派候选顺序
-        # = [中文列名「代码」优先, 接口配置的代码列]，与 HEAD（先取中文列名，再试
-        # 配置代码列）逐行等价；required 槽缺失整行丢弃 + 计数（边界 6）。
+        # code 槽取 resolve_fields 默认：公告用途（cat=4）按 category_id 分派候选
+        # 顺序 = [中文列名「代码」优先, 接口配置的代码列]；required 槽缺失整行丢弃。
         compiled = resolve_fields(itf)
         rows, dropped = self._mds._filter_required_rows(itf, compiled, rows)
         if not rows:
             # 整批被 required 丢弃 = 无可用响应：复用既有 consecutive_failures/alerted 通道
             await self._mds._note_required_drops(itf, dropped, total)
             return []
-        # 证券代码 → master_id 映射（一次建表，逐行命中）
         code_field = index_by_slot(compiled).get(SLOT_CODE)
         codes = set()
         for r in rows:
@@ -365,7 +329,9 @@ class DividendNoticeScanService:
             text = str(text)
             is_div = bool(_TITLE_DIVIDEND_RE.search(text))
             is_cancel = is_div and bool(_TITLE_CANCEL_RE.search(text))
-            is_candidate = is_div and bool(_TITLE_SPECIAL_RE.search(text))
+            # §5.5：候选 = 命中分红正则 ∧ 非 cancel（不再要求含「特别|中期」，
+            # 否则普通年度分红公告会被整批漏掉）。
+            is_candidate = is_div and not is_cancel
             if not (is_candidate or is_cancel):
                 continue
             raw = code_field.get(r) if code_field else None
@@ -382,135 +348,130 @@ class DividendNoticeScanService:
                 events.append((master_id, "cancel"))
         return events
 
-    async def _process_master(
-        self,
-        mid: str,
-        code: str,
-        detail: Optional[QuoteInterface],
-        is_candidate: bool,
-        is_cancel: bool,
-        day: date,
-        stats: dict,
-    ) -> set[str]:
-        """处理单一证券：取消置 REJECTED + 新浪逐只补充写 SPECIAL；返回变更 master 集。"""
-        changed: set[str] = set()
-        if is_cancel:
-            if await self._reject_proposed(mid):
-                stats["special_upd"] += 1
-                changed.add(mid)
+    async def fetch_and_upsert_master(
+        self, mid: str, code: str, detail: QuoteInterface, stats: dict
+    ) -> bool:
+        """单只证券：调巨潮拉全历史 → 按 §5.3 映射 → 5 年裁剪 → upsert。返回是否有变更。
 
-        # 存量复查或候选命中需查新浪补充源（金额 + 实施事实源）。
-        # 判定：候选命中 或 该证券已有存量 PROPOSED SPECIAL（存量复查，§6.8）
-        want_sina = is_candidate or await self._has_proposed(mid)
-        if not want_sina or detail is None:
-            return changed
-
-        digits = re.sub(r"\D", "", code)
+        供每日 ``scan()`` 与首跑播种（§5.7）共用：代码取参数 ``code`` 的纯数字部分
+        （响应无代码列），遍历**全部返回行**（不再是「取当天那一条」）。
+        """
+        digits = re.sub(r"\D", "", code)  # sh600519 → 600519
         params = {**(detail.params or {}), "symbol": digits}
-        srows = await self._mds.call_interface_raw(detail, params, None)
-        for r in srows:
-            cash = _sina_cash(_row_get(r, _COL_SINA_CASH))
-            if cash is None:
+        rows = await self._mds.call_interface_raw(detail, params, None)
+        cutoff_year = retention_cutoff_year(today_app_tz())  # 真 5 年：[cur-4, cur]
+        dirty = False
+        for r in rows:
+            parsed = parse_cninfo_row(r)
+            if parsed is None:  # 纯送转行 / 报告期不可解析（§5.3、§9.3-A1）
+                _bump(stats, "skip")
                 continue
-            progress = str(_row_get(r, _COL_SINA_PROGRESS) or "")
-            ex_date = parse_date(_row_get(r, _COL_SINA_EXDATE))
-            ann_raw = parse_date(_row_get(r, _COL_SINA_ANN))
-            # 实施判定：进度含「实施」且除权日非空（§6.8）
-            is_impl = "实施" in progress and ex_date is not None
-            # announcement_date = 新浪行公告日期（实施行）或公告扫描命中日（§6.8）
-            ann = ann_raw if (is_impl and ann_raw is not None) else day
-            ry, rq = _anchor(ann)
-
-            # 西向去重：已被东财报告期行覆盖则跳过（§6.8）
-            if await self._westward_dup(mid, ex_date, ry, rq, cash):
+            if parsed.report_year < cutoff_year:  # §9.3-A3：对齐 retention_cleanup
+                _bump(stats, "window")
                 continue
+            if await self._upsert_one(mid, parsed, detail.name, stats):
+                dirty = True
+        return dirty
 
-            if is_impl:
-                matched = await self._match_proposed(mid, cash)
-                if matched is not None:
-                    matched.status = DividendStatus.PAID
-                    matched.ex_dividend_date = ex_date
-                    matched.announcement_date = ann
-                    matched.source = detail.name
-                    stats["special_upd"] += 1
-                    changed.add(mid)
-                else:
-                    # 西向去重已过，但同格已有 SPECIAL 行（不同额）则不再重复写
-                    if await self._exists_anchor(mid, ry, rq):
-                        stats["anchor"] += 1
-                        continue
-                    self.session.add(
-                        self._new_special(mid, ry, rq, cash, DividendStatus.PAID, ex_date, ann, detail.name)
-                    )
-                    stats["special_new"] += 1
-                    changed.add(mid)
-            elif is_candidate:
-                # 新浪只作「金额 + 实施事实」源，PROPOSED 发现以公告标题为准（§6.8）
-                if await self._exists_anchor(mid, ry, rq):
-                    stats["anchor"] += 1
-                    continue
-                self.session.add(
-                    self._new_special(mid, ry, rq, cash, DividendStatus.PROPOSED, None, ann, detail.name)
-                )
-                stats["special_new"] += 1
-                changed.add(mid)
-        return changed
-
-    def _new_special(
-        self,
-        mid: str,
-        ry: int,
-        rq: int,
-        cash: Decimal,
-        status: DividendStatus,
-        ex_date: Optional[date],
-        ann: date,
-        source: str,
-    ) -> SecurityDividend:
-        """构造 SPECIAL 行（公告日期锚点落格，§2.1）。"""
-        return SecurityDividend(
-            master_id=mid,
-            report_year=ry,
-            report_quarter=rq,
-            period_type=ReportPeriodType.SPECIAL,
-            cash_per_share=cash,
-            status=status,
-            ex_dividend_date=ex_date,
-            announcement_date=ann,
-            source=source,
+    async def _upsert_one(
+        self, mid: str, row: CninfoDividendRow, source: str, stats: dict
+    ) -> bool:
+        """按唯一键定位后更新 / 未命中则插入；返回是否有变更。"""
+        existing = await self._locate_cell(mid, row)
+        if existing is not None:
+            # 定位后更新：目标格命中即刷新金额/日期/送转/source。
+            # 取舍见 ``_westward_dup``——去重护栏只作用于「未命中目标格」的新增路径。
+            dirty = (
+                existing.cash_per_share != row.cash_per_share
+                or existing.ex_dividend_date != row.ex_dividend_date
+                or existing.record_date != row.record_date
+                or existing.announcement_date != row.announcement_date
+                or existing.bonus_share_ratio != row.bonus_share_ratio
+                or existing.convert_ratio != row.convert_ratio
+                or existing.status != row.status
+                or existing.source != source
+            )
+            existing.cash_per_share = row.cash_per_share
+            existing.ex_dividend_date = row.ex_dividend_date
+            existing.record_date = row.record_date
+            existing.announcement_date = row.announcement_date
+            existing.bonus_share_ratio = row.bonus_share_ratio
+            existing.convert_ratio = row.convert_ratio
+            existing.status = row.status
+            existing.source = source
+            if dirty:
+                _bump(stats, "upd")
+            return dirty
+        if await self._westward_dup(
+            mid, row.ex_dividend_date, row.report_year, row.report_quarter, row.cash_per_share
+        ):
+            _bump(stats, "anchor")
+            return False
+        self.session.add(
+            SecurityDividend(
+                master_id=mid,
+                report_year=row.report_year,
+                report_quarter=row.report_quarter,
+                period_type=row.period_type,
+                cash_per_share=row.cash_per_share,
+                status=row.status,
+                ex_dividend_date=row.ex_dividend_date,
+                announcement_date=row.announcement_date,
+                record_date=row.record_date,
+                source=source,
+                bonus_share_ratio=row.bonus_share_ratio,
+                convert_ratio=row.convert_ratio,
+            )
         )
+        _bump(stats, "new")
+        return True
 
-    async def _westward_dup(self, mid, ex_date, ry, rq, cash) -> bool:
-        """西向去重：同 master 已有「ex_date 相等」或「(ry,rq,cash) 全等」记录 → 跳过。"""
-        if ex_date is not None:
-            hit = (
-                await self.session.execute(
-                    select(SecurityDividend.id)
-                    .where(
-                        SecurityDividend.master_id == mid,
-                        SecurityDividend.ex_dividend_date == ex_date,
-                    )
-                    .limit(1)
-                )
-            ).scalar_one_or_none()
-            if hit is not None:
-                return True
-        hit = (
+    async def _locate_cell(self, mid: str, row: CninfoDividendRow) -> Optional[SecurityDividend]:
+        """按唯一键 (master_id, report_year, report_quarter, period_type) 定位存量行。"""
+        return (
             await self.session.execute(
-                select(SecurityDividend.id)
+                select(SecurityDividend)
                 .where(
                     SecurityDividend.master_id == mid,
-                    SecurityDividend.report_year == ry,
-                    SecurityDividend.report_quarter == rq,
-                    SecurityDividend.cash_per_share == cash,
+                    SecurityDividend.report_year == row.report_year,
+                    SecurityDividend.report_quarter == row.report_quarter,
+                    SecurityDividend.period_type == row.period_type,
                 )
                 .limit(1)
             )
         ).scalar_one_or_none()
-        return hit is not None
+
+    async def _first(self, *where: Any) -> Optional[Any]:
+        """去重护栏类查询收口：按条件取首行 id，无命中返回 None。"""
+        return (
+            await self.session.execute(select(SecurityDividend.id).where(*where).limit(1))
+        ).scalar_one_or_none()
+
+    async def _westward_dup(self, mid, ex_date, ry, rq, cash) -> bool:
+        """西向去重：同 master 已有「ex_date 相等」或「(ry,rq,cash) 全等」记录 → 跳过。
+
+        **取舍（§5.6 二次护栏）**：本方法只在**新增**路径生效——目标格未命中时才调用。
+        旧代码每次写行前都先过本方法，其 ``(ry,rq,cash) 全等 → 跳过`` 分支会把「同格
+        同额」行判为重复，导致除权日/登记日/送转比例等后续事实永远无法刷新（全历史
+        重跑时预案期写入的 PROPOSED 行无法升级为 PAID）。故改为：先按唯一键定位
+        （命中即更新），未命中再走本护栏。``ex_date`` 分支意义不变——新旧链路并存期
+        （P0~P1）用其挡住同源旧行。
+        """
+        if ex_date is not None and await self._first(
+            SecurityDividend.master_id == mid,
+            SecurityDividend.ex_dividend_date == ex_date,
+        ) is not None:
+            return True
+        return await self._first(
+            SecurityDividend.master_id == mid,
+            SecurityDividend.report_year == ry,
+            SecurityDividend.report_quarter == rq,
+            SecurityDividend.cash_per_share == cash,
+        ) is not None
 
     async def _match_proposed(self, mid: str, cash: Decimal) -> Optional[SecurityDividend]:
-        """PROPOSED→PAID：同 master + cash 相等匹配存量 PROPOSED SPECIAL；多行同额取 announcement_date 最近者。"""
+        """PROPOSED→PAID：同 master + cash 相等匹配存量 PROPOSED SPECIAL；多行同额取
+        announcement_date 最近者。（旧新浪链路遗留，§3 明确保留）"""
         return (
             await self.session.execute(
                 select(SecurityDividend)
@@ -529,43 +490,37 @@ class DividendNoticeScanService:
         ).scalar_one_or_none()
 
     async def _exists_anchor(self, mid: str, ry: int, rq: int) -> bool:
-        """同 master 的 (ry, rq) 格是否已有 SPECIAL 行（防唯一键冲突）。"""
-        hit = (
-            await self.session.execute(
-                select(SecurityDividend.id)
-                .where(
-                    SecurityDividend.master_id == mid,
-                    SecurityDividend.report_year == ry,
-                    SecurityDividend.report_quarter == rq,
-                    SecurityDividend.period_type == ReportPeriodType.SPECIAL,
-                )
-                .limit(1)
-            )
-        ).scalar_one_or_none()
-        return hit is not None
+        """同 master 的 (ry, rq) 格是否已有 SPECIAL 行（防唯一键冲突）。（§3 明确保留）"""
+        return await self._first(
+            SecurityDividend.master_id == mid,
+            SecurityDividend.report_year == ry,
+            SecurityDividend.report_quarter == rq,
+            SecurityDividend.period_type == ReportPeriodType.SPECIAL,
+        ) is not None
 
     async def _has_proposed(self, mid: str) -> bool:
-        """该证券是否已有存量 PROPOSED SPECIAL 行（存量复查触发）。"""
-        hit = (
-            await self.session.execute(
-                select(SecurityDividend.id)
-                .where(
-                    SecurityDividend.master_id == mid,
-                    SecurityDividend.period_type == ReportPeriodType.SPECIAL,
-                    SecurityDividend.status == DividendStatus.PROPOSED,
-                )
-                .limit(1)
-            )
-        ).scalar_one_or_none()
-        return hit is not None
+        """该证券是否已有存量 PROPOSED 行（存量复查触发）。
+
+        与 ``_reject_proposed`` 同口径放宽为不限 period_type：新链路只写
+        ANNUAL/INTERIM/QUARTERLY，不再有 SPECIAL。
+        """
+        return await self._first(
+            SecurityDividend.master_id == mid,
+            SecurityDividend.status == DividendStatus.PROPOSED,
+        ) is not None
 
     async def _reject_proposed(self, mid: str) -> int:
-        """取消/终止：对应存量 PROPOSED SPECIAL 行置 REJECTED；返回置位数。"""
+        """取消/终止：该 master 的存量 PROPOSED 行置 REJECTED；返回置位数。
+
+        放宽为**不限 period_type**：旧链路只写 SPECIAL 故原查询带
+        ``period_type == SPECIAL`` 过滤；新链路（§5.3）按「分红类型」写
+        ANNUAL/INTERIM/QUARTERLY，不再产出 SPECIAL，沿用旧过滤会使取消路径彻底失效
+        （取消公告命中后一行都置不上）。
+        """
         rows = (
             await self.session.execute(
                 select(SecurityDividend).where(
                     SecurityDividend.master_id == mid,
-                    SecurityDividend.period_type == ReportPeriodType.SPECIAL,
                     SecurityDividend.status == DividendStatus.PROPOSED,
                 )
             )
@@ -575,82 +530,16 @@ class DividendNoticeScanService:
         return len(rows)
 
     # ------------------------------------------------------------------ #
-    # 特别分红历史回补（§6.9，冷启动一次性手动 trigger）
+    # 特别分红历史回补（§6.9）：整段删除属 P2 批次（§4.1），此处保留符号以维持路由 /
+    # 任务接线，实现改为 fail fast —— 其数据源（新浪 stock_history_dividend_detail）
+    # 已随 §5 下线，若继续按新浪列名解析巨潮响应会静默「新写 0 行」，把「源已失效」
+    # 伪装成「无数据」。历史补齐改由巨潮播种路径（§5.7 seed_initial_dividends）承担。
     # ------------------------------------------------------------------ #
     async def backfill_specials(self, cfg: Any) -> str:
-        """特别分红历史回补（§6.9）：遍历 security_dividends 已有 master，逐只回溯新浪历史明细。
-
-        硬约束（依附录 A.12 / A.13 实测）：
-        - **只处理「进度含实施 且 除权除息日非空」的行** → PAID。这是西向去重
-          ``ex_dividend_date`` 分支可用的前提；一旦放宽到预案行（``ex_date`` 为空），
-          普通分红会被误判为「东财缺失」而重复写入 SPECIAL，导致分子重复计数。
-        - **5 年窗口过滤**：新浪返回该证券全历史（实测茅台 2002~2026 共 24 年）。
-        - **必须在 §6.1 季度抓取之后执行**：西向去重依赖报告期行已存在。
-        """
-        today = today_app_tz()
-        cutoff_year = today.year - _BACKFILL_YEARS + 1  # 窗口 [cur-4, cur]
-
-        mids = set(
-            (
-                await self.session.execute(
-                    select(SecurityDividend.master_id)
-                    .where(SecurityDividend.period_type != ReportPeriodType.SPECIAL)
-                    .distinct()
-                )
-            ).scalars().all()
-        )
-        if not mids:
-            raise RuntimeError(
-                "特别分红历史回补须在 §6.1 季度股息抓取之后执行：当前无报告期分红行；"
-                "若继续，全部普通分红都会被判为「东财缺失」而落 SPECIAL（分子重复计数）"
-            )
-        detail = await self._resolve_detail_itf(await self._settings())
-        if detail is None:
-            raise RuntimeError("补充源（新浪历史分红明细）缺失或未启用，fail fast 跳过回补")
-        code_map = await self._master_code_map(mids)
-        # 进入逐只回补前先提交：① 释放前置只读查询占用的事务——后续是数千只证券的串行
-        # HTTP 调用，长期持有事务（idle in transaction）会阻塞 vacuum 并放大锁竞争；
-        # ② 使「单只失败 → rollback」只回滚该只自身的写入，而不把前置查询已加载的
-        # 实例一并 expire（rollback 无活动事务时为空操作，不触发 expire）。
-        # 依赖 ``expire_on_commit=False``（工程全局口径）：提交不会使 detail 过期。
-        await self.session.commit()
-
-        stats = {"new": 0, "dup": 0, "window": 0, "nocash": 0, "anchor": 0, "failed": 0}
-        changed: set[str] = set()
-        for idx, mid in enumerate(sorted(mids), 1):
-            code = code_map.get(mid)
-            if not code:
-                stats["failed"] += 1
-                continue
-            # snapshot：rollback 会丢弃该只已累加的计数，须回退——
-            # 摘要「新写N」须等于实际落库行数，否则运维按摘要对账会偏大。
-            snapshot = dict(stats)
-            try:
-                dirty = await self._backfill_one(mid, code, detail, today, cutoff_year, stats)
-                await self.session.commit()
-                if dirty:
-                    changed.add(mid)  # 仅提交成功后计入变更集（「重算N只」同口径）
-            except Exception:  # 单证券失败：rollback 续下一只（§6.9 断点即数据本身）
-                await self.session.rollback()
-                stats.update(snapshot)
-                stats["failed"] += 1
-                # rollback() 会 expire 会话内实例 → detail 过期，下一只再读
-                # detail.params 会触发同步惰性加载 → MissingGreenlet → 连锁全部计入失败。
-                # 故失败后必须重新解析补充源（仅失败路径，避免每只一次无谓查询），
-                # 源已失效则 fail fast raise；过程异常（DB 抖动）记日志续下一只（L-3）
-                detail = await self._reresolve_detail_safe(idx, len(mids)) or detail
-            if idx % 200 == 0:
-                logger.info(
-                    "特别分红回补进度 %d/%d：新写%d 去重跳过%d 失败%d",
-                    idx, len(mids), stats["new"], stats["dup"], stats["failed"],
-                )
-
-        await refresh_yields_for_masters(self.session, list(changed))
-        await self.session.commit()
-        return (
-            f"特别分红历史回补完成：证券{len(mids)}只；SPECIAL 新写{stats['new']}；"
-            f"去重跳过{stats['dup']}；窗口外{stats['window']}；无金额{stats['nocash']}；"
-            f"锚点跳过{stats['anchor']}；失败{stats['failed']}只；重算{len(changed)}只"
+        """特别分红历史回补：已随新浪明细源下线，fail fast（P2 整段删除）。"""
+        raise RuntimeError(
+            "特别分红历史回补（§6.9）已随新浪明细源下线：历史补齐改由巨潮播种路径"
+            "（§5.7 seed_initial_dividends）承担，本路径在 P2 批次整段删除"
         )
 
     async def _backfill_one(
@@ -662,45 +551,12 @@ class DividendNoticeScanService:
         cutoff_year: int,
         stats: dict,
     ) -> bool:
-        """单只证券回补：解析新浪历史明细逐行写 SPECIAL；返回是否有变更。"""
-        digits = re.sub(r"\D", "", code)
-        srows = await self._mds.call_interface_raw(
-            detail, {**(detail.params or {}), "symbol": digits}, None
-        )
-        dirty = False
-        for r in srows:
-            cash = _sina_cash(_row_get(r, _COL_SINA_CASH))
-            if cash is None:
-                stats["nocash"] += 1
-                continue
-            progress = str(_row_get(r, _COL_SINA_PROGRESS) or "")
-            ex_date = parse_date(_row_get(r, _COL_SINA_EXDATE))
-            # 只认「实施」行：ex_date 非空是西向去重可用的前提（附录 A.12）
-            if "实施" not in progress or ex_date is None:
-                continue
-            ann = parse_date(_row_get(r, _COL_SINA_ANN)) or today
-            ry, rq = _anchor(ann)
-            if ry < cutoff_year:  # 5 年窗口过滤（新浪返回全历史）
-                stats["window"] += 1
-                continue
-            if await self._westward_dup(mid, ex_date, ry, rq, cash):
-                stats["dup"] += 1
-                continue
-            if await self._exists_anchor(mid, ry, rq):
-                stats["anchor"] += 1
-                continue
-            self.session.add(
-                self._new_special(
-                    mid, ry, rq, cash, DividendStatus.PAID, ex_date, ann, detail.name
-                )
-            )
-            stats["new"] += 1
-            dirty = True
-        return dirty
+        """单只证券回补：已随新浪明细源下线，fail fast（P2 整段删除）。"""
+        raise RuntimeError("特别分红历史回补已下线：_backfill_one 不再可用（P2 整段删除）")
 
 
 async def run_dividend_notice_scan(cfg: Any) -> str:
-    """模块级 handler：每日公告扫描 + 特别分红补充（§6.8 第 5 条系统任务）。"""
+    """模块级 handler：每日公告扫描 + 巨潮历史分红采集（§5 系统任务）。"""
     from app.db.database import AsyncSessionLocal
 
     async with AsyncSessionLocal() as session:
@@ -710,7 +566,7 @@ async def run_dividend_notice_scan(cfg: Any) -> str:
 
 
 async def run_dividend_special_backfill(cfg: Any) -> str:
-    """模块级 handler：特别分红历史回补（§6.9，冷启动一次性手动 trigger）。"""
+    """模块级 handler：特别分红历史回补（§6.9，P2 删除前保留接线）。"""
     from app.db.database import AsyncSessionLocal
 
     async with AsyncSessionLocal() as session:
