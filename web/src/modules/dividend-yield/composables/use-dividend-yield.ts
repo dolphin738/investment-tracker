@@ -7,6 +7,7 @@
  * - useImpliedPrice(masterId,targetRatio,enabled): 目标收益率反推隐含价格
  * - useDividendYieldSettings(enabled): 阈值 + 接口源设置（admin-only，非 admin 传 enabled=false）
  * - useUpdateDividendYieldSettings(): 更新设置（admin-only）
+ * - useSeedInitialDividends(): 触发历史分红补齐 / 播种（admin-only，fire-and-forget）
  * - useDividendYieldInterfaces(enabled): 设置页双源下拉候选接口（复用 listAllInterfaces）
  *
  * 参考 use-preferences.ts / use-query-data.ts 的 queryKey + enabled 语义约定。
@@ -22,7 +23,7 @@ import {
   getDividendYieldSettings,
   getDividendYieldTop20,
   rebuildDividendYield,
-  backfillSpecialDividends,
+  seedInitialDividends,
   updateDividendYieldSettings,
   type DividendYieldRankFilters,
 } from '@/api/dividend-yield.api';
@@ -185,16 +186,19 @@ export function useRebuildDividendYield() {
 }
 
 /**
- * 手动触发特别分红历史回补（§6.9；admin-only，冷启动一次性）。
- * 后端为 fire-and-forget：本调用立即返回、任务在后台执行，
- * 进度经应用日志（record 审计）查看，故此处不失效榜单查询。
+ * 手动触发历史分红补齐 / 播种（admin-only；取代原「特别分红回补」入口）。
+ *
+ * 后端为 fire-and-forget：端点立即返回、全市场播种在后台跑约 19 小时，
+ * 进度经「定时任务日志」/ 应用日志查看，故此处**不失效**榜单查询——
+ * 此刻 invalidate 只会刷出旧数据（任务尚未完成、前端无从感知），
+ * 用户可在跑完后手动刷新。该取舍与原回补 composable 保持一致。
  */
-export function useBackfillSpecialDividends() {
+export function useSeedInitialDividends() {
   return useMutation({
-    mutationFn: () => backfillSpecialDividends(),
+    mutationFn: () => seedInitialDividends(),
     onSuccess: (data) => {
-      toast.success(data.message || '已触发特别分红历史回补，后台执行中');
+      toast.success(data.message || '已触发历史分红补齐，后台执行中');
     },
-    onError: () => toast.error('特别分红历史回补触发失败，请稍后重试'),
+    onError: () => toast.error('历史分红补齐触发失败，请稍后重试'),
   });
 }

@@ -70,7 +70,7 @@ vi.mock('@/modules/dividend-yield/composables/use-dividend-yield', () => ({
     isError: ref(false),
     mutate: vi.fn(),
   }),
-  useBackfillSpecialDividends: () => ({
+  useSeedInitialDividends: () => ({
     isPending: ref(false),
     isError: ref(false),
     mutate: vi.fn(),

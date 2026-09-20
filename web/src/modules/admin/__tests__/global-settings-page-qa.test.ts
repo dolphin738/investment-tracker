@@ -47,7 +47,7 @@ vi.mock('@/modules/dividend-yield/composables/use-dividend-yield', () => ({
     mutate: mutateSpy,
   }),
   useRebuildDividendYield: () => ({ isPending: ref(false), isError: ref(false), mutate: vi.fn() }),
-  useBackfillSpecialDividends: () => ({ isPending: ref(false), isError: ref(false), mutate: vi.fn() }),
+  useSeedInitialDividends: () => ({ isPending: ref(false), isError: ref(false), mutate: vi.fn() }),
 }));
 
 vi.mock('@/modules/admin/composables/use-quote-provider', () => ({

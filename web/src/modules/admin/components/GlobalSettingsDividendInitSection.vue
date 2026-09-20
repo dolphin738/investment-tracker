@@ -6,7 +6,7 @@
  * 父组件（GlobalSettingsPage）继续持有全部状态（settingsForm）与保存逻辑。
  *
  * 布局：仅保留「交易日历起始日期」一项配置控件（参与父组件 settings 保存），
- * 其余冷启动手工动作（全量重建 / 特别分红回补）交由 GlobalSettingsDividendInitBlock 承载。
+ * 其余冷启动手工动作（全量重建 / 补齐历史分红（播种））交由 GlobalSettingsDividendInitBlock 承载。
  *
  * 「回补行情缺口」相关配置（历史行情回补接口、每日回补额度、回补起始日期、回补模式、
  * 回补复权方式）已随价格缺口回补功能下线一并移除。

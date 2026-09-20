@@ -9,6 +9,8 @@
  * - GET  /dividend-yield/{master_id}/implied-price — 按目标收益率反推隐含价格
  * - GET  /dividend-yield/settings       — 阈值 + 三接口源设置（admin-only）
  * - PUT  /dividend-yield/settings       — 更新设置（admin-only）
+ * - POST /dividend-yield/rebuild                — 全量重建派生快照（admin-only）
+ * - POST /dividend-yield/seed-initial-dividends — 触发历史分红补齐 / 播种（admin-only，fire-and-forget）
  *
  * 端点/字段契约与后端实现已对齐（见 web/src/api/types.ts 的股息率排名 API 段）。
  */
@@ -115,12 +117,15 @@ export function rebuildDividendYield(): Promise<{ summary: string }> {
   return http.post<{ summary: string }>('/dividend-yield/rebuild');
 }
 
-/** 手动触发特别分红历史回补（§6.9；admin-only，后端异步后台执行、立即返回） */
-export function backfillSpecialDividends(): Promise<{
-  message: string;
-  job_id: string;
-}> {
-  return http.post<{ message: string; job_id: string }>(
-    '/dividend-yield/backfill-specials',
+/**
+ * 手动触发历史分红补齐 / 播种（admin-only；后端异步后台执行、立即返回）。
+ *
+ * 契约说明（勿照抄旧 backfillSpecialDividends 的声明）：端点为 fire-and-forget，
+ * 返回体只有 { message }；旧声明里的 job_id 后端从不返回，已随迁移
+ * 0015_remove_special_backfill_task 消失，故此处只声明 { message: string }。
+ */
+export function seedInitialDividends(): Promise<{ message: string }> {
+  return http.post<{ message: string }>(
+    '/dividend-yield/seed-initial-dividends',
   );
 }
