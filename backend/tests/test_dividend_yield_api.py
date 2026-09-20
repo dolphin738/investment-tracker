@@ -564,29 +564,34 @@ async def test_top20_excludes_numeric_nan_snapshot(session, client):
     assert "sh600921" not in cons_codes, "NaN 不得进连续分红榜"
 
 
-# ───────────────────────── /backfill-specials 端点契约（§6.9，审查 M-2） ─────────────────────────
+# ───────────────────────── /seed-initial-dividends 端点契约（§5.7 / §4.6） ─────────────────────────
 @pytest.mark.asyncio
-async def test_backfill_specials_requires_admin(session, client):
-    """守护 §6.9：未登录 401、非 admin 403（与 /rebuild 同口径）。"""
+async def test_seed_requires_admin(session, client):
+    """守护 §5.7：未登录 401、非 admin 403（与 /rebuild 同口径）。"""
     # 未登录
-    r = await client.post("/api/dividend-yield/backfill-specials")
+    r = await client.post("/api/dividend-yield/seed-initial-dividends")
     assert r.status_code == 401
     # 已登录非 admin
     info = await register_login(client)
     r = await client.post(
-        "/api/dividend-yield/backfill-specials", headers=auth(info["token"])
+        "/api/dividend-yield/seed-initial-dividends", headers=auth(info["token"])
     )
     assert r.status_code == 403
 
 
 @pytest.mark.asyncio
-async def test_backfill_specials_triggers_job_async(session, client, monkeypatch):
-    """守护 §6.9：admin 触发成功 → 200，且 fire-and-forget 直接调起服务（不再依赖种子系统任务）。
+async def test_seed_triggers_job_async(session, client, monkeypatch):
+    """守护 §5.7：admin 触发成功 → 200，且 fire-and-forget 直接调起播种服务。
 
-    ``run_dividend_special_backfill`` 被替换为即时桩：真实链路会串行遍历 4609 只证券（10~25 分钟），
-    测试中绝不可真实执行；契约关注点是「直接调起服务且立即返回。
+    ``run_dividend_seed`` 被替换为即时桩：真实链路串行遍历全市场约 11430 只（约 19 小时），
+    测试中绝不可真实执行；契约关注点是「立即返回 + 后台确实被调起」。
+
+    **patch 目标**：``_run_seed()`` 在**函数体内** ``from app.services.dividend_seed import
+    run_dividend_seed``（延迟导入，装配期不拉起引擎），因此必须打在模块属性
+    ``app.services.dividend_seed.run_dividend_seed`` 上；打在 backfill_router 模块上无效
+    （该模块没有这个名字），断言会退化成假通过。
     """
-    import app.services.dividend_notice_scan as dns
+    import app.services.dividend_seed as seed_mod
 
     captured: list = []
     # 即时桩：记录被调用的 cfg（应为 None），返回占位摘要
@@ -594,21 +599,24 @@ async def test_backfill_specials_triggers_job_async(session, client, monkeypatch
         captured.append(cfg)
         return "noop"
 
-    monkeypatch.setattr(dns, "run_dividend_special_backfill", _noop)
+    monkeypatch.setattr(seed_mod, "run_dividend_seed", _noop)
 
     admin = await _make_admin(session, client)
     h = auth(admin["token"])
-    r = await client.post("/api/dividend-yield/backfill-specials", headers=h)
+    r = await client.post("/api/dividend-yield/seed-initial-dividends", headers=h)
     status, _, data, _ = env(r)
     assert status == 200
     assert "后台执行" in data["message"]
+    # §4.4 契约漂移：后端从不返回 job_id（播种不注册 JobType、无 job_task 行可对应），
+    # 前端旧声明里的 job_id 不得复辟。
+    assert "job_id" not in data
 
     # 等待 fire-and-forget 任务被调度（track_task + asyncio.create_task，同 /backfill-prices 契约）
     for _ in range(50):
         if captured:
             break
         await asyncio.sleep(0.01)
-    assert captured, "须以 fire-and-forget 调起 run_dividend_special_backfill(None)"
+    assert captured, "须以 fire-and-forget 调起 run_dividend_seed(None)"
     assert captured[0] is None, "按钮版直接调用服务函数，不再经系统任务 cfg"
 
 
