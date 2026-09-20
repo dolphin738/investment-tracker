@@ -202,12 +202,7 @@ class DividendYieldSettings(Base, TimestampMixin):
     id: Mapped[str] = pk_uuid()
     # 注：股息率标色阈值已迁至「用户偏好」user_preferences.green/red_threshold（0026 迁移），
     # 本表不再承载；对应两列由 0027 迁移删除。
-    # 主源（分类 3，按报告期全量形态）；补充源（分类 3，按证券逐只形态）；行情源（分类 2）
-    dividend_report_source_interface_id: Mapped[Optional[str]] = mapped_column(
-        String(36),
-        ForeignKey("quote_provider_interfaces.id", ondelete="SET NULL"),
-        nullable=True,
-    )
+    # 补充源（分类 3，按证券逐只形态）；行情源（分类 2）
     dividend_detail_source_interface_id: Mapped[Optional[str]] = mapped_column(
         String(36),
         ForeignKey("quote_provider_interfaces.id", ondelete="SET NULL"),

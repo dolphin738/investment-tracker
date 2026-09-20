@@ -45,7 +45,6 @@ from app.services.dividend_notice_scan import (
     run_dividend_notice_scan,
 )
 from app.services.dividend_sync import (
-    run_dividend_quarterly_fetch,
     run_dividend_retention_cleanup,
 )
 from app.services.dividend_yield_refresh import run_trade_calendar_refresh
@@ -203,7 +202,6 @@ _HANDLERS: dict[JobTaskType, Callable[[JobConfig], Any]] = {
     JobTaskType.LOG_CLEANUP: _log_cleanup,
     JobTaskType.HTTP_CALLBACK: _http_callback,
     # 股息率排名采集（§6，处理器在各自服务模块，此处仅薄注册）
-    JobTaskType.DIVIDEND_QUARTERLY_FETCH: run_dividend_quarterly_fetch,
     JobTaskType.MARKET_DAILY_CLOSE_FETCH: run_market_daily_close_fetch,
     JobTaskType.DIVIDEND_RETENTION_CLEANUP: run_dividend_retention_cleanup,
     JobTaskType.DIVIDEND_NOTICE_SCAN: run_dividend_notice_scan,

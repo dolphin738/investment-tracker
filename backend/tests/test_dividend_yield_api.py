@@ -287,21 +287,11 @@ async def _seed_category4_interface(session, *, enabled: bool = True):
 
 @pytest.mark.asyncio
 async def test_settings_put_interface_shape_validation(session, client):
-    """守护 §5.4 四重校验（P1-4）：主源选逐只接口（params 含 symbol）→ 400；
-    主源/补充源各归其位 → 200。"""
+    """守护 §5.4 四重校验（P1-4）：补充源选「按报告期全量」接口（无 symbol）→ 400；
+    补充源逐只接口 → 200。"""
     admin = await _make_admin(session, client)
     main_itf, detail_itf = await _seed_category3_interfaces(session)
     h = auth(admin["token"])
-
-    # 主源误选「逐只」形态接口 → 400
-    r = await client.put(
-        "/api/dividend-yield/settings",
-        json={
-            "dividend_report_source_interface_id": detail_itf.id,
-        },
-        headers=h,
-    )
-    assert r.status_code == 400
 
     # 补充源误选「按报告期全量」接口 → 400
     r = await client.put(
@@ -317,14 +307,12 @@ async def test_settings_put_interface_shape_validation(session, client):
     r = await client.put(
         "/api/dividend-yield/settings",
         json={
-            "dividend_report_source_interface_id": main_itf.id,
             "dividend_detail_source_interface_id": detail_itf.id,
         },
         headers=h,
     )
     status, _, data, _ = env(r)
     assert status == 200
-    assert data["dividend_report_source"]["id"] == main_itf.id
     assert data["dividend_detail_source"]["id"] == detail_itf.id
 
 

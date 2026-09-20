@@ -430,7 +430,7 @@ PG 原生枚举类型名 `interface_direction`（由迁移创建）。
 
 系统任务（不可追加/删除，仅可编辑）由迁移种子写入；普通任务（可增删改）在
 定时任务管理页由管理员新建。两者共用本枚举。 */
-    JobTaskType: 'MARKET_DATA_SYNC' | 'SECURITY_MASTER_SYNC' | 'HTTP_CALLBACK' | 'ACCOUNT_CLEANUP' | 'LOG_CLEANUP' | 'DIVIDEND_QUARTERLY_FETCH' | 'MARKET_DAILY_CLOSE_FETCH' | 'DIVIDEND_RETENTION_CLEANUP' | 'DIVIDEND_NOTICE_SCAN' | 'TRADE_CALENDAR_REFRESH';
+    JobTaskType: 'MARKET_DATA_SYNC' | 'SECURITY_MASTER_SYNC' | 'HTTP_CALLBACK' | 'ACCOUNT_CLEANUP' | 'LOG_CLEANUP' | 'MARKET_DAILY_CLOSE_FETCH' | 'DIVIDEND_RETENTION_CLEANUP' | 'DIVIDEND_NOTICE_SCAN' | 'TRADE_CALENDAR_REFRESH';
     /** JobUpdate */
     JobUpdate: {
         /** Name */
@@ -1001,8 +1001,6 @@ type 为可选 override；不传则读取时由代码前缀推断（infer_securi
     SecurityType: 'STOCK' | 'ON_EXCHANGE_FUND' | 'BOND' | 'OTHER' | 'HK_STOCK' | 'CONVERTIBLE_BOND' | 'INDEX' | 'OFF_EXCHANGE_FUND' | 'UNCATEGORIZED';
     /** SettingsUpdateBody */
     SettingsUpdateBody: {
-        /** Dividend Report Source Interface Id */
-        dividend_report_source_interface_id?: string | null;
         /** Dividend Detail Source Interface Id */
         dividend_detail_source_interface_id?: string | null;
         /** Price Source Interface Id */

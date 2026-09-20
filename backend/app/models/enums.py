@@ -111,7 +111,6 @@ class JobTaskType(str, enum.Enum):
     ACCOUNT_CLEANUP = "ACCOUNT_CLEANUP"  # 账户物理清理（系统任务，迁移种子写入）
     LOG_CLEANUP = "LOG_CLEANUP"  # 日志中心清理（系统任务，迁移种子写入）
     # —— 股息率排名（系统任务，迁移种子写入）——
-    DIVIDEND_QUARTERLY_FETCH = "DIVIDEND_QUARTERLY_FETCH"  # 季度股息抓取（§6.1）
     MARKET_DAILY_CLOSE_FETCH = "MARKET_DAILY_CLOSE_FETCH"  # 每日收盘价抓取（§6.2）
     DIVIDEND_RETENTION_CLEANUP = "DIVIDEND_RETENTION_CLEANUP"  # 五年留存清理（§6.3）
     DIVIDEND_NOTICE_SCAN = "DIVIDEND_NOTICE_SCAN"  # 每日公告扫描+特别分红补充（§6.8）

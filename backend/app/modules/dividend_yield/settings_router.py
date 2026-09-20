@@ -42,7 +42,6 @@ class SettingsUpdateBody(BaseModel):
     # （返 200 却什么都没改），改为显式 400 —— 避免「以为改了其实没改」。
     model_config = ConfigDict(extra="forbid")
 
-    dividend_report_source_interface_id: Optional[str] = None
     dividend_detail_source_interface_id: Optional[str] = None
     price_source_interface_id: Optional[str] = None
     announcement_source_interface_id: Optional[str] = None
@@ -118,9 +117,6 @@ async def load_settings(db: AsyncSession) -> DividendYieldSettings:
 async def _settings_out(db: AsyncSession, row: DividendYieldSettings) -> dict[str, Any]:
     """配置序列化：resolve 后的数据源接口 {id, name}（阈值已迁用户偏好，不在此返回）。"""
     return {
-        "dividend_report_source": _interface_out(
-            await _resolve_interface(db, row.dividend_report_source_interface_id)
-        ),
         "dividend_detail_source": _interface_out(
             await _resolve_interface(db, row.dividend_detail_source_interface_id)
         ),
@@ -157,9 +153,6 @@ async def put_dividend_yield_settings(
 ):
     """更新全局配置（§5.4/§6.6：非 admin 403；接口四重校验 400 不落库；AppLog 审计）。"""
     await _validate_interface(
-        db, body.dividend_report_source_interface_id, DIVIDEND_LIST_CAT_ID, require_per_symbol=False
-    )
-    await _validate_interface(
         db, body.dividend_detail_source_interface_id, DIVIDEND_LIST_CAT_ID, require_per_symbol=True
     )
     await _validate_interface(
@@ -173,7 +166,6 @@ async def put_dividend_yield_settings(
     row = await load_settings(db)
     is_new = row.id is None  # 空默认（无持久化行）时插入，否则更新既有行
     before_detail = {
-        "dividend_report_source_interface_id": row.dividend_report_source_interface_id,
         "dividend_detail_source_interface_id": row.dividend_detail_source_interface_id,
         "price_source_interface_id": row.price_source_interface_id,
         "announcement_source_interface_id": row.announcement_source_interface_id,
@@ -183,7 +175,6 @@ async def put_dividend_yield_settings(
             else None
         ),
     }
-    row.dividend_report_source_interface_id = body.dividend_report_source_interface_id
     row.dividend_detail_source_interface_id = body.dividend_detail_source_interface_id
     row.price_source_interface_id = body.price_source_interface_id
     row.announcement_source_interface_id = body.announcement_source_interface_id
@@ -203,7 +194,6 @@ async def put_dividend_yield_settings(
         detail={
             "before": before_detail,
             "after": {
-                "dividend_report_source_interface_id": body.dividend_report_source_interface_id,
                 "dividend_detail_source_interface_id": body.dividend_detail_source_interface_id,
                 "price_source_interface_id": body.price_source_interface_id,
                 "announcement_source_interface_id": body.announcement_source_interface_id,

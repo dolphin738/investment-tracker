@@ -8425,7 +8425,6 @@
           "HTTP_CALLBACK",
           "ACCOUNT_CLEANUP",
           "LOG_CLEANUP",
-          "DIVIDEND_QUARTERLY_FETCH",
           "MARKET_DAILY_CLOSE_FETCH",
           "DIVIDEND_RETENTION_CLEANUP",
           "DIVIDEND_NOTICE_SCAN",
@@ -10570,17 +10569,6 @@
       },
       "SettingsUpdateBody": {
         "properties": {
-          "dividend_report_source_interface_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Dividend Report Source Interface Id"
-          },
           "dividend_detail_source_interface_id": {
             "anyOf": [
               {
