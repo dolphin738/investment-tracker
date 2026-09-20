@@ -835,7 +835,6 @@ export interface DividendYieldSourceRef {
 
 /** 股息率设置读取响应（GET /dividend-yield/settings；标色阈值已迁「用户偏好」，不在本响应内） */
 export interface DividendYieldSettingsOut {
-  dividend_report_source: DividendYieldSourceRef | null;
   dividend_detail_source: DividendYieldSourceRef | null;
   price_source: DividendYieldSourceRef | null;
   /** 公司公告接口（§5.4；未配置为 null） */
@@ -847,7 +846,6 @@ export interface DividendYieldSettingsOut {
 
 /** 股息率设置更新请求（PUT /dividend-yield/settings · admin-only；写时用 *_interface_id 字段） */
 export interface UpdateDividendYieldSettingsDto {
-  dividend_report_source_interface_id?: string | null;
   dividend_detail_source_interface_id?: string | null;
   price_source_interface_id?: string | null;
   /** 公司公告接口（§5.4；null = 不设置） */

@@ -34,16 +34,12 @@ interface InterfaceOption {
 }
 
 defineProps<{
-  /** 股息主数据源接口 id（含哨兵值表示「不设置」） */
-  dividendReportSourceInterfaceId: string;
   /** 股息明细源接口 id（含哨兵值） */
   dividendDetailSourceInterfaceId: string;
   /** 行情源接口 id（含哨兵值） */
   priceSourceInterfaceId: string;
   /** 公司公告接口 id（含哨兵值） */
   announcementSourceInterfaceId: string;
-  /** 股息主源候选（category_id === '3' && enabled） */
-  dividendSourceOptions: InterfaceOption[];
   /** 股息补充源候选（category_id === '3' && enabled） */
   dividendDetailOptions: InterfaceOption[];
   /** 行情源候选（category_id === '2' && enabled） */
@@ -55,7 +51,6 @@ defineProps<{
 }>();
 
 const emit = defineEmits<{
-  (e: 'update:dividendReportSourceInterfaceId', v: string): void;
   (e: 'update:dividendDetailSourceInterfaceId', v: string): void;
   (e: 'update:priceSourceInterfaceId', v: string): void;
   (e: 'update:announcementSourceInterfaceId', v: string): void;
@@ -72,31 +67,6 @@ const emit = defineEmits<{
     </CardHeader>
     <CardContent class="space-y-6">
       <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <!-- 股息主源 -->
-        <div class="space-y-2">
-          <Label for="dy-report-source">股息主数据源接口（按报告期全量）</Label>
-          <Select
-            :model-value="dividendReportSourceInterfaceId"
-            @update:model-value="
-              (v) => emit('update:dividendReportSourceInterfaceId', String(v))
-            "
-          >
-            <SelectTrigger id="dy-report-source" class="w-full">
-              <SelectValue placeholder="选择股息主数据源接口" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem :value="SELECT_EMPTY_VALUE">不设置</SelectItem>
-              <SelectItem
-                v-for="itf in dividendSourceOptions"
-                :key="itf.id"
-                :value="itf.id"
-              >
-                {{ itf.name }}（{{ providerNameById.get(itf.provider_id) ?? '未知提供方' }}）
-              </SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
         <!-- 股息补充源 -->
         <div class="space-y-2">
           <Label for="dy-detail-source">股息明细源接口（按证券逐只）</Label>

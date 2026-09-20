@@ -43,7 +43,6 @@ const providers = vi.hoisted(() => [
 ]);
 
 const settings = vi.hoisted<DividendYieldSettingsOut>(() => ({
-  dividend_report_source: { id: 'i1', name: '东财-分红配送' },
   dividend_detail_source: { id: 'i2', name: '新浪-分红配股' },
   price_source: { id: 'i3', name: '腾讯财经-A股行情' },
   announcement_source: null,
@@ -222,9 +221,8 @@ function interfaceOptions(select: DOMWrapper<Element>): DOMWrapper<Element>[] {
     );
 }
 
-/** 股息率 TAB 的四个接口下拉（稳定锚点，id 由 SelectTrigger 提供、替身 <select> 转接） */
+/** 股息率 TAB 的三源接口下拉（稳定锚点，id 由 SelectTrigger 提供、替身 <select> 转接） */
 const DIVIDEND_INTERFACE_SELECT_IDS = [
-  'dy-report-source',
   'dy-detail-source',
   'dy-price-source',
   'dy-announcement-source',
@@ -276,9 +274,6 @@ describe('GlobalSettingsPage — 顶层 TAB 与全局设置', () => {
       expect(realOptions(sel).some((o) => o.attributes('value') === '')).toBe(false);
     });
     // 提供方名反查生效
-    expect(
-      interfaceOptions(wrapper.find('#dy-report-source'))[0].text(),
-    ).toBe('东财-分红配送（东方财富）');
     expect(
       interfaceOptions(wrapper.find('#dy-detail-source'))[1].text(),
     ).toBe('新浪-分红配股（新浪财经）');

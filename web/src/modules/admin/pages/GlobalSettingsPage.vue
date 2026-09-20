@@ -52,8 +52,7 @@ const interfacesQuery = useDividendYieldInterfaces(true);
 const category3Enabled = computed(() =>
   (interfacesQuery.data.value ?? []).filter((i) => i.category_id === '3' && i.enabled),
 );
-/** 股息主源 / 补充源候选（category_id === '3'；主源限按报告期全量形态由后端四重校验兜底） */
-const dividendSourceOptions = category3Enabled;
+/** 股息补充源候选（category_id === '3' && enabled） */
 const dividendDetailOptions = category3Enabled;
 /** 行情源候选（category_id === '2'） */
 const priceSourceOptions = computed(() =>
@@ -75,7 +74,6 @@ const providerNameById = computed(() => {
 // ───────────────────────── 表单（唯一状态源） ─────────────────────────
 // 接口下拉的「不设置」用 SELECT_EMPTY_VALUE 表示（reka-ui 禁止 value=""）。
 const settingsForm = reactive({
-  dividendReportSourceInterfaceId: SELECT_EMPTY_VALUE,
   dividendDetailSourceInterfaceId: SELECT_EMPTY_VALUE,
   priceSourceInterfaceId: SELECT_EMPTY_VALUE,
   announcementSourceInterfaceId: SELECT_EMPTY_VALUE,
@@ -95,8 +93,6 @@ watch(
   dividendSettings,
   (s) => {
     if (!s) return;
-    settingsForm.dividendReportSourceInterfaceId =
-      s.dividend_report_source?.id ?? SELECT_EMPTY_VALUE;
     settingsForm.dividendDetailSourceInterfaceId =
       s.dividend_detail_source?.id ?? SELECT_EMPTY_VALUE;
     settingsForm.priceSourceInterfaceId = s.price_source?.id ?? SELECT_EMPTY_VALUE;
@@ -113,8 +109,6 @@ const settingsHasChanges = computed(() => {
   const s = dividendSettings.value;
   if (!s) return false;
   return (
-    settingsForm.dividendReportSourceInterfaceId !==
-      (s.dividend_report_source?.id ?? SELECT_EMPTY_VALUE) ||
     settingsForm.dividendDetailSourceInterfaceId !==
       (s.dividend_detail_source?.id ?? SELECT_EMPTY_VALUE) ||
     settingsForm.priceSourceInterfaceId !==
@@ -130,9 +124,6 @@ const settingsHasChanges = computed(() => {
 function handleSaveSettings(): void {
   settingsFormError.value = '';
   const payload: UpdateDividendYieldSettingsDto = {
-    dividend_report_source_interface_id: toInterfaceIdOrNull(
-      settingsForm.dividendReportSourceInterfaceId,
-    ),
     dividend_detail_source_interface_id: toInterfaceIdOrNull(
       settingsForm.dividendDetailSourceInterfaceId,
     ),
@@ -190,9 +181,6 @@ function handleSaveSettings(): void {
         <!-- 股息率 TAB：四源接口（阈值已迁「个人中心 → 偏好设置」，本页不再承载） -->
         <GlobalSettingsDividendTab
           v-else
-          v-model:dividend-report-source-interface-id="
-            settingsForm.dividendReportSourceInterfaceId
-          "
           v-model:dividend-detail-source-interface-id="
             settingsForm.dividendDetailSourceInterfaceId
           "
@@ -200,7 +188,6 @@ function handleSaveSettings(): void {
           v-model:announcement-source-interface-id="
             settingsForm.announcementSourceInterfaceId
           "
-          :dividend-source-options="dividendSourceOptions"
           :dividend-detail-options="dividendDetailOptions"
           :price-source-options="priceSourceOptions"
           :announcement-source-options="announcementSourceOptions"
