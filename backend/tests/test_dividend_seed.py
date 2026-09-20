@@ -362,7 +362,7 @@ async def test_failure_rolls_back_stats_snapshot_not_inflated(session, monkeypat
     a = await _add_master(session, code="600519", name="证券A")
     b = await _add_master(session, code="000001", name="证券B")
     await _seed_detail_source(session)
-    mid_a, code_a, mid_b, code_b = a.id, a.code, b.id, b.code
+    code_a, code_b = a.code, b.code
     await session.commit()
 
     cur = _cur_year()
