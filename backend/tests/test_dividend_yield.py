@@ -19,6 +19,7 @@ from app.services.dividend_yield import (
     is_suspicious,
     last_dividend_year,
     payout_records,
+    restate_cells,
     to_cell,
 )
 
@@ -313,6 +314,9 @@ def test_to_cell_projects_row_to_minimal_cell():
         status = DividendStatus.PROPOSED
         ex_dividend_date = date(2026, 3, 1)
         announcement_date = date(2026, 2, 1)
+        # P6 新增投影列：除权复权重述所需的送转比例（§9.1/§9.2）
+        bonus_share_ratio = None
+        convert_ratio = None
 
     c = to_cell(_Row())
     assert isinstance(c, DividendCell)
@@ -323,3 +327,114 @@ def test_to_cell_projects_row_to_minimal_cell():
     assert c.status == DividendStatus.PROPOSED
     assert c.ex_dividend_date == date(2026, 3, 1)
     assert c.announcement_date == date(2026, 2, 1)
+
+
+# ───────────────────────── 除权复权重述（§9.1/§9.2，P6 分红采集链路迁移） ─────────────────────────
+def test_restate_cells_wansheng_example():
+    """守护 §9.1/§9.2：万盛（现金 0.4 元 + 10 送 4）除权复权重述到当前股本基准。
+
+    cash=0.4（宣告口径=旧股本），10 送 4 → bonus_share_ratio=0.4。as_of 取除权日(2021-04-27)
+    时送转因子 1.4 适用，重述后每股现金 = 0.4/1.4；股息率 = (0.4/1.4)/19.09 ≈ 1.497%。
+    """
+    cell = DividendCell(
+        id="x",
+        report_year=2021,
+        report_quarter=4,
+        period_type="ANNUAL",
+        cash_per_share=Decimal("0.4"),
+        status=DividendStatus.PAID,
+        ex_dividend_date=date(2021, 4, 27),
+        announcement_date=None,
+        bonus_share_ratio=Decimal("0.4"),
+        convert_ratio=Decimal("0"),
+    )
+    restated = restate_cells([cell], as_of=date(2021, 4, 27))
+    # 重述后每股现金（Decimal 精确相等）
+    assert restated[0].cash_per_share == Decimal("0.4") / Decimal("1.4")  # ≈ 0.285714
+    # 重述后股息率 = (0.4/1.4)/19.09（Decimal 精确相等，≈ 0.014968 = 1.497%）
+    yield_res = compute_yield(restated, Decimal("19.09"), 2021)
+    assert yield_res.dividend_yield == Decimal("0.4") / Decimal("1.4") / Decimal("19.09")
+
+
+def test_restate_cells_multi_split_accumulates():
+    """守护 §9.1/§9.2：as_of 之前的累计送转因子 Π(1+bonus+convert) 累乘到每笔分红。
+
+    A 除权日(2020-06-01) 早于 B 的送转日(2021-06-01) → B 的送转(0.2+0.1=0.3) 适用 A；
+    B 自身送转也适用，因子均为 1.3。
+    """
+    a = DividendCell(
+        id="A", report_year=2020, report_quarter=4, period_type="ANNUAL",
+        cash_per_share=Decimal("1.0"), status=DividendStatus.PAID,
+        ex_dividend_date=date(2020, 6, 1), announcement_date=None,
+        bonus_share_ratio=None, convert_ratio=None,
+    )
+    b = DividendCell(
+        id="B", report_year=2021, report_quarter=4, period_type="ANNUAL",
+        cash_per_share=Decimal("0.5"), status=DividendStatus.PAID,
+        ex_dividend_date=date(2021, 6, 1), announcement_date=None,
+        bonus_share_ratio=Decimal("0.2"), convert_ratio=Decimal("0.1"),
+    )
+    out = restate_cells([a, b], as_of=date(2022, 1, 1))
+    by_id = {c.id: c for c in out}
+    # B 的送转发生在 A 除权日之后 → A 分子缩小 1.3 倍
+    assert by_id["A"].cash_per_share == Decimal("1.0") / Decimal("1.3")
+    # B 自身送转适用 → 0.5 / 1.3
+    assert by_id["B"].cash_per_share == Decimal("0.5") / Decimal("1.3")
+
+
+def test_restate_cells_no_split_unchanged():
+    """守护 §9.1/§9.2：无送转记录时重述为恒等变换（factor==1，原样透传）。"""
+    cell = DividendCell(
+        id="x", report_year=2021, report_quarter=4, period_type="ANNUAL",
+        cash_per_share=Decimal("0.4"), status=DividendStatus.PAID,
+        ex_dividend_date=date(2021, 4, 27), announcement_date=None,
+        bonus_share_ratio=None, convert_ratio=None,
+    )
+    out = restate_cells([cell], as_of=date(2022, 1, 1))
+    # factor==1 → 透传同一对象，金额不变
+    assert out[0] is cell
+    assert out[0].cash_per_share == Decimal("0.4")
+
+
+def test_restate_cells_proposed_null_exdate():
+    """守护 §9.1/§9.2：PROPOSED 行 ex_date=None 时取 as_of 前全部送转因子。
+
+    另一 PAID 送转行(2021-01-01, 送股 0.5)在 as_of=2021-06-01 之前 → PROPOSED 分子含该
+    送转因子 1.5 → 0.4/1.5。
+    """
+    prop = DividendCell(
+        id="prop", report_year=2021, report_quarter=4, period_type="ANNUAL",
+        cash_per_share=Decimal("0.4"), status=DividendStatus.PROPOSED,
+        ex_dividend_date=None, announcement_date=None,
+        bonus_share_ratio=None, convert_ratio=None,
+    )
+    paid_split = DividendCell(
+        id="split", report_year=2021, report_quarter=4, period_type="ANNUAL",
+        cash_per_share=Decimal("0"), status=DividendStatus.PAID,
+        ex_dividend_date=date(2021, 1, 1), announcement_date=None,
+        bonus_share_ratio=Decimal("0.5"), convert_ratio=Decimal("0"),
+    )
+    out = restate_cells([prop, paid_split], as_of=date(2021, 6, 1))
+    by_id = {c.id: c for c in out}
+    # ex_date=None → 取 as_of 前全部送转（0.5）→ 0.4 / 1.5
+    assert by_id["prop"].cash_per_share == Decimal("0.4") / Decimal("1.5")
+
+
+def test_snapshot_curve_consistent_with_restatement():
+    """守护 §9 一致性契约在重述下仍成立：快照(先重述再算) == 曲线末点(内部已重述)。"""
+    cell = DividendCell(
+        id="c1", report_year=2021, report_quarter=4, period_type="ANNUAL",
+        cash_per_share=Decimal("1.0"), status=DividendStatus.PAID,
+        ex_dividend_date=date(2021, 6, 1), announcement_date=None,
+        bonus_share_ratio=Decimal("0.5"), convert_ratio=Decimal("0"),
+    )
+    records = [cell]
+    as_of = date(2022, 1, 1)
+    price = Decimal("20")
+    # 快照：先重述再 compute_yield
+    restated = restate_cells(records, as_of=as_of)
+    snap = compute_yield(restated, price, 2021)
+    # 曲线末点：compute_yield_at 内部已对 visible 重述
+    point = compute_yield_at(records, as_of=as_of, price=price, current_year=2021)
+    assert snap.dividend_yield is not None
+    assert point.dividend_yield == snap.dividend_yield

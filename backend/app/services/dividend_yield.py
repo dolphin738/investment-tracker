@@ -48,6 +48,11 @@ class DividendCell:
     status: DividendStatus
     ex_dividend_date: Optional[date]
     announcement_date: Optional[date]
+    # 除权复权重述（§9.1/§9.2）投影列：送转比例。用于把「宣告口径=旧股本基准」的
+    # 每股现金分红重述到「as_of 时点的当前股本」基准，消除分子(旧股本) ÷ 分母(新股本
+    # 股价) 的虚增（约 (1+送转率) 倍）。带默认值以保持原 8 个位置字段构造仍合法。
+    bonus_share_ratio: Optional[Decimal] = None
+    convert_ratio: Optional[Decimal] = None
 
 
 def to_cell(r: SecurityDividend) -> DividendCell:
@@ -66,6 +71,8 @@ def to_cell(r: SecurityDividend) -> DividendCell:
         status=r.status,
         ex_dividend_date=r.ex_dividend_date,
         announcement_date=r.announcement_date,
+        bonus_share_ratio=r.bonus_share_ratio,
+        convert_ratio=r.convert_ratio,
     )
 
 
@@ -146,6 +153,50 @@ def compute_yield(
     return YieldResult(mode, numerator, numerator / price, ref_ids)
 
 
+def restate_cells(records: list[DividendCell], as_of: date) -> list[DividendCell]:
+    """除权复权重述（§9.1/§9.2）：把每笔现金分红的每股分红重述到「as_of 时点的当前股本」基准。
+
+    分母（最新不复权收盘价）已是当前股本基准；分子（宣告口径=旧股本）须按 as_of 之前、
+    且发生在该笔分红除权日之后的累计送转因子 Π(1+bonus+convert) 缩小，分子分母同基准相除
+    才不虚增。纯送转行（cash=0）不落库（§9.3-A1），故送转因子仅取自「含现金且带送转」的行。
+    """
+    splits = [
+        (j.ex_dividend_date, (j.bonus_share_ratio or Decimal("0")) + (j.convert_ratio or Decimal("0")))
+        for j in records
+        if j.ex_dividend_date is not None
+        and ((j.bonus_share_ratio or Decimal("0")) + (j.convert_ratio or Decimal("0"))) > 0
+        and j.ex_dividend_date <= as_of
+    ]
+    out: list[DividendCell] = []
+    for i in records:
+        if i.cash_per_share <= 0:
+            out.append(i)  # 无现金，原样透传
+            continue
+        i_date = i.ex_dividend_date
+        factor = Decimal("1")
+        for ex_date, b in splits:
+            if i_date is None or ex_date >= i_date:
+                factor *= (Decimal("1") + b)
+        if factor == 1:
+            out.append(i)
+        else:
+            out.append(
+                DividendCell(
+                    id=i.id,
+                    report_year=i.report_year,
+                    report_quarter=i.report_quarter,
+                    period_type=i.period_type,
+                    cash_per_share=i.cash_per_share / factor,
+                    status=i.status,
+                    ex_dividend_date=i.ex_dividend_date,
+                    announcement_date=i.announcement_date,
+                    bonus_share_ratio=i.bonus_share_ratio,
+                    convert_ratio=i.convert_ratio,
+                )
+            )
+    return out
+
+
 def is_suspicious(yield_ratio: Optional[Decimal]) -> bool:
     """异常股息率判定（决策 A12）：yield<=0 或 yield>0.30 置 true（小数比率）。"""
     if yield_ratio is None:
@@ -219,4 +270,5 @@ def compute_yield_at(
     visible = [
         r for r in records if (_anchor_date(r) is not None and _anchor_date(r) <= as_of)
     ]
-    return compute_yield(visible, price, current_year)
+    restated = restate_cells(visible, as_of)
+    return compute_yield(restated, price, current_year)

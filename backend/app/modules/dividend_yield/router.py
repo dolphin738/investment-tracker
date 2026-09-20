@@ -41,6 +41,7 @@ from app.services.dividend_period import period_label, plan_label
 from app.services.dividend_yield import (
     compute_yield,
     implied_price,
+    restate_cells,
     to_cell,
 )
 
@@ -221,6 +222,9 @@ async def rank_dividend_yield(
             # 过滤态股息率（§8.1）：剔除 PROPOSED 后按过滤记录集现算（价格为缺失时得 None）
             cells = [to_cell(d) for d in payout_map.get(r.master_id, [])]
             visible = [c for c in cells if c.status != DividendStatus.PROPOSED]
+            # 除权复权重述（§9.1/§9.2）：过滤态股息率同样须按当前股本基准重述分子
+            as_of = r.latest_trade_date if r.latest_trade_date is not None else today_app_tz()
+            visible = restate_cells(visible, as_of)
             recomputed = compute_yield(visible, r.latest_price, cur_year)
             item["dividend_yield"] = recomputed.dividend_yield
             item["numerator_per_share"] = recomputed.numerator_per_share

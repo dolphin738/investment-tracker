@@ -38,6 +38,7 @@ from app.services.dividend_yield import (
     consecutive_years,
     is_suspicious,
     last_dividend_year,
+    restate_cells,
     to_cell,
 )
 
@@ -129,6 +130,11 @@ async def refresh_yields_for_masters(session, master_ids: list[str]) -> tuple[in
             if not cells and price is None and mid in snap_by_master:
                 preserved += 1
                 continue
+
+            # 除权复权重述（§9.1/§9.2）：把分子重述到当前股本基准，避免送转后股息率高估。
+            # as_of 取最新交易日；缺失时回退应用时区当日（与快照基准口径一致）。
+            as_of = latest_trade_date if latest_trade_date is not None else today_app_tz()
+            cells = restate_cells(cells, as_of)
 
             result = compute_yield(cells, price, cur_year)
             mode = result.mode if result.ref_div_ids else DividendYieldMode.LFY
