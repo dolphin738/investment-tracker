@@ -52,9 +52,19 @@ _FALLBACK_TOKENS: dict[str, set[str]] = {
     "_FALLBACK_CODE_FIELD": {"services/response_fields.py"},
     "_NOTICE_CODE_FIELD": {"services/response_fields.py"},
     "_COL_NOTICE_CODE": {"services/response_fields.py"},
-    # 公告标题为展示字段（无 slot，§5.2）：取值仅在公告扫描模块，兜底常量在读入口
-    "公告标题": {"services/response_fields.py", "services/dividend_notice_scan.py"},
-    "_COL_NOTICE_TITLE": {"services/response_fields.py", "services/dividend_notice_scan.py"},
+    # 公告标题为展示字段（无 slot，§5.2）：取值仅在公告扫描模块，兜底常量在读入口。
+    # 公告扫描模块已拆分为 dividend_notice_scan.py（落库主流程）与
+    # dividend_notice_meta.py（标题二筛，§6.3），二者均属白名单。
+    "公告标题": {
+        "services/response_fields.py",
+        "services/dividend_notice_scan.py",
+        "services/dividend_notice_meta.py",
+    },
+    "_COL_NOTICE_TITLE": {
+        "services/response_fields.py",
+        "services/dividend_notice_scan.py",
+        "services/dividend_notice_meta.py",
+    },
 }
 
 

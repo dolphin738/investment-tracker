@@ -45,10 +45,12 @@ from app.services.dividend_cninfo_parse import (
     parse_period_type,
     retention_cutoff_year,
 )
-from app.services.dividend_notice_scan import (
-    DividendNoticeScanService,
+from app.services.dividend_notice_meta import (
     _TITLE_CANCEL_RE,
     _TITLE_DIVIDEND_RE,
+)
+from app.services.dividend_notice_scan import (
+    DividendNoticeScanService,
 )
 from app.services.market_data_sync import (
     DIVIDEND_LIST_CAT_ID,
