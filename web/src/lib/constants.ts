@@ -37,6 +37,8 @@ export const ROUTE_PATH = {
   ADMIN_TASKS: '/admin/tasks',
   ADMIN_LOGS: '/admin/logs',
   ADMIN_GLOBAL_SETTINGS: '/admin/global-settings',
+  /** 待人工划分分红独立页（唯一入口 = 全局设置「补齐历史分红」区块的按钮，不挂侧边栏） */
+  ADMIN_PENDING_DIVIDENDS: '/admin/pending-dividends',
 } as const;
 
 // ===== 路由持久化键 =====

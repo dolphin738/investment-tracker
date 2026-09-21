@@ -124,6 +124,15 @@ const routes: RouteRecordRaw[] = [
         name: 'admin-global-settings',
         component: () => import('@/modules/admin/pages/GlobalSettingsPage.vue'),
       },
+      {
+        // 待人工划分分红独立页：唯一入口 = 全局设置「补齐历史分红」区块的按钮（不挂侧边栏）。
+        // 角色守卫走「页内 useHasRole('admin','auditor') 门控 + 后端 require_admin 403」，
+        // 本项目路由层无 meta/role 机制，不为本页发明 meta（见 review §5.3.2）。
+        path: 'admin/pending-dividends',
+        name: 'admin-pending-dividends',
+        component: () =>
+          import('@/modules/admin/pages/PendingDividendsPage.vue'),
+      },
     ],
   },
 

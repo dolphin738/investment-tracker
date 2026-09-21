@@ -22,8 +22,18 @@ import type {
   DividendYieldSort,
   DividendYieldSettingsOut,
   ImpliedPriceResult,
+  PaginatedResponse,
   UpdateDividendYieldSettingsDto,
 } from './types';
+// 待人工划分分红端点响应契约直接复用 OpenAPI 生成类型（批次 C 已重生成 types/api.ts）。
+import type { components } from '../types/api';
+
+type PendingDividendOut = components['schemas']['PendingDividendOut'];
+type PendingDividendSummaryOut = components['schemas']['PendingDividendSummaryOut'];
+type PendingAssignResultOut = components['schemas']['PendingAssignResultOut'];
+type PendingIgnoreResultOut = components['schemas']['PendingIgnoreResultOut'];
+type PendingReopenResultOut = components['schemas']['PendingReopenResultOut'];
+type BatchOperationOut = components['schemas']['BatchOperationOut'];
 
 /** 股息率榜单过滤参数（§8.1；include_no_dividend 默认 false=剔除近两年无分红） */
 export interface DividendYieldRankFilters {
@@ -65,6 +75,8 @@ export interface SecurityDividendItem {
   planLabel: string;
   /** 每股现金分红（元；字符串防前端类型漂移） */
   cashPerShare: string;
+  /** 源站「分红类型」原文标签（如「股改分红」「重整转增」）；无标签为 null（E6 修复） */
+  dividendLabel: string | null;
   /** PROPOSED 预案 / PAID 已派发 / REJECTED 否决 */
   status: string;
   exDividendDate: string | null;
@@ -97,9 +109,21 @@ export function getDividendYieldImpliedPrice(
   );
 }
 
-/** 股息率阈值 + 三接口源设置（admin-only） */
-export function getDividendYieldSettings(): Promise<DividendYieldSettingsOut> {
-  return http.get<DividendYieldSettingsOut>('/dividend-yield/settings');
+/**
+ * GET /dividend-yield/settings 响应（在既有 DividendYieldSettingsOut 上补 D-4 留存窗年数）。
+ *
+ * 后端 `_settings_out` 始终返回有效 `dividend_retention_years`（未配置回落 5）。因
+ * `api/types.ts` 非本链路手写契约（不改动该文件），此处以扩展接口承载该新字段；
+ * 待人工划分页据此算建议留存窗，不再硬编码 `cur-4`（避免与后端清理窗漂移）。
+ */
+export interface DividendYieldSettings extends DividendYieldSettingsOut {
+  /** 分红留存窗年数（可配 1~10；未配置后端回落 5） */
+  dividend_retention_years: number | null;
+}
+
+/** 股息率阈值 + 三接口源设置（登录可读；含 D-4 留存窗年数） */
+export function getDividendYieldSettings(): Promise<DividendYieldSettings> {
+  return http.get<DividendYieldSettings>('/dividend-yield/settings');
 }
 
 /** 更新股息率阈值 + 三接口源设置（admin-only；写时用 *_interface_id 字段） */
@@ -127,5 +151,102 @@ export function rebuildDividendYield(): Promise<{ summary: string }> {
 export function seedInitialDividends(): Promise<{ message: string }> {
   return http.post<{ message: string }>(
     '/dividend-yield/seed-initial-dividends',
+  );
+}
+
+// ============================================================================
+// 待人工划分分红（批次 C/D · /dividend-yield/pending-dividends/*）
+//
+// 「无报告期」的现金分红行落在 staging 表，交人工指定报告期。后端**永不**判定报告期，
+// 仅前端据原文标签 + 日期给建议（见 lib/suggest-report-period.ts）。
+// 读端点（list/summary）对 admin/auditor 开放；写端点仅 admin。
+// ============================================================================
+
+/** 待划分列表筛选/分页参数（排序固定 created_at DESC, id DESC，后端不提供 sort） */
+export interface PendingDividendFilters {
+  /** 状态筛选（不传 = 全部） */
+  status?: 'PENDING' | 'ASSIGNED' | 'IGNORED';
+  /** 源站原文标签精确匹配（不传 = 全部） */
+  label?: string;
+  /** 关键字：证券代码 / 名称模糊（服务端 ilike） */
+  q?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+/** 划分单笔请求体（reportYear/reportQuarter/periodType 由弹窗表单给出） */
+export interface PendingAssignPayload {
+  reportYear: number;
+  reportQuarter: number;
+  /** ANNUAL | INTERIM | QUARTERLY | SPECIAL | OTHER（后端服务层枚举校验） */
+  periodType: string;
+}
+
+/** 批量划分单条（= 单笔请求体 + 待划分行 id） */
+export type PendingAssignItemPayload = PendingAssignPayload & { id: string };
+
+/** 待划分分页列表（固定排序；筛选 status/label/q） */
+export function listPendingDividends(
+  filters: PendingDividendFilters = {},
+): Promise<PaginatedResponse<PendingDividendOut>> {
+  return http.get<PaginatedResponse<PendingDividendOut>>(
+    '/dividend-yield/pending-dividends',
+    { params: filters },
+  );
+}
+
+/** 待划分概览：各状态计数 + 标签候选集 labels[] */
+export function getPendingDividendSummary(): Promise<PendingDividendSummaryOut> {
+  return http.get<PendingDividendSummaryOut>(
+    '/dividend-yield/pending-dividends/summary',
+  );
+}
+
+/** 划分单笔（写回分红主表 + 置 ASSIGNED；主表同格已存在则 conflict=true 不覆盖） */
+export function assignPendingDividend(
+  id: string,
+  payload: PendingAssignPayload,
+): Promise<PendingAssignResultOut> {
+  return http.post<PendingAssignResultOut>(
+    `/dividend-yield/pending-dividends/${id}/assign`,
+    payload,
+  );
+}
+
+/** 批量划分（逐项独立提交；部分失败返回 { succeeded, failed[] }） */
+export function batchAssignPendingDividends(
+  items: PendingAssignItemPayload[],
+): Promise<BatchOperationOut> {
+  return http.post<BatchOperationOut>(
+    '/dividend-yield/pending-dividends/batch-assign',
+    { items },
+  );
+}
+
+/** 忽略单笔（PENDING → IGNORED；不写回主表） */
+export function ignorePendingDividend(
+  id: string,
+): Promise<PendingIgnoreResultOut> {
+  return http.post<PendingIgnoreResultOut>(
+    `/dividend-yield/pending-dividends/${id}/ignore`,
+  );
+}
+
+/** 批量忽略（逐项独立提交；部分失败返回 { succeeded, failed[] }） */
+export function batchIgnorePendingDividends(
+  ids: string[],
+): Promise<BatchOperationOut> {
+  return http.post<BatchOperationOut>(
+    '/dividend-yield/pending-dividends/batch-ignore',
+    { ids },
+  );
+}
+
+/** 撤销指定（仅 ASSIGNED 可撤销；连带删除 assign 写入的主表同键行） */
+export function reopenPendingDividend(
+  id: string,
+): Promise<PendingReopenResultOut> {
+  return http.post<PendingReopenResultOut>(
+    `/dividend-yield/pending-dividends/${id}/reopen`,
   );
 }
