@@ -68,10 +68,11 @@ def _cur_year() -> int:
 
 
 def _new_stats() -> dict:
-    """与 ``scan()`` 同键集的计数器（``fetch_and_upsert_master`` 只写其中 5 个键）。"""
+    """与 ``scan()`` / ``seed()`` 同键集的计数器（``fetch_and_upsert_master`` 只写其中若干键）。"""
     return {
-        "rows": 0, "hits": 0, "new": 0, "upd": 0,
-        "anchor": 0, "skip": 0, "window": 0, "skipped": 0,
+        "rows": 0, "hits": 0, "new": 0, "upd": 0, "anchor": 0,
+        "skip": 0, "no_period": 0, "unknown_label": 0, "collision": 0,
+        "window": 0, "skipped": 0,
     }
 
 
@@ -291,12 +292,14 @@ async def test_classify_notices_cancel_is_not_candidate(session):
 
 # ───────────── §5.3 / §9.3-A3 纯解析口径 ─────────────
 def test_parse_period_type_labels():
-    """§5.3：「分红类型」年度分红→ANNUAL、中期分红→INTERIM、其余→QUARTERLY。"""
+    """§5.3（批次 A）：分红类型 5 项精确映射；未收录/空/None → OTHER。"""
     assert parse_period_type("年度分红") is ReportPeriodType.ANNUAL
     assert parse_period_type("中期分红") is ReportPeriodType.INTERIM
-    assert parse_period_type("三季度分红") is ReportPeriodType.QUARTERLY
-    assert parse_period_type("") is ReportPeriodType.QUARTERLY
-    assert parse_period_type(None) is ReportPeriodType.QUARTERLY
+    assert parse_period_type("季度分红") is ReportPeriodType.QUARTERLY
+    assert parse_period_type("特别分红") is ReportPeriodType.SPECIAL
+    assert parse_period_type("股改分红") is ReportPeriodType.OTHER
+    assert parse_period_type("") is ReportPeriodType.OTHER
+    assert parse_period_type(None) is ReportPeriodType.OTHER
 
 
 def test_retention_cutoff_year_is_true_five_years():
@@ -376,7 +379,7 @@ async def test_fetch_cuts_rows_outside_true_five_year_window(session):
 # ───────────── §5.3 / §9.3-A1 跳行口径 ─────────────
 @pytest.mark.asyncio
 async def test_pure_bonus_row_not_persisted(session):
-    """§9.3-A1：纯送转行（派息比例空）不落库，计入 ``stats['skip']``。"""
+    """§9.3-A1（批次 A 命名 A）：纯送转行（派息比例空）不落库，计入 ``stats['skip']``（无派息）。"""
     m = await _add_master(session)
     _notice, detail = await _seed_sources(session)
     svc = DividendNoticeScanService(session)
@@ -409,7 +412,10 @@ async def test_explicit_zero_cash_not_persisted(session):
 
 @pytest.mark.asyncio
 async def test_unparsable_report_period_not_persisted(session):
-    """§5.3：「报告时间」不可解析 → 无报告期归属，跳行计入 ``stats['skip']``。"""
+    """§5.3（批次 A）：「报告时间」不可解析 → 有派息但无报告期，跳过计入 ``stats['no_period']``。
+
+    行为不变：仍不落库（``_div_rows == []``）。
+    """
     m = await _add_master(session)
     _notice, detail = await _seed_sources(session)
     svc = DividendNoticeScanService(session)
@@ -423,7 +429,8 @@ async def test_unparsable_report_period_not_persisted(session):
     await session.commit()
 
     assert await _div_rows(session, m.id) == []
-    assert stats["skip"] == 2
+    assert stats["skip"] == 0
+    assert stats["no_period"] == 2
 
 
 # ───────────── §5.3 字段映射 / §5.4 status 判据 ─────────────
@@ -480,7 +487,7 @@ async def test_status_paid_when_ex_date_else_proposed(session):
 
 @pytest.mark.asyncio
 async def test_period_type_mapped_from_dividend_type(session):
-    """§5.3 端到端：分红类型「年度/中期/其它」→ ANNUAL / INTERIM / QUARTERLY。"""
+    """§5.3 端到端（批次 A）：分红类型「年度/中期/季度/其它」→ ANNUAL / INTERIM / QUARTERLY / OTHER。"""
     m = await _add_master(session)
     _notice, detail = await _seed_sources(session)
     cur = _cur_year()
@@ -488,7 +495,7 @@ async def test_period_type_mapped_from_dividend_type(session):
     rows = [
         _cn_row(report=f"{cur - 1}年报", ptype="年度分红", cash="100"),
         _cn_row(report=f"{cur - 1}半年报", ptype="中期分红", cash="50"),
-        _cn_row(report=f"{cur - 1}一季报", ptype="三季度分红", cash="30"),
+        _cn_row(report=f"{cur - 1}一季报", ptype="季度分红", cash="30"),
     ]
     svc._mds.call_interface_raw = _make_raw({"600519": rows})[0]
     await svc.fetch_and_upsert_master(m.id, "sh600519", detail, _new_stats())
@@ -766,3 +773,261 @@ async def test_resolve_detail_itf_provider_disabled_returns_none(session):
     svc = DividendNoticeScanService(session)
     resolved = await svc._resolve_detail_itf(await svc._settings())
     assert resolved is None
+
+
+# ───────────── 批次 A：OTHER 枚举 / 原文标签 / 撞键护栏 ─────────────
+@pytest.mark.asyncio
+async def test_fetch_sharereform_row_persisted_as_other(session):
+    """端到端 #10：股改分红行落库，period_type=OTHER 且 dividend_label 透传原文。"""
+    m = await _add_master(session)
+    _notice, detail = await _seed_sources(session)
+    cur = _cur_year()
+    svc = DividendNoticeScanService(session)
+    rows = [_cn_row(
+        report=f"{cur - 1}年报", ptype="股改分红", cash="100", ex=f"{cur - 1}-06-10",
+    )]
+    svc._mds.call_interface_raw = _make_raw({"600519": rows})[0]
+    stats = _new_stats()
+    await svc.fetch_and_upsert_master(m.id, "sh600519", detail, stats)
+    await session.commit()
+
+    stored = await _div_rows(session, m.id)
+    assert len(stored) == 1
+    assert stored[0].period_type is ReportPeriodType.OTHER
+    assert stored[0].dividend_label == "股改分红"
+    assert stats["new"] == 1
+    assert stats["unknown_label"] == 0  # 股改是已收录标签
+
+
+@pytest.mark.asyncio
+async def test_fetch_unknown_label_persisted_as_other(session):
+    """端到端 #11：未收录标签落 OTHER，原文 dividend_label 透传，计 unknown_label==1。"""
+    m = await _add_master(session)
+    _notice, detail = await _seed_sources(session)
+    cur = _cur_year()
+    svc = DividendNoticeScanService(session)
+    rows = [_cn_row(
+        report=f"{cur - 1}年报", ptype="承诺补偿", cash="100", ex=f"{cur - 1}-06-10",
+    )]
+    svc._mds.call_interface_raw = _make_raw({"600519": rows})[0]
+    stats = _new_stats()
+    await svc.fetch_and_upsert_master(m.id, "sh600519", detail, stats)
+    await session.commit()
+
+    stored = await _div_rows(session, m.id)
+    assert len(stored) == 1
+    assert stored[0].period_type is ReportPeriodType.OTHER
+    assert stored[0].dividend_label == "承诺补偿"
+    assert stats["unknown_label"] == 1
+
+
+@pytest.mark.asyncio
+async def test_collision_guard_keeps_old_label(session):
+    """🔴 撞键 #12：同唯一键(OTHER)新旧标签均非空且不等 → 整行不更新，保留旧值。
+
+    先写 股改分红/cash=1.0，再拉 承诺补偿/cash=2.0：唯一键相同（均 OTHER），命中撞键护栏，
+    库内仍 1 行、cash 未覆盖、dividend_label 仍旧，collision==1、upd==0。
+    """
+    m = await _add_master(session)
+    _notice, detail = await _seed_sources(session)
+    cur = _cur_year()
+    svc = DividendNoticeScanService(session)
+
+    svc._mds.call_interface_raw = _make_raw({"600519": [
+        _cn_row(report=f"{cur - 1}年报", ptype="股改分红", cash="10", ex=f"{cur - 1}-06-10"),
+    ]})[0]
+    first = _new_stats()
+    await svc.fetch_and_upsert_master(m.id, "sh600519", detail, first)
+    await session.commit()
+    assert first["new"] == 1
+
+    svc._mds.call_interface_raw = _make_raw({"600519": [
+        _cn_row(report=f"{cur - 1}年报", ptype="承诺补偿", cash="20", ex=f"{cur - 1}-07-10"),
+    ]})[0]
+    second = _new_stats()
+    await svc.fetch_and_upsert_master(m.id, "sh600519", detail, second)
+    await session.commit()
+
+    stored = await _div_rows(session, m.id)
+    assert len(stored) == 1
+    assert stored[0].cash_per_share == Decimal("1.0")  # 未覆盖
+    assert stored[0].dividend_label == "股改分红"       # 保留旧标签
+    assert second["collision"] == 1
+    assert second["upd"] == 0
+
+
+@pytest.mark.asyncio
+async def test_collision_guard_exempt_same_label_refreshes(session):
+    """护栏豁免 #13：同标签重扫（补除权日）→ 正常刷新，collision==0、upd==1。"""
+    m = await _add_master(session)
+    _notice, detail = await _seed_sources(session)
+    cur = _cur_year()
+    svc = DividendNoticeScanService(session)
+
+    svc._mds.call_interface_raw = _make_raw({"600519": [
+        _cn_row(report=f"{cur - 1}年报", ptype="股改分红", cash="10", ex=""),
+    ]})[0]
+    first = _new_stats()
+    await svc.fetch_and_upsert_master(m.id, "sh600519", detail, first)
+    await session.commit()
+    assert first["new"] == 1
+
+    svc._mds.call_interface_raw = _make_raw({"600519": [
+        _cn_row(report=f"{cur - 1}年报", ptype="股改分红", cash="10", ex=f"{cur - 1}-06-10"),
+    ]})[0]
+    second = _new_stats()
+    await svc.fetch_and_upsert_master(m.id, "sh600519", detail, second)
+    await session.commit()
+
+    stored = await _div_rows(session, m.id)
+    assert len(stored) == 1
+    assert stored[0].ex_dividend_date == date(cur - 1, 6, 10)
+    assert stored[0].dividend_label == "股改分红"
+    assert second["collision"] == 0
+    assert second["upd"] == 1
+
+
+@pytest.mark.asyncio
+async def test_collision_guard_exempt_null_label_is_backfilled(session):
+    """护栏豁免 #14：存量 dividend_label=NULL 行 → 标签被补写，collision==0。"""
+    m = await _add_master(session)
+    _notice, detail = await _seed_sources(session)
+    cur = _cur_year()
+    # 预置存量行（迁移后存量 NULL 行）：同唯一键，dividend_label=None
+    session.add(SecurityDividend(
+        master_id=m.id, report_year=cur - 1, report_quarter=4,
+        period_type=ReportPeriodType.OTHER, cash_per_share=Decimal("1.0"),
+        status=DividendStatus.PROPOSED, source="巨潮-历史分红",
+        dividend_label=None,
+    ))
+    await session.commit()
+
+    svc = DividendNoticeScanService(session)
+    rows = [_cn_row(
+        report=f"{cur - 1}年报", ptype="股改分红", cash="10", ex=f"{cur - 1}-06-10",
+    )]
+    svc._mds.call_interface_raw = _make_raw({"600519": rows})[0]
+    stats = _new_stats()
+    await svc.fetch_and_upsert_master(m.id, "sh600519", detail, stats)
+    await session.commit()
+
+    stored = await _div_rows(session, m.id)
+    assert len(stored) == 1
+    assert stored[0].dividend_label == "股改分红"  # 被补写
+    assert stats["collision"] == 0
+    assert stats["upd"] == 1
+
+
+# ───────────── 摘要片段 / WARN 聚合 / 唯一键 / 键集（批次 A 收口守护） ─────────────
+@pytest.mark.asyncio
+async def test_scan_summary_includes_new_bucket_fragments(session, monkeypatch):
+    """运维对账：scan() 摘要须含四个新桶片段（无派息/无报告期/未知标签/标签撞键）。
+
+    新桶的全部意义是运维可观测，而摘要字符串是运维唯一可见面——改了摘要却零用例守护
+    等于计数器白加；此用例锁死四段格式（含计数），任一桶被删/改名即红。
+    """
+    m = await _add_master(session)
+    _notice, _detail = await _seed_sources(session)
+    cur = _cur_year()
+    mid = m.id  # 纯字符串：避免 rollback 后读 ORM 属性触发同步惰性加载
+    # 预置同格 (cur-1, Q4, ANNUAL) 但旧标签≠新标签 → 触发撞键护栏
+    session.add(SecurityDividend(
+        master_id=mid, report_year=cur - 1, report_quarter=4,
+        period_type=ReportPeriodType.ANNUAL, cash_per_share=Decimal("19.0"),
+        status=DividendStatus.PAID, ex_dividend_date=date(cur - 1, 6, 1),
+        source="巨潮-历史分红", dividend_label="旧标签-临",
+    ))
+    await session.commit()
+    notice_rows = [{"代码": "600519", "公告标题": "XX公司2025年度权益分派实施公告"}]
+    # 年度分红(cur-1) → 同格撞键；未知类型(cur-1) → 未知标签；现金0 → 无派息
+    fake, _calls = _make_raw({
+        "600519": [
+            _cn_row(report=f"{cur - 1}年报", cash="10", ptype="未知道具分红"),
+            _cn_row(report=f"{cur - 1}年报", cash="10"),  # 年度分红 → dividend_label=年度分红 ≠ 旧标签
+            _cn_row(report=f"{cur - 1}年报", cash="0"),   # 无派息
+        ]
+    }, notice_rows)
+    monkeypatch.setattr(MarketDataSyncService, "call_interface_raw", fake)
+
+    result = await DividendNoticeScanService(session).scan(None)
+    await session.commit()
+
+    for frag in ("无派息1", "无报告期0", "未知标签1", "标签撞键1"):
+        assert frag in result, f"scan() 摘要须含「{frag}」（运维对账）：{result}"
+
+
+@pytest.mark.asyncio
+async def test_scan_aggregated_and_collision_warnings(session, monkeypatch, caplog):
+    """R3：scan 整轮仅打**一条**未收录标签聚合 WARNING；撞键打一条 WARNING（pin 模块 logger）。
+
+    不直读私有属性 ``_unknown_label_counts``，只经公共入口 scan() + caplog 验证；
+    root + 模块 logger 都 pin 到 WARNING，避免被会话内其它用例的 logger 级别污染。
+    """
+    import logging
+    caplog.set_level(logging.WARNING)
+    caplog.set_level(logging.WARNING, logger="app.services.dividend_notice_scan")
+    m = await _add_master(session)
+    _notice, _detail = await _seed_sources(session)
+    cur = _cur_year()
+    mid = m.id
+    session.add(SecurityDividend(
+        master_id=mid, report_year=cur - 1, report_quarter=4,
+        period_type=ReportPeriodType.ANNUAL, cash_per_share=Decimal("19.0"),
+        status=DividendStatus.PAID, ex_dividend_date=date(cur - 1, 6, 1),
+        source="巨潮-历史分红", dividend_label="旧标签-临",
+    ))
+    await session.commit()
+    notice_rows = [{"代码": "600519", "公告标题": "XX公司2025年度权益分派实施公告"}]
+    fake, _calls = _make_raw({
+        "600519": [
+            _cn_row(report=f"{cur - 1}年报", cash="10", ptype="未知道具分红"),  # 未知标签
+            _cn_row(report=f"{cur - 1}年报", cash="10"),                        # 撞键
+        ]
+    }, notice_rows)
+    monkeypatch.setattr(MarketDataSyncService, "call_interface_raw", fake)
+
+    await DividendNoticeScanService(session).scan(None)
+    await session.commit()
+
+    msgs = [r.message for r in caplog.records]
+    assert any("未收录标签" in x for x in msgs), f"scan 应聚合打一条未收录标签 WARNING：{msgs}"
+    assert any("撞键保留旧值" in x for x in msgs), f"scan 应打一条撞键 WARNING：{msgs}"
+    # 聚合未收录标签 WARNING 必须只出现一次（即非逐行 WARN 风暴）
+    assert sum("未收录标签" in x for x in msgs) == 1
+
+
+@pytest.mark.asyncio
+async def test_security_dividends_unique_key_has_four_columns(session):
+    """R4：唯一键 uq_security_dividends_master_period 须为 4 列，dividend_label 不入唯一键。
+
+    否则同格不同标签的行会被唯一键拒绝而非走撞键护栏 → 撞键判据失效。
+    """
+    from sqlalchemy import text
+    rows = (
+        await session.execute(text(
+            "SELECT kcu.column_name FROM information_schema.table_constraints tc "
+            "JOIN information_schema.key_column_usage kcu "
+            "ON tc.constraint_name = kcu.constraint_name "
+            "WHERE tc.table_name = 'security_dividends' "
+            "AND tc.constraint_type = 'UNIQUE' "
+            "AND tc.constraint_name = 'uq_security_dividends_master_period' "
+            "ORDER BY kcu.ordinal_position"
+        ))
+    ).all()
+    cols = {r[0] for r in rows}
+    assert cols == {"master_id", "report_year", "report_quarter", "period_type"}, (
+        f"唯一键列集须为 4 列且不含 dividend_label：{cols}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_scan_and_seed_stats_keysets_equal(session):
+    """R5：scan() 与 seed() 初始 stats 键集合必须完全相等，防单侧加键导致摘要缺桶。"""
+    from app.services.dividend_notice_scan import _STATS_KEYS as SCAN_KEYS
+    from app.services.dividend_seed import _STATS_KEYS as SEED_KEYS
+    assert set(SCAN_KEYS) == set(SEED_KEYS), (
+        "两入口 stats 键集必须一致，否则某一入口的摘要会缺桶"
+    )
+    # 新桶必须都在键集中（旧链路没有、批次 A 新增的可观测维度）
+    for required in ("unknown_label", "collision", "no_period", "skip"):
+        assert required in SCAN_KEYS

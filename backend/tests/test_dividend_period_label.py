@@ -37,3 +37,22 @@ def test_plan_label():
 def test_plan_label_invalid():
     assert plan_label(Decimal("NaN")) == "—"
     assert plan_label(None) == "—"
+
+
+# ───────────── 批次 A：OTHER 分支（位置硬约束） ─────────────
+def test_period_label_other_does_not_include_quarter():
+    """#1：OTHER → 「YYYY其他分红」，quarter 不进文案（如 OTHER+Q1 仍只写其他分红）。"""
+    assert period_label(2025, 4, "OTHER") == "2025其他分红"
+    assert period_label(2025, 1, "OTHER") == "2025其他分红"
+    assert period_label(2025, 3, "OTHER") == "2025其他分红"
+
+
+def test_period_label_other_position_before_quarter_fallback():
+    """#2 反向钉死：OTHER 分支位于 quarter==4 回退之前——未知/缺失仍按 quarter 回退。"""
+    assert period_label(2025, 4, None) == "2025年报"
+    assert period_label(2025, 2, "UNKNOWN") == "2025半年报"
+
+
+def test_period_label_no_share_reform_branch():
+    """#3 钉死无「股改分红」专属分支：SHARE_REFORM 未知 → 按 quarter==4 回退为年报。"""
+    assert period_label(2025, 4, "SHARE_REFORM") == "2025年报"

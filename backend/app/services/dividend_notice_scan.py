@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections import Counter
 from decimal import Decimal
 from typing import Any, Optional
 
@@ -41,7 +42,8 @@ from app.models import (
 from app.models.enums import DividendStatus, ReportPeriodType
 from app.services.dividend_cninfo_parse import (
     CninfoDividendRow,
-    parse_cninfo_row,
+    _KNOWN_LABELS,
+    parse_cninfo_row_ex,
     retention_cutoff_year,
 )
 from app.services.dividend_yield_refresh import refresh_yields_for_masters
@@ -78,12 +80,23 @@ def _bump(stats: dict, key: str, n: int = 1) -> None:
     stats[key] = stats.get(key, 0) + n
 
 
+# scan() / seed() 初始统计键集（fetch_and_upsert_master 只累加其中若干键）。
+# 两入口键集必须完全一致，否则摘要会缺桶——tests 有「两入口 stats 键集相等」用例守护。
+# seed 模块另定义一份独立常量（非 import）正是为了让「单侧加键」被该用例捕获。
+_STATS_KEYS: frozenset = frozenset({
+    "rows", "hits", "new", "upd", "anchor", "skip",
+    "no_period", "unknown_label", "collision", "window", "skipped",
+})
+
+
 class DividendNoticeScanService:
     """公告扫描 + 巨潮历史分红采集（复用 market_data_sync 既有分派机制）。"""
 
     def __init__(self, session) -> None:
         self.session = session
         self._mds = MarketDataSyncService(session)
+        # 跨证券聚合未收录标签，整轮结束后由 scan()/seed() 打**一条** WARNING
+        self._unknown_label_counts: Counter = Counter()
 
     async def _settings(self) -> Optional[DividendYieldSettings]:
         return (
@@ -193,16 +206,8 @@ class DividendNoticeScanService:
         # 异常计失败（≥3 发站内信）已下沉到 call_interface_raw（P1-4），此处不再手工接线
         notice_rows = await self._mds.call_interface_raw(notice_itf, params, None)
 
-        stats = {
-            "rows": len(notice_rows),
-            "hits": 0,      # 动作命中行数（分红相关公告：候选 + 取消/终止）
-            "new": 0,       # 新增分红行
-            "upd": 0,       # 更新分红行（含取消置 REJECTED）
-            "anchor": 0,    # 西向去重跳过数（不重复写，运维对账须可见）
-            "skip": 0,      # 无派息（纯送转）或报告期不可解析而跳过的行
-            "window": 0,    # 真 5 年窗口外的行
-            "skipped": 0,   # 单证券失败续下一只数
-        }
+        stats = {k: 0 for k in _STATS_KEYS}
+        stats["rows"] = len(notice_rows)  # 公告条数（其余键含义见 _STATS_KEYS 定义处）
         candidate_mids: set[str] = set()
         cancel_mids: set[str] = set()
         events = await self._classify_notices(notice_itf, notice_rows, stats)
@@ -263,6 +268,17 @@ class DividendNoticeScanService:
                     # 源已失效则 fail fast raise；过程异常（DB 抖动）记日志续下一只（L-3）
                     detail = await self._reresolve_detail_safe(idx, len(all_mids)) or detail
 
+        # 未收录标签聚合告警：整轮仅一条（样例取出现频次最高的 3 种），避免逐行 WARN 风暴
+        if self._unknown_label_counts:
+            samples = [label for label, _ in self._unknown_label_counts.most_common(3)]
+            # 总量读 stats["unknown_label"]（随快照 rollback，口径与摘要一致）；Counter
+            # 只用于算样例与「去重种数」。否则失败 rollback 后 Counter 未回退，会略大于落库行数。
+            logger.warning(
+                "巨潮「分红类型」未收录标签共 %d 行、去重 %d 种，样例=%r",
+                stats["unknown_label"],
+                len(self._unknown_label_counts), samples[:3],
+            )
+
         # 完成后：仅变更集重算（§5.2 末步 / §7 变更集重算）
         await refresh_yields_for_masters(self.session, list(changed))
         await self.session.commit()
@@ -271,7 +287,8 @@ class DividendNoticeScanService:
         return (
             f"公告扫描完成{note}：公告{stats['rows']}条/命中{stats['hits']}；"
             f"分红行新写{stats['new']}/更新{stats['upd']}；"
-            f"窗口外{stats['window']}/无派息或报告期不可解析{stats['skip']}；"
+            f"窗口外{stats['window']}/无派息{stats['skip']}/无报告期{stats['no_period']}；"
+            f"标签撞键{stats['collision']}/未知标签{stats['unknown_label']}；"
             f"重算{len(changed)}只；去重跳过{stats['anchor']}；失败{stats['skipped']}只"
         )
 
@@ -351,6 +368,10 @@ class DividendNoticeScanService:
 
         供每日 ``scan()`` 与首跑播种（§5.7）共用：代码取参数 ``code`` 的纯数字部分
         （响应无代码列），遍历**全部返回行**（不再是「取当天那一条」）。
+
+        未收录标签计数聚合在 ``self._unknown_label_counts``（每实例一个），由 scan()/seed()
+        在整轮结束后打**一条**聚合 WARNING（避免逐行 WARN 淹没真正告警）。**只统计活过 5 年
+        留存窗的行**，避免窗口外行同时计入 ``window`` 与 ``unknown_label`` 两桶。
         """
         digits = re.sub(r"\D", "", code)  # sh600519 → 600519
         params = {**(detail.params or {}), "symbol": digits}
@@ -358,13 +379,18 @@ class DividendNoticeScanService:
         cutoff_year = retention_cutoff_year(today_app_tz())  # 真 5 年：[cur-4, cur]
         dirty = False
         for r in rows:
-            parsed = parse_cninfo_row(r)
-            if parsed is None:  # 纯送转行 / 报告期不可解析（§5.3、§9.3-A1）
-                _bump(stats, "skip")
+            parsed, skip_reason = parse_cninfo_row_ex(r)
+            if parsed is None:  # 纯送转（no_cash）/ 报告期不可解析（no_period）
+                _bump(stats, "skip" if skip_reason == "no_cash" else "no_period")
                 continue
             if parsed.report_year < cutoff_year:  # §9.3-A3：对齐 retention_cleanup
                 _bump(stats, "window")
                 continue
+            # 活过留存窗后，未收录标签（含空/None）→ 落 OTHER，原文已存入 dividend_label，
+            # 仅按行数累加 unknown_label；逐行 WARN 改为由 scan/seed 整轮聚合一次。
+            if parsed.dividend_label not in _KNOWN_LABELS:
+                _bump(stats, "unknown_label")
+                self._unknown_label_counts[parsed.dividend_label or ""] += 1
             if await self._upsert_one(mid, parsed, detail.name, stats):
                 dirty = True
         return dirty
@@ -375,7 +401,25 @@ class DividendNoticeScanService:
         """按唯一键定位后更新 / 未命中则插入；返回是否有变更。"""
         existing = await self._locate_cell(mid, row)
         if existing is not None:
-            # 定位后更新：目标格命中即刷新金额/日期/送转/source。
+            # 撞键护栏（批次 A）：命中唯一键且新旧「分红类型」标签均非空且不等 →
+            # **整行不更新**（保留旧值，不覆盖）。四个条件缺一不可——``old_label``
+            # 为空必须豁免，否则迁移后存量 NULL 行会被全表判为撞键。
+            old_label = existing.dividend_label
+            new_label = row.dividend_label
+            if old_label and new_label and old_label != new_label:
+                _bump(stats, "collision")
+                logger.warning(
+                    "分红撞键保留旧值（不覆盖）：master=%s 格=(%dQ%d, %s) 旧标签=%r 新标签=%r；"
+                    "旧除权日=%s 新除权日=%s",
+                    mid, row.report_year, row.report_quarter, row.period_type.value,
+                    old_label, new_label, existing.ex_dividend_date, row.ex_dividend_date,
+                )
+                return False
+            # 标签写入口径：仅当「本次标签非空」才用新值，否则保留旧标签。这样：
+            # old=None+new='X' → 回填 ✅；old='X'+new=None → 保留旧 ✅（避免新标签为空
+            # 把旧标签覆盖成 NULL 造成抖动）；old/new 均非空且不等已在上面判撞键。
+            effective_label = new_label if new_label is not None else old_label
+            # 定位后更新：目标格命中即刷新金额/日期/送转/source/原文标签。
             # 取舍见 ``_westward_dup``——去重护栏只作用于「未命中目标格」的新增路径。
             dirty = (
                 existing.cash_per_share != row.cash_per_share
@@ -386,6 +430,7 @@ class DividendNoticeScanService:
                 or existing.convert_ratio != row.convert_ratio
                 or existing.status != row.status
                 or existing.source != source
+                or existing.dividend_label != effective_label
             )
             existing.cash_per_share = row.cash_per_share
             existing.ex_dividend_date = row.ex_dividend_date
@@ -395,6 +440,7 @@ class DividendNoticeScanService:
             existing.convert_ratio = row.convert_ratio
             existing.status = row.status
             existing.source = source
+            existing.dividend_label = effective_label
             if dirty:
                 _bump(stats, "upd")
             return dirty
@@ -417,6 +463,7 @@ class DividendNoticeScanService:
                 source=source,
                 bonus_share_ratio=row.bonus_share_ratio,
                 convert_ratio=row.convert_ratio,
+                dividend_label=row.dividend_label,
             )
         )
         _bump(stats, "new")
@@ -497,8 +544,9 @@ class DividendNoticeScanService:
     async def _has_proposed(self, mid: str) -> bool:
         """该证券是否已有存量 PROPOSED 行（存量复查触发）。
 
-        与 ``_reject_proposed`` 同口径放宽为不限 period_type：新链路只写
-        ANNUAL/INTERIM/QUARTERLY，不再有 SPECIAL。
+        与 ``_reject_proposed`` 同口径放宽为不限 period_type：批次 A 后新链路按「分红类型」
+        写 ANNUAL/INTERIM/QUARTERLY/SPECIAL/OTHER（含 SPECIAL 与 OTHER），故此处不再限定
+        period_type，沿用旧 ``== SPECIAL`` 过滤会使复查/取消路径漏掉非 SPECIAL 的存量行。
         """
         return await self._first(
             SecurityDividend.master_id == mid,
@@ -508,9 +556,9 @@ class DividendNoticeScanService:
     async def _reject_proposed(self, mid: str) -> int:
         """取消/终止：该 master 的存量 PROPOSED 行置 REJECTED；返回置位数。
 
-        放宽为**不限 period_type**：旧链路只写 SPECIAL 故原查询带
-        ``period_type == SPECIAL`` 过滤；新链路（§5.3）按「分红类型」写
-        ANNUAL/INTERIM/QUARTERLY，不再产出 SPECIAL，沿用旧过滤会使取消路径彻底失效
+        放宽为**不限 period_type**：旧链路只写 SPECIAL 故原查询带 ``period_type == SPECIAL``
+        过滤；批次 A 后新链路按「分红类型」写 ANNUAL/INTERIM/QUARTERLY/SPECIAL/OTHER
+        （含 SPECIAL 与 OTHER），沿用旧过滤会使取消/复查路径漏掉非 SPECIAL 的存量行
         （取消公告命中后一行都置不上）。
         """
         rows = (

@@ -329,6 +329,7 @@ async def list_security_dividends(
                 ),
                 "planLabel": plan_label(r.cash_per_share),
                 "cashPerShare": str(r.cash_per_share),
+                "dividendLabel": r.dividend_label,
                 "status": _enum_value(r.status),
                 "exDividendDate": (
                     r.ex_dividend_date.isoformat() if r.ex_dividend_date else None

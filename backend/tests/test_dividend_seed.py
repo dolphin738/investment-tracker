@@ -489,3 +489,57 @@ async def test_run_dividend_seed_returns_summary(session, monkeypatch):
     assert isinstance(summary, str) and summary.startswith("历史分红播种完成")
     assert "证券总数1只" in summary
     assert len(_detail_calls(calls)) == 1
+
+
+# ───────────── 摘要片段 / WARN 聚合（批次 A 收口守护） ─────────────
+@pytest.mark.asyncio
+async def test_seed_summary_includes_new_bucket_fragments(session, monkeypatch):
+    """运维对账：seed() 摘要须含四个新桶片段（无派息/无报告期/未知标签/标签撞键）。
+
+    摘要字符串是运维唯一可见面——此用例锁死四段格式（含计数），任一桶被删/改名即红。
+    """
+    m = await _add_master(session, code="600519", name="证券A")
+    await _seed_detail_source(session)
+    code = m.code  # 纯字符串先取，防 rollback expire
+    await session.commit()
+    cur = _cur_year()
+    fake, _calls = _make_raw({_digits(code): [
+        _cn_row(report=f"{cur - 1}年报", cash="10", ptype="未知道具分红"),  # 未知标签
+        _cn_row(report=f"{cur - 1}年报", cash="0"),                         # 无派息
+    ]})
+    monkeypatch.setattr(MarketDataSyncService, "call_interface_raw", fake)
+
+    summary = await DividendSeedService(session).seed_initial_dividends(None)
+    await session.commit()
+
+    for frag in ("无派息1", "无报告期0", "未知标签1", "标签撞键0"):
+        assert frag in summary, f"seed() 摘要须含「{frag}」（运维对账）：{summary}"
+
+
+@pytest.mark.asyncio
+async def test_seed_aggregated_unknown_label_warning(session, monkeypatch, caplog):
+    """R3：seed 整轮仅打**一条**未收录标签聚合 WARNING（pin seed 模块 logger）。
+
+    不直读私有属性 ``_unknown_label_counts``，只经公共入口 seed() + caplog 验证。
+    seed 的聚合 WARNING 走 ``app.services.dividend_seed`` logger（非 scan 的），须分别 pin。
+    """
+    import logging
+    caplog.set_level(logging.WARNING)
+    caplog.set_level(logging.WARNING, logger="app.services.dividend_seed")
+    m = await _add_master(session, code="600519", name="证券A")
+    await _seed_detail_source(session)
+    code = m.code
+    await session.commit()
+    cur = _cur_year()
+    fake, _calls = _make_raw({_digits(code): [
+        _cn_row(report=f"{cur - 1}年报", cash="10", ptype="未知道具分红"),
+    ]})
+    monkeypatch.setattr(MarketDataSyncService, "call_interface_raw", fake)
+
+    await DividendSeedService(session).seed_initial_dividends(None)
+    await session.commit()
+
+    msgs = [r.message for r in caplog.records]
+    assert any("未收录标签" in x for x in msgs), f"seed 应打一条未收录标签 WARNING：{msgs}"
+    # 聚合未收录标签 WARNING 必须只出现一次（非逐行 WARN 风暴）
+    assert sum("未收录标签" in x for x in msgs) == 1

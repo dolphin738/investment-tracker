@@ -98,6 +98,8 @@ class SecurityDividend(Base, TimestampMixin):
     # 每股转增比例（资本公积转增股本）：源站口径为「每 10 股转 X 股」，落库时已除以 10
     # 折算为每股；巨潮无值或空/NaN 时为 NULL。用途见方案 §5.3.1（除权复权重述因子）。
     convert_ratio: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 6), nullable=True)
+    # 原文「分红类型」标签（如「股改分红」「重整转增」）：展示与撞键判别用，**不入唯一键**
+    dividend_label: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
 
 
 class MarketSecurityDailyPrice(Base, CreatedAtMixin):

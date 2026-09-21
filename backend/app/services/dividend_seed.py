@@ -31,6 +31,13 @@ from app.services.dividend_cninfo_parse import retention_cutoff_year
 from app.services.dividend_notice_scan import DividendNoticeScanService, _bump
 from app.services.dividend_yield_refresh import refresh_yields_for_masters
 
+# 与 scan._STATS_KEYS 必须完全一致（tests 有「两入口 stats 键集相等」守护）。
+# 此处**独立定义**（非 import 共享）正是为了让「单侧加键导致摘要缺桶」被该用例捕获。
+_STATS_KEYS: frozenset = frozenset({
+    "rows", "hits", "new", "upd", "anchor", "skip",
+    "no_period", "unknown_label", "collision", "window", "skipped",
+})
+
 # 分批粒度：同时用作「每 200 只打一条进度日志」的间隔与断点检查点的 IN 批大小（§5.7）
 _SEED_CHUNK = 200
 
@@ -54,16 +61,8 @@ class DividendSeedService:
         """按 seed set 逐只补历史分红；返回可运维对账的摘要字符串。"""
         seed_rows = await self._seed_rows()
         total = len(seed_rows)
-        stats: dict[str, int] = {
-            "rows": total,     # seed set 规模（≈11430 只）
-            "hits": 0,         # 本轮实际调巨潮并完成提交的证券数
-            "new": 0,          # 新增分红行
-            "upd": 0,          # 更新分红行
-            "anchor": 0,       # 西向去重跳过数
-            "skip": 0,         # 无派息（纯送转）或报告期不可解析而跳过的行
-            "window": 0,       # 真 5 年窗口外的行
-            "skipped": 0,      # 单证券失败续下一只数
-        }
+        stats: dict[str, int] = {k: 0 for k in _STATS_KEYS}
+        stats["rows"] = total  # seed set 规模（≈11430 只）
         # 明细源缺失/停用沿用 scan():232 口径：不 fail fast，跳过逐只采集并在摘要里标注
         detail = await self._scan._resolve_detail_itf(await self._scan._settings())
         covered_skipped = 0  # 断点续跑：已覆盖而跳过的只数
@@ -113,6 +112,17 @@ class DividendSeedService:
                 stats["hits"], stats["skipped"], stats["new"], stats["upd"],
             )
 
+        # 未收录标签聚合告警：整轮仅一条（样例取出现频次最高的 3 种），与 scan 同口径。
+        # 总量读 stats["unknown_label"]（随 snapshot rollback，口径与摘要一致）；Counter
+        # 只用于算样例与「去重种数」，避免失败 rollback 后 Counter 未回退导致总数虚高。
+        if self._scan._unknown_label_counts:
+            samples = [label for label, _ in self._scan._unknown_label_counts.most_common(3)]
+            logger.warning(
+                "巨潮「分红类型」未收录标签共 %d 行、去重 %d 种，样例=%r",
+                stats["unknown_label"],
+                len(self._scan._unknown_label_counts), samples[:3],
+            )
+
         # 完成后：仅变更集重算（与 scan():271-272 同口径）
         await refresh_yields_for_masters(self.session, list(changed))
         await self.session.commit()
@@ -122,7 +132,8 @@ class DividendSeedService:
             f"已覆盖跳过{covered_skipped}只，本轮处理{stats['hits']}只，"
             f"失败{stats['skipped']}只；"
             f"分红行新写{stats['new']}/更新{stats['upd']}；"
-            f"窗口外{stats['window']}/无派息或报告期不可解析{stats['skip']}；"
+            f"窗口外{stats['window']}/无派息{stats['skip']}/无报告期{stats['no_period']}；"
+            f"标签撞键{stats['collision']}/未知标签{stats['unknown_label']}；"
             f"去重跳过{stats['anchor']}；重算{len(changed)}只"
         )
 

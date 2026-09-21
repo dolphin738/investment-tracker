@@ -32,11 +32,19 @@ COL_ARRIVE = "股份到账日"
 COL_DESC = "实施方案分红说明"
 COL_REPORT = "报告时间"
 
-# 「分红类型」→ period_type（§5.3）：年度分红→ANNUAL、中期分红→INTERIM、其余→QUARTERLY
+# 「分红类型」→ period_type（§5.3，批次 A 扩到 5 项精确映射）：
+# 年度分红→ANNUAL、中期分红→INTERIM、季度分红→QUARTERLY、特别分红→SPECIAL、
+# 股改分红→OTHER（股改不单列枚举，落 OTHER，原文存 dividend_label）。未收录标签也→OTHER。
 _PERIOD_TYPE_BY_LABEL: dict[str, ReportPeriodType] = {
     "年度分红": ReportPeriodType.ANNUAL,
     "中期分红": ReportPeriodType.INTERIM,
+    "季度分红": ReportPeriodType.QUARTERLY,
+    "特别分红": ReportPeriodType.SPECIAL,
+    "股改分红": ReportPeriodType.OTHER,
 }
+
+# 已收录的「分红类型」原文标签（撞键/未知标签判定用）：命中则不记 unknown_label。
+_KNOWN_LABELS = frozenset(_PERIOD_TYPE_BY_LABEL)
 
 # 留存财年数（真 5 年，§9.3-A3）：保留 [cur-4, cur]，与 dividend_sync.retention_cleanup
 # 的 cutoff = cur - 5 + 1 严格对齐，否则播种写入的第 6 个年度会被下次清理删掉。
@@ -57,6 +65,8 @@ class CninfoDividendRow:
     announcement_date: Optional[date]
     bonus_share_ratio: Optional[Decimal]
     convert_ratio: Optional[Decimal]
+    # 原文「分红类型」标签（如「股改分红」「重整转增」）：展示与撞键判别用，**不入唯一键**。
+    dividend_label: Optional[str]
 
 
 def retention_cutoff_year(today: date) -> int:
@@ -64,30 +74,51 @@ def retention_cutoff_year(today: date) -> int:
     return today.year - RETAIN_YEARS + 1
 
 
+def normalize_label(raw: Any) -> Optional[str]:
+    """「分红类型」原文标签归一：strip + 截断 32；空/全空白/NaN → None。
+
+    ⚠️ 先挡 NaN：``float('nan')`` 是 truthy，``str()`` 会得到字符串 ``'nan'``，与缺失同义须
+    归 None；否则缺标签会被存成字符串 ``'nan'`` 还被当成「非空未知标签」计入 unknown_label。
+    与同文件 ``parse_cash`` 口径一致（显式挡 ``is_nan``）。
+    """
+    # NaN 自不等（``nan != nan`` 恒成立），免去 math import
+    if raw is None or (isinstance(raw, float) and raw != raw):
+        return None
+    s = str(raw or "").strip()
+    if not s:
+        return None
+    return s[:32]
+
+
 def parse_period_type(raw: Any) -> ReportPeriodType:
-    """「分红类型」→ ReportPeriodType；未收录的标签一律 QUARTERLY（§5.3）。"""
-    return _PERIOD_TYPE_BY_LABEL.get(str(raw or "").strip(), ReportPeriodType.QUARTERLY)
+    """「分红类型」→ ReportPeriodType；未收录的标签一律 ``OTHER``（§5.3，批次 A）。"""
+    return _PERIOD_TYPE_BY_LABEL.get(str(raw or "").strip(), ReportPeriodType.OTHER)
 
 
-def parse_cninfo_row(row: Any) -> Optional[CninfoDividendRow]:
-    """巨潮单行 → 目标列映射；该行应被跳过时返回 None。
+def parse_cninfo_row_ex(row: Any) -> tuple[Optional[CninfoDividendRow], Optional[str]]:
+    """巨潮单行 → 目标列映射；返回 ``(CninfoDividendRow | None, 跳过原因 | None)``。
 
-    跳过两类行（§5.3 / §9.3-A1）：
-    - **派息比例为空 / NaN / 显式 0** → 纯送转行不落库（不撑起「连续分红」计数）；
-    - **「报告时间」不可解析** → 无报告期归属，无法落唯一键。
+    跳过两类行（§5.3 / §9.3-A1，批次 A 拆桶可观测）：
+    - **派息比例为空 / NaN / 显式 0** → 纯送转行不落库，原因 ``"no_cash"``；
+    - **「报告时间」不可解析** → 无报告期归属无法落唯一键，原因 ``"no_period"``。
+
+    ⚠️ 判据顺序**不可调换**：``no_cash`` 优先于 ``no_period``（纯送转行即使无报告期也
+    只应计无派息，不污染无报告期计数）。
 
     金额单位一律折算为**每股**（源为「每 10 股」÷10，与 ``cash_per_share`` 同口径）；
     ``status`` 按 §9.3-A2：除权日非空 → PAID，否则 → PROPOSED（巨潮无「进度」列）。
+    原文标签经 ``normalize_label`` 归一并截断，空标签落 ``dividend_label=None``。
     """
     cash = parse_cash(_row_get(row, COL_CASH))
     if cash is None or cash == 0:
-        return None
+        return None, "no_cash"
     period = parse_report_period_cn(_row_get(row, COL_REPORT))
     if period is None:
-        return None
+        return None, "no_period"
+    raw_label = _row_get(row, COL_PERIOD_TYPE)
     ex_date = parse_date(_row_get(row, COL_EX))
     return CninfoDividendRow(
-        period_type=parse_period_type(_row_get(row, COL_PERIOD_TYPE)),
+        period_type=parse_period_type(raw_label),
         report_year=period[0],
         report_quarter=period[1],
         cash_per_share=cash,
@@ -97,4 +128,14 @@ def parse_cninfo_row(row: Any) -> Optional[CninfoDividendRow]:
         announcement_date=parse_date(_row_get(row, COL_ANN)),
         bonus_share_ratio=parse_cash(_row_get(row, COL_BONUS)),
         convert_ratio=parse_cash(_row_get(row, COL_CONVERT)),
-    )
+        dividend_label=normalize_label(raw_label),
+    ), None
+
+
+def parse_cninfo_row(row: Any) -> Optional[CninfoDividendRow]:
+    """薄包装：返回 ``parse_cninfo_row_ex`` 的解析结果（跳过则返回 None）。
+
+    保留以兼容既有调用方（``dividend_seed`` 文档、``dividend_notice_scan`` 旧引用），
+    降低测试改动面；批次 A 新逻辑统一走 ``parse_cninfo_row_ex``。
+    """
+    return parse_cninfo_row_ex(row)[0]

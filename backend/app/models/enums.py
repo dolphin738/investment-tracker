@@ -154,6 +154,9 @@ class ReportPeriodType(str, enum.Enum):
     INTERIM = "INTERIM"  # 半年报（report_quarter==2）
     QUARTERLY = "QUARTERLY"  # 一/三季报（report_quarter∈{1,3}）
     SPECIAL = "SPECIAL"  # 特别分红（公告驱动补充，§3.6）
+    OTHER = "OTHER"  # 其它（股改分红/重整转增/承诺补偿等非闭集词表兜底，批次 A 追加）
+    # ⚠️ OTHER 必须追加在末尾：PG 原生枚举定义顺序即排序顺序，router 用
+    # ``ORDER BY period_type.asc()`` 期望 OTHER 垫底。改词表映射见 dividend_cninfo_parse。
 
 
 class JobTriggerSource(str, enum.Enum):

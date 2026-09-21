@@ -149,10 +149,13 @@ _QUARTER_CN = {1: "一", 2: "二", 3: "三", 4: "四"}
 
 
 def period_label(year: int, quarter: int, period_type: Any) -> str:
-    """报告期展示名：2025年报 / 2025半年报 / 2025三季报 / 2023特别分配。
+    """报告期展示名：2025年报 / 2025半年报 / 2025三季报 / 2023特别分配 / 2025其他分红。
 
-    ``period_type`` 为 ReportPeriodType 的值（ANNUAL/INTERIM/QUARTERLY/SPECIAL）；
+    ``period_type`` 为 ReportPeriodType 的值（ANNUAL/INTERIM/QUARTERLY/SPECIAL/OTHER）；
     为兼容脏数据，period_type 缺失或未知时按 ``report_quarter`` 回退判定。
+
+    ⚠️ OTHER 分支须位于 ``quarter == 4`` 回退**之前**：若排在之后，``OTHER`` 配
+    ``quarter==4`` 会被回退误产「YYYY年报」，分支不可达（批次 A 硬约束）。
     """
     # ReportPeriodType 是 str 枚举：直接 str() 会得到 "ReportPeriodType.ANNUAL"，
     # 故先取 .value（普通字符串则用自身）。
@@ -160,6 +163,8 @@ def period_label(year: int, quarter: int, period_type: Any) -> str:
     pt = str(raw) if raw is not None else ""
     if pt == "SPECIAL":
         return f"{year}特别分配"
+    if pt == "OTHER":
+        return f"{year}其他分红"
     if pt == "ANNUAL" or quarter == 4:
         return f"{year}年报"
     if pt == "INTERIM" or quarter == 2:
