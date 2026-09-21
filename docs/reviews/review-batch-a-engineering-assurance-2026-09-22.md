@@ -99,19 +99,25 @@
 - **我的建议**：③。理由：与已验证的撞键护栏正交，混入 A 需重新走验证闸门、污染 70 测试已锁定的回归基线；且语义未定（跨 source 是否判重）不应在 A 内拍脑袋。
 - **依据**：`:423` 明确两护栏正交；A 已锁定定向 70 通过 + ruff clean，追加改动需重新验证，成本/收益上单独立项更优。
 
-### U2 · 前端 TS 联合类型补 `'OTHER'`（batch D）
+### U2 · 前端 TS 联合类型补 `'OTHER'`（batch D）— ✅ 已实施（`1cc9b98`）
 - `period_type` 前端联合类型需补 `OTHER` 分支，否则类型收窄会丢 OTHER（前端页 batch D 一并处理）。非 A 阻塞。
+- **落地**：`web/src/api/dividend-yield.api.ts:61` 补 `| 'OTHER'`；`vue-tsc --noEmit`（web lint）通过。`periodType` 全仓仅 4 处消费（`SecurityDetailPanel.vue:74` 的 `:key` 插值 + 测试字面量），无收窄逻辑，无需改消费侧。
 
-### U3 · `_KNOWN_LABELS` 私有符号跨模块导入（batch B）
+### U3 · `_KNOWN_LABELS` 私有符号跨模块导入（batch B）— ✅ 已实施（`02dacbe`）
 - `dividend_notice_scan.py:45` 导入 `dividend_cninfo_parse._KNOWN_LABELS`（私有）。建议 batch B 升为公开常量或显式导出，消除跨模块私有依赖。
+- **落地**：升为公开常量 `dividend_cninfo_parse.KNOWN_LABELS`，同步 `dividend_notice_scan.py` 导入与 `:391` 使用点；MCP 索引核验代码中 `_KNOWN_LABELS` 零残留。
 
-### U4 · `parse_cninfo_row` 死代码（batch E）
+### U4 · `parse_cninfo_row` 死代码（batch E）— ✅ 已实施（`02dacbe`）
 - 旧 `parse_cninfo_row` 已被 `parse_cninfo_row_ex` 取代，建议 batch E 清理。
+- **落地**：删除 `dividend_cninfo_parse.parse_cninfo_row` 薄包装；测试 3 处调用改 `parse_cninfo_row_ex(...)[0]`（保留 `dividend_label` 透传/空值/截断断言，不丢覆盖），`dividend_seed` docstring 引用同步更正。受影响测试 51 passed、ruff(F) clean；MCP graph 已无 `parse_cninfo_row` 函数节点。
 
-### U5 · 存量 `QUARTERLY(未知标签)` 行归并（batch B）
-- 迁移前存量数据中 `period_type=QUARTERLY` 但 label 未收录的行，需决策是否归并/回填 `dividend_label`。batch B 决策。
+### U5 · 存量 `QUARTERLY(未知标签)` 行归并（batch B）— ⚠️ 已消解 / N/A（owner 2026-09-22 清库）
+- 原决策对象：迁移前存量数据中 `period_type=QUARTERLY` 但 label 未收录的行，是否归并/回填 `dividend_label`。batch B 决策。
+- **消解原因**：`dividend_label` 是 `SecurityDividend` 列（models/dividend_yield.py:102），随旧分红行一并删除；旧分红数据已清空 → 目标行不复存在，无可归并对象。
+- **复发护栏**：L1 解析修复（5 标签 dict + OTHER + `unknown_label` 计数桶，`dividend_cninfo_parse.py`）使新采集数据不再产生「未知标签→QUARTERLY 兜底」行；即便重新 19h 播种，新行亦带规范标签 → 不产生新 U5 群体。
+- **结论**：无需裁决；batch B 不再含 U5。保留条目作审计留痕。
 
-> 以上 U2–U5 均为**已识别/已递延**，非批次 A 放行阻塞。
+> U2/U3/U4 已实施（`1cc9b98` / `02dacbe`），U5 已消解（数据清空）；均非批次 A 放行阻塞。
 
 ---
 
@@ -121,7 +127,7 @@
 - **A2**：提交批次 A。当前为**未提交**状态（modified + 新增文件）。按项目约定由 `senior-dev <dev@local>` 以 Conventional Commits 提交，建议提交信息：
   `feat(dividend): 分红报告期枚举扩展 OTHER + 原文标签列与撞键护栏`（本地 commit，不自动 push）。
 - **A3**：✅ 全量回归已确认 —— `YU8mle` 实测 **697 passed / 3 xpassed / 0 failed**，可合入（本环境 conftest 会 session 级 DROP/CREATE 测试库，多个 pytest 进程会互毁，须串行）。
-- **A4**：规划 batch B/C/D/E 吸收 U2–U5 递延项。
+- **A4**：✅ 已吸收 —— U2（batch D，`1cc9b98`）、U3（batch B）、U4（batch E）同批落地（`02dacbe`）；U5 已消解（数据清空）。
 
 ---
 
