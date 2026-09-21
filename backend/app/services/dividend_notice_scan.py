@@ -445,7 +445,8 @@ class DividendNoticeScanService:
                 _bump(stats, "upd")
             return dirty
         if await self._westward_dup(
-            mid, row.ex_dividend_date, row.report_year, row.report_quarter, row.cash_per_share
+            mid, row.ex_dividend_date, row.report_year, row.report_quarter,
+            row.cash_per_share, source,
         ):
             _bump(stats, "anchor")
             return False
@@ -490,19 +491,27 @@ class DividendNoticeScanService:
             await self.session.execute(select(SecurityDividend.id).where(*where).limit(1))
         ).scalar_one_or_none()
 
-    async def _westward_dup(self, mid, ex_date, ry, rq, cash) -> bool:
-        """西向去重：同 master 已有「ex_date 相等」或「(ry,rq,cash) 全等」记录 → 跳过。
+    async def _westward_dup(self, mid, ex_date, ry, rq, cash, source) -> bool:
+        """西向去重：同 master 已有「跨源 + ex_date 相等」或「跨源 + (ry,rq,cash) 全等」
+        记录 → 跳过重写。
+
+        **L2（2026-09-22）跨源限定**：两分支均追加 ``source != <入参 source>`` 条件，
+        **同源（含同一接口拆出的两行）一律豁免**。理由：巨潮把一次分配拆成「年度 + 特别」
+        两行、同 ``ex_date`` 异 ``cash``，二者是**兄弟分量而非重复**；旧口径仅按 ``ex_date``
+        判重会把第二个分量误杀（丢哪一半取决于源站行序），故同源必须豁免。
+        **反向陷阱**：两分支**不得**加 ``period_type`` 相等条件——旧新浪链路把每行都写
+        成 ``SPECIAL``，加 ``period_type`` 相等会让 ``SPECIAL≠ANNUAL`` 漏挡跨源重复。
 
         **取舍（§5.6 二次护栏）**：本方法只在**新增**路径生效——目标格未命中时才调用。
         旧代码每次写行前都先过本方法，其 ``(ry,rq,cash) 全等 → 跳过`` 分支会把「同格
         同额」行判为重复，导致除权日/登记日/送转比例等后续事实永远无法刷新（全历史
         重跑时预案期写入的 PROPOSED 行无法升级为 PAID）。故改为：先按唯一键定位
-        （命中即更新），未命中再走本护栏。``ex_date`` 分支意义不变——新旧链路并存期
-        （P0~P1）用其挡住同源旧行。
+        （命中即更新），未命中再走本护栏。
         """
         if ex_date is not None and await self._first(
             SecurityDividend.master_id == mid,
             SecurityDividend.ex_dividend_date == ex_date,
+            SecurityDividend.source != source,
         ) is not None:
             return True
         return await self._first(
@@ -510,6 +519,7 @@ class DividendNoticeScanService:
             SecurityDividend.report_year == ry,
             SecurityDividend.report_quarter == rq,
             SecurityDividend.cash_per_share == cash,
+            SecurityDividend.source != source,
         ) is not None
 
     async def _match_proposed(self, mid: str, cash: Decimal) -> Optional[SecurityDividend]:

@@ -108,7 +108,8 @@ def _cn_row(*, report, ptype="年度分红", cash="219.1", bonus="", convert="",
 
 
 def _div_row(master_id, cash, status=DividendStatus.PROPOSED, ry=None, rq=None,
-             ex=None, ann=None, period_type=ReportPeriodType.ANNUAL):
+             ex=None, ann=None, period_type=ReportPeriodType.ANNUAL,
+             source="巨潮-历史分红"):
     return SecurityDividend(
         master_id=master_id,
         report_year=ry or _cur_year(),
@@ -118,7 +119,7 @@ def _div_row(master_id, cash, status=DividendStatus.PROPOSED, ry=None, rq=None,
         status=status,
         ex_dividend_date=ex,
         announcement_date=ann,
-        source="巨潮-历史分红",
+        source=source,
     )
 
 
@@ -647,19 +648,79 @@ async def test_scan_single_master_failure_continues(session, monkeypatch):
 # ───────────── 既有护栏（未随迁移删除） ─────────────
 @pytest.mark.asyncio
 async def test_westward_dup_by_ex_date_and_identity(session):
-    """附录 A.6：已有「ex_date 相等」或「(ry,rq,cash) 全等」→ 跳过不重复写。"""
+    """L2：去重护栏改为跨源限定——同源（兄弟分量）豁免，跨源重复才跳过。"""
     m = await _add_master(session)
     session.add(_div_row(m.id, "19.0", status=DividendStatus.PAID,
                          ry=2022, rq=4, ex=date(2022, 12, 27)))
     await session.commit()
 
     svc = DividendNoticeScanService(session)
-    # ex_date 相等 → True
-    assert await svc._westward_dup(m.id, date(2022, 12, 27), 2022, 4, Decimal("19.0")) is True
-    # (ry,rq,cash) 全等 → True（即使 ex_date 不同）
-    assert await svc._westward_dup(m.id, None, 2022, 4, Decimal("19.0")) is True
+    SAME = "巨潮-历史分红"      # 与存量行同源
+    OTHER = "新浪-分红配股"     # 跨源
+    # 跨源 + ex_date 相等 → True（挡住旧链路同名行）
+    assert await svc._westward_dup(
+        m.id, date(2022, 12, 27), 2022, 4, Decimal("19.0"), OTHER) is True
+    # 跨源 + (ry,rq,cash) 全等 → True（即使 ex_date 不同）
+    assert await svc._westward_dup(
+        m.id, None, 2022, 4, Decimal("19.0"), OTHER) is True
+    # 同源 + ex_date 相等 → False（同源豁免：巨潮同 ex_date 的兄弟分量不被误杀）
+    assert await svc._westward_dup(
+        m.id, date(2022, 12, 27), 2022, 4, Decimal("19.0"), SAME) is False
+    # 同源 + (ry,rq,cash) 全等 → False（同源豁免）
+    assert await svc._westward_dup(
+        m.id, None, 2022, 4, Decimal("19.0"), SAME) is False
     # 无命中 → False
-    assert await svc._westward_dup(m.id, None, 2023, 1, Decimal("1.0")) is False
+    assert await svc._westward_dup(
+        m.id, None, 2023, 1, Decimal("1.0"), OTHER) is False
+
+
+@pytest.mark.asyncio
+async def test_westward_dup_keeps_same_source_sibling_components(session):
+    """L2 端到端：同源兄弟分量（同 ex_date、异 cash、异 period_type）两行都落库，不被误杀。
+
+    复刻巨潮 300750 2023Q4「年度 20.11 + 特别 30.17」同 ex_date 拆两行的真实形态。
+    修复前：第二分量会被 ``ex_date`` 分支判重而整行丢弃（实际只剩 1 行）。
+    """
+    m = await _add_master(session)
+    _notice, detail = await _seed_sources(session)
+    cur = _cur_year()
+    svc = DividendNoticeScanService(session)
+    svc._mds.call_interface_raw = _make_raw({"600519": [
+        _cn_row(report=f"{cur - 1}年报", ptype="年度分红", cash="20.11", ex=f"{cur - 1}-06-01"),
+        _cn_row(report=f"{cur - 1}年报", ptype="特别分红", cash="30.17", ex=f"{cur - 1}-06-01"),
+    ]})[0]
+    stats = _new_stats()
+    await svc.fetch_and_upsert_master(m.id, "sh600519", detail, stats)
+    await session.commit()
+    rows = await _div_rows(session, m.id)
+    assert len(rows) == 2, f"兄弟分量应两行都保留，实际 {len(rows)} 行"
+    assert stats["new"] == 2
+    assert stats["anchor"] == 0  # 同源豁免，不应走 anchor 跳过
+
+
+@pytest.mark.asyncio
+async def test_westward_dup_skips_cross_source_duplicate(session):
+    """L2 端到端（回归护栏）：跨源重复（旧新浪 SPECIAL 行已存在 + 新巨潮同 ex_date/cash）
+    仍应被去重护栏跳过，不得因同源豁免而漏挡。
+    """
+    m = await _add_master(session)
+    _notice, detail = await _seed_sources(session)
+    cur = _cur_year()
+    # 存量：旧新浪链路把每行都写成 SPECIAL（与新巨潮 ANNUAL 唯一键不同 → 走 _westward_dup）
+    session.add(_div_row(m.id, "19.0", status=DividendStatus.PAID, ry=cur - 1, rq=4,
+                         ex=date(cur - 1, 6, 1), period_type=ReportPeriodType.SPECIAL,
+                         source="新浪-分红配股"))
+    await session.commit()
+    svc = DividendNoticeScanService(session)
+    svc._mds.call_interface_raw = _make_raw({"600519": [
+        _cn_row(report=f"{cur - 1}年报", ptype="年度分红", cash="19.0", ex=f"{cur - 1}-06-01"),
+    ]})[0]
+    stats = _new_stats()
+    await svc.fetch_and_upsert_master(m.id, "sh600519", detail, stats)
+    await session.commit()
+    rows = await _div_rows(session, m.id)
+    assert len(rows) == 1, f"跨源重复应被去重，实际 {len(rows)} 行"
+    assert stats["new"] == 0 and stats["anchor"] == 1
 
 
 @pytest.mark.asyncio
