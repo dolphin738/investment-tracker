@@ -157,3 +157,13 @@
 - 方向 2 设计（实时行情消费端：`get_active_provider` → `fallback_fetch` + upsert SecurityPrice + recalculateRange）
 - `docs/quote-provider-setup-examples.md` — 小熊同学 / AKShare 填写示例（响应结构差异佐证 G2 需接口级字段映射）
 - 本地留痕（非仓库）：`.workbuddy/memory/2026-08-13.md`「金融数据接口优先级链可行性评估」段
+
+---
+
+## 7. 修订补记（2026-09-21）：分红明细源切换
+
+> 本节为**追加修订**，不改动 §0~§6 既有内容。
+
+- **分红明细源已切换**：由旧「东财批量季报源 + 新浪逐股分红补充」切至**巨潮 `stock_dividend_cninfo`**（akshare 1.18.87），形态为「cat 4 公告探测 → 命中证券按代码调巨潮拉全量历史分红」。详见 `docs/分红采集链路迁移方案.md` 与 `docs/adr/ADR-004-dividend-report-period-and-manual-assignment.md`。
+- **配置列退役**：`dividend_yield_settings.dividend_report_source_interface_id`（东财批量源）**已下线**（迁移 `0032_drop_dividend_report_source`）；`QuoteInterface` 表结构不变。
+- **优先级链语义不变**：§2.1 的「分类级接口优先级链 + 顺序 fallback + 连续失败告警」模型**完全不变**；本次仅替换了「分红明细」这一**具体接口**，不改优先级链本身。
