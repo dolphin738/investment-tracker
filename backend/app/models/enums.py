@@ -164,3 +164,16 @@ class JobTriggerSource(str, enum.Enum):
 
     SCHEDULED = "SCHEDULED"
     MANUAL = "MANUAL"
+
+
+class DividendPendingStatus(str, enum.Enum):
+    """待人工划分分红（staging）行状态（批次 B，§3.1）。
+
+    承载巨潮「现金>0 但报告时间不可解析」的行，人工裁定报告期后写回主表。
+    PG 原生枚举类型名同本类名。**无排序约束**（与 ``ReportPeriodType.OTHER`` 不同，
+    不依赖定义顺序参与 ``ORDER BY``），故值顺序可自由。
+    """
+
+    PENDING = "PENDING"  # 待人工划分
+    ASSIGNED = "ASSIGNED"  # 已划分（已写回主表 security_dividends）
+    IGNORED = "IGNORED"  # 已忽略（不写回主表）

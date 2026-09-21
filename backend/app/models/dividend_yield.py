@@ -1,11 +1,12 @@
 """股息率排名数据模型（§5）。
 
-五张表：
+六张表：
 - ``security_dividends``：分红事件（按报告期季度粒度，5 年留存）
 - ``market_security_daily_prices``：市场级日线收盘价（不复权）
 - ``security_dividend_yields``：派生快照（每证券一行，事件驱动重算）
 - ``dividend_yield_settings``：全局配置（单行：阈值 + 主源/补充源/行情源）
 - ``market_trade_calendar``：交易日历
+- ``security_dividend_pending``：待人工划分分红 staging 队列（批次 B）
 
 命名约束（§4）：本模块一律使用 ``master_id`` 指向 ``securities`` 主数据目录行，
 **不得**使用 ``security_id``（后者在本仓库一律指持仓行 ``portfolio_securities.id``）。
@@ -37,7 +38,12 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, CreatedAtMixin, TimestampMixin, pk_uuid
-from app.models.enums import DividendStatus, DividendYieldMode, ReportPeriodType
+from app.models.enums import (
+    DividendPendingStatus,
+    DividendStatus,
+    DividendYieldMode,
+    ReportPeriodType,
+)
 
 
 class SecurityDividend(Base, TimestampMixin):
@@ -100,6 +106,80 @@ class SecurityDividend(Base, TimestampMixin):
     convert_ratio: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 6), nullable=True)
     # 原文「分红类型」标签（如「股改分红」「重整转增」）：展示与撞键判别用，**不入唯一键**
     dividend_label: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+
+
+class SecurityDividendPending(Base, TimestampMixin):
+    """待人工划分分红 staging 表（批次 B，§3.1）。
+
+    承接巨潮「现金>0 但报告时间不可解析」的行（``parse_cninfo_row_ex`` 的 ``no_period``
+    桶）：源站报告期词表不可解析，无法落主表唯一键，故先入队待人工裁定报告期后再写回
+    ``security_dividends``。
+
+    幂等键为 ``row_fingerprint``（sha1 hex，40 字符）单列唯一——**刻意不用复合唯一键**：
+    复合键含可空日期，PG 唯一索引对 NULL 视为互不相等，无法幂等（§3.6）。
+
+    ``resolved_period_type`` **刻意用 ``String(16)`` 非原生枚举**：避免枚举值演进触发
+    PG 类型重建（§9.1）。**不保留** ``股份到账日`` / ``实施方案分红说明``（§9.3-A6）。
+    """
+
+    __tablename__ = "security_dividend_pending"
+    __table_args__ = (
+        # 幂等键（ON CONFLICT 目标）；单列唯一，规避「复合键含可空日期 → NULL 不相等」
+        Index(
+            "uq_security_dividend_pending_fingerprint",
+            "row_fingerprint",
+            unique=True,
+        ),
+        Index("ix_security_dividend_pending_status", "status"),
+        Index("ix_security_dividend_pending_master", "master_id"),
+    )
+
+    id: Mapped[str] = pk_uuid()
+    # 主数据目录行（ADR-003），非持仓行；与 SecurityDividend.master_id 同口径（延迟检查）
+    master_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey(
+            "securities.id",
+            ondelete="CASCADE",
+            deferrable=True,
+            initially="DEFERRED",
+        ),
+        nullable=False,
+    )
+    # sha1 hex 幂等键（唯一）：同源行重复 scan → 同指纹（§3.6）
+    row_fingerprint: Mapped[str] = mapped_column(String(40), nullable=False)
+    # 源站「分红类型」原文（normalize_label 截断 32）；供人工判读
+    dividend_label: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    # 每股派息（元；源「每 10 股」÷10，与 SecurityDividend.cash_per_share 同口径）
+    cash_per_share: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
+    # 每股送股比例（源「每 10 股送 X 股」÷10）；缺失为 NULL
+    bonus_share_ratio: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 6), nullable=True)
+    # 每股转增比例（源「每 10 股转 X 股」÷10）；缺失为 NULL
+    convert_ratio: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 6), nullable=True)
+    record_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    ex_dividend_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    # 派息日（SecurityDividend 未落，pending 保留，§5.2）
+    pay_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    announcement_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    # 「报告时间」原文（不可解析故入 staging，保留原样供人工判读）
+    report_period_raw: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    status: Mapped[DividendPendingStatus] = mapped_column(
+        Enum(
+            DividendPendingStatus,
+            name="DividendPendingStatus",
+            native_enum=True,
+            create_type=False,
+        ),
+        nullable=False,
+        default=DividendPendingStatus.PENDING,
+        server_default=text("'PENDING'"),
+    )
+    # 人工裁定后的报告期类型（存 ReportPeriodType 的 .value 字符串）；刻意非 native enum
+    resolved_period_type: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    resolved_report_year: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    resolved_report_quarter: Mapped[Optional[int]] = mapped_column(SmallInteger, nullable=True)
+    resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    resolved_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
 
 
 class MarketSecurityDailyPrice(Base, CreatedAtMixin):

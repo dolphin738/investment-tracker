@@ -10,10 +10,12 @@ from app.models.dividend_yield import (
     MarketSecurityDailyPrice,
     MarketTradeCalendar,
     SecurityDividend,
+    SecurityDividendPending,
     SecurityDividendYield,
 )
 from app.models.enums import (
     CashFlowType,
+    DividendPendingStatus,
     DividendStatus,
     DividendType,
     DividendYieldMode,
@@ -77,8 +79,10 @@ __all__ = [
     "JobTriggerSource",
     "DividendYieldMode",
     "DividendStatus",
+    "DividendPendingStatus",
     "ReportPeriodType",
     "SecurityDividend",
+    "SecurityDividendPending",
     "MarketSecurityDailyPrice",
     "SecurityDividendYield",
     "DividendYieldSettings",

@@ -65,6 +65,8 @@ def test_metadata_tables_and_enums():
         "dividend_yield_settings",
         "market_security_daily_prices",
         "market_trade_calendar",
+        # 增量：批次 B——待人工划分分红 staging 队列
+        "security_dividend_pending",
     } == tables
 
     enums = {
@@ -91,6 +93,8 @@ def test_metadata_tables_and_enums():
         "DividendStatus",
         "DividendYieldMode",
         "ReportPeriodType",
+        # 增量：批次 B——待人工划分分红状态原生枚举
+        "DividendPendingStatus",
     } == enums
 
     # 精度对齐 PRD 8.1

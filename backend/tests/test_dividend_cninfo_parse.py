@@ -5,15 +5,25 @@
 """
 from __future__ import annotations
 
+from datetime import date
+from decimal import Decimal
+
 from app.models.enums import ReportPeriodType
 from app.services.dividend_cninfo_parse import (
+    COL_ANN,
+    COL_BONUS,
     COL_CASH,
+    COL_CONVERT,
     COL_EX,
+    COL_PAY,
     COL_PERIOD_TYPE,
+    COL_RECORD,
     COL_REPORT,
     normalize_label,
     parse_cninfo_row_ex,
+    parse_pending_row,
     parse_period_type,
+    pending_fingerprint,
 )
 
 
@@ -124,3 +134,92 @@ def test_normalize_label_truncates_to_32_and_period_other():
     assert row.period_type is ReportPeriodType.OTHER
     assert row.dividend_label is not None
     assert len(row.dividend_label) == 32
+
+
+# ───────────── 批次 B：parse_pending_row（§3.1） ─────────────
+def test_parse_pending_row_maps_columns_and_units():
+    """巨潮行 → PendingDividendRow：金额 ÷10 折每股、日期解析、标签/报告时间原文透传。"""
+    row = parse_pending_row({
+        COL_PERIOD_TYPE: "股改分红",
+        COL_CASH: "219.1",
+        COL_BONUS: "3",
+        COL_CONVERT: "5",
+        COL_RECORD: "2025-06-09",
+        COL_EX: "2025-06-10",
+        COL_PAY: "2025-06-20",
+        COL_ANN: "2025-05-20",
+        COL_REPORT: "未知报告期",
+    })
+    assert row.dividend_label == "股改分红"
+    assert row.cash_per_share == Decimal("21.91")     # 219.1 / 10
+    assert row.bonus_share_ratio == Decimal("0.3")    # 3 / 10
+    assert row.convert_ratio == Decimal("0.5")        # 5 / 10
+    assert row.record_date == date(2025, 6, 9)
+    assert row.ex_dividend_date == date(2025, 6, 10)
+    assert row.pay_date == date(2025, 6, 20)
+    assert row.announcement_date == date(2025, 5, 20)
+    assert row.report_period_raw == "未知报告期"
+
+
+def test_parse_pending_row_empty_and_missing_are_none():
+    """空标签 / 空报告时间 → None；日期列缺失 → None；金额缺失兜底 0（列 NOT NULL）。"""
+    row = parse_pending_row({
+        COL_PERIOD_TYPE: "",
+        COL_CASH: "",
+        COL_REPORT: "",
+    })
+    assert row.dividend_label is None
+    assert row.report_period_raw is None
+    assert row.cash_per_share == Decimal("0")
+    assert row.bonus_share_ratio is None
+    assert row.convert_ratio is None
+    assert row.ex_dividend_date is None
+    assert row.pay_date is None
+
+
+def test_parse_pending_row_nan_guards():
+    """NaN 金额 / 标签 → None（复用 parse_cash / _normalize_text 的 NaN 守卫）。"""
+    row = parse_pending_row({
+        COL_PERIOD_TYPE: float("nan"),
+        COL_CASH: "NaN",
+        COL_BONUS: "NaN",
+        COL_REPORT: float("nan"),
+    })
+    assert row.dividend_label is None
+    assert row.report_period_raw is None
+    assert row.cash_per_share == Decimal("0")
+    assert row.bonus_share_ratio is None
+
+
+# ───────────── 批次 B：pending_fingerprint（§3.6） ─────────────
+def test_pending_fingerprint_stable_and_sha1_length():
+    """同输入同输出；sha1 hex 恒 40 字符。"""
+    raw = {
+        COL_PERIOD_TYPE: "年度分红", COL_CASH: "100", COL_BONUS: "3", COL_CONVERT: "5",
+        COL_RECORD: "2025-06-09", COL_EX: "2025-06-10", COL_PAY: "2025-06-20",
+        COL_ANN: "2025-05-20", COL_REPORT: "",
+    }
+    fp1 = pending_fingerprint("mid-1", parse_pending_row(dict(raw)))
+    fp2 = pending_fingerprint("mid-1", parse_pending_row(dict(raw)))
+    assert fp1 == fp2
+    assert len(fp1) == 40
+    assert all(c in "0123456789abcdef" for c in fp1)
+
+
+def test_pending_fingerprint_field_sensitive():
+    """任一纳入字段变化 → 指纹变化（含 master_id）。"""
+    base_raw = {
+        COL_PERIOD_TYPE: "年度分红", COL_CASH: "100", COL_BONUS: "3", COL_CONVERT: "5",
+        COL_RECORD: "2025-06-09", COL_EX: "2025-06-10", COL_PAY: "2025-06-20",
+        COL_ANN: "2025-05-20", COL_REPORT: "",
+    }
+    base_fp = pending_fingerprint("mid-1", parse_pending_row(dict(base_raw)))
+
+    assert pending_fingerprint("mid-2", parse_pending_row(dict(base_raw))) != base_fp
+    for key, value in (
+        (COL_CASH, "200"), (COL_BONUS, "4"), (COL_CONVERT, "6"),
+        (COL_PERIOD_TYPE, "中期分红"), (COL_EX, "2025-07-10"), (COL_REPORT, "2025三季报"),
+    ):
+        changed = dict(base_raw)
+        changed[key] = value
+        assert pending_fingerprint("mid-1", parse_pending_row(changed)) != base_fp

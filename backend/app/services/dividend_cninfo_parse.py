@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
@@ -74,8 +75,8 @@ def retention_cutoff_year(today: date) -> int:
     return today.year - RETAIN_YEARS + 1
 
 
-def normalize_label(raw: Any) -> Optional[str]:
-    """「分红类型」原文标签归一：strip + 截断 32；空/全空白/NaN → None。
+def _normalize_text(raw: Any) -> Optional[str]:
+    """通用文本归一：strip + 截断 32；空/全空白/NaN → None。
 
     ⚠️ 先挡 NaN：``float('nan')`` 是 truthy，``str()`` 会得到字符串 ``'nan'``，与缺失同义须
     归 None；否则缺标签会被存成字符串 ``'nan'`` 还被当成「非空未知标签」计入 unknown_label。
@@ -88,6 +89,11 @@ def normalize_label(raw: Any) -> Optional[str]:
     if not s:
         return None
     return s[:32]
+
+
+def normalize_label(raw: Any) -> Optional[str]:
+    """「分红类型」原文标签归一（strip + 截断 32，空/全空白/NaN → None）。"""
+    return _normalize_text(raw)
 
 
 def parse_period_type(raw: Any) -> ReportPeriodType:
@@ -130,5 +136,96 @@ def parse_cninfo_row_ex(row: Any) -> tuple[Optional[CninfoDividendRow], Optional
         convert_ratio=parse_cash(_row_get(row, COL_CONVERT)),
         dividend_label=normalize_label(raw_label),
     ), None
+
+
+# —— 批次 B：待人工划分 staging 行（§3.1 / §3.6）——
+
+
+@dataclass(frozen=True)
+class PendingDividendRow:
+    """待划分 staging 行（批次 B，§3.1）：现金 >0 但「报告时间」不可解析的巨潮行。
+
+    金额一律为**每股**（源「每 10 股」÷10）；日期不可解析为 None；原文标签 / 报告时间
+    经归一（空 → None）。经 ``parse_pending_row`` 构造、``stage_pending`` 落库。
+    """
+
+    dividend_label: Optional[str]
+    cash_per_share: Decimal
+    bonus_share_ratio: Optional[Decimal]
+    convert_ratio: Optional[Decimal]
+    record_date: Optional[date]
+    ex_dividend_date: Optional[date]
+    pay_date: Optional[date]
+    announcement_date: Optional[date]
+    report_period_raw: Optional[str]
+
+    def fields(self) -> dict[str, Any]:
+        """映射到 ``security_dividend_pending`` 的列值。
+
+        仅含业务列（不含 ``id`` / ``row_fingerprint`` / ``status`` 与
+        ``resolved_*`` / 时间戳——后者由服务层或 DB 默认值补齐）。
+        """
+        return {
+            "dividend_label": self.dividend_label,
+            "cash_per_share": self.cash_per_share,
+            "bonus_share_ratio": self.bonus_share_ratio,
+            "convert_ratio": self.convert_ratio,
+            "record_date": self.record_date,
+            "ex_dividend_date": self.ex_dividend_date,
+            "pay_date": self.pay_date,
+            "announcement_date": self.announcement_date,
+            "report_period_raw": self.report_period_raw,
+        }
+
+
+def parse_pending_row(row: Any) -> PendingDividendRow:
+    """巨潮单行 → 待划分 staging 行（批次 B，§3.1）。
+
+    仅由 ``fetch_and_upsert_master`` 对「现金 >0 且报告时间不可解析」（``no_period``）的行
+    调用；自巨潮原始行取：分红类型原文、派息（÷10 每股）、送股（÷10）、转增（÷10）、
+    股权登记日、除权日、**派息日**、公告日、报告时间原文。日期走
+    ``app.core.date_utils.parse_date``；金额走 ``parse_cash``（NaN 守卫）；文本走
+    ``_normalize_text``（空 / 全空白 → None）。
+
+    ``cash_per_share`` 列 NOT NULL：解析不出金额时兜底为 ``Decimal("0")``（正常调用路径
+    已由 ``no_period`` 桶保证现金 >0）。
+    """
+    cash = parse_cash(_row_get(row, COL_CASH))
+    return PendingDividendRow(
+        dividend_label=_normalize_text(_row_get(row, COL_PERIOD_TYPE)),
+        cash_per_share=cash if cash is not None else Decimal("0"),
+        bonus_share_ratio=parse_cash(_row_get(row, COL_BONUS)),
+        convert_ratio=parse_cash(_row_get(row, COL_CONVERT)),
+        record_date=parse_date(_row_get(row, COL_RECORD)),
+        ex_dividend_date=parse_date(_row_get(row, COL_EX)),
+        pay_date=parse_date(_row_get(row, COL_PAY)),
+        announcement_date=parse_date(_row_get(row, COL_ANN)),
+        report_period_raw=_normalize_text(_row_get(row, COL_REPORT)),
+    )
+
+
+def pending_fingerprint(master_id: str, row: PendingDividendRow) -> str:
+    """身份指纹：``sha1('\\x1f'.join(canonical fields)).hexdigest()``（40 hex）。
+
+    字段顺序固定、缺失归一为空串，保证「同一源行重复 scan → 同一指纹」。纳入字段：
+    ``master_id | dividend_label | cash_per_share | bonus_share_ratio | convert_ratio
+    | record_date | ex_dividend_date | pay_date | announcement_date | report_period_raw``。
+
+    含 ``master_id``：表内跨证券去重（同源行归属唯一证券）。用 sha1 文本列而非复合唯一键：
+    复合键含可空日期，PG 唯一索引对 NULL 视为互不相等，无法幂等（§3.6）。
+    """
+    canonical = "\x1f".join([
+        master_id,
+        row.dividend_label or "",
+        str(row.cash_per_share),
+        str(row.bonus_share_ratio or ""),
+        str(row.convert_ratio or ""),
+        str(row.record_date or ""),
+        str(row.ex_dividend_date or ""),
+        str(row.pay_date or ""),
+        str(row.announcement_date or ""),
+        row.report_period_raw or "",
+    ])
+    return hashlib.sha1(canonical.encode("utf-8")).hexdigest()
 
 
