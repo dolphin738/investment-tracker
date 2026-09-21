@@ -27,6 +27,7 @@ from app.models import (
     SecuritiesDataProvider,
     Security,
     SecurityDividend,
+    SecurityDividendPending,
 )
 from app.models.enums import DividendStatus, ReportPeriodType, SecurityType
 from app.services.dividend_cninfo_parse import (
@@ -71,7 +72,7 @@ def _new_stats() -> dict:
     return {
         "rows": 0, "hits": 0, "new": 0, "upd": 0, "anchor": 0,
         "skip": 0, "no_period": 0, "unknown_label": 0, "collision": 0,
-        "window": 0, "skipped": 0,
+        "window": 0, "skipped": 0, "staged": 0,
     }
 
 
@@ -398,9 +399,8 @@ async def test_explicit_zero_cash_not_persisted(session):
 
 @pytest.mark.asyncio
 async def test_unparsable_report_period_not_persisted(session):
-    """§5.3（批次 A）：「报告时间」不可解析 → 有派息但无报告期，跳过计入 ``stats['no_period']``。
-
-    行为不变：仍不落库（``_div_rows == []``）。
+    """§5.3（批次 A/B）：「报告时间」不可解析 → 有派息但无报告期，跳过计入 ``stats['no_period']``；
+    批次 B 起落 staging 待人工划分（``staged`` 计数 + pending 行），仍**不落主表**。
     """
     m = await _add_master(session)
     _notice, detail = await _seed_sources(session)
@@ -417,6 +417,14 @@ async def test_unparsable_report_period_not_persisted(session):
     assert await _div_rows(session, m.id) == []
     assert stats["skip"] == 0
     assert stats["no_period"] == 2
+    # 批次 B：两行报告时间原文不同（None / "未知报告期"）→ 各入队一行，主表仍无写入
+    assert stats["staged"] == 2
+    pending = (
+        await session.execute(
+            select(SecurityDividendPending).where(SecurityDividendPending.master_id == m.id)
+        )
+    ).scalars().all()
+    assert len(pending) == 2
 
 
 # ───────────── §5.3 字段映射 / §5.4 status 判据 ─────────────
@@ -981,7 +989,7 @@ async def test_scan_summary_includes_new_bucket_fragments(session, monkeypatch):
     result = await DividendNoticeScanService(session).scan(None)
     await session.commit()
 
-    for frag in ("无派息1", "无报告期0", "未知标签1", "标签撞键1"):
+    for frag in ("无派息1", "无报告期0", "待划分0", "未知标签1", "标签撞键1"):
         assert frag in result, f"scan() 摘要须含「{frag}」（运维对账）：{result}"
 
 
@@ -1057,6 +1065,6 @@ async def test_scan_and_seed_stats_keysets_equal(session):
     assert set(SCAN_KEYS) == set(SEED_KEYS), (
         "两入口 stats 键集必须一致，否则某一入口的摘要会缺桶"
     )
-    # 新桶必须都在键集中（旧链路没有、批次 A 新增的可观测维度）
-    for required in ("unknown_label", "collision", "no_period", "skip"):
+    # 新桶必须都在键集中（旧链路没有、批次 A/B 新增的可观测维度）
+    for required in ("unknown_label", "collision", "no_period", "skip", "staged"):
         assert required in SCAN_KEYS

@@ -35,7 +35,7 @@ from app.services.dividend_yield_refresh import refresh_yields_for_masters
 # 此处**独立定义**（非 import 共享）正是为了让「单侧加键导致摘要缺桶」被该用例捕获。
 _STATS_KEYS: frozenset = frozenset({
     "rows", "hits", "new", "upd", "anchor", "skip",
-    "no_period", "unknown_label", "collision", "window", "skipped",
+    "no_period", "unknown_label", "collision", "window", "skipped", "staged",
 })
 
 # 分批粒度：同时用作「每 200 只打一条进度日志」的间隔与断点检查点的 IN 批大小（§5.7）
@@ -48,8 +48,8 @@ class DividendSeedService:
     """全市场历史分红首跑播种（§5.7；手动一次性、可断点续跑）。
 
     统计字典沿用 ``scan():200-209`` 的键口径（``rows/hits/new/upd/anchor/skip/
-    window/skipped``），因为同一份 stats 会直接传给 ``fetch_and_upsert_master``
-    由其累加新写/更新等计数，键名必须一致才能跨两个入口对账。
+    no_period/unknown_label/collision/window/skipped/staged``），因为同一份 stats 会直接传给
+    ``fetch_and_upsert_master`` 由其累加新写/更新等计数，键名必须一致才能跨两个入口对账。
     """
 
     def __init__(self, session) -> None:
@@ -136,7 +136,8 @@ class DividendSeedService:
             f"已覆盖跳过{covered_skipped}只，本轮处理{stats['hits']}只，"
             f"失败{stats['skipped']}只；"
             f"分红行新写{stats['new']}/更新{stats['upd']}；"
-            f"窗口外{stats['window']}/无派息{stats['skip']}/无报告期{stats['no_period']}；"
+            f"窗口外{stats['window']}/无派息{stats['skip']}/无报告期{stats['no_period']}"
+            f"/待划分{stats['staged']}；"
             f"标签撞键{stats['collision']}/未知标签{stats['unknown_label']}；"
             f"去重跳过{stats['anchor']}；重算{len(changed)}只"
         )

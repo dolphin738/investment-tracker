@@ -43,8 +43,10 @@ from app.services.dividend_cninfo_parse import (
     CninfoDividendRow,
     KNOWN_LABELS,
     parse_cninfo_row_ex,
+    parse_pending_row,
     retention_cutoff_year,
 )
+from app.services.dividend_pending import stage_pending
 from app.services.dividend_yield_refresh import refresh_yields_for_masters
 from app.services.market_data_sync import (
     DIVIDEND_LIST_CAT_ID,
@@ -81,7 +83,7 @@ def _bump(stats: dict, key: str, n: int = 1) -> None:
 # seed 模块另定义一份独立常量（非 import）正是为了让「单侧加键」被该用例捕获。
 _STATS_KEYS: frozenset = frozenset({
     "rows", "hits", "new", "upd", "anchor", "skip",
-    "no_period", "unknown_label", "collision", "window", "skipped",
+    "no_period", "unknown_label", "collision", "window", "skipped", "staged",
 })
 
 
@@ -286,7 +288,8 @@ class DividendNoticeScanService:
         return (
             f"公告扫描完成{note}：公告{stats['rows']}条/命中{stats['hits']}；"
             f"分红行新写{stats['new']}/更新{stats['upd']}；"
-            f"窗口外{stats['window']}/无派息{stats['skip']}/无报告期{stats['no_period']}；"
+            f"窗口外{stats['window']}/无派息{stats['skip']}/无报告期{stats['no_period']}"
+            f"/待划分{stats['staged']}；"
             f"标签撞键{stats['collision']}/未知标签{stats['unknown_label']}；"
             f"重算{len(changed)}只；去重跳过{stats['anchor']}；失败{stats['skipped']}只"
         )
@@ -368,6 +371,10 @@ class DividendNoticeScanService:
         供每日 ``scan()`` 与首跑播种（§5.7）共用：代码取参数 ``code`` 的纯数字部分
         （响应无代码列），遍历**全部返回行**（不再是「取当天那一条」）。
 
+        「现金 >0 但报告时间不可解析」（``no_period``）的行落 staging（``stage_pending``）
+        待人工划分；staging **不计入 changed**（返回值只反映主表 ``security_dividends``
+        写入；调用方不得据此把 mid 加入派生快照重算集）。
+
         未收录标签计数聚合在 ``self._unknown_label_counts``（每实例一个），由 scan()/seed()
         在整轮结束后打**一条**聚合 WARNING（避免逐行 WARN 淹没真正告警）。**只统计活过 5 年
         留存窗的行**，避免窗口外行同时计入 ``window`` 与 ``unknown_label`` 两桶。
@@ -381,6 +388,12 @@ class DividendNoticeScanService:
             parsed, skip_reason = parse_cninfo_row_ex(r)
             if parsed is None:  # 纯送转（no_cash）/ 报告期不可解析（no_period）
                 _bump(stats, "skip" if skip_reason == "no_cash" else "no_period")
+                if skip_reason == "no_period":
+                    # 现金 >0 但「报告时间」不可解析 → 落 staging 待人工划分（§3.7）。
+                    # 纯送转（no_cash）与窗口外行不入队；staging **不计入 changed**
+                    # （调用方不得据此把 mid 加入派生快照重算集，见 _STATS_KEYS 说明）。
+                    if await stage_pending(self.session, mid, parse_pending_row(r)):
+                        _bump(stats, "staged")
                 continue
             if parsed.report_year < cutoff_year:  # §9.3-A3：对齐 retention_cleanup
                 _bump(stats, "window")

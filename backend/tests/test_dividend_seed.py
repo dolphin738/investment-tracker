@@ -33,6 +33,7 @@ from app.models import (
     SecuritiesDataProvider,
     Security,
     SecurityDividend,
+    SecurityDividendPending,
 )
 from app.models.enums import DividendStatus, ReportPeriodType, SecurityType
 from app.services.dividend_cninfo_parse import (
@@ -512,8 +513,35 @@ async def test_seed_summary_includes_new_bucket_fragments(session, monkeypatch):
     summary = await DividendSeedService(session).seed_initial_dividends(None)
     await session.commit()
 
-    for frag in ("无派息1", "无报告期0", "未知标签1", "标签撞键0"):
+    for frag in ("无派息1", "无报告期0", "待划分0", "未知标签1", "标签撞键0"):
         assert frag in summary, f"seed() 摘要须含「{frag}」（运维对账）：{summary}"
+
+
+@pytest.mark.asyncio
+async def test_seed_no_period_row_is_staged(session, monkeypatch):
+    """批次 B：播种路径经 ``fetch_and_upsert_master`` 同样落 staging。
+
+    现金 >0 且报告时间不可解析 → ``staged`` 桶 +1（摘要含「待划分1」），并写入 1 行
+    ``security_dividend_pending``；主表 ``security_dividends`` 仍无写入。
+    """
+    m = await _add_master(session, code="600519", name="证券A")
+    await _seed_detail_source(session)
+    mid, code = m.id, m.code  # 纯字符串先取，防 rollback expire
+    await session.commit()
+    fake, _calls = _make_raw({_digits(code): [_cn_row(report="", cash="100")]})
+    monkeypatch.setattr(MarketDataSyncService, "call_interface_raw", fake)
+
+    summary = await DividendSeedService(session).seed_initial_dividends(None)
+    await session.commit()
+
+    assert "待划分1" in summary
+    assert await _div_rows(session, mid) == []
+    pending = (
+        await session.execute(
+            select(SecurityDividendPending).where(SecurityDividendPending.master_id == mid)
+        )
+    ).scalars().all()
+    assert len(pending) == 1
 
 
 @pytest.mark.asyncio
