@@ -79,11 +79,17 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index(
-        "ix_price_backfill_gap_master", table_name="market_price_backfill_gaps"
+    # 幂等（关键）：下游 0028「下线历史行情回补」已随功能删除把洞表与
+    # ``price_backfill_mode`` 列一并 DROP 掉，且其 downgrade **刻意不重建**（见 0028
+    # docstring）。因此在「已降过 0028」的库上这些对象已不存在；若沿用裸
+    # drop_index/drop_column，会抛 ``UndefinedObjectError`` 令**反向迁移链在 0021 处断链**
+    # （比 0015 的枚举断链更早触发）。全部 IF EXISTS 后本步退化为无操作，反向链得以继续。
+    op.execute(sa.text("DROP INDEX IF EXISTS ix_price_backfill_gap_master"))
+    op.execute(sa.text("DROP INDEX IF EXISTS ix_price_backfill_gap_status_date"))
+    op.execute(sa.text("DROP TABLE IF EXISTS market_price_backfill_gaps"))
+    op.execute(
+        sa.text(
+            'ALTER TABLE dividend_yield_settings '
+            'DROP COLUMN IF EXISTS "price_backfill_mode"'
+        )
     )
-    op.drop_index(
-        "ix_price_backfill_gap_status_date", table_name="market_price_backfill_gaps"
-    )
-    op.drop_table("market_price_backfill_gaps")
-    op.drop_column("dividend_yield_settings", "price_backfill_mode")
