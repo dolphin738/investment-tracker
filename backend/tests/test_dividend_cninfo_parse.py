@@ -12,7 +12,6 @@ from app.services.dividend_cninfo_parse import (
     COL_PERIOD_TYPE,
     COL_REPORT,
     normalize_label,
-    parse_cninfo_row,
     parse_cninfo_row_ex,
     parse_period_type,
 )
@@ -44,37 +43,40 @@ def test_period_type_sharereform_is_not_special():
     assert parse_period_type("股改分红") is ReportPeriodType.OTHER
 
 
-# ───────────── #7 原文标签透传 ─────────────
-def test_parse_cninfo_row_transports_original_label():
+# ───────────── #7 原文标签透传（parse_cninfo_row_ex） ─────────────
+def test_parse_cninfo_row_ex_transports_original_label():
     """原文「分红类型」标签透传进 CninfoDividendRow.dividend_label。"""
-    row = parse_cninfo_row({
+    row, reason = parse_cninfo_row_ex({
         COL_PERIOD_TYPE: "股改分红",
         COL_CASH: "100",
         COL_REPORT: "2025年报",
         COL_EX: "2025-06-10",
     })
+    assert reason is None
     assert row is not None
     assert row.dividend_label == "股改分红"
     assert row.period_type is ReportPeriodType.OTHER
 
 
-# ───────────── #8 空标签 → None ─────────────
-def test_parse_cninfo_row_empty_label_is_none():
+# ───────────── #8 空标签 → None（parse_cninfo_row_ex） ─────────────
+def test_parse_cninfo_row_ex_empty_label_is_none():
     """空/缺失标签归一到 dividend_label=None（落 OTHER 但不带原文）。"""
-    row = parse_cninfo_row({
+    row, reason = parse_cninfo_row_ex({
         COL_PERIOD_TYPE: "",
         COL_CASH: "100",
         COL_REPORT: "2025年报",
         COL_EX: "2025-06-10",
     })
+    assert reason is None
     assert row is not None
     assert row.dividend_label is None
 
-    row2 = parse_cninfo_row({
+    row2, reason2 = parse_cninfo_row_ex({
         COL_CASH: "100",
         COL_REPORT: "2025年报",
         COL_EX: "2025-06-10",
     })
+    assert reason2 is None
     assert row2 is not None
     assert row2.dividend_label is None
 
@@ -112,7 +114,7 @@ def test_normalize_label_truncates_to_32_and_period_other():
     long_label = "X" * 40
     assert len(normalize_label(long_label)) == 32
 
-    row = parse_cninfo_row({
+    row, _reason = parse_cninfo_row_ex({
         COL_PERIOD_TYPE: long_label,
         COL_CASH: "100",
         COL_REPORT: "2025年报",

@@ -44,7 +44,7 @@ _PERIOD_TYPE_BY_LABEL: dict[str, ReportPeriodType] = {
 }
 
 # 已收录的「分红类型」原文标签（撞键/未知标签判定用）：命中则不记 unknown_label。
-_KNOWN_LABELS = frozenset(_PERIOD_TYPE_BY_LABEL)
+KNOWN_LABELS = frozenset(_PERIOD_TYPE_BY_LABEL)
 
 # 留存财年数（真 5 年，§9.3-A3）：保留 [cur-4, cur]，与 dividend_sync.retention_cleanup
 # 的 cutoff = cur - 5 + 1 严格对齐，否则播种写入的第 6 个年度会被下次清理删掉。
@@ -132,10 +132,3 @@ def parse_cninfo_row_ex(row: Any) -> tuple[Optional[CninfoDividendRow], Optional
     ), None
 
 
-def parse_cninfo_row(row: Any) -> Optional[CninfoDividendRow]:
-    """薄包装：返回 ``parse_cninfo_row_ex`` 的解析结果（跳过则返回 None）。
-
-    保留以兼容既有调用方（``dividend_seed`` 文档、``dividend_notice_scan`` 旧引用），
-    降低测试改动面；批次 A 新逻辑统一走 ``parse_cninfo_row_ex``。
-    """
-    return parse_cninfo_row_ex(row)[0]

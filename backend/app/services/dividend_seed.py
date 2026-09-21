@@ -12,7 +12,7 @@
 **与 DividendNoticeScanService 的关系是「组合」而非「继承」**：本类持有自己的
 session，内部实例化一个 scan service 作为采集能力提供方，复用它的两个既有能力——
 - ``fetch_and_upsert_master``（单只入口，内部已做纯数字 symbol → 调巨潮 → 遍历
-  全行 → ``parse_cninfo_row`` → 真 5 年裁剪 ``retention_cutoff_year`` → upsert）；
+  全行 → ``parse_cninfo_row_ex`` → 真 5 年裁剪 ``retention_cutoff_year`` → upsert）；
   播种**不得**另写一套解析。
 - ``_reresolve_detail_safe``（``rollback()`` 后重解析明细源，防 MissingGreenlet
   连锁失败）。

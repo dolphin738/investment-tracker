@@ -42,7 +42,7 @@ from app.models import (
 from app.models.enums import DividendStatus, ReportPeriodType
 from app.services.dividend_cninfo_parse import (
     CninfoDividendRow,
-    _KNOWN_LABELS,
+    KNOWN_LABELS,
     parse_cninfo_row_ex,
     retention_cutoff_year,
 )
@@ -388,7 +388,7 @@ class DividendNoticeScanService:
                 continue
             # 活过留存窗后，未收录标签（含空/None）→ 落 OTHER，原文已存入 dividend_label，
             # 仅按行数累加 unknown_label；逐行 WARN 改为由 scan/seed 整轮聚合一次。
-            if parsed.dividend_label not in _KNOWN_LABELS:
+            if parsed.dividend_label not in KNOWN_LABELS:
                 _bump(stats, "unknown_label")
                 self._unknown_label_counts[parsed.dividend_label or ""] += 1
             if await self._upsert_one(mid, parsed, detail.name, stats):
