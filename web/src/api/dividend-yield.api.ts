@@ -58,7 +58,7 @@ export function getDividendYieldTop20(): Promise<DividendYieldTop20Response> {
 export interface SecurityDividendItem {
   reportYear: number;
   reportQuarter: number;
-  periodType: 'ANNUAL' | 'INTERIM' | 'QUARTERLY' | 'SPECIAL';
+  periodType: 'ANNUAL' | 'INTERIM' | 'QUARTERLY' | 'SPECIAL' | 'OTHER';
   /** 报告期展示名：2025年报 / 2025半年报 / 2025三季报 / 2023特别分配（§5.1 命名） */
   periodLabel: string;
   /** 分红方案展示名：源站口径「10派3元」（库内每股金额 ×10 折算） */
