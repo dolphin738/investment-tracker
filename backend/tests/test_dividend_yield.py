@@ -396,11 +396,13 @@ def test_restate_cells_no_split_unchanged():
     assert out[0].cash_per_share == Decimal("0.4")
 
 
-def test_restate_cells_proposed_null_exdate():
-    """守护 §9.1/§9.2：PROPOSED 行 ex_date=None 时取 as_of 前全部送转因子。
+def test_restate_cells_null_exdate_passthrough():
+    """行动项 9（设计 §6.4 边界②）：``ex_dividend_date is None`` 的行**原样透传、不参与重述**。
 
-    另一 PAID 送转行(2021-01-01, 送股 0.5)在 as_of=2021-06-01 之前 → PROPOSED 分子含该
-    送转因子 1.5 → 0.4/1.5。
+    无除权锚点就无法判定「该笔之后发生的送转」，套用 as_of 之前的**全部**送转因子属滥用
+    （方案 §9.1 未定义该情形）——故冻结为不重述（推翻旧口径「ex_date=None → 取 as_of 前
+    全部送转」）。此处 PAID 送转行（2021-01-01，送股 0.5）虽在 as_of 之前，也**不得**作用于
+    该 PROPOSED 行。
     """
     prop = DividendCell(
         id="prop", report_year=2021, report_quarter=4, period_type="ANNUAL",
@@ -416,8 +418,38 @@ def test_restate_cells_proposed_null_exdate():
     )
     out = restate_cells([prop, paid_split], as_of=date(2021, 6, 1))
     by_id = {c.id: c for c in out}
-    # ex_date=None → 取 as_of 前全部送转（0.5）→ 0.4 / 1.5
-    assert by_id["prop"].cash_per_share == Decimal("0.4") / Decimal("1.5")
+    # 边界②：无除权锚点 → 原样透传（同一对象），金额不因送转而缩小
+    assert by_id["prop"] is prop
+    assert by_id["prop"].cash_per_share == Decimal("0.4")
+
+
+def test_restate_cells_excludes_rejected_splits():
+    """行动项 9（设计 §6.4 边界①）：REJECTED 行的送转**不得**进入复权基准（否则污染他笔）。
+
+    一笔 PAID 现金分红（除权日早）+ 一笔 REJECTED 送转行（除权日更晚、送转 0.5）。旧口径按
+    「含送转即取」会把 REJECTED 的送转算进因子（0.4/1.5）；新口径仅取 ``_PAYABLE`` →
+    REJECTED 被排除 → 因子恒 1 → 金额不变。末尾用等价 PAID 行做对照，确保用例非空洞。
+    """
+    a = DividendCell(
+        id="a", report_year=2020, report_quarter=4, period_type="ANNUAL",
+        cash_per_share=Decimal("0.4"), status=DividendStatus.PAID,
+        ex_dividend_date=date(2020, 6, 1), announcement_date=None,
+        bonus_share_ratio=None, convert_ratio=None,
+    )
+
+    def _split(status: DividendStatus, rid: str) -> DividendCell:
+        return DividendCell(
+            id=rid, report_year=2021, report_quarter=2, period_type="ANNUAL",
+            cash_per_share=Decimal("0"), status=status,
+            ex_dividend_date=date(2021, 1, 1), announcement_date=None,
+            bonus_share_ratio=Decimal("0.5"), convert_ratio=Decimal("0"),
+        )
+
+    out = restate_cells([a, _split(DividendStatus.REJECTED, "rej")], as_of=date(2022, 1, 1))
+    assert {c.id: c for c in out}["a"].cash_per_share == Decimal("0.4")  # REJECTED 被排除
+    # 对照：同一行若为 PAID，则其送转生效 → a 被缩 1.5 倍（证明上面的「不变」非因逻辑空转）
+    out2 = restate_cells([a, _split(DividendStatus.PAID, "paid")], as_of=date(2022, 1, 1))
+    assert {c.id: c for c in out2}["a"].cash_per_share == Decimal("0.4") / Decimal("1.5")
 
 
 def test_snapshot_curve_consistent_with_restatement():

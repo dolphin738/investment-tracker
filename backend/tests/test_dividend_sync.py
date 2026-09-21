@@ -164,6 +164,39 @@ async def test_refresh_yields_with_and_without_price(session):
     assert snap2.latest_price is None
 
 
+@pytest.mark.asyncio
+async def test_restate_cells_called_once_per_master(session, monkeypatch):
+    """行动项 9（设计 §6.4 边界③）：``restate_cells`` 对每只证券**恰好调用一次**。
+
+    ``restate_cells`` 是无状态纯函数、无重入标记，靠「调用点唯一」契约保证不**二次缩股**
+    （对已重述输出再次调用会把分红缩小两次）。本用例用调用点计数 spy 守护该契约：跑一轮
+    ``refresh_yields_for_masters`` → 断言该 master 恰被重述 **1 次**（真能红：把重算路径里
+    的 ``restate_cells`` 人为调两次，本用例即失败）。
+    """
+    import app.services.dividend_yield_refresh as refresh_mod
+
+    m = await _add_master(session)
+    cur = today_app_tz().year
+    session.add(_div(m.id, cur, 4, "1.0"))
+    session.add(
+        MarketSecurityDailyPrice(master_id=m.id, trade_date=date(cur, 9, 1), close=Decimal("10"))
+    )
+    await session.commit()
+    mid = m.id
+
+    calls = {"n": 0}
+    real_restate = refresh_mod.restate_cells
+
+    def _spy(records, as_of):
+        calls["n"] += 1
+        return real_restate(records, as_of)
+
+    monkeypatch.setattr(refresh_mod, "restate_cells", _spy)
+
+    await refresh_yields_for_masters(session, [mid])
+    assert calls["n"] == 1, f"restate_cells 每只应恰调用 1 次，实际 {calls['n']} 次（重入会二次缩股）"
+
+
 # ───────────────────────── 五年留存清理（§6.3 决策 C5） ─────────────────────────
 @pytest.mark.asyncio
 async def test_retention_cleanup_report_year_boundary(session, monkeypatch):

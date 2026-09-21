@@ -159,11 +159,28 @@ def restate_cells(records: list[DividendCell], as_of: date) -> list[DividendCell
     分母（最新不复权收盘价）已是当前股本基准；分子（宣告口径=旧股本）须按 as_of 之前、
     且发生在该笔分红除权日之后的累计送转因子 Π(1+bonus+convert) 缩小，分子分母同基准相除
     才不虚增。纯送转行（cash=0）不落库（§9.3-A1），故送转因子仅取自「含现金且带送转」的行。
+
+    **三条边界口径（批次 E / 行动项 9，设计 §6.4）**：
+
+    1. **送转因子只取可计入状态**（``_PAYABLE`` = PROPOSED/PAID）：被驳回（REJECTED）的
+       分红不得进入复权基准，否则会污染**他笔**分红的复权分母。
+    2. **``ex_dividend_date is None`` 的行原样透传、不参与重述**：无除权锚点就无法判定
+       「该笔之后发生的送转」，套用 as_of 之前**全部**送转因子属滥用（方案 §9.1 未定义该
+       情形）→ 冻结为不重述。
+    3. **纯函数、无重入标记**：本函数只接受**未重述的原始 cell**；调用方须保证同一轮每只
+       证券**恰好调用一次**（``refresh_yields_for_masters`` / 排名过滤 ``router.py`` /
+       曲线 ``compute_yield_at`` 三调用点各恰一次，已核实）。对已重述输出**再次调用会二次
+       缩股**——该不变式由 ``test_restate_cells_called_once_per_master`` 的调用点计数 spy 守护。
     """
     splits = [
-        (j.ex_dividend_date, (j.bonus_share_ratio or Decimal("0")) + (j.convert_ratio or Decimal("0")))
+        (
+            j.ex_dividend_date,
+            (j.bonus_share_ratio or Decimal("0")) + (j.convert_ratio or Decimal("0")),
+        )
         for j in records
-        if j.ex_dividend_date is not None
+        # 边界①：仅 PROPOSED/PAID 参与复权基准；REJECTED 剔除（否则污染他笔复权）
+        if j.status in _PAYABLE
+        and j.ex_dividend_date is not None
         and ((j.bonus_share_ratio or Decimal("0")) + (j.convert_ratio or Decimal("0"))) > 0
         and j.ex_dividend_date <= as_of
     ]
@@ -173,9 +190,13 @@ def restate_cells(records: list[DividendCell], as_of: date) -> list[DividendCell
             out.append(i)  # 无现金，原样透传
             continue
         i_date = i.ex_dividend_date
+        if i_date is None:
+            # 边界②：无除权锚点 → 无法判定「该笔之后发生的送转」→ 不参与重述，原样透传
+            out.append(i)
+            continue
         factor = Decimal("1")
         for ex_date, b in splits:
-            if i_date is None or ex_date >= i_date:
+            if ex_date >= i_date:
                 factor *= (Decimal("1") + b)
         if factor == 1:
             out.append(i)
