@@ -213,6 +213,10 @@ def pending_fingerprint(master_id: str, row: PendingDividendRow) -> str:
 
     含 ``master_id``：表内跨证券去重（同源行归属唯一证券）。用 sha1 文本列而非复合唯一键：
     复合键含可空日期，PG 唯一索引对 NULL 视为互不相等，无法幂等（§3.6）。
+
+    归一化细节：``bonus_share_ratio`` / ``convert_ratio`` 的 ``Decimal("0")`` 与 ``None``
+    经 ``x or ""`` 归一为**同一空串** → 产出**同一指纹**（语义上二者均表示「无送转」，
+    去重意图正确，不应因「显式 0」与「缺失」而分裂成两行待办）。
     """
     canonical = "\x1f".join([
         master_id,

@@ -571,3 +571,36 @@ async def test_seed_aggregated_unknown_label_warning(session, monkeypatch, caplo
     assert any("未收录标签" in x for x in msgs), f"seed 应打一条未收录标签 WARNING：{msgs}"
     # 聚合未收录标签 WARNING 必须只出现一次（非逐行 WARN 风暴）
     assert sum("未收录标签" in x for x in msgs) == 1
+
+
+@pytest.mark.asyncio
+async def test_seed_single_failure_logs_warning_with_exc_info(session, monkeypatch, caplog):
+    """行动项 8：播种单只失败必须打 WARNING 且带 ``exc_info=True``。
+
+    走的是 ``app.services.dividend_seed`` 模块 logger（非 scan 的），须单独 pin。
+    注入方式：把 ``fetch_and_upsert_master`` 换成抛 RuntimeError 的替身。
+    """
+    import logging
+    caplog.set_level(logging.WARNING)
+    caplog.set_level(logging.WARNING, logger="app.services.dividend_seed")
+    await _add_master(session, code="600519", name="证券A")
+    await _seed_detail_source(session)
+    await session.commit()
+    fake, _calls = _make_raw({})
+    monkeypatch.setattr(MarketDataSyncService, "call_interface_raw", fake)
+
+    async def _boom(self, mid, code, detail, stats):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(DividendNoticeScanService, "fetch_and_upsert_master", _boom)
+
+    summary = await DividendSeedService(session).seed_initial_dividends(None)
+    await session.commit()
+
+    recs = [
+        r for r in caplog.records
+        if r.name == "app.services.dividend_seed" and "单只失败" in r.getMessage()
+    ]
+    assert recs, f"seed 单只失败须打 WARNING：{[r.getMessage() for r in caplog.records]}"
+    assert any(r.exc_info is not None for r in recs), "warning 须带 exc_info=True（含异常栈）"
+    assert "失败1只" in summary

@@ -1068,3 +1068,38 @@ async def test_scan_and_seed_stats_keysets_equal(session):
     # 新桶必须都在键集中（旧链路没有、批次 A/B 新增的可观测维度）
     for required in ("unknown_label", "collision", "no_period", "skip", "staged"):
         assert required in SCAN_KEYS
+
+
+@pytest.mark.asyncio
+async def test_scan_single_failure_logs_warning_with_exc_info(session, monkeypatch, caplog):
+    """行动项 8：单只失败必须打 WARNING 且带 ``exc_info=True``（否则事后无法自证失败原因）。
+
+    pin 模块 logger（``app.services.dividend_notice_scan``），避免 root 跨测试污染。
+    注入方式：把 ``fetch_and_upsert_master`` 换成抛 RuntimeError 的替身，驱动 scan 走
+    单证券 ``except`` 分支。
+    """
+    import logging
+    caplog.set_level(logging.WARNING)
+    caplog.set_level(logging.WARNING, logger="app.services.dividend_notice_scan")
+    await _add_master(session)
+    _notice, _detail = await _seed_sources(session)
+    await session.commit()
+    notice_rows = [{"代码": "600519", "公告标题": "XX公司2025年度权益分派实施公告"}]
+    fake, _calls = _make_raw({}, notice_rows)
+    monkeypatch.setattr(MarketDataSyncService, "call_interface_raw", fake)
+
+    async def _boom(self, mid, code, detail, stats):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(DividendNoticeScanService, "fetch_and_upsert_master", _boom)
+
+    result = await DividendNoticeScanService(session).scan(None)
+    await session.commit()
+
+    recs = [
+        r for r in caplog.records
+        if r.name == "app.services.dividend_notice_scan" and "单只失败" in r.getMessage()
+    ]
+    assert recs, f"scan 单只失败须打 WARNING：{[r.getMessage() for r in caplog.records]}"
+    assert any(r.exc_info is not None for r in recs), "warning 须带 exc_info=True（含异常栈）"
+    assert "失败1只" in result

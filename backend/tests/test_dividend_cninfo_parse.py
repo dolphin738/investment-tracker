@@ -219,7 +219,28 @@ def test_pending_fingerprint_field_sensitive():
     for key, value in (
         (COL_CASH, "200"), (COL_BONUS, "4"), (COL_CONVERT, "6"),
         (COL_PERIOD_TYPE, "中期分红"), (COL_EX, "2025-07-10"), (COL_REPORT, "2025三季报"),
+        # 三个日期列必须参与指纹（QA 指出原用例漏测 → 拦不住「未来把它们踢出指纹」的回归）
+        (COL_RECORD, "2025-06-08"), (COL_PAY, "2025-06-21"), (COL_ANN, "2025-05-21"),
     ):
         changed = dict(base_raw)
         changed[key] = value
         assert pending_fingerprint("mid-1", parse_pending_row(changed)) != base_fp
+
+
+def test_pending_fingerprint_zero_and_none_ratio_are_equivalent():
+    """§3.6 归一化：送股/转增的 ``Decimal("0")`` 与缺失归一为同一空串 → **同指纹**。
+
+    语义上二者均表示「无送转」，去重意图正确（不应因「显式 0」与「缺失」分裂成两行待办）。
+    """
+    with_zero = parse_pending_row({
+        COL_PERIOD_TYPE: "年度分红", COL_CASH: "100",
+        COL_BONUS: "0", COL_CONVERT: "0", COL_REPORT: "",
+    })
+    with_none = parse_pending_row({
+        COL_PERIOD_TYPE: "年度分红", COL_CASH: "100", COL_REPORT: "",
+    })
+    assert with_zero.bonus_share_ratio == Decimal("0")
+    assert with_zero.convert_ratio == Decimal("0")
+    assert with_none.bonus_share_ratio is None
+    assert with_none.convert_ratio is None
+    assert pending_fingerprint("mid-1", with_zero) == pending_fingerprint("mid-1", with_none)

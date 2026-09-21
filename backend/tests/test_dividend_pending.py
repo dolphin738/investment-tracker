@@ -219,6 +219,23 @@ def test_pending_fingerprint_changes_on_any_field():
         ("mid-A", parse_pending_row(_cn_row(
             report="2025三季报", cash="100", bonus="3", convert="5",
             ex="2025-06-10", record="2025-06-09", ann="2025-05-20", pay="2025-06-20"))),
+        # 以下逐字段：转增 / 原文标签 / 股权登记日 / 派息日 / 公告日
+        # （后三者是 QA 指出原用例漏测的日期列，必须参与指纹，否则拦不住回归）
+        ("mid-A", parse_pending_row(_cn_row(
+            report="2025一季报", cash="100", bonus="3", convert="6",
+            ex="2025-06-10", record="2025-06-09", ann="2025-05-20", pay="2025-06-20"))),
+        ("mid-A", parse_pending_row(_cn_row(
+            report="2025一季报", ptype="中期分红", cash="100", bonus="3", convert="5",
+            ex="2025-06-10", record="2025-06-09", ann="2025-05-20", pay="2025-06-20"))),
+        ("mid-A", parse_pending_row(_cn_row(
+            report="2025一季报", cash="100", bonus="3", convert="5",
+            ex="2025-06-10", record="2025-06-08", ann="2025-05-20", pay="2025-06-20"))),
+        ("mid-A", parse_pending_row(_cn_row(
+            report="2025一季报", cash="100", bonus="3", convert="5",
+            ex="2025-06-10", record="2025-06-09", ann="2025-05-20", pay="2025-06-21"))),
+        ("mid-A", parse_pending_row(_cn_row(
+            report="2025一季报", cash="100", bonus="3", convert="5",
+            ex="2025-06-10", record="2025-06-09", ann="2025-05-21", pay="2025-06-20"))),
     ]
     for mid, row in variants:
         assert pending_fingerprint(mid, row) != base_fp
