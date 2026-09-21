@@ -18,7 +18,7 @@ from app.core.exceptions import BusinessException
 from app.services.auth import CurrentUser, require_admin
 from app.services.log import record
 
-router_backfill = APIRouter(route_class=EnvelopeRoute)
+router_trigger = APIRouter(route_class=EnvelopeRoute)
 
 # 进程内单飞锁（行动项 8，设计 §6.2）：播种是「一次性全市场冷启动」（约 11430 只 ×
 # ≈6s ≈ 19h，接口限流 10/min），连点会并发启动多个 19h 任务、双倍打满限流预算。
@@ -33,7 +33,7 @@ _seed_lock = asyncio.Lock()
 # --------------------------------------------------------------------------- #
 # 手动全量重建（替代原系统定时任务 DIVIDEND_YIELD_REBUILD）
 # --------------------------------------------------------------------------- #
-@router_backfill.post("/rebuild")
+@router_trigger.post("/rebuild")
 async def rebuild_dividend_yield(
     admin: CurrentUser = Depends(require_admin),
 ):
@@ -82,7 +82,7 @@ async def _run_seed() -> None:
         _seed_lock.release()
 
 
-@router_backfill.post("/seed-initial-dividends")
+@router_trigger.post("/seed-initial-dividends")
 async def seed_initial_dividends(
     admin: CurrentUser = Depends(require_admin),
 ):

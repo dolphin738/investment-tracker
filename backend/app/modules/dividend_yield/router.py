@@ -45,9 +45,9 @@ from app.services.dividend_yield import (
     to_cell,
 )
 
-from app.modules.dividend_yield.backfill_router import router_backfill
 from app.modules.dividend_yield.pending_router import router_pending
 from app.modules.dividend_yield.settings_router import router_settings
+from app.modules.dividend_yield.trigger_router import router_trigger
 from app.schemas_resp import SecurityDividendListOut
 
 router_dividend_yield = APIRouter(
@@ -55,7 +55,7 @@ router_dividend_yield = APIRouter(
 )
 
 router_dividend_yield.include_router(router_settings)
-router_dividend_yield.include_router(router_backfill)
+router_dividend_yield.include_router(router_trigger)
 router_dividend_yield.include_router(router_pending)
 
 logger = logging.getLogger(__name__)

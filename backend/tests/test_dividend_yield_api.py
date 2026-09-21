@@ -601,7 +601,7 @@ async def test_seed_triggers_job_async(session, client, monkeypatch):
 
     **patch 目标**：``_run_seed()`` 在**函数体内** ``from app.services.dividend_seed import
     run_dividend_seed``（延迟导入，装配期不拉起引擎），因此必须打在模块属性
-    ``app.services.dividend_seed.run_dividend_seed`` 上；打在 backfill_router 模块上无效
+    ``app.services.dividend_seed.run_dividend_seed`` 上；打在 trigger_router 模块上无效
     （该模块没有这个名字），断言会退化成假通过。
     """
     import app.services.dividend_seed as seed_mod
@@ -648,7 +648,7 @@ async def test_seed_single_flight_rejects_concurrent(session, client, monkeypatc
     import asyncio as _asyncio
 
     import app.services.dividend_seed as seed_mod
-    import app.modules.dividend_yield.backfill_router as bf
+    import app.modules.dividend_yield.trigger_router as bf
 
     monkeypatch.setattr(bf, "_seed_lock", _asyncio.Lock())
 

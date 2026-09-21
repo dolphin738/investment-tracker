@@ -2768,7 +2768,7 @@
           "dividend-yield"
         ],
         "summary": "Seed Initial Dividends",
-        "description": "手动触发全市场历史分红播种（§5.7；admin-only）。\n\n遍历全市场约 11430 只，并按 rate_limit 串行逐只调巨潮，长耗时（约 19 小时）故\nfire-and-forget 立即返回；支持断点续跑（按「当前明细源 + 近 5 年」判定已覆盖者\n跳过），中途失败重跑会自动续跑。进度与结果经应用日志查看。",
+        "description": "手动触发全市场历史分红播种（§5.7；admin-only）。\n\n遍历全市场约 11430 只，并按 rate_limit 串行逐只调巨潮，长耗时（约 19 小时）故\nfire-and-forget 立即返回；支持断点续跑（按「当前明细源 + 近 5 年」判定已覆盖者\n跳过），中途失败重跑会自动续跑。进度与结果经应用日志查看。\n\n**单飞**（行动项 8，§6.2）：已在播种中再次触发 → 不新建任务，返回 409\n「已有播种任务在运行」，避免连点并发启动多个 19h 任务打满限流预算。",
         "operationId": "seed_initial_dividends_api_dividend_yield_seed_initial_dividends_post",
         "responses": {
           "200": {
