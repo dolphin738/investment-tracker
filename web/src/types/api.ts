@@ -27,6 +27,22 @@ export interface components {
         accessToken: string;
         user: components['schemas']['UserPublicOut'];
       };
+    /** BatchFailedItemOut */
+    BatchFailedItemOut: {
+        /** Id */
+        id: string;
+        /** Code */
+        code: string;
+        /** Reason */
+        reason: string;
+      };
+    /** 批量端点统一响应：成功数 + 逐项失败明细。 */
+    BatchOperationOut: {
+        /** Succeeded */
+        succeeded: number;
+        /** Failed */
+        failed?: components['schemas']['BatchFailedItemOut'][];
+      };
     /** Body_import_preview_api_portfolios__portfolio_id__import_preview_post */
     Body_import_preview_api_portfolios__portfolio_id__import_preview_post: {
         type: components['schemas']['ImportType'];
@@ -548,6 +564,17 @@ PG 原生枚举类型名 `interface_direction`（由迁移创建）。
         /** Pagesize */
         pageSize: number;
       };
+    /** Paginated[PendingDividendOut] */
+    Paginated_PendingDividendOut_: {
+        /** Items */
+        items: components['schemas']['PendingDividendOut'][];
+        /** Total */
+        total: number;
+        /** Page */
+        page: number;
+        /** Pagesize */
+        pageSize: number;
+      };
     /** Paginated[PriceOut] */
     Paginated_PriceOut_: {
         /** Items */
@@ -609,6 +636,128 @@ PG 原生枚举类型名 `interface_direction`（由迁移创建）。
         currentPassword: string;
         /** Newpassword */
         newPassword: string;
+      };
+    /** 划分单笔请求体。
+
+``reportQuarter`` 用 Field 约束（非法 → 400）；批量项刻意不加约束，改由服务层逐项
+校验并在 ``failed[]`` 回报 ``VALIDATION_FAILED``（支持批量部分失败）。 */
+    PendingAssignBody: {
+        /** Reportyear */
+        reportYear: number;
+        /** Reportquarter */
+        reportQuarter: number;
+        /** Periodtype */
+        periodType: string;
+      };
+    /** 批量划分单条（无约束 → 项级校验由服务层完成）。 */
+    PendingAssignItem: {
+        /** Id */
+        id: string;
+        /** Reportyear */
+        reportYear: number;
+        /** Reportquarter */
+        reportQuarter: number;
+        /** Periodtype */
+        periodType: string;
+      };
+    /** PendingAssignResultOut */
+    PendingAssignResultOut: {
+        /** Id */
+        id: string;
+        /** Status */
+        status: string;
+        /** Conflict */
+        conflict: boolean;
+        /** Warning */
+        warning?: string | null;
+        /** Reportyear */
+        reportYear: number;
+        /** Reportquarter */
+        reportQuarter: number;
+        /** Periodtype */
+        periodType: string;
+      };
+    /** PendingBatchAssignBody */
+    PendingBatchAssignBody: {
+        /** Items */
+        items: components['schemas']['PendingAssignItem'][];
+      };
+    /** PendingBatchIgnoreBody */
+    PendingBatchIgnoreBody: {
+        /** Ids */
+        ids: string[];
+      };
+    /** 待人工划分分红行（列表项）。金额 Decimal → str（信封编码器保证）。 */
+    PendingDividendOut: {
+        /** Id */
+        id: string;
+        /** Masterid */
+        masterId: string;
+        /** Code */
+        code?: string | null;
+        /** Name */
+        name?: string | null;
+        /** Exchange */
+        exchange?: string | null;
+        /** Dividendlabel */
+        dividendLabel?: string | null;
+        /** Cashpershare */
+        cashPerShare: string;
+        /** Bonusshareratio */
+        bonusShareRatio?: string | null;
+        /** Convertratio */
+        convertRatio?: string | null;
+        /** Recorddate */
+        recordDate?: string | null;
+        /** Exdividenddate */
+        exDividendDate?: string | null;
+        /** Paydate */
+        payDate?: string | null;
+        /** Announcementdate */
+        announcementDate?: string | null;
+        /** Reportperiodraw */
+        reportPeriodRaw?: string | null;
+        /** Status */
+        status: string;
+        /** Resolvedperiodtype */
+        resolvedPeriodType?: string | null;
+        /** Resolvedreportyear */
+        resolvedReportYear?: number | null;
+        /** Resolvedreportquarter */
+        resolvedReportQuarter?: number | null;
+        /** Createdat */
+        createdAt: string;
+        /** Resolvedat */
+        resolvedAt?: string | null;
+      };
+    /** 待划分概览：各状态计数 + 标签候选集（D-8）。 */
+    PendingDividendSummaryOut: {
+        /** Pending */
+        pending: number;
+        /** Assigned */
+        assigned: number;
+        /** Ignored */
+        ignored: number;
+        /** Total */
+        total: number;
+        /** Labels */
+        labels?: string[];
+      };
+    /** PendingIgnoreResultOut */
+    PendingIgnoreResultOut: {
+        /** Id */
+        id: string;
+        /** Status */
+        status: string;
+      };
+    /** PendingReopenResultOut */
+    PendingReopenResultOut: {
+        /** Id */
+        id: string;
+        /** Status */
+        status: string;
+        /** Rolledback */
+        rolledBack: boolean;
       };
     /** 归档请求：archived 缺省或 true → 归档；false → 取消归档。 */
     PortfolioArchiveReq: {
@@ -944,6 +1093,36 @@ PG 原生枚举类型名 `interface_direction`（由迁移创建）。
         /** Password */
         password: string;
       };
+    /** SecurityDividendItemOut */
+    SecurityDividendItemOut: {
+        /** Reportyear */
+        reportYear: number;
+        /** Reportquarter */
+        reportQuarter: number;
+        /** Periodtype */
+        periodType: string;
+        /** Periodlabel */
+        periodLabel: string;
+        /** Planlabel */
+        planLabel: string;
+        /** Cashpershare */
+        cashPerShare: string;
+        /** Dividendlabel */
+        dividendLabel?: string | null;
+        /** Status */
+        status: string;
+        /** Exdividenddate */
+        exDividendDate?: string | null;
+        /** Announcementdate */
+        announcementDate?: string | null;
+      };
+    /** SecurityDividendListOut */
+    SecurityDividendListOut: {
+        /** Masterid */
+        masterId: string;
+        /** Items */
+        items?: components['schemas']['SecurityDividendItemOut'][];
+      };
     /** 批量/单行删除证券主数据请求体。
 - ids：待删除主数据 id 列表（all=False 时必填，可含重复，后端去重）。
 - all=True：删除「当前筛选条件下全部孤儿主数据」（跨所有页），忽略 ids；
@@ -1009,6 +1188,8 @@ type 为可选 override；不传则读取时由代码前缀推断（infer_securi
         announcement_source_interface_id?: string | null;
         /** Trade Calendar Start Date */
         trade_calendar_start_date?: string | null;
+        /** Dividend Retention Years */
+        dividend_retention_years?: number | null;
       };
     /** SnapshotCreateReq */
     SnapshotCreateReq: {

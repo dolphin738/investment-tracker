@@ -2195,6 +2195,392 @@
         ]
       }
     },
+    "/api/dividend-yield/pending-dividends": {
+      "get": {
+        "tags": [
+          "dividend-yield"
+        ],
+        "summary": "List Pending Dividends",
+        "description": "待划分分页列表：固定排序 ``created_at DESC, id DESC``；筛选 status/label/q（§4.5）。",
+        "operationId": "list_pending_dividends_api_dividend_yield_pending_dividends_get",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "label",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Label"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 50
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 20,
+              "title": "Pagesize"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Paginated_PendingDividendOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/dividend-yield/pending-dividends/batch-assign": {
+      "post": {
+        "tags": [
+          "dividend-yield"
+        ],
+        "summary": "Batch Assign Pending",
+        "description": "批量划分：逐项独立提交，部分失败返回 ``{succeeded, failed[]}``。",
+        "operationId": "batch_assign_pending_api_dividend_yield_pending_dividends_batch_assign_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PendingBatchAssignBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchOperationOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ]
+      }
+    },
+    "/api/dividend-yield/pending-dividends/batch-ignore": {
+      "post": {
+        "tags": [
+          "dividend-yield"
+        ],
+        "summary": "Batch Ignore Pending",
+        "description": "批量忽略：逐项独立提交，部分失败返回 ``{succeeded, failed[]}``。",
+        "operationId": "batch_ignore_pending_api_dividend_yield_pending_dividends_batch_ignore_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PendingBatchIgnoreBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchOperationOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ]
+      }
+    },
+    "/api/dividend-yield/pending-dividends/summary": {
+      "get": {
+        "tags": [
+          "dividend-yield"
+        ],
+        "summary": "Pending Dividends Summary",
+        "description": "待划分概览：各状态计数 + ``labels[]``（``KNOWN_LABELS`` ∪ 表内标签，D-8）。",
+        "operationId": "pending_dividends_summary_api_dividend_yield_pending_dividends_summary_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PendingDividendSummaryOut"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ]
+      }
+    },
+    "/api/dividend-yield/pending-dividends/{pending_id}/assign": {
+      "post": {
+        "tags": [
+          "dividend-yield"
+        ],
+        "summary": "Assign Pending",
+        "description": "划分单笔：写回主表 + 置 ``ASSIGNED``；主表同格已存在则 ``conflict=True`` 不覆盖。",
+        "operationId": "assign_pending_api_dividend_yield_pending_dividends__pending_id__assign_post",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "pending_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Pending Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PendingAssignBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PendingAssignResultOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/dividend-yield/pending-dividends/{pending_id}/ignore": {
+      "post": {
+        "tags": [
+          "dividend-yield"
+        ],
+        "summary": "Ignore Pending",
+        "description": "忽略单笔：仅 ``PENDING`` 可忽略 → ``IGNORED``（不写回主表）。",
+        "operationId": "ignore_pending_api_dividend_yield_pending_dividends__pending_id__ignore_post",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "pending_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Pending Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PendingIgnoreResultOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/dividend-yield/pending-dividends/{pending_id}/reopen": {
+      "post": {
+        "tags": [
+          "dividend-yield"
+        ],
+        "summary": "Reopen Pending",
+        "description": "撤销单笔：仅 ``ASSIGNED`` 可撤销；连带删除 assign 写入的主表同键行（§4.6）。",
+        "operationId": "reopen_pending_api_dividend_yield_pending_dividends__pending_id__reopen_post",
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "pending_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Pending Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PendingReopenResultOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/dividend-yield/rankings": {
       "get": {
         "tags": [
@@ -2523,7 +2909,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/SecurityDividendListOut"
+                }
               }
             }
           },
@@ -7012,6 +7400,51 @@
         ],
         "title": "AuthTokenOut"
       },
+      "BatchFailedItemOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "code",
+          "reason"
+        ],
+        "title": "BatchFailedItemOut"
+      },
+      "BatchOperationOut": {
+        "properties": {
+          "succeeded": {
+            "type": "integer",
+            "title": "Succeeded"
+          },
+          "failed": {
+            "items": {
+              "$ref": "#/components/schemas/BatchFailedItemOut"
+            },
+            "type": "array",
+            "title": "Failed",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "succeeded"
+        ],
+        "title": "BatchOperationOut",
+        "description": "批量端点统一响应：成功数 + 逐项失败明细。"
+      },
       "Body_import_preview_api_portfolios__portfolio_id__import_preview_post": {
         "properties": {
           "type": {
@@ -8875,6 +9308,37 @@
         ],
         "title": "Paginated[NavPointOut]"
       },
+      "Paginated_PendingDividendOut_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PendingDividendOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "pageSize": {
+            "type": "integer",
+            "title": "Pagesize"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "pageSize"
+        ],
+        "title": "Paginated[PendingDividendOut]"
+      },
       "Paginated_PriceOut_": {
         "properties": {
           "items": {
@@ -9050,6 +9514,434 @@
           "newPassword"
         ],
         "title": "PasswordPatchReq"
+      },
+      "PendingAssignBody": {
+        "properties": {
+          "reportYear": {
+            "type": "integer",
+            "minimum": 1990.0,
+            "title": "Reportyear"
+          },
+          "reportQuarter": {
+            "type": "integer",
+            "maximum": 4.0,
+            "minimum": 1.0,
+            "title": "Reportquarter"
+          },
+          "periodType": {
+            "type": "string",
+            "title": "Periodtype"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "reportYear",
+          "reportQuarter",
+          "periodType"
+        ],
+        "title": "PendingAssignBody",
+        "description": "划分单笔请求体。\n\n``reportQuarter`` 用 Field 约束（非法 → 400）；批量项刻意不加约束，改由服务层逐项\n校验并在 ``failed[]`` 回报 ``VALIDATION_FAILED``（支持批量部分失败）。"
+      },
+      "PendingAssignItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "reportYear": {
+            "type": "integer",
+            "title": "Reportyear"
+          },
+          "reportQuarter": {
+            "type": "integer",
+            "title": "Reportquarter"
+          },
+          "periodType": {
+            "type": "string",
+            "title": "Periodtype"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "reportYear",
+          "reportQuarter",
+          "periodType"
+        ],
+        "title": "PendingAssignItem",
+        "description": "批量划分单条（无约束 → 项级校验由服务层完成）。"
+      },
+      "PendingAssignResultOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "conflict": {
+            "type": "boolean",
+            "title": "Conflict"
+          },
+          "warning": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warning"
+          },
+          "reportYear": {
+            "type": "integer",
+            "title": "Reportyear"
+          },
+          "reportQuarter": {
+            "type": "integer",
+            "title": "Reportquarter"
+          },
+          "periodType": {
+            "type": "string",
+            "title": "Periodtype"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "conflict",
+          "reportYear",
+          "reportQuarter",
+          "periodType"
+        ],
+        "title": "PendingAssignResultOut"
+      },
+      "PendingBatchAssignBody": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PendingAssignItem"
+            },
+            "type": "array",
+            "maxItems": 200,
+            "minItems": 1,
+            "title": "Items"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "PendingBatchAssignBody"
+      },
+      "PendingBatchIgnoreBody": {
+        "properties": {
+          "ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 200,
+            "minItems": 1,
+            "title": "Ids"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "ids"
+        ],
+        "title": "PendingBatchIgnoreBody"
+      },
+      "PendingDividendOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "masterId": {
+            "type": "string",
+            "title": "Masterid"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "exchange": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exchange"
+          },
+          "dividendLabel": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dividendlabel"
+          },
+          "cashPerShare": {
+            "type": "string",
+            "title": "Cashpershare"
+          },
+          "bonusShareRatio": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bonusshareratio"
+          },
+          "convertRatio": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Convertratio"
+          },
+          "recordDate": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recorddate"
+          },
+          "exDividendDate": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exdividenddate"
+          },
+          "payDate": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paydate"
+          },
+          "announcementDate": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Announcementdate"
+          },
+          "reportPeriodRaw": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reportperiodraw"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "resolvedPeriodType": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolvedperiodtype"
+          },
+          "resolvedReportYear": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolvedreportyear"
+          },
+          "resolvedReportQuarter": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolvedreportquarter"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          },
+          "resolvedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolvedat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "masterId",
+          "cashPerShare",
+          "status",
+          "createdAt"
+        ],
+        "title": "PendingDividendOut",
+        "description": "待人工划分分红行（列表项）。金额 Decimal → str（信封编码器保证）。"
+      },
+      "PendingDividendSummaryOut": {
+        "properties": {
+          "pending": {
+            "type": "integer",
+            "title": "Pending"
+          },
+          "assigned": {
+            "type": "integer",
+            "title": "Assigned"
+          },
+          "ignored": {
+            "type": "integer",
+            "title": "Ignored"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "labels": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Labels",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "pending",
+          "assigned",
+          "ignored",
+          "total"
+        ],
+        "title": "PendingDividendSummaryOut",
+        "description": "待划分概览：各状态计数 + 标签候选集（D-8）。"
+      },
+      "PendingIgnoreResultOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "status"
+        ],
+        "title": "PendingIgnoreResultOut"
+      },
+      "PendingReopenResultOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "rolledBack": {
+            "type": "boolean",
+            "title": "Rolledback"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "rolledBack"
+        ],
+        "title": "PendingReopenResultOut"
       },
       "PortfolioArchiveReq": {
         "properties": {
@@ -10386,6 +11278,105 @@
         ],
         "title": "RestoreReq"
       },
+      "SecurityDividendItemOut": {
+        "properties": {
+          "reportYear": {
+            "type": "integer",
+            "title": "Reportyear"
+          },
+          "reportQuarter": {
+            "type": "integer",
+            "title": "Reportquarter"
+          },
+          "periodType": {
+            "type": "string",
+            "title": "Periodtype"
+          },
+          "periodLabel": {
+            "type": "string",
+            "title": "Periodlabel"
+          },
+          "planLabel": {
+            "type": "string",
+            "title": "Planlabel"
+          },
+          "cashPerShare": {
+            "type": "string",
+            "title": "Cashpershare"
+          },
+          "dividendLabel": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dividendlabel"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "exDividendDate": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exdividenddate"
+          },
+          "announcementDate": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Announcementdate"
+          }
+        },
+        "type": "object",
+        "required": [
+          "reportYear",
+          "reportQuarter",
+          "periodType",
+          "periodLabel",
+          "planLabel",
+          "cashPerShare",
+          "status"
+        ],
+        "title": "SecurityDividendItemOut"
+      },
+      "SecurityDividendListOut": {
+        "properties": {
+          "masterId": {
+            "type": "string",
+            "title": "Masterid"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SecurityDividendItemOut"
+            },
+            "type": "array",
+            "title": "Items",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "masterId"
+        ],
+        "title": "SecurityDividendListOut"
+      },
       "SecurityMasterDeleteBody": {
         "properties": {
           "ids": {
@@ -10613,6 +11604,17 @@
               }
             ],
             "title": "Trade Calendar Start Date"
+          },
+          "dividend_retention_years": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dividend Retention Years"
           }
         },
         "additionalProperties": false,
