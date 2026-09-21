@@ -48,7 +48,6 @@ from app.services.dividend_notice_scan import (
     DividendNoticeScanService,
     _TITLE_CANCEL_RE,
     _TITLE_DIVIDEND_RE,
-    _TITLE_SPECIAL_RE,
 )
 from app.services.market_data_sync import (
     DIVIDEND_LIST_CAT_ID,
@@ -209,20 +208,6 @@ def test_title_cancel_regex():
     """守护附录 A.10：`取消|终止` 落在分红相关标题上 → cancel。"""
     assert _TITLE_CANCEL_RE.search("关于取消2022年度利润分配方案的公告")
     assert _TITLE_CANCEL_RE.search("关于终止分红实施方案的公告")
-
-
-def test_title_special_regex_is_only_period_type_hint():
-    """§5.5：`特别|中期` **不再**是候选二筛条件，降为 period_type 兜底提示。
-
-    旧口径要求候选标题含「特别|中期」，新方法下会漏掉普通年度分红公告；该正则
-    仅保留作「分红类型」未收录时的提示，不得再用于判定候选。
-    """
-    assert _TITLE_SPECIAL_RE.search("贵州茅台2022年度回报股东特别分红实施公告")
-    assert _TITLE_SPECIAL_RE.search("2024年中期权益分派实施公告")
-    # 普通年度分红标题不含「特别|中期」，但仍是候选（由分类用例断言）
-    plain = "XX公司2025年度权益分派实施公告"
-    assert _TITLE_DIVIDEND_RE.search(plain)
-    assert not _TITLE_SPECIAL_RE.search(plain)
 
 
 @pytest.mark.asyncio
@@ -721,23 +706,6 @@ async def test_westward_dup_skips_cross_source_duplicate(session):
     rows = await _div_rows(session, m.id)
     assert len(rows) == 1, f"跨源重复应被去重，实际 {len(rows)} 行"
     assert stats["new"] == 0 and stats["anchor"] == 1
-
-
-@pytest.mark.asyncio
-async def test_match_proposed_same_cash(session):
-    """存量 SPECIAL 匹配（§3 明确保留）：PROPOSED 同额匹配取 announcement_date 最近者。"""
-    m = await _add_master(session)
-    old = _div_row(m.id, "19.0", status=DividendStatus.PROPOSED, ry=2022, rq=4,
-                   ann=date(2022, 11, 1), period_type=ReportPeriodType.SPECIAL)
-    new = _div_row(m.id, "19.0", status=DividendStatus.PROPOSED, ry=2023, rq=1,
-                   ann=date(2022, 12, 1), period_type=ReportPeriodType.SPECIAL)
-    session.add_all([old, new])
-    await session.commit()
-
-    svc = DividendNoticeScanService(session)
-    matched = await svc._match_proposed(m.id, Decimal("19.0"))
-    assert matched is not None
-    assert matched.id == new.id  # 最近公告日优先
 
 
 # ───────────── 公告源解析（§5.4 可配置化） ─────────────

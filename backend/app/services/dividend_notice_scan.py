@@ -26,7 +26,6 @@ from __future__ import annotations
 import logging
 import re
 from collections import Counter
-from decimal import Decimal
 from typing import Any, Optional
 
 from sqlalchemy import select
@@ -39,7 +38,7 @@ from app.models import (
     Security,
     SecurityDividend,
 )
-from app.models.enums import DividendStatus, ReportPeriodType
+from app.models.enums import DividendStatus
 from app.services.dividend_cninfo_parse import (
     CninfoDividendRow,
     KNOWN_LABELS,
@@ -63,9 +62,6 @@ from app.services.response_fields import (
 
 # —— 标题正则二筛白名单（§5.5；改模式须补单测，禁止删改关键词）——
 _TITLE_DIVIDEND_RE = re.compile(r"分红|派息|权益分派|利润分配|分配方案")
-# 「特别|中期」：§5.5 起**不再**作为候选二筛（会漏掉普通年度分红公告），仅保留作
-# period_type 兜底提示——标题含「中期」而巨潮「分红类型」未收录时，可据此提示 INTERIM。
-_TITLE_SPECIAL_RE = re.compile(r"特别|中期")
 _TITLE_CANCEL_RE = re.compile(r"取消|终止")
 
 # 东财公告 SDK（stock_notice_report）的公告标题列：展示字段（无 slot，不参与同步
@@ -520,47 +516,6 @@ class DividendNoticeScanService:
             SecurityDividend.report_quarter == rq,
             SecurityDividend.cash_per_share == cash,
             SecurityDividend.source != source,
-        ) is not None
-
-    async def _match_proposed(self, mid: str, cash: Decimal) -> Optional[SecurityDividend]:
-        """PROPOSED→PAID：同 master + cash 相等匹配存量 PROPOSED SPECIAL；多行同额取
-        announcement_date 最近者。（旧新浪链路遗留，§3 明确保留）"""
-        return (
-            await self.session.execute(
-                select(SecurityDividend)
-                .where(
-                    SecurityDividend.master_id == mid,
-                    SecurityDividend.period_type == ReportPeriodType.SPECIAL,
-                    SecurityDividend.status == DividendStatus.PROPOSED,
-                    SecurityDividend.cash_per_share == cash,
-                )
-                .order_by(
-                    SecurityDividend.announcement_date.desc().nulls_last(),
-                    SecurityDividend.id.desc(),
-                )
-                .limit(1)
-            )
-        ).scalar_one_or_none()
-
-    async def _exists_anchor(self, mid: str, ry: int, rq: int) -> bool:
-        """同 master 的 (ry, rq) 格是否已有 SPECIAL 行（防唯一键冲突）。（§3 明确保留）"""
-        return await self._first(
-            SecurityDividend.master_id == mid,
-            SecurityDividend.report_year == ry,
-            SecurityDividend.report_quarter == rq,
-            SecurityDividend.period_type == ReportPeriodType.SPECIAL,
-        ) is not None
-
-    async def _has_proposed(self, mid: str) -> bool:
-        """该证券是否已有存量 PROPOSED 行（存量复查触发）。
-
-        与 ``_reject_proposed`` 同口径放宽为不限 period_type：批次 A 后新链路按「分红类型」
-        写 ANNUAL/INTERIM/QUARTERLY/SPECIAL/OTHER（含 SPECIAL 与 OTHER），故此处不再限定
-        period_type，沿用旧 ``== SPECIAL`` 过滤会使复查/取消路径漏掉非 SPECIAL 的存量行。
-        """
-        return await self._first(
-            SecurityDividend.master_id == mid,
-            SecurityDividend.status == DividendStatus.PROPOSED,
         ) is not None
 
     async def _reject_proposed(self, mid: str) -> int:
