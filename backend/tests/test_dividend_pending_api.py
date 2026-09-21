@@ -6,6 +6,7 @@
 - assign 冲突路径（``conflict=True`` 且主表旧值**未被覆盖**）；
 - assign 非冲突路径（写回主表，source=人工划分、status 按除权日推导）；
 - 批量部分失败（``{succeeded, failed[]}`` 含 NOT_FOUND / INVALID_STATE / VALIDATION_FAILED）；
+- 批量单项入库异常隔离（DB_ERROR）：一项抛错不中断整批，其余项照常处理；
 - reopen 回滚（主表行被删 + ``rolledBack=True`` + pending 回 PENDING 且清 ``resolved_*``）；
 - ignore（PENDING → IGNORED）与非 PENDING 状态保护。
 """
@@ -52,6 +53,10 @@ def _pending(
     created_at=None,
     ex=None,
     pid=None,
+    bonus=None,
+    convert=None,
+    record=None,
+    ann=None,
 ) -> SecurityDividendPending:
     ts = created_at or datetime.now(timezone.utc)
     return SecurityDividendPending(
@@ -62,6 +67,10 @@ def _pending(
         cash_per_share=Decimal(cash),
         status=DividendPendingStatus.PENDING,
         ex_dividend_date=ex,
+        bonus_share_ratio=None if bonus is None else Decimal(bonus),
+        convert_ratio=None if convert is None else Decimal(convert),
+        record_date=record,
+        announcement_date=ann,
         report_period_raw="未知报告期",
         created_at=ts,
         updated_at=ts,
@@ -222,7 +231,12 @@ async def test_pending_summary_counts_and_labels(session, client):
 # ───────────────────────── assign：冲突保留旧值 ─────────────────────────
 @pytest.mark.asyncio
 async def test_assign_conflict_keeps_existing(session, client):
-    """主表同格已存在 → ``conflict=True``、warning 提示未覆盖、旧值保持不变。"""
+    """主表同格已存在 → ``conflict=True``、warning 提示未覆盖、**主表旧值逐字段保持不变**。
+
+    ``_insert_main`` 写入的主表字段共 12 个（含 source / 送转 / 三个日期 / status / 键列）；
+    仅断言其中 2 个（cash/label）会漏掉「部分字段被覆盖」的回归，故逐字段钉死。主表现有行
+    与待划分行各字段取值**均不同**——一旦实现误用 ``DO UPDATE`` 覆盖，任一项都会被抓到。
+    """
     admin = await _make_role(session, client, "adm-cf@example.com", "admin")
     h = auth(admin["token"])
     mid = await _master(session)
@@ -231,9 +245,15 @@ async def test_assign_conflict_keeps_existing(session, client):
             master_id=mid, report_year=2024, report_quarter=4,
             period_type=ReportPeriodType.ANNUAL, cash_per_share=Decimal("5.0"),
             status=DividendStatus.PAID, dividend_label="旧标签",
+            source="旧源", ex_dividend_date=date(2024, 6, 10),
+            announcement_date=date(2024, 5, 20), record_date=date(2024, 6, 9),
+            bonus_share_ratio=Decimal("0.3"), convert_ratio=Decimal("0.4"),
         )
     )
-    p = _pending(mid, label="本次标签", cash="12.5")
+    p = _pending(
+        mid, label="本次标签", cash="12.5", ex=date(2024, 7, 1),
+        bonus="0.9", convert="0.8", record=date(2024, 6, 30), ann=date(2024, 6, 20),
+    )
     session.add(p)
     await session.commit()
     pid = p.id
@@ -256,8 +276,19 @@ async def test_assign_conflict_keeps_existing(session, client):
             select(SecurityDividend).where(SecurityDividend.master_id == mid)
         )
     ).scalar_one()
-    assert row.cash_per_share == Decimal("5.0")  # 旧值未被覆盖
+    # 12 字段逐项不被覆盖（主表原值保持）
+    assert row.cash_per_share == Decimal("5.0")
     assert row.dividend_label == "旧标签"
+    assert row.source == "旧源"
+    assert row.bonus_share_ratio == Decimal("0.3")
+    assert row.convert_ratio == Decimal("0.4")
+    assert row.record_date == date(2024, 6, 9)
+    assert row.ex_dividend_date == date(2024, 6, 10)
+    assert row.announcement_date == date(2024, 5, 20)
+    assert row.status is DividendStatus.PAID
+    assert row.report_year == 2024
+    assert row.report_quarter == 4
+    assert row.period_type is ReportPeriodType.ANNUAL
 
     p2 = await session.get(SecurityDividendPending, pid)
     await session.refresh(p2)
@@ -366,6 +397,110 @@ async def test_batch_assign_partial_failure(session, client):
             select(SecurityDividend).where(SecurityDividend.master_id == mid)
         )
     ).scalar_one() is not None
+
+
+# ───────────────────────── 批量：单项入库异常隔离（DB_ERROR） ─────────────────────────
+@pytest.mark.asyncio
+async def test_batch_assign_db_error_isolated(session, client, monkeypatch):
+    """单项入库异常 → 该 item 落 ``failed[]`` 且 ``code == "DB_ERROR"``；**同批其他项照常成功**。
+
+    QA 建议：``batch_assign`` 的 ``except Exception``（DB_ERROR）分支此前无覆盖。批处理
+    不应被单项异常整体带挂——注入中间项抛错，断言其余两项正常写回主表、整批不中断。
+    """
+    from app.services.dividend_pending import PendingDividendService
+
+    admin = await _make_role(session, client, "adm-dberr@example.com", "admin")
+    h = auth(admin["token"])
+    mid = await _master(session)
+    good1 = _pending(mid, cash="9.0")
+    boom = _pending(mid, cash="9.0")
+    good2 = _pending(mid, cash="9.0")
+    session.add_all([good1, boom, good2])
+    await session.commit()
+    good1_id, boom_id, good2_id = good1.id, boom.id, good2.id
+
+    original = PendingDividendService._assign_one
+
+    async def _flaky(self, pending_id, **kwargs):
+        if pending_id == boom_id:
+            raise RuntimeError("模拟单项入库失败")
+        return await original(self, pending_id, **kwargs)
+
+    monkeypatch.setattr(PendingDividendService, "_assign_one", _flaky)
+
+    st, code, data, _ = env(
+        await client.post(
+            "/api/dividend-yield/pending-dividends/batch-assign",
+            json={
+                "items": [
+                    {"id": good1_id, "reportYear": 2024, "reportQuarter": 4, "periodType": "ANNUAL"},
+                    {"id": boom_id, "reportYear": 2024, "reportQuarter": 4, "periodType": "ANNUAL"},
+                    {"id": good2_id, "reportYear": 2023, "reportQuarter": 4, "periodType": "ANNUAL"},
+                ]
+            },
+            headers=h,
+        )
+    )
+    assert st == 200 and code == 0
+    assert data["succeeded"] == 2, "单项 DB 异常不得带挂整批"
+    assert len(data["failed"]) == 1
+    assert data["failed"][0]["id"] == boom_id
+    assert data["failed"][0]["code"] == "DB_ERROR"
+
+    # 其余两项已独立提交写回主表（2024Q4 + 2023Q4 各一行），失败项未写主表
+    session.expire_all()
+    rows = (
+        await session.execute(
+            select(SecurityDividend).where(SecurityDividend.master_id == mid)
+        )
+    ).scalars().all()
+    assert len(rows) == 2
+    boom_p = await session.get(SecurityDividendPending, boom_id)
+    await session.refresh(boom_p)
+    assert boom_p.status.value == "PENDING"  # 失败项未被置 ASSIGNED
+
+
+@pytest.mark.asyncio
+async def test_batch_ignore_db_error_isolated(session, client, monkeypatch):
+    """``batch_ignore`` 的 DB_ERROR 分支：单项异常被隔离，其余项照常置 IGNORED。"""
+    from app.services.dividend_pending import PendingDividendService
+
+    admin = await _make_role(session, client, "adm-iger@example.com", "admin")
+    h = auth(admin["token"])
+    mid = await _master(session)
+    a = _pending(mid)
+    b = _pending(mid)
+    c = _pending(mid)
+    session.add_all([a, b, c])
+    await session.commit()
+    a_id, b_id, c_id = a.id, b.id, c.id
+
+    original = PendingDividendService._ignore_one
+
+    async def _flaky(self, pending_id):
+        if pending_id == b_id:
+            raise RuntimeError("模拟单项入库失败")
+        return await original(self, pending_id)
+
+    monkeypatch.setattr(PendingDividendService, "_ignore_one", _flaky)
+
+    st, code, data, _ = env(
+        await client.post(
+            "/api/dividend-yield/pending-dividends/batch-ignore",
+            json={"ids": [a_id, b_id, c_id]},
+            headers=h,
+        )
+    )
+    assert st == 200 and code == 0
+    assert data["succeeded"] == 2
+    assert len(data["failed"]) == 1
+    assert data["failed"][0]["id"] == b_id
+    assert data["failed"][0]["code"] == "DB_ERROR"
+
+    session.expire_all()
+    b_p = await session.get(SecurityDividendPending, b_id)
+    await session.refresh(b_p)
+    assert b_p.status.value == "PENDING"  # 失败项未被置 IGNORED
 
 
 # ───────────────────────── reopen：回滚 ─────────────────────────
