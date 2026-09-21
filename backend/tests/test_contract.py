@@ -162,6 +162,41 @@ def test_swagger_ui_reachable():
     assert "text/html" in r.headers["content-type"]
 
 
+def test_openapi_pending_contract_paths_and_schemas():
+    """批次 C 契约：pending 七端点进 OpenAPI（paths 96 → 103）且新 schema 出现。
+
+    E6：``/{master_id}/dividends`` 补 response_model 后，``SecurityDividendItemOut`` /
+    ``SecurityDividendListOut`` 进契约，``dividendLabel`` 字段可见。
+    """
+    spec = client.get("/api/openapi.json").json()
+    paths = spec["paths"]
+    assert len(paths) == 103, f"paths 计数应为 103（96 + 7 pending），实得 {len(paths)}"
+    for p in (
+        "/api/dividend-yield/pending-dividends",
+        "/api/dividend-yield/pending-dividends/summary",
+        "/api/dividend-yield/pending-dividends/{pending_id}/assign",
+        "/api/dividend-yield/pending-dividends/batch-assign",
+        "/api/dividend-yield/pending-dividends/{pending_id}/ignore",
+        "/api/dividend-yield/pending-dividends/batch-ignore",
+        "/api/dividend-yield/pending-dividends/{pending_id}/reopen",
+    ):
+        assert p in paths, f"缺少 pending path：{p}"
+
+    schemas = spec["components"]["schemas"]
+    for name in (
+        "PendingDividendOut",
+        "PendingDividendSummaryOut",
+        "PendingAssignResultOut",
+        "PendingIgnoreResultOut",
+        "PendingReopenResultOut",
+        "BatchOperationOut",
+        "SecurityDividendItemOut",
+        "SecurityDividendListOut",
+    ):
+        assert name in schemas, f"缺少 schema：{name}"
+    assert "dividendLabel" in schemas["SecurityDividendItemOut"]["properties"]
+
+
 def _ns(**kw):
     return types.SimpleNamespace(**kw)
 

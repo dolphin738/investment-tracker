@@ -374,3 +374,94 @@ class ImportCommitOut(BaseModel):
     skipped: int
     failed: list[ImportRowError] = []
     recalculated: Optional[dict[str, Any]] = None
+
+
+# ───────────────────────── 待人工划分分红（批次 C，§4.4） ─────────────────────────
+class PendingDividendOut(BaseModel):
+    """待人工划分分红行（列表项）。金额 Decimal → str（信封编码器保证）。"""
+
+    id: str
+    masterId: str
+    code: Optional[str] = None
+    name: Optional[str] = None
+    exchange: Optional[str] = None
+    dividendLabel: Optional[str] = None
+    cashPerShare: str
+    bonusShareRatio: Optional[str] = None
+    convertRatio: Optional[str] = None
+    recordDate: Optional[date] = None
+    exDividendDate: Optional[date] = None
+    payDate: Optional[date] = None
+    announcementDate: Optional[date] = None
+    reportPeriodRaw: Optional[str] = None
+    status: str  # PENDING|ASSIGNED|IGNORED
+    resolvedPeriodType: Optional[str] = None
+    resolvedReportYear: Optional[int] = None
+    resolvedReportQuarter: Optional[int] = None
+    createdAt: datetime
+    resolvedAt: Optional[datetime] = None
+
+
+class PendingDividendSummaryOut(BaseModel):
+    """待划分概览：各状态计数 + 标签候选集（D-8）。"""
+
+    pending: int
+    assigned: int
+    ignored: int
+    total: int
+    labels: list[str] = []  # KNOWN_LABELS ∪ 表内 DISTINCT 非空 label
+
+
+class PendingAssignResultOut(BaseModel):
+    id: str
+    status: str
+    conflict: bool
+    warning: Optional[str] = None
+    reportYear: int
+    reportQuarter: int
+    periodType: str
+
+
+class PendingIgnoreResultOut(BaseModel):
+    id: str
+    status: str
+
+
+class PendingReopenResultOut(BaseModel):
+    id: str
+    status: str
+    rolledBack: bool  # 是否连带删除了主表同键行
+
+
+class BatchFailedItemOut(BaseModel):
+    id: str
+    code: str  # NOT_FOUND|INVALID_STATE|VALIDATION_FAILED|DB_ERROR
+    reason: str
+
+
+class BatchOperationOut(BaseModel):
+    """批量端点统一响应：成功数 + 逐项失败明细。"""
+
+    succeeded: int
+    failed: list[BatchFailedItemOut] = []
+
+
+# —— E6 修复：单证券分红明细（含 dividendLabel）——
+# 字段名必须与 modules/dividend_yield/router.py 手工 dict 的键逐字一致，否则前端既有
+# 消费字段漂移（`/{master_id}/dividends` 之前无 response_model → 200 schema 为空）。
+class SecurityDividendItemOut(BaseModel):
+    reportYear: int
+    reportQuarter: int
+    periodType: str
+    periodLabel: str
+    planLabel: str
+    cashPerShare: str
+    dividendLabel: Optional[str] = None
+    status: str
+    exDividendDate: Optional[date] = None
+    announcementDate: Optional[date] = None
+
+
+class SecurityDividendListOut(BaseModel):
+    masterId: str
+    items: list[SecurityDividendItemOut] = []

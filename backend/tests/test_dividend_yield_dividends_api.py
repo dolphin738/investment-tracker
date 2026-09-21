@@ -119,3 +119,26 @@ async def test_dividends_requires_login(session, client):
     mid = await _new_master(session, "600004")
     r = await client.get(f"/api/dividend-yield/{mid}/dividends")
     assert r.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_dividends_response_includes_dividend_label(session, client):
+    """E6 契约缺口修复：响应含 ``dividendLabel`` 字段（无标签时也保留键，值为 null）。"""
+    info = await register_login(client)
+    h = auth(info["token"])
+    mid = await _new_master(session, "600005")
+    session.add(_div(mid, 2025, 4, ReportPeriodType.ANNUAL, "0.3"))
+    labeled = _div(mid, 2025, 3, ReportPeriodType.OTHER, "0.15")
+    labeled.dividend_label = "重整转增"
+    session.add(labeled)
+    await session.commit()
+
+    st, code, data, _ = env(
+        await client.get(f"/api/dividend-yield/{mid}/dividends", headers=h)
+    )
+    assert st == 200 and code == 0
+    items = data["items"]
+    assert items and all("dividendLabel" in i for i in items)
+    by_type = {i["periodType"]: i for i in items}
+    assert by_type["OTHER"]["dividendLabel"] == "重整转增"
+    assert by_type["ANNUAL"]["dividendLabel"] is None

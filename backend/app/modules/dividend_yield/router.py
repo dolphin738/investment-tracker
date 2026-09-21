@@ -46,7 +46,9 @@ from app.services.dividend_yield import (
 )
 
 from app.modules.dividend_yield.backfill_router import router_backfill
+from app.modules.dividend_yield.pending_router import router_pending
 from app.modules.dividend_yield.settings_router import router_settings
+from app.schemas_resp import SecurityDividendListOut
 
 router_dividend_yield = APIRouter(
     prefix="/api/dividend-yield", tags=["dividend-yield"], route_class=EnvelopeRoute
@@ -54,6 +56,7 @@ router_dividend_yield = APIRouter(
 
 router_dividend_yield.include_router(router_settings)
 router_dividend_yield.include_router(router_backfill)
+router_dividend_yield.include_router(router_pending)
 
 logger = logging.getLogger(__name__)
 
@@ -284,7 +287,9 @@ async def top20_dividend_yield(
     }
 
 
-@router_dividend_yield.get("/{master_id}/dividends")
+@router_dividend_yield.get(
+    "/{master_id}/dividends", response_model=SecurityDividendListOut
+)
 async def list_security_dividends(
     master_id: str = Path(...),
     user: CurrentUser = Depends(get_current_user),
