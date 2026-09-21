@@ -1075,23 +1075,35 @@ async def test_scan_single_failure_logs_warning_with_exc_info(session, monkeypat
     """行动项 8：单只失败必须打 WARNING 且带 ``exc_info=True``（否则事后无法自证失败原因）。
 
     pin 模块 logger（``app.services.dividend_notice_scan``），避免 root 跨测试污染。
-    注入方式：把 ``fetch_and_upsert_master`` 换成抛 RuntimeError 的替身，驱动 scan 走
-    单证券 ``except`` 分支。
+    注入方式：把 ``fetch_and_upsert_master`` 换成「仅对一只抛 RuntimeError、其余照常」的
+    替身，驱动 scan 走单证券 ``except`` 分支。失败数（1）刻意 **< 总数（3）的 50%**，以免
+    触发批次 E 新增的「失败占比过高抛错」阈值（该阈值另有独立用例守护）。
     """
     import logging
     caplog.set_level(logging.WARNING)
     caplog.set_level(logging.WARNING, logger="app.services.dividend_notice_scan")
-    await _add_master(session)
+    a = await _add_master(session, code="600519", name="证券A")
+    await _add_master(session, code="000001", name="证券B")
+    await _add_master(session, code="000002", name="证券C")
     _notice, _detail = await _seed_sources(session)
+    code_a = a.code  # 失败路径 rollback 会 expire ORM 实例，先取纯字符串
     await session.commit()
-    notice_rows = [{"代码": "600519", "公告标题": "XX公司2025年度权益分派实施公告"}]
+    notice_rows = [
+        {"代码": "600519", "公告标题": "XX公司2025年度权益分派实施公告"},
+        {"代码": "000001", "公告标题": "XX公司2025年度权益分派实施公告"},
+        {"代码": "000002", "公告标题": "XX公司2025年度权益分派实施公告"},
+    ]
     fake, _calls = _make_raw({}, notice_rows)
     monkeypatch.setattr(MarketDataSyncService, "call_interface_raw", fake)
 
-    async def _boom(self, mid, code, detail, stats):
-        raise RuntimeError("boom")
+    original = DividendNoticeScanService.fetch_and_upsert_master
 
-    monkeypatch.setattr(DividendNoticeScanService, "fetch_and_upsert_master", _boom)
+    async def _flaky(self, mid, code, detail, stats):
+        if code == code_a:  # 仅 A 失败（1/3 < 50%，不触发失败占比阈值）
+            raise RuntimeError("boom")
+        return await original(self, mid, code, detail, stats)
+
+    monkeypatch.setattr(DividendNoticeScanService, "fetch_and_upsert_master", _flaky)
 
     result = await DividendNoticeScanService(session).scan(None)
     await session.commit()
@@ -1103,3 +1115,63 @@ async def test_scan_single_failure_logs_warning_with_exc_info(session, monkeypat
     assert recs, f"scan 单只失败须打 WARNING：{[r.getMessage() for r in caplog.records]}"
     assert any(r.exc_info is not None for r in recs), "warning 须带 exc_info=True（含异常栈）"
     assert "失败1只" in result
+
+
+@pytest.mark.asyncio
+async def test_scan_aborts_when_failure_ratio_over_half(session, monkeypatch):
+    """行动项 8（§6.2）：整轮失败占比 > 50% → 冒泡（使 scheduler 记 FAILED）。
+
+    最危险的失败模式是「上游整体失效把上万只吞成 skipped、摘要仍报完成」；只要半数以上
+    证券采集失败，就判定为上游整体不可用并终止，而非静默返回「成功」摘要。
+    """
+    # 两只证券（全失败 → 2/2 = 100%）；scan 抛错后会话已 rollback，勿再读 ORM 属性
+    await _add_master(session, code="600519", name="证券A")
+    await _add_master(session, code="000001", name="证券B")
+    _notice, _detail = await _seed_sources(session)
+    await session.commit()
+    notice_rows = [
+        {"代码": "600519", "公告标题": "XX公司2025年度权益分派实施公告"},
+        {"代码": "000001", "公告标题": "XX公司2025年度权益分派实施公告"},
+    ]
+    fake, _calls = _make_raw({}, notice_rows)
+    monkeypatch.setattr(MarketDataSyncService, "call_interface_raw", fake)
+
+    async def _boom(self, mid, code, detail, stats):  # 两只全失败 → 2/2 = 100%
+        raise RuntimeError("上游整体失效（模拟）")
+
+    monkeypatch.setattr(DividendNoticeScanService, "fetch_and_upsert_master", _boom)
+
+    with pytest.raises(RuntimeError, match="失败占比过高"):
+        await DividendNoticeScanService(session).scan(None)
+
+
+@pytest.mark.asyncio
+async def test_scan_no_abort_when_failure_ratio_at_half(session, monkeypatch):
+    """行动项 8（§6.2 边界）：失败占比 == 50% 时**不**冒泡（阈值为严格 ``> 0.5``）→ 摘要正常。
+
+    逐只容错仍生效：半数失败（偶发）按「滚回续下一只」处理，只有**超过**半数才判整体失效。
+    """
+    a = await _add_master(session, code="600519", name="证券A")
+    await _add_master(session, code="000001", name="证券B")
+    _notice, _detail = await _seed_sources(session)
+    code_a = a.code
+    await session.commit()
+    notice_rows = [
+        {"代码": "600519", "公告标题": "XX公司2025年度权益分派实施公告"},
+        {"代码": "000001", "公告标题": "XX公司2025年度权益分派实施公告"},
+    ]
+    fake, _calls = _make_raw({}, notice_rows)
+    monkeypatch.setattr(MarketDataSyncService, "call_interface_raw", fake)
+
+    original = DividendNoticeScanService.fetch_and_upsert_master
+
+    async def _flaky(self, mid, code, detail, stats):
+        if code == code_a:  # 1/2 = 50%，恰不触发（> 0.5 才抛）
+            raise RuntimeError("单只失败（模拟）")
+        return await original(self, mid, code, detail, stats)
+
+    monkeypatch.setattr(DividendNoticeScanService, "fetch_and_upsert_master", _flaky)
+
+    result = await DividendNoticeScanService(session).scan(None)
+    await session.commit()
+    assert "失败1只" in result and "失败2只" not in result

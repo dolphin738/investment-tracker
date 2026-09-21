@@ -633,3 +633,59 @@ async def test_seed_triggers_job_async(session, client, monkeypatch):
     assert captured[0] is None, "按钮版直接调用服务函数，不再经系统任务 cfg"
 
 
+# ───────────────────────── 播种单飞锁（行动项 8，§6.2） ─────────────────────────
+@pytest.mark.asyncio
+async def test_seed_single_flight_rejects_concurrent(session, client, monkeypatch):
+    """行动项 8（§6.2）：播种单飞——已在运行中再次触发 → 409，且后台任务只被创建一次。
+
+    用 ``asyncio.Event`` 让桩播种「挂住」以保持锁被持有；期间第二次触发须被拒（409）而非
+    再起一个任务（否则连点会并发启动多个 19h 任务、双倍打满 rate_limit 预算）。释放后锁
+    须复位（``_run_seed`` 的 finally 保证），避免一次失败把播种永久锁死。
+
+    **测试隔离**：用 monkeypatch 把模块级 ``_seed_lock`` 换成全新锁，避免与其它用例残留
+    的锁状态相互污染（monkeypatch 结束后自动还原）。
+    """
+    import asyncio as _asyncio
+
+    import app.services.dividend_seed as seed_mod
+    import app.modules.dividend_yield.backfill_router as bf
+
+    monkeypatch.setattr(bf, "_seed_lock", _asyncio.Lock())
+
+    started = _asyncio.Event()
+    release = _asyncio.Event()
+    calls = {"n": 0}
+
+    async def _blocking(cfg):
+        calls["n"] += 1
+        started.set()
+        await release.wait()
+        return "noop"
+
+    monkeypatch.setattr(seed_mod, "run_dividend_seed", _blocking)
+
+    admin = await _make_admin(session, client)
+    h = auth(admin["token"])
+
+    r1 = await client.post("/api/dividend-yield/seed-initial-dividends", headers=h)
+    status1, _, data1, _ = env(r1)
+    assert status1 == 200 and "后台执行" in data1["message"]
+    # 后台任务确实起来了（锁已被持有）
+    await _asyncio.wait_for(started.wait(), timeout=2)
+
+    # 已在运行 → 第二次触发 409，且不新建任务
+    r2 = await client.post("/api/dividend-yield/seed-initial-dividends", headers=h)
+    status2, _, _, msg2 = env(r2)
+    assert status2 == 409, r2.text
+    assert "已有播种任务在运行" in msg2
+    assert calls["n"] == 1, "单飞锁须阻止第二个播种任务被调起"
+
+    # 释放后台任务 → 锁须复位（finally 释放）
+    release.set()
+    for _ in range(200):
+        if not bf._seed_lock.locked():
+            break
+        await _asyncio.sleep(0.01)
+    assert not bf._seed_lock.locked(), "播种结束后单飞锁须释放（否则播种被永久锁死）"
+
+

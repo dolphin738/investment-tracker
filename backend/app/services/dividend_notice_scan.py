@@ -86,6 +86,12 @@ _STATS_KEYS: frozenset = frozenset({
     "no_period", "unknown_label", "collision", "window", "skipped", "staged",
 })
 
+# 失败占比阈值（行动项 8，设计 §6.2）。逐只容错是「单只异常 → rollback 续下一只」；但
+# 整轮失败率超过该阈值即判定为「上游整体失效」——必须**冒泡**（RuntimeError）让 scheduler
+# 记 FAILED，而非把上万只吞成 skipped、摘要仍报「扫描完成」，这是本链路最危险的失败模式。
+# 取 0.5：单只偶发失败（远低于半数）仍按容错续跑；半数以上失败几乎只可能来自上游整体不可用。
+_FAILURE_RATIO_RAISE = 0.5
+
 
 class DividendNoticeScanService:
     """公告扫描 + 巨潮历史分红采集（复用 market_data_sync 既有分派机制）。"""
@@ -268,6 +274,16 @@ class DividendNoticeScanService:
                 if detail is not None:
                     # 源已失效则 fail fast raise；过程异常（DB 抖动）记日志续下一只（L-3）
                     detail = await self._reresolve_detail_safe(idx, len(all_mids)) or detail
+
+        # 失败占比过高 → 冒泡（行动项 8，§6.2）：使 scheduler 记 FAILED 而非 SUCCESS。
+        # 逐只容错只针对单只偶发失败；整体失败率过高必须终止，否则上游整体失效会被伪装成
+        # 「扫描完成、只是失败几只」。total==0（无候选）时不做除法、也不判失败。
+        total = len(all_mids)
+        if total > 0 and stats["skipped"] / total > _FAILURE_RATIO_RAISE:
+            raise RuntimeError(
+                f"公告扫描失败占比过高：{stats['skipped']}/{total} 只失败"
+                f"（阈值 {_FAILURE_RATIO_RAISE:.0%}），疑似上游整体失效，终止并标记 FAILED"
+            )
 
         # 未收录标签聚合告警：整轮仅一条（样例取出现频次最高的 3 种），避免逐行 WARN 风暴
         if self._unknown_label_counts:

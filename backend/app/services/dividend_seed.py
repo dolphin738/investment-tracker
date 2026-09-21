@@ -41,6 +41,11 @@ _STATS_KEYS: frozenset = frozenset({
 # 分批粒度：同时用作「每 200 只打一条进度日志」的间隔与断点检查点的 IN 批大小（§5.7）
 _SEED_CHUNK = 200
 
+# 失败占比阈值（行动项 8，设计 §6.2；与 scan 同口径同取值）。逐只容错是「单只异常 →
+# rollback 续下一只」；但整轮失败率超过该阈值即判定为「上游整体失效」，必须冒泡
+# （RuntimeError）让 scheduler 记 FAILED，而非把上万只吞成 skipped、摘要仍报「完成」。
+_FAILURE_RATIO_RAISE = 0.5
+
 logger = logging.getLogger(__name__)
 
 
@@ -114,6 +119,15 @@ class DividendSeedService:
                 "分红行新写 %d/更新 %d",
                 min(start + _SEED_CHUNK, total), total,
                 stats["hits"], stats["skipped"], stats["new"], stats["upd"],
+            )
+
+        # 失败占比过高 → 冒泡（行动项 8，§6.2；与 scan 同口径同阈值）：使 scheduler 记
+        # FAILED。total 为 seed set 规模（≈11430）；covered_skipped 是「已完成跳过」，
+        # 不计失败。total==0（无证券）时不做除法、也不判失败。
+        if total > 0 and stats["skipped"] / total > _FAILURE_RATIO_RAISE:
+            raise RuntimeError(
+                f"历史分红播种失败占比过高：{stats['skipped']}/{total} 只失败"
+                f"（阈值 {_FAILURE_RATIO_RAISE:.0%}），疑似上游整体失效，终止并标记 FAILED"
             )
 
         # 未收录标签聚合告警：整轮仅一条（样例取出现频次最高的 3 种），与 scan 同口径。
