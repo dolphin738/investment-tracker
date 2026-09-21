@@ -72,10 +72,8 @@ async def _resolve_interface(db: AsyncSession, interface_id: Optional[str]):
 
 
 def _is_per_symbol_interface(itf: QuoteInterface) -> bool:
-    """调用形态判定（§5.4 第四重）：params 含 ``symbol`` 键 = 按证券逐只形态。
-
-    seed 数据实证：主源「东财-分红配送」params={"date": ...}（无 symbol，按报告期全量）；
-    补充源「新浪-分红配股」params={"symbol": ...}（逐只）。
+    """调用形态判定（§5.4 第四重）：params 含 ``symbol`` 键 = 按证券逐只形态；
+    无 ``symbol`` = 按报告期全量形态。
     """
     return bool(itf.params) and "symbol" in itf.params
 
@@ -89,7 +87,7 @@ async def _validate_interface(
 ) -> None:
     """接口四重校验（§5.4）：存在性 + 分类归属 + enabled + **调用形态**；缺省（null/省略）允许置空。
 
-    形态不符须拒绝——把逐只接口当主源会让 §6.1 按报告期抓取静默失效。
+    形态不符须拒绝——接口形态与源的采集形态不匹配会让采集静默失效。
     """
     if not interface_id:
         return

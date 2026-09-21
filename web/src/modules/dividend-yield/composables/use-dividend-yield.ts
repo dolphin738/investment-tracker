@@ -150,12 +150,12 @@ export function useUpdateDividendYieldSettings() {
 }
 
 /**
- * 设置页双源/行情源下拉候选接口（admin-only）。
+ * 设置页数据源下拉候选接口（admin-only）。
  *
  * 复用已有 listAllInterfaces()（GET /admin/quote-providers/interfaces），
  * 前端按 category_id 过滤后再分别供给：
- * - 股息主源 / 补充源候选 = category_id === '3' && enabled
- * - 行情源候选          = category_id === '2' && enabled
+ * - 分红明细源候选 = category_id === '3' && enabled
+ * - 行情源候选     = category_id === '2' && enabled
  */
 export function useDividendYieldInterfaces(
   enabled: MaybeRefOrGetter<boolean> = true,
@@ -189,7 +189,7 @@ export function useRebuildDividendYield() {
  * 手动触发历史分红补齐 / 播种（admin-only；取代原「特别分红回补」入口）。
  *
  * 后端为 fire-and-forget：端点立即返回、全市场播种在后台跑约 19 小时，
- * 进度经「定时任务日志」/ 应用日志查看，故此处**不失效**榜单查询——
+ * 进度经应用日志查看，故此处**不失效**榜单查询——
  * 此刻 invalidate 只会刷出旧数据（任务尚未完成、前端无从感知），
  * 用户可在跑完后手动刷新。该取舍与原回补 composable 保持一致。
  */
