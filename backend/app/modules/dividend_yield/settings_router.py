@@ -34,6 +34,11 @@ from app.services.market_data_sync import (
 
 router_settings = APIRouter(route_class=EnvelopeRoute)
 
+# 留存窗年数（D-4 配置化）：可配范围与默认（对齐 dividend_sync._RETENTION_YEARS=5 的兜底）。
+RETENTION_YEARS_MIN = 1
+RETENTION_YEARS_MAX = 10
+DEFAULT_RETENTION_YEARS = 5
+
 
 class SettingsUpdateBody(BaseModel):
     # 注：股息率标色阈值已迁至「用户偏好」（user_preferences，见 0026 迁移）；
@@ -48,6 +53,8 @@ class SettingsUpdateBody(BaseModel):
     # 交易日历刷新起始日期（YYYY-MM-DD）：refresh_trade_calendar 的窗口下限，决定
     # 「获取多长时间」（上限受数据源限制只到当年末，故不暴露）。None 表示不改。
     trade_calendar_start_date: Optional[date] = None
+    # 分红留存窗年数（D-4）：retention_cleanup 保留 [cur-years+1, cur] 个财年；范围 1~10。
+    dividend_retention_years: Optional[int] = None
 
 
 def _interface_out(itf: Optional[QuoteInterface]) -> Optional[dict[str, Any]]:
@@ -132,6 +139,13 @@ async def _settings_out(db: AsyncSession, row: DividendYieldSettings) -> dict[st
             if row.trade_calendar_start_date is not None
             else None
         ),
+        # 分红留存窗年数（D-4）：始终返回有效值——未配置（无行 / 显式 NULL）回落默认 5，
+        # 前端据此算建议留存窗，不再硬编码 cur-4（避免与后端实际清理窗漂移）。
+        "dividend_retention_years": (
+            row.dividend_retention_years
+            if row.dividend_retention_years is not None
+            else DEFAULT_RETENTION_YEARS
+        ),
     }
 
 
@@ -162,6 +176,18 @@ async def put_dividend_yield_settings(
     await _validate_interface(
         db, body.announcement_source_interface_id, NOTICE_CAT_ID, require_per_symbol=True
     )
+    # 留存窗年数（D-4）：范围 1~10；越界 400（None = 不改，豁免校验）
+    if body.dividend_retention_years is not None and not (
+        RETENTION_YEARS_MIN <= body.dividend_retention_years <= RETENTION_YEARS_MAX
+    ):
+        raise BusinessException(
+            code=BusinessErrorCode.VALIDATION_FAILED,
+            message=(
+                f"留存窗年数须在 {RETENTION_YEARS_MIN}~{RETENTION_YEARS_MAX} 之间，"
+                f"实得 {body.dividend_retention_years}"
+            ),
+            status_code=400,
+        )
 
     row = await load_settings(db)
     is_new = row.id is None  # 空默认（无持久化行）时插入，否则更新既有行
@@ -174,6 +200,7 @@ async def put_dividend_yield_settings(
             if row.trade_calendar_start_date is not None
             else None
         ),
+        "dividend_retention_years": row.dividend_retention_years,
     }
     row.dividend_detail_source_interface_id = body.dividend_detail_source_interface_id
     row.price_source_interface_id = body.price_source_interface_id
@@ -181,6 +208,9 @@ async def put_dividend_yield_settings(
     # 交易日历刷新起始日期：显式提交语义（显式 null = 清除 → 用默认下限）
     if "trade_calendar_start_date" in body.model_fields_set:
         row.trade_calendar_start_date = body.trade_calendar_start_date
+    # 留存窗年数：同上显式提交语义（显式 null = 回落默认 5）
+    if "dividend_retention_years" in body.model_fields_set:
+        row.dividend_retention_years = body.dividend_retention_years
     row.updated_by = admin.user_id
     if is_new:
         db.add(row)
@@ -202,6 +232,7 @@ async def put_dividend_yield_settings(
                     if row.trade_calendar_start_date is not None
                     else None
                 ),
+                "dividend_retention_years": row.dividend_retention_years,
             },
         },
         user_id=admin.user_id,

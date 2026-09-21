@@ -76,11 +76,22 @@ class DividendSyncService:
     # 五年留存清理（§6.3）
     # ------------------------------------------------------------------ #
     async def retention_cleanup(self, cfg: Any) -> str:
-        """留存清理：保留最近 _RETENTION_YEARS 个财年（窗口 [cur-_RETENTION_YEARS+1, cur]，
-        即真 5 年），删除更早的 report_year（含 PROPOSED/REJECTED）；
-        日线按 trade_date 保留 _PRICE_RETENTION_YEARS 年。"""
+        """留存清理：保留最近 ``settings.dividend_retention_years`` 个财年
+        （窗口 [cur-years+1, cur]，即真 N 年），删除更早的 report_year（含 PROPOSED/REJECTED）；
+        日线按 trade_date 保留 ``_PRICE_RETENTION_YEARS`` 年。
+
+        年数读全局配置 ``dividend_yield_settings.dividend_retention_years``（D-4 配置化，
+        owner 定「完整可配」）；未配置（无配置行 / 显式 NULL）时回落常量
+        ``_RETENTION_YEARS`` 作默认，避免前端硬编码 ``cur-4`` 漂移。
+        """
         today = today_app_tz()
-        cutoff = today.year - _RETENTION_YEARS + 1
+        settings = await self._settings()
+        years = (
+            settings.dividend_retention_years
+            if settings is not None and settings.dividend_retention_years is not None
+            else _RETENTION_YEARS
+        )
+        cutoff = today.year - years + 1
         doomed_masters = set(
             (
                 await self.session.execute(
@@ -107,7 +118,8 @@ class DividendSyncService:
         await refresh_yields_for_masters(self.session, list(doomed_masters))
         await self.session.commit()
         return (
-            f"五年留存清理完成：删分红 {res_div.rowcount or 0} 行、日线 {res_price.rowcount or 0} 行，"
+            f"留存清理完成（留存窗 {years} 年）："
+            f"删分红 {res_div.rowcount or 0} 行、日线 {res_price.rowcount or 0} 行，"
             f"重算 {len(doomed_masters)} 只"
         )
 

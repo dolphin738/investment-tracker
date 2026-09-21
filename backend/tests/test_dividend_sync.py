@@ -19,6 +19,7 @@ from sqlalchemy import select
 
 from app.core.date_utils import today_app_tz
 from app.models import (
+    DividendYieldSettings,
     MarketSecurityDailyPrice,
     MarketTradeCalendar,
     Security,
@@ -203,7 +204,59 @@ async def test_retention_cleanup_report_year_boundary(session, monkeypatch):
         await session.execute(select(MarketSecurityDailyPrice))
     ).scalars().all()
     assert {p.trade_date for p in prices} == {new_price_d}  # 旧日线被清
-    assert "五年留存清理完成" in result
+    assert "留存清理完成" in result
+
+
+# ───────────────────────── 留存窗 D-4 配置化（读 settings.dividend_retention_years） ─────────────────────────
+@pytest.mark.asyncio
+async def test_retention_cleanup_uses_default_years_when_unset(session, monkeypatch):
+    """D-4：无配置行 → 回落常量默认 5（窗口 [cur-4, cur]），摘要含「留存窗 5 年」。"""
+    from app.services import dividend_sync as ds
+
+    async def _noop_calendar(sess):
+        return None
+
+    monkeypatch.setattr(ds, "refresh_trade_calendar", _noop_calendar)
+
+    m = await _add_master(session)
+    cur = today_app_tz().year
+    session.add(_div(m.id, cur - 4, 4, "1.0"))  # 边界 cur-4 保留
+    session.add(_div(m.id, cur - 5, 4, "1.0"))  # cur-5 删除
+    await session.commit()
+
+    result = await DividendSyncService(session).retention_cleanup({})
+
+    remaining = {
+        r.report_year for r in (await session.execute(select(SecurityDividend))).scalars().all()
+    }
+    assert remaining == {cur - 4}
+    assert "留存窗 5 年" in result
+
+
+@pytest.mark.asyncio
+async def test_retention_cleanup_reads_configured_years(session, monkeypatch):
+    """D-4：配置 3 年 → 窗口 [cur-2, cur]，删 report_year < cur-2；摘要含「留存窗 3 年」。"""
+    from app.services import dividend_sync as ds
+
+    async def _noop_calendar(sess):
+        return None
+
+    monkeypatch.setattr(ds, "refresh_trade_calendar", _noop_calendar)
+
+    session.add(DividendYieldSettings(id=_uid(), dividend_retention_years=3))
+    m = await _add_master(session)
+    cur = today_app_tz().year
+    session.add(_div(m.id, cur - 2, 4, "1.0"))  # 边界 cur-2 保留
+    session.add(_div(m.id, cur - 3, 4, "1.0"))  # cur-3 删除
+    await session.commit()
+
+    result = await DividendSyncService(session).retention_cleanup({})
+
+    remaining = {
+        r.report_year for r in (await session.execute(select(SecurityDividend))).scalars().all()
+    }
+    assert remaining == {cur - 2}
+    assert "留存窗 3 年" in result
 
 
 # ───────────────────────── 交易日历（§5.5 决策 A9） ─────────────────────────

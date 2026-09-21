@@ -305,6 +305,11 @@ class DividendYieldSettings(Base, TimestampMixin):
     # 窗口下限（只落该日及之后的交易日）；None = 用默认下限「去年 1 月 1 日」。
     # 不暴露「结束日期」：akshare tool_trade_date_hist_sina 只给到当年末，配上限也拿不到数据。
     trade_calendar_start_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    # 分红留存窗年数（D-4 配置化）：retention_cleanup 保留 [cur-years+1, cur] 个财年；
+    # 可空 + server_default '5'（存量行自动获 5；显式 NULL 语义为「用默认值」）。
+    dividend_retention_years: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True, server_default=text("'5'")
+    )
     updated_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
 
 

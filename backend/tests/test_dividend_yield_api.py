@@ -382,6 +382,31 @@ async def test_settings_get_announcement_source_null_by_default(session, client)
     assert data["announcement_source"] is None
 
 
+# ───────────────────────── 留存窗年数（D-4 配置化） ─────────────────────────
+@pytest.mark.asyncio
+async def test_settings_retention_years_default_and_update(session, client):
+    """D-4：GET 默认返回 5；PUT 合法值落库并回显；越界 400。"""
+    admin = await _make_admin(session, client)
+    h = auth(admin["token"])
+    # GET 默认（无配置行）→ 回落默认 5
+    status, _, data, _ = env(await client.get("/api/dividend-yield/settings", headers=h))
+    assert status == 200
+    assert data["dividend_retention_years"] == 5
+
+    # 合法值 → 200 并回显
+    status, _, data, _ = env(await client.put(
+        "/api/dividend-yield/settings", json={"dividend_retention_years": 3}, headers=h
+    ))
+    assert status == 200
+    assert data["dividend_retention_years"] == 3
+
+    # 越界 → 400（范围 1~10）
+    r = await client.put(
+        "/api/dividend-yield/settings", json={"dividend_retention_years": 11}, headers=h
+    )
+    assert env(r)[0] == 400
+
+
 # ───────────────────────── 可排序列扩到 5 列（§8.1，P2-6） ─────────────────────────
 @pytest.mark.asyncio
 async def test_rankings_sort_by_numerator_and_mode_fixed_order(session, client):
