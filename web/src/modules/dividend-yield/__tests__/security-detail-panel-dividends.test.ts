@@ -33,6 +33,7 @@ function item(over: Partial<SecurityDividendItem>): SecurityDividendItem {
     periodLabel: '2025年报',
     planLabel: '10派3元',
     cashPerShare: '0.300000',
+    dividendLabel: null,
     status: 'PAID',
     exDividendDate: '2026-06-10',
     announcementDate: null,
@@ -122,5 +123,18 @@ describe('SecurityDetailPanel 分红明细', () => {
     const rows = wrapper.findAll('li');
     expect(rows[0].text()).toContain('预案');
     expect(rows[1].text()).not.toContain('预案');
+  });
+
+  it('原文标签存在时渲染 Badge（E6 新增 dividendLabel），无标签则不渲染', async () => {
+    dividendItems.list = [
+      item({ dividendLabel: '股改分红', periodLabel: '2023特别分配' }),
+      item({ dividendLabel: null, periodLabel: '2025年报' }),
+    ];
+    const wrapper = await mountPanel();
+    const rows = wrapper.findAll('li');
+    // 有标签行：Badge 文案等于原文标签
+    expect(rows[0].text()).toContain('股改分红');
+    // 无标签行：不出现空 Badge（不渲染标签文本）
+    expect(rows[1].text()).not.toContain('股改分红');
   });
 });

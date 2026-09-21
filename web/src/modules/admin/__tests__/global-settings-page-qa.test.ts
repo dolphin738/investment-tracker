@@ -55,6 +55,18 @@ vi.mock('@/modules/admin/composables/use-quote-provider', () => ({
 
 vi.mock('@/stores/auth.store', () => ({ useIsAdmin: () => true }));
 
+// 「补齐历史分红」区块内的待人工划分入口：概览查询与路由跳转到此替身
+vi.mock('@/modules/dividend-yield/composables/use-pending-dividends', async () => {
+  const { ref } = await import('vue');
+  return {
+    usePendingDividendSummary: () => ({
+      isLoading: ref(false),
+      data: ref({ pending: 0 }),
+    }),
+  };
+});
+vi.mock('vue-router', () => ({ useRouter: () => ({ push: vi.fn() }) }));
+
 // reka-ui Select → <select>/<option> 替身（id 由 SelectTrigger 转接，按锚点定位）
 vi.mock('@/components/ui/select', async () => {
   await import('vue');

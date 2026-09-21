@@ -16,6 +16,7 @@
  * 功能下线一并移除，本组件不再承载任何在途轮询 / 额度展示逻辑。
  */
 import { computed, ref } from 'vue';
+import { useRouter } from 'vue-router';
 import { Button } from '@/components/ui/button';
 import {
   AlertDialog,
@@ -28,10 +29,16 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { Loader2 } from 'lucide-vue-next';
+import { ROUTE_PATH } from '@/lib/constants';
+import { useIsAdmin } from '@/stores/auth.store';
 import {
   useRebuildDividendYield,
   useSeedInitialDividends,
 } from '@/modules/dividend-yield/composables/use-dividend-yield';
+import { usePendingDividendSummary } from '@/modules/dividend-yield/composables/use-pending-dividends';
+
+const router = useRouter();
+const isAdmin = useIsAdmin();
 
 // ── 全量重建（无二次确认） ──
 const rebuild = useRebuildDividendYield();
@@ -50,6 +57,14 @@ function onSeed(): void {
 function confirmSeed(): void {
   seedConfirmOpen.value = false;
   seed.mutate();
+}
+
+// ── 待人工划分入口（仅 admin；非授权不发请求，staleTime 30s） ──
+const summary = usePendingDividendSummary(isAdmin);
+const summaryLoading = computed(() => summary.isLoading.value);
+const pendingCount = computed(() => summary.data.value?.pending ?? 0);
+function goPending(): void {
+  router.push(ROUTE_PATH.ADMIN_PENDING_DIVIDENDS);
 }
 </script>
 
@@ -74,6 +89,21 @@ function confirmSeed(): void {
         <Loader2 v-if="seeding" class="mr-2 h-4 w-4 animate-spin" />
         补齐历史分红
       </Button>
+
+      <!-- 待人工划分入口（仅 admin；加载中不渲染；空态置灰不隐藏） -->
+      <Button
+        v-if="isAdmin && !summaryLoading"
+        variant="outline"
+        :disabled="pendingCount === 0"
+        :title="
+          pendingCount > 0
+            ? `有 ${pendingCount} 笔无报告期分红待人工划分`
+            : '当前无待划分分红'
+        "
+        @click="goPending"
+      >
+        {{ pendingCount > 0 ? `待人工划分 ${pendingCount} 笔 →` : '暂无待划分' }}
+      </Button>
     </div>
 
     <!-- 补齐历史分红二次确认（约 19 小时的重操作，必须确认） -->
@@ -85,7 +115,7 @@ function confirmSeed(): void {
         <AlertDialogHeader>
           <AlertDialogTitle>确认补齐历史分红？</AlertDialogTitle>
           <AlertDialogDescription>
-            将串行拉取全市场约 11430 只证券近 5 年的历史分红（接口限流 10/min，约 19 小时），属一次性补齐操作，支持断点续跑；进度可在「定时任务日志」查看。
+            将串行拉取全市场约 11430 只证券近 5 年的历史分红（接口限流 10/min，约 19 小时），属一次性补齐操作，支持断点续跑；进度见应用日志。
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

@@ -21,7 +21,7 @@ import {
   type VueWrapper,
 } from '@vue/test-utils';
 import { ref, defineComponent, h } from 'vue';
-import { SELECT_EMPTY_VALUE } from '@/lib/constants';
+import { ROUTE_PATH, SELECT_EMPTY_VALUE } from '@/lib/constants';
 import type { DividendYieldSettingsOut } from '@/api/types';
 
 // ---------------------------------------------------------------------------
@@ -86,6 +86,25 @@ vi.mock('@/modules/admin/composables/use-quote-provider', () => ({
 vi.mock('@/stores/auth.store', () => ({
   useIsAdmin: () => true,
 }));
+
+// 待人工划分入口按钮依赖的概览查询（三态可控：加载中不渲染 / 可点 / 置灰）
+const pendingSummaryState = vi.hoisted(() => ({
+  isLoading: false,
+  data: { pending: 3 } as { pending: number } | undefined,
+}));
+vi.mock('@/modules/dividend-yield/composables/use-pending-dividends', async () => {
+  const { ref } = await import('vue');
+  return {
+    usePendingDividendSummary: () => ({
+      isLoading: ref(pendingSummaryState.isLoading),
+      data: ref(pendingSummaryState.data),
+    }),
+  };
+});
+
+// 待人工划分入口按钮点击 → router.push（本页不引入真实 router）
+const pushSpy = vi.hoisted(() => vi.fn());
+vi.mock('vue-router', () => ({ useRouter: () => ({ push: pushSpy }) }));
 
 // reka-ui Select 原生替身：Select 渲染为 <select>，SelectItem 渲染为 <option>（可断言文本）。
 // 关键：把子节点 SelectTrigger 上的 id 转接到替身 <select> 的 id，使测试可按
@@ -231,6 +250,8 @@ const DIVIDEND_INTERFACE_SELECT_IDS = [
 beforeEach(() => {
   vi.clearAllMocks();
   settings.trade_calendar_start_date = null;
+  pendingSummaryState.isLoading = false;
+  pendingSummaryState.data = { pending: 3 };
 });
 
 describe('GlobalSettingsPage — 顶层 TAB 与全局设置', () => {
@@ -281,6 +302,45 @@ describe('GlobalSettingsPage — 顶层 TAB 与全局设置', () => {
       interfaceOptions(wrapper.find('#dy-announcement-source'))[0].text(),
     ).toBe('沪深京A股公告（东方财富）');
 
+    wrapper.unmount();
+  });
+
+  it('③ 待人工划分入口按钮三态：加载中不渲染 / pending>0 可点跳转 / pending=0 置灰不隐藏', async () => {
+    // 加载中 → 不渲染入口按钮
+    pendingSummaryState.isLoading = true;
+    wrapper = await mountPage();
+    expect(
+      wrapper
+        .findAll('button')
+        .some(
+          (b) =>
+            b.text().includes('待人工划分') || b.text().includes('暂无待划分'),
+        ),
+    ).toBe(false);
+    wrapper.unmount();
+
+    // pending > 0 → 可点，点击跳转到待划分页
+    pendingSummaryState.isLoading = false;
+    pendingSummaryState.data = { pending: 5 };
+    wrapper = await mountPage();
+    const active = wrapper
+      .findAll('button')
+      .find((b) => b.text().includes('待人工划分'))!;
+    expect(active).toBeTruthy();
+    expect(active.text()).toContain('待人工划分 5 笔');
+    expect(active.attributes('disabled')).toBeUndefined();
+    await active.trigger('click');
+    expect(pushSpy).toHaveBeenCalledWith(ROUTE_PATH.ADMIN_PENDING_DIVIDENDS);
+    wrapper.unmount();
+
+    // pending === 0 → 置灰「暂无待划分」且不隐藏（区分「功能存在但为空」与「没做」）
+    pendingSummaryState.data = { pending: 0 };
+    wrapper = await mountPage();
+    const idle = wrapper
+      .findAll('button')
+      .find((b) => b.text().includes('暂无待划分'))!;
+    expect(idle).toBeTruthy();
+    expect(idle.attributes('disabled')).toBeDefined();
     wrapper.unmount();
   });
 });

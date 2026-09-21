@@ -16,6 +16,7 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useSecurityDividends } from '../composables/use-dividend-yield';
 
@@ -76,6 +77,13 @@ const dividendItems = computed(() => dividends.data.value?.items ?? []);
           >
             <span class="shrink-0">{{ d.periodLabel }}</span>
             <span class="flex items-center gap-2">
+              <Badge
+                v-if="d.dividendLabel"
+                variant="outline"
+                class="shrink-0"
+              >
+                {{ d.dividendLabel }}
+              </Badge>
               <span v-if="d.status !== 'PAID'" class="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
                 {{ d.status === 'PROPOSED' ? '预案' : d.status === 'REJECTED' ? '否决' : d.status }}
               </span>
