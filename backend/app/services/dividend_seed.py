@@ -96,6 +96,10 @@ class DividendSeedService:
                     if dirty:
                         changed.add(mid)  # 仅提交成功后计入变更集
                 except Exception:  # 单只失败：rollback 续下一只（断点即数据本身，§5.7）
+                    logger.warning(
+                        "历史分红播种单只失败 master_id=%s（rollback 续下一只）",
+                        mid, exc_info=True,
+                    )
                     await self.session.rollback()
                     stats.update(snapshot)
                     _bump(stats, "skipped")
