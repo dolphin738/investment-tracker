@@ -50,13 +50,14 @@ _STATS_KEYS: frozenset = frozenset({
 # 分批粒度：同时用作「每 200 只打一条进度日志」的间隔与断点检查点的 IN 批大小（§5.7）
 _SEED_CHUNK = 200
 
-# 失败只数阈值（行动项 8，设计 §6.2；owner 2026-09-22 裁定：由**比例**改为**绝对只数**）。
-# 逐只容错是「单只异常 → rollback 续下一只」；但整轮失败只数超过该阈值即判定为「上游整体
+# 失败占比阈值（行动项 8，设计 §6.2；owner 2026-09-22 最终裁定：**比例 10%**）。
+# 逐只容错是「单只异常 → rollback 续下一只」；但整轮失败率超过该阈值即判定为「上游整体
 # 失效」，必须冒泡（RuntimeError）让 scheduler 记 FAILED，而非把上万只吞成 skipped、摘要
-# 仍报「完成」。用绝对只数而非比例的理由：① seed set 是已知有界的 serviceable STOCK 子集
-# （约 5923 只），600 只真异常已足以表征巨潮对沪深京出现灾难性整体失效（约 10%），远比
-# 「半场崩盘（50%≈2962 只）才中止」更早止损；② 语义不受 set 规模变化影响，运维可直接解读。
-_FAILURE_ABSOLUTE_RAISE = 600
+# 仍报「完成」。分母 = seed set 规模（serviceable STOCK 子集，约 5923 只，非全表 11430）；
+# 取 10%（≈592 只）：健康运行时个别失败（退市/停牌数据异常）应远低于此，而巨潮一旦出现
+# 整体性降级即可早停止损——相较早前的 50%（≈2962 只才中止）大幅提前，与 scan 同口径。
+# 注：曾短暂改为绝对只数口径，owner 最终选择比例（与 scan 同口径），绝对数代码已删除。
+_FAILURE_RATIO_RAISE = 0.1
 
 logger = logging.getLogger(__name__)
 
@@ -192,21 +193,20 @@ class DividendSeedService:
             seed_progress.failed = stats["skipped"]
             seed_progress.covered = covered_skipped
 
-        # 失败只数过多 → 冒泡（行动项 8，§6.2；owner 2026-09-22 改绝对只数）：使 scheduler 记
-        # FAILED。判据只看真异常只数 stats["skipped"]，与 seed set 规模（约 5923 只）无关；
-        # covered_skipped 是「已完成跳过」，不计失败。绝对阈值无需 total>0 守卫（无证券时
-        # skipped 恒为 0，不会误判）。
-        if stats["skipped"] > _FAILURE_ABSOLUTE_RAISE:
-            # 进度可视化：失败只数冒泡 → 置 error（与 _run_seed 的兜底异常捕获二选一生效）
+        # 失败占比过高 → 冒泡（行动项 8，§6.2；与 scan 同口径）：使 scheduler 记
+        # FAILED。分母 = seed set 规模（serviceable STOCK 子集，约 5923 只）；
+        # covered_skipped 是「已完成跳过」，不计失败。total==0（无证券）时不做除法、也不判失败。
+        if total > 0 and stats["skipped"] / total > _FAILURE_RATIO_RAISE:
+            # 进度可视化：失败率冒泡 → 置 error（与 _run_seed 的兜底异常捕获二选一生效）
             seed_progress.state = "error"
             seed_progress.error = (
-                f"失败只数过多：{stats['skipped']} 只（阈值 {_FAILURE_ABSOLUTE_RAISE} 只），"
-                f"疑似上游整体失效"
+                f"失败占比过高：{stats['skipped']}/{total} 只"
+                f"（阈值 {_FAILURE_RATIO_RAISE:.0%}），疑似上游整体失效"
             )
             seed_progress.finished_at = _seed_progress_now()
             raise RuntimeError(
-                f"历史分红播种失败只数过多：{stats['skipped']} 只失败"
-                f"（阈值 {_FAILURE_ABSOLUTE_RAISE} 只），疑似上游整体失效，终止并标记 FAILED"
+                f"历史分红播种失败占比过高：{stats['skipped']}/{total} 只失败"
+                f"（阈值 {_FAILURE_RATIO_RAISE:.0%}），疑似上游整体失效，终止并标记 FAILED"
             )
 
         # 未收录标签聚合告警：整轮仅一条（样例取出现频次最高的 3 种），与 scan 同口径。
