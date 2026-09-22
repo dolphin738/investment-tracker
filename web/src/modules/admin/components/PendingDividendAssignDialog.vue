@@ -27,6 +27,13 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
   MIN_REPORT_YEAR,
   PERIOD_TYPE_LABELS,
   inferPeriodType,
@@ -244,16 +251,19 @@ watch(
       <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div class="space-y-2">
           <Label for="pd-period-type">报告期类型</Label>
-          <select
-            id="pd-period-type"
-            class="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-            :value="periodType"
-            @change="onTypeChange(($event.target as HTMLSelectElement).value)"
+          <Select
+            :model-value="periodType"
+            @update:model-value="onTypeChange(String($event))"
           >
-            <option v-for="t in PERIOD_TYPES" :key="t" :value="t">
-              {{ PERIOD_TYPE_LABELS[t] }}
-            </option>
-          </select>
+            <SelectTrigger id="pd-period-type" class="h-9 w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem v-for="t in PERIOD_TYPES" :key="t" :value="t">
+                {{ PERIOD_TYPE_LABELS[t] }}
+              </SelectItem>
+            </SelectContent>
+          </Select>
         </div>
         <div class="space-y-2">
           <Label for="pd-report-year">报告年份</Label>
@@ -269,22 +279,24 @@ watch(
         </div>
         <div class="space-y-2">
           <Label for="pd-report-quarter">季度</Label>
-          <select
-            id="pd-report-quarter"
-            class="h-9 w-full rounded-md border border-input bg-background px-2 text-sm disabled:opacity-60"
-            :value="String(reportQuarter)"
-            :disabled="quarterDisabled"
-            @change="reportQuarter = Number(($event.target as HTMLSelectElement).value)"
+          <Select
+            :model-value="String(reportQuarter)"
+            @update:model-value="(v) => (reportQuarter = Number(v))"
           >
-            <option
-              v-for="q in [1, 2, 3, 4]"
-              :key="q"
-              :value="String(q)"
-              :disabled="!legal.includes(q)"
-            >
-              Q{{ q }}
-            </option>
-          </select>
+            <SelectTrigger id="pd-report-quarter" class="h-9 w-full" :disabled="quarterDisabled">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem
+                v-for="q in [1, 2, 3, 4]"
+                :key="q"
+                :value="String(q)"
+                :disabled="!legal.includes(q)"
+              >
+                Q{{ q }}
+              </SelectItem>
+            </SelectContent>
+          </Select>
         </div>
       </div>
 
