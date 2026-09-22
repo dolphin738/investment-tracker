@@ -8,25 +8,39 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 
 from fastapi import APIRouter, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.bg import track_task
 from app.core.enums import BusinessErrorCode
 from app.core.envelope import EnvelopeRoute
 from app.core.exceptions import BusinessException
+from app.db.database import get_db
+from app.services.admin_lock import (
+    LOCK_DIVIDEND_SEED,
+    acquire_admin_lock,
+    release_admin_lock,
+)
 from app.services.auth import CurrentUser, require_admin
 from app.services.log import record
 
+logger = logging.getLogger(__name__)
+
 router_trigger = APIRouter(route_class=EnvelopeRoute)
 
-# 进程内单飞锁（行动项 8，设计 §6.2）：播种是「一次性冷启动」（serviceable STOCK 子集
-# 约 5923 只 × ≈6s ≈ 10h，接口限流 10/min），连点会并发启动多个任务、双倍打满限流预算。
-# 模块级 asyncio.Lock 保证**同进程内至多一个播种在跑**：已在运行时再次触发立即拒绝
-# （409）而不新建任务。
+# 进程内单飞锁（行动项 8，设计 §6.2）**第一层**：播种是「一次性冷启动」（serviceable
+# STOCK 子集约 5923 只 × ≈6s ≈ 10h，接口限流 10/min），连点会并发启动多个任务、双倍打满
+# 限流预算。模块级 asyncio.Lock 保证**同进程内至多一个播种在跑**：已在运行时再次触发
+# 立即拒绝（409）而不新建任务。
 # 为何「检查-获取」无竞态：单进程内 asyncio 事件循环单线程，locked() 判定与其后
 # acquire() 之间**没有 await 让出点**（acquire() 在未持有时同步完成），故相对其他请求
 # 是原子的。
+# ⚠️ 该锁**只覆盖单进程**：多 worker / 多副本部署下每个进程各持一个 Lock、互不可见，
+# 连点仍会各自起任务 → 第二层为 DB 行级锁 ``admin_locks``（见 ``app.services.admin_lock``）：
+# 先抢跨进程锁、再取本锁，两层都到手才真正创建任务（顺序不可颠倒，否则同进程连点会
+# 白白打一次 DB）。
 _seed_lock = asyncio.Lock()
 
 # 当前运行中的播种后台任务引用（进程内）；供「取消」端点经 task.cancel() 中断。
@@ -69,8 +83,8 @@ async def rebuild_dividend_yield(
 # 定时会每天重跑并打满 rate_limit=10/min 预算；播种本质是冷启动一次性动作，故沿用旧
 # 回补的 HTTP fire-and-forget 形态，唯一入口是管理端「补齐历史分红」按钮。
 # --------------------------------------------------------------------------- #
-async def _run_seed() -> None:
-    """后台执行首跑播种（独立会话，fire-and-forget）；结束时释放单飞锁。
+async def _run_seed(lock_token: str) -> None:
+    """后台执行首跑播种（独立会话，fire-and-forget）；结束时释放两层单飞锁。
 
     直接复用 services 的 ``run_dividend_seed(None)``（内部自建会话），此处仅包裹为
     后台任务并经 ``track_task`` 持有强引用防 GC 回收。
@@ -79,6 +93,7 @@ async def _run_seed() -> None:
     「锁的生命周期 = 后台任务的生命周期」。无论播种正常返回、抛错还是被取消，finally
     都释放锁，避免一次失败把播种永久锁死。
     """
+    from app.db.database import AsyncSessionLocal
     from app.services.dividend_seed import (
         run_dividend_seed,
         seed_progress,
@@ -95,12 +110,21 @@ async def _run_seed() -> None:
         seed_progress.finished_at = _seed_progress_now()
         raise
     finally:
+        # 第二层（跨进程 DB 锁）：自建会话——请求会话在 fire-and-forget 返回后即关闭，
+        # 不能沿用。释放失败只记日志：TTL 到期后后续触发者会自动接管，不必把异常抛出
+        # 掩盖播种本身的失败原因。
+        try:
+            async with AsyncSessionLocal() as session:
+                await release_admin_lock(session, LOCK_DIVIDEND_SEED, lock_token)
+        except Exception:  # pragma: no cover - 释放失败不应改变播种结果
+            logger.warning("释放跨进程播种锁失败（TTL 到期后将自动接管）", exc_info=True)
         _seed_lock.release()
 
 
 @router_trigger.post("/seed-initial-dividends")
 async def seed_initial_dividends(
     admin: CurrentUser = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
 ):
     """手动触发历史分红播种（§5.7；admin-only）。
 
@@ -111,7 +135,9 @@ async def seed_initial_dividends(
     ``GET /seed-initial-dividends/progress`` 轮询。
 
     **单飞**（行动项 8，§6.2）：已在播种中再次触发 → 不新建任务，返回 409
-    「已有播种任务在运行」，避免连点并发启动多个任务打满限流预算。
+    「已有播种任务在运行」，避免连点并发启动多个任务打满限流预算。分两层：
+    进程内 ``asyncio.Lock``（第一层，零 DB 往返）+ DB 行级锁 ``admin_locks``
+    （第二层，跨进程 / 多 worker 生效）。
     """
         # 单飞判定放在依赖校验（require_admin）之后：非 admin 已在依赖层被 403 拦下。
     if _seed_lock.locked():
@@ -123,10 +149,19 @@ async def seed_initial_dividends(
             message="已有播种任务在运行",
             status_code=409,
         )
+    # 第二层：跨进程 DB 行级锁（多 worker 下各进程的 asyncio.Lock 互不可见，须由 DB 兜底）。
+    # 单条原子 upsert：被其他进程持有且未过 TTL → None → 409。
+    lock_token = await acquire_admin_lock(db, LOCK_DIVIDEND_SEED)
+    if lock_token is None:
+        raise BusinessException(
+            code=BusinessErrorCode.VALIDATION_FAILED,
+            message="已有播种任务在运行（另一进程持有）",
+            status_code=409,
+        )
     # 先取锁再创建后台任务：保证「任务在跑」期间锁始终被持有；_run_seed 的 finally 释放。
     await _seed_lock.acquire()
     global seed_task
-    seed_task = track_task(asyncio.create_task(_run_seed()))
+    seed_task = track_task(asyncio.create_task(_run_seed(lock_token)))
     await record(
         level="info",
         scope="admin",

@@ -2,6 +2,7 @@
 
 导入顺序无关（关系使用字符串 forward ref），但必须全部 import，否则建表会漏表。
 """
+from app.models.admin_lock import AdminLock
 from app.models.calc import DailyNav, DailyXirr
 from app.models.cashflow import CashBalance, CashFlow
 from app.models.dividend import DividendRecord
@@ -44,6 +45,7 @@ from app.models.user import User, UserPreference
 from app.models.user_quote_sync import UserQuoteSyncConfig
 
 __all__ = [
+    "AdminLock",
     "User",
     "UserPreference",
     "Portfolio",
