@@ -36,3 +36,9 @@ class AdminLock(Base):
     acquired_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # 取消请求标记（跨进程取消）：NULL = 无请求；非 NULL = 已请求取消（值为请求时刻）。
+    # 取消端点只置此列（不依赖本进程是否持有任务对象），持锁 worker 的循环自检后自行退出。
+    # 释放锁时一并清空，防一次运行的取消标记泄漏到下一次。
+    cancel_requested_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )

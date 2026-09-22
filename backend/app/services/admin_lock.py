@@ -76,15 +76,56 @@ async def acquire_admin_lock(
 
 
 async def release_admin_lock(session: AsyncSession, name: str, token: str) -> None:
-    """释放锁（仅当 ``owner`` 与令牌匹配——「谁持有谁释放」）。"""
+    """释放锁（仅当 ``owner`` 与令牌匹配——「谁持有谁释放」）。
+
+    释放时**一并清空取消标记**：否则本次运行的取消标记会残留到下一次运行，
+    导致下次播种一启动就在检查点自行退出。
+    """
     await session.execute(
         text(
             """
             UPDATE admin_locks
-               SET owner = NULL, acquired_at = NULL
+               SET owner = NULL, acquired_at = NULL, cancel_requested_at = NULL
              WHERE name = :name AND owner = :tok
             """
         ),
         {"name": name, "tok": token},
     )
     await session.commit()
+
+
+async def request_cancel(session: AsyncSession, name: str) -> bool:
+    """请求取消（跨进程信号）：置 ``cancel_requested_at``，返回是否真有运行中的持锁者。
+
+    仅当 ``owner IS NOT NULL``（有人持锁 = 有任务在跑）才置标记并返回 ``True``；
+    无人持锁时返回 ``False``（调用方据此返 409「当前没有正在运行的任务」）。
+
+    **不直接杀任务**：本模块不持有其他进程的协程引用，也无法强杀线程；只是留一个
+    跨进程可见的标记，由持锁 worker 的循环在下一个检查点自检后自行退出。
+    """
+    res = await session.execute(
+        text(
+            """
+            UPDATE admin_locks
+               SET cancel_requested_at = now()
+             WHERE name = :name AND owner IS NOT NULL
+            """
+        ),
+        {"name": name},
+    )
+    affected = res.rowcount or 0
+    await session.commit()
+    if affected == 0:
+        logger.info("请求取消但无人持锁（无运行中任务）：name=%s", name)
+        return False
+    return True
+
+
+async def is_cancel_requested(session: AsyncSession, name: str) -> bool:
+    """持锁 worker 侧自检：是否已有人请求取消（跨进程可见）。"""
+    res = await session.execute(
+        text("SELECT cancel_requested_at FROM admin_locks WHERE name = :n"),
+        {"n": name},
+    )
+    row = res.first()
+    return row is not None and row[0] is not None
