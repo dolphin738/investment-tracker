@@ -34,7 +34,7 @@ class MarketDataInterfaceMixin:
         """原始行分派（P1-4 告警链路统一入口）：异常计失败、成功即复位。
 
         consecutive_failures ≥3 发站内信（§6.5）此前只挂在 fallback/_call_interface
-        调用侧，raw 消费者（分红明细源/公告源/行情源/主数据同步）都不接线——现下沉到
+        调用侧，raw 消费者（股息明细源接口/公告源/行情源/主数据同步）都不接线——现下沉到
         本层，所有 raw 调用自动继承：异常 → ``_mark_failure`` 后原样抛出；
         成功（含业务空响应）→ ``_mark_success`` 复位。
         """

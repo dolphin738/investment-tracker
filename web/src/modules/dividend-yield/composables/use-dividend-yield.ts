@@ -154,7 +154,7 @@ export function useUpdateDividendYieldSettings() {
  *
  * 复用已有 listAllInterfaces()（GET /admin/quote-providers/interfaces），
  * 前端按 category_id 过滤后再分别供给：
- * - 分红明细源候选 = category_id === '3' && enabled
+ * - 股息明细源接口候选 = category_id === '3' && enabled
  * - 行情源候选     = category_id === '2' && enabled
  */
 export function useDividendYieldInterfaces(

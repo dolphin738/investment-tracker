@@ -60,7 +60,7 @@ _URL_LENGTH_WARN_THRESHOLD: int = 8192
 # 列是 String(36)（非 PG 原生 UUID 类型），故用简短数字 id，不依赖 gen_random_uuid()。
 MASTER_LIST_CAT_ID = "1"  # 证券列表（主数据拉取）
 QUOTE_CAT_ID = "2"        # 证券行情（价格行情）
-DIVIDEND_LIST_CAT_ID = "3"  # 股息列表（分红事件：分红明细源）
+DIVIDEND_LIST_CAT_ID = "3"  # 股息列表（分红事件：股息明细源接口）
 NOTICE_CAT_ID = "4"        # 公司公告（公告扫描：特别分红补充）
 
 

@@ -171,7 +171,7 @@ async def put_dividend_yield_settings(
     """更新全局配置（§5.4/§6.6：非 admin 403；接口四重校验 400 不落库；AppLog 审计）。"""
     await _validate_interface(
         db, body.dividend_detail_source_interface_id, DIVIDEND_LIST_CAT_ID,
-        source_label="分红明细源", require_per_symbol=True,
+        source_label="股息明细源接口", require_per_symbol=True,
     )
     await _validate_interface(
         db, body.price_source_interface_id, QUOTE_CAT_ID,

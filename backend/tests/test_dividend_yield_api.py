@@ -315,15 +315,15 @@ async def _seed_quote_per_symbol_interface(session):
 @pytest.mark.asyncio
 async def test_settings_put_interface_shape_validation(session, client):
     """守护 §5.4 四重校验（P1-4）+ 形态错误提示按源动态生成（两种错配各提示各自要求）：
-    分红明细源（require_per_symbol=True）误选「按报告期全量」→ 400，提示「须为按证券逐只」；
+    股息明细源接口（require_per_symbol=True）误选「按报告期全量」→ 400，提示「须为按证券逐只」；
     行情源（require_per_symbol=False）误选「按证券逐只」→ 400，提示「须为按报告期全量」；
-    补充源逐只接口 → 200。"""
+    股息明细源接口为逐只形态 → 200。"""
     admin = await _make_admin(session, client)
     main_itf, detail_itf = await _seed_category3_interfaces(session)
     quote_itf = await _seed_quote_per_symbol_interface(session)
     h = auth(admin["token"])
 
-    # 分支一（require_per_symbol=True）：分红明细源误选「按报告期全量」接口 → 400
+    # 分支一（require_per_symbol=True）：股息明细源接口误选「按报告期全量」接口 → 400
     r = await client.put(
         "/api/dividend-yield/settings",
         json={
@@ -333,7 +333,7 @@ async def test_settings_put_interface_shape_validation(session, client):
     )
     status, _, _, message = env(r)
     assert status == 400
-    assert message == "接口调用形态不符：分红明细源须为按证券逐只接口（params 含 symbol）"
+    assert message == "接口调用形态不符：股息明细源接口须为按证券逐只接口（params 含 symbol）"
 
     # 分支二（require_per_symbol=False）：行情源误选「按证券逐只」接口 → 400
     r = await client.put(
