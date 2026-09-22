@@ -18,7 +18,9 @@ from sqlalchemy import text
 from app.services.admin_lock import (
     LOCK_DIVIDEND_SEED,
     acquire_admin_lock,
+    is_cancel_requested,
     release_admin_lock,
+    request_cancel,
 )
 
 
@@ -118,3 +120,26 @@ async def test_ttl_param_zero_allows_immediate_preempt(session):
     assert await acquire_admin_lock(session, LOCK_DIVIDEND_SEED) is None
     # TTL=0 → 立即抢占
     assert await acquire_admin_lock(session, LOCK_DIVIDEND_SEED, ttl_hours=0) is not None
+
+
+@pytest.mark.asyncio
+async def test_request_cancel_requires_a_holder(session):
+    """⑦ 无人持锁时请求取消 → False（调用方据此返 409），且不写入标记。"""
+    await _reset(session)
+    assert await request_cancel(session, LOCK_DIVIDEND_SEED) is False
+    assert await is_cancel_requested(session, LOCK_DIVIDEND_SEED) is False
+
+
+@pytest.mark.asyncio
+async def test_request_cancel_sets_marker_and_release_clears_it(session):
+    """⑧ 有人持锁 → True 且标记置位；释放锁须**一并清标记**（防泄漏到下一次运行）。"""
+    await _reset(session)
+    tok = await acquire_admin_lock(session, LOCK_DIVIDEND_SEED)
+
+    assert await request_cancel(session, LOCK_DIVIDEND_SEED) is True
+    assert await is_cancel_requested(session, LOCK_DIVIDEND_SEED) is True
+
+    await release_admin_lock(session, LOCK_DIVIDEND_SEED, tok)
+    assert (
+        await is_cancel_requested(session, LOCK_DIVIDEND_SEED) is False
+    ), "释放锁须清空取消标记，否则下次播种一启动就在检查点自行退出"

@@ -827,3 +827,58 @@ async def test_seed_progress_error_on_failure_bubble(session, monkeypatch):
     assert seed_progress.failed == 2
     assert seed_progress.error is not None and "失败占比过高" in seed_progress.error
     assert seed_progress.finished_at is not None
+
+
+# ───────────── 跨进程取消：检查点自检（§5.7，多 worker 取消缺口补强） ─────────────
+@pytest.mark.asyncio
+async def test_seed_stops_at_checkpoint_when_cancel_requested(session, monkeypatch):
+    """跨进程取消：持锁 worker 在每个检查点自检 ``cancel_requested_at`` → 已置标记则在下一个
+    检查点 break，已完成部分保留、可断点续跑。
+
+    背景：``trigger_router.seed_task`` 是进程内变量，多 worker 下取消请求打到无任务的 worker 时
+    旧实现直接 409「无运行中任务」、用户点不动；新实现由 DB 标记承载取消意图，持锁 worker 在
+    检查点读取后自行退出。本例复刻「首个检查点放行、第二个检查点已置标记」→ 第二只证券不被
+    处理，state=cancelled，且**不**触发失败占比冒泡（人为取消非上游失效）。
+
+    为在少量证券上复现「跨检查点」行为，把 ``_SEED_CHUNK`` 压到 1（每只在独立检查点），并让
+    ``is_cancel_requested`` 在第二个检查点返回 True（模拟别的 worker 置了标记）。
+    """
+    from app.services import dividend_seed as ds
+    from app.services.dividend_seed import seed_progress
+
+    a = await _add_master(session, code="600519", name="证券A")
+    b = await _add_master(session, code="000001", name="证券B")
+    await _seed_detail_source(session)
+    code_a, code_b = a.code, b.code
+    await session.commit()
+    cur = _cur_year()
+    fake, calls = _make_raw({
+        _digits(code_a): [_cn_row(report=f"{cur - 1}年报", cash="100")],
+        _digits(code_b): [_cn_row(report=f"{cur - 1}年报", cash="50")],
+    })
+    monkeypatch.setattr(MarketDataSyncService, "call_interface_raw", fake)
+    monkeypatch.setattr(ds, "_SEED_CHUNK", 1)
+
+    # 首个检查点（处理 A 前）放行；第二个检查点（处理 B 前）已置标记 → 停止
+    checks = {"n": 0}
+
+    async def _cancel_after_first(_session, _name):
+        checks["n"] += 1
+        return checks["n"] >= 2
+
+    monkeypatch.setattr(ds, "is_cancel_requested", _cancel_after_first)
+
+    summary = await DividendSeedService(session).seed_initial_dividends(None)
+    await session.commit()
+
+    assert seed_progress.state == "cancelled", "自检到取消须走 cancelled 态（非 error）"
+    assert seed_progress.error is None, "跨进程取消不得误判失败率冒泡"
+    assert "历史分红播种取消" in summary
+    assert "已完成部分保留" in summary
+    assert _symbols(calls) == {_digits(code_a)}, (
+        "仅首个检查点前的证券被处理，其余在断点停止"
+    )
+    assert "本轮处理1只" in summary
+    # 已完成部分照常落库（收尾重算仍执行），可断点续跑
+    stored_a = await _div_rows(session, a.id)
+    assert any(r.source == _DETAIL_NAME for r in stored_a), "已处理证券的写入须保留"
