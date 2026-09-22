@@ -195,13 +195,13 @@ async def _div_rows(session, master_id) -> list[SecurityDividend]:
     ).scalars().all()
 
 
-# ───────────── §9.3-A4 seed set = 全市场 ─────────────
+# ───────────── §9.3-A4 seed set = 巨潮可服务的沪深京 STOCK 子集 ─────────────
 @pytest.mark.asyncio
 async def test_seed_set_is_whole_market(session, monkeypatch):
-    """§9.3-A4：seed set 取 ``securities`` 全表（B 全市场），逐只调用明细源。
+    """§9.3-A4：seed set 取 ``asset_class == STOCK`` 的 serviceable 子集（沪深京），逐只调用明细源。
 
-    断言「被调次数 == 证券数」即可刻画「全市场」——轻量子集 A / 广播种面列已被裁决不做，
-    若实现退回子集，次数会小于证券数。
+    断言「被调次数 == STOCK 证券数」即可刻画「serviceable 子集」——若实现退回全表或
+    漏掉 STOCK 过滤，次数会与证券数不符。
     """
     codes = ["600519", "000001", "300750"]
     for c in codes:
@@ -218,6 +218,32 @@ async def test_seed_set_is_whole_market(session, monkeypatch):
     assert len(_detail_calls(calls)) == len(codes), "每只证券都须被采集一次（全市场 seed set）"
     assert f"证券总数{len(codes)}只" in summary
     assert f"本轮处理{len(codes)}只" in summary
+
+
+@pytest.mark.asyncio
+async def test_seed_skips_non_stock_securities(session, monkeypatch):
+    """§5.7（2026-09-22 收窄）：seed set 仅含 ``asset_class == STOCK`` 的 serviceable 子集。
+
+    港股/指数/基金/债券无巨潮分红数据，必须被排除——否则会稀释失败率分母并空耗
+    rate_limit 预算。造一只 STOCK + 一只 HK_STOCK，仅 STOCK 被采集。
+    """
+    await _add_master(session, code="600519", name="沪市A")
+    hk = Security(
+        id=_uid(), code=_normalize_master_code("00700", "HK"),
+        name="港股", exchange="HK", asset_class=SecurityType.HK_STOCK,
+    )
+    session.add(hk)
+    await _seed_detail_source(session)
+    await session.commit()
+
+    fake, calls = _make_raw({})
+    monkeypatch.setattr(MarketDataSyncService, "call_interface_raw", fake)
+
+    summary = await DividendSeedService(session).seed_initial_dividends(None)
+    await session.commit()
+
+    assert _symbols(calls) == {"600519"}, "仅 STOCK 证券须被采集，HK_STOCK 必须排除"
+    assert "证券总数1只" in summary
 
 
 @pytest.mark.asyncio
@@ -695,8 +721,8 @@ async def test_seed_progress_reports_failed_count(session, monkeypatch):
     from app.services.dividend_seed import seed_progress
 
     a = await _add_master(session, code="600519", name="证券A")
-    b = await _add_master(session, code="000001", name="证券B")
-    c = await _add_master(session, code="000002", name="证券C")
+    await _add_master(session, code="000001", name="证券B")
+    await _add_master(session, code="000002", name="证券C")
     await _seed_detail_source(session)
     code_a = a.code  # 失败路径 rollback 会 expire ORM 实例，先取纯字符串
     await session.commit()

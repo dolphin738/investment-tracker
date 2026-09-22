@@ -4,7 +4,12 @@
 （``date = today_app_tz()``），本质是每日增量扫描器、不回溯历史，故「首跑把近 5 年
 分过红的证券灌进来」必须是一条与 scan 窗口解耦的独立路径，即本模块承担的播种。
 
-播种集合（§9.3-A4）：只实现 **B 全市场**——``securities`` 全表约 11430 只。
+播种集合（§9.3-A4 + 2026-09-22 收窄）：明细源（巨潮 ``stock_dividend_cninfo``）仅覆盖
+沪深京 A股 + 北交所（``asset_class == STOCK``，含 B股），港股/指数/基金/债券等
+**无**巨潮分红数据。故 seed set 收窄为 ``securities`` 中 ``asset_class == STOCK`` 的
+serviceable 子集（约 5923 只），而非 ``securities`` 全表（约 11430 只）——既使失败率
+分母落在「巨潮真能服务」的证券上（阈值才有意义），又避免对 5507 只无效证券空耗
+``rate_limit=10/min`` 预算（耗时由约 19h 降至约 10h）。
 
 **为什么独立成模块**：播种是与每日 scan 解耦的独立编排路径（种子集 + 断点续跑 + 逐只
 容错），与 scan 的当日窗口逻辑无交集，故单独成模块、自持 session，只**组合** scan service
@@ -29,7 +34,7 @@ from typing import Any
 from sqlalchemy import select
 
 from app.core.date_utils import today_app_tz
-from app.models import Security, SecurityDividend
+from app.models import Security, SecurityDividend, SecurityType
 from app.services.dividend_cninfo_parse import retention_cutoff_year
 from app.services.dividend_notice_scan import DividendNoticeScanService, _bump
 from app.services.dividend_yield_refresh import refresh_yields_for_masters
@@ -47,6 +52,9 @@ _SEED_CHUNK = 200
 # 失败占比阈值（行动项 8，设计 §6.2；与 scan 同口径同取值）。逐只容错是「单只异常 →
 # rollback 续下一只」；但整轮失败率超过该阈值即判定为「上游整体失效」，必须冒泡
 # （RuntimeError）让 scheduler 记 FAILED，而非把上万只吞成 skipped、摘要仍报「完成」。
+# 分母 = seed set 规模（serviceable STOCK 子集，约 5923 只，非 securities 全表 11430）；
+# 50% ≈ 2962 只真异常 → 巨潮对沪深京出现灾难性整体失效才触发，属「上游挂了」而非
+# 「个别板块抖动」（局部失败被逐只容错吞掉，符合设计意图）。
 _FAILURE_RATIO_RAISE = 0.5
 
 logger = logging.getLogger(__name__)
@@ -63,7 +71,8 @@ def _seed_progress_now() -> str:
 class SeedProgress:
     """首跑播种运行进度（fire-and-forget 后台任务，单进程内存态）。
 
-    state: idle（本进程生命周期内从未跑 / 已复位）| running | done | error。
+    state: idle（本进程生命周期内从未跑 / 已复位）| running | done | error |
+    cancelled（用户主动取消，已完成部分保留、可再次触发续跑）。
     failed = 单只异常 rollback 续跑的只数（≡ stats["skipped"]），与「无派息」
     （stats["skip"]）、「窗口外」（stats["window"]）严格区分，避免把正常零分红
     证券误报为失败。
@@ -102,7 +111,7 @@ class DividendSeedService:
         seed_rows = await self._seed_rows()
         total = len(seed_rows)
         stats: dict[str, int] = {k: 0 for k in _STATS_KEYS}
-        stats["rows"] = total  # seed set 规模（≈11430 只）
+        stats["rows"] = total  # seed set 规模（serviceable STOCK 子集，约 5923 只）
         # 明细源缺失/停用沿用 scan():232 口径：不 fail fast，跳过逐只采集并在摘要里标注
         detail = await self._scan._resolve_detail_itf(await self._scan._settings())
         covered_skipped = 0  # 断点续跑：已覆盖而跳过的只数
@@ -174,8 +183,8 @@ class DividendSeedService:
             seed_progress.covered = covered_skipped
 
         # 失败占比过高 → 冒泡（行动项 8，§6.2；与 scan 同口径同阈值）：使 scheduler 记
-        # FAILED。total 为 seed set 规模（≈11430）；covered_skipped 是「已完成跳过」，
-        # 不计失败。total==0（无证券）时不做除法、也不判失败。
+        # FAILED。total 为 seed set 规模（serviceable STOCK 子集，约 5923 只）；
+        # covered_skipped 是「已完成跳过」，不计失败。total==0（无证券）时不做除法、也不判失败。
         if total > 0 and stats["skipped"] / total > _FAILURE_RATIO_RAISE:
             # 进度可视化：失败率冒泡 → 置 error（与 _run_seed 的兜底异常捕获二选一生效）
             seed_progress.state = "error"
@@ -221,15 +230,23 @@ class DividendSeedService:
         return summary
 
     async def _seed_rows(self) -> list[tuple[str, str]]:
-        """seed set：全市场证券 ``(id, code)``，按 id 排序保证重跑顺序稳定。
+        """seed set：巨潮可服务的证券 ``(id, code)``，按 id 排序保证重跑顺序稳定。
+
+        仅取 ``asset_class == STOCK``（沪深京 A股 + 北交所，含 B股）——明细源巨潮
+        只覆盖这部分；港股/指数/基金/债券无巨潮分红数据，纳入只会稀释失败率分母并
+        空耗限流预算（2026-09-22 收窄；生产库 STOCK 约 5923 / 全表 11430）。
 
         为什么一次性取出而非流式游标：① 播种期间会话要为每只证券穿插写库与 commit，
         ``session.stream()`` 的服务端游标不允许在其未消费完之前执行其它语句；
-        ② seed set 仅约 11430 行两列短字符串，内存开销可忽略；
+        ② seed set 仅约 5923 行两列短字符串，内存开销可忽略；
         ③ 取 ``Row`` 元组而非 ORM 实体，故不会被后续 ``rollback()`` expire。
         """
         rows = (
-            await self.session.execute(select(Security.id, Security.code).order_by(Security.id))
+            await self.session.execute(
+                select(Security.id, Security.code)
+                .where(Security.asset_class == SecurityType.STOCK)
+                .order_by(Security.id)
+            )
         ).all()
         return [(str(row[0]), str(row[1])) for row in rows]
 

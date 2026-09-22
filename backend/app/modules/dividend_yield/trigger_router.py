@@ -20,14 +20,19 @@ from app.services.log import record
 
 router_trigger = APIRouter(route_class=EnvelopeRoute)
 
-# 进程内单飞锁（行动项 8，设计 §6.2）：播种是「一次性全市场冷启动」（约 11430 只 ×
-# ≈6s ≈ 19h，接口限流 10/min），连点会并发启动多个 19h 任务、双倍打满限流预算。
+# 进程内单飞锁（行动项 8，设计 §6.2）：播种是「一次性冷启动」（serviceable STOCK 子集
+# 约 5923 只 × ≈6s ≈ 10h，接口限流 10/min），连点会并发启动多个任务、双倍打满限流预算。
 # 模块级 asyncio.Lock 保证**同进程内至多一个播种在跑**：已在运行时再次触发立即拒绝
 # （409）而不新建任务。
 # 为何「检查-获取」无竞态：单进程内 asyncio 事件循环单线程，locked() 判定与其后
 # acquire() 之间**没有 await 让出点**（acquire() 在未持有时同步完成），故相对其他请求
 # 是原子的。
 _seed_lock = asyncio.Lock()
+
+# 当前运行中的播种后台任务引用（进程内）；供「取消」端点经 task.cancel() 中断。
+# 与单飞锁同生命周期：任务结束（正常/抛错/取消）后由 _run_seed 的 finally 释放锁，
+# 此处引用留作 done() 判定（取消端点据此区分「有运行中任务 / 无」）。
+seed_task: asyncio.Task | None = None
 
 
 # --------------------------------------------------------------------------- #
@@ -97,16 +102,18 @@ async def _run_seed() -> None:
 async def seed_initial_dividends(
     admin: CurrentUser = Depends(require_admin),
 ):
-    """手动触发全市场历史分红播种（§5.7；admin-only）。
+    """手动触发历史分红播种（§5.7；admin-only）。
 
-    遍历全市场约 11430 只，并按 rate_limit 串行逐只调巨潮，长耗时（约 19 小时）故
-    fire-and-forget 立即返回；支持断点续跑（按「当前明细源 + 近 5 年」判定已覆盖者
-    跳过），中途失败重跑会自动续跑。进度与结果经应用日志查看。
+    遍历巨潮可服务的沪深京证券（asset_class=STOCK，约 5923 只），按 rate_limit 串行
+    逐只调巨潮，长耗时（约 10 小时）故 fire-and-forget 立即返回；支持断点续跑
+    （按「当前明细源 + 近 5 年」判定已覆盖者跳过），中途失败重跑会自动续跑，也可经
+    ``POST /seed-initial-dividends/cancel`` 主动取消（已完成部分保留）。进度经
+    ``GET /seed-initial-dividends/progress`` 轮询。
 
     **单飞**（行动项 8，§6.2）：已在播种中再次触发 → 不新建任务，返回 409
-    「已有播种任务在运行」，避免连点并发启动多个 19h 任务打满限流预算。
+    「已有播种任务在运行」，避免连点并发启动多个任务打满限流预算。
     """
-    # 单飞判定放在依赖校验（require_admin）之后：非 admin 已在依赖层被 403 拦下。
+        # 单飞判定放在依赖校验（require_admin）之后：非 admin 已在依赖层被 403 拦下。
     if _seed_lock.locked():
         raise BusinessException(
             # 项目无通用「资源占用」业务码（既有 409 均为领域专属：1003/1007/1008）；
@@ -118,7 +125,8 @@ async def seed_initial_dividends(
         )
     # 先取锁再创建后台任务：保证「任务在跑」期间锁始终被持有；_run_seed 的 finally 释放。
     await _seed_lock.acquire()
-    track_task(asyncio.create_task(_run_seed()))
+    global seed_task
+    seed_task = track_task(asyncio.create_task(_run_seed()))
     await record(
         level="info",
         scope="admin",
@@ -157,3 +165,36 @@ async def seed_initial_dividends_progress(
         "error": seed_progress.error,
         "message": seed_progress.message,
     }
+
+
+@router_trigger.post("/seed-initial-dividends/cancel")
+async def cancel_seed_initial_dividends(
+    admin: CurrentUser = Depends(require_admin),
+):
+    """取消正在运行的历史分红播种（admin-only）。
+
+    经 ``seed_task.cancel()`` 请求取消，播种协程在下一个 await 中断点（单只网络请求或
+    commit）抛出 CancelledError 而停止——**已完成部分（按「当前明细源 + 近 5 年」判定为
+    已覆盖）保留**，进程重启或再次触发会从断点续跑，不丢数据、不重复写入。
+
+    **单飞锁不在本端点释放**：取消信号传播后 ``_run_seed`` 的 ``finally`` 才释放
+    ``_seed_lock``，避免此处与 finally 重复释放导致竞态。
+
+    **无运行任务 → 409**：``seed_task is None``（从未触发）或 ``seed_task.done()``
+    （已正常结束/已取消完成）均视为「无运行任务」，不重复取消。
+    """
+    global seed_task
+    if seed_task is None or seed_task.done():
+        raise BusinessException(
+            code=BusinessErrorCode.VALIDATION_FAILED,
+            message="当前没有正在运行的补齐历史分红任务",
+            status_code=409,
+        )
+    from app.services.dividend_seed import seed_progress, _seed_progress_now
+
+    seed_task.cancel()
+    seed_progress.state = "cancelled"
+    seed_progress.finished_at = _seed_progress_now()
+    seed_progress.error = None
+    seed_progress.message = "已由用户取消（已完成部分保留，可再次触发续跑）"
+    return {"message": "已发送取消信号，任务将在下一个中断点停止"}
