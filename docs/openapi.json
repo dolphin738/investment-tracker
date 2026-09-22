@@ -2768,8 +2768,58 @@
           "dividend-yield"
         ],
         "summary": "Seed Initial Dividends",
-        "description": "手动触发全市场历史分红播种（§5.7；admin-only）。\n\n遍历全市场约 11430 只，并按 rate_limit 串行逐只调巨潮，长耗时（约 19 小时）故\nfire-and-forget 立即返回；支持断点续跑（按「当前明细源 + 近 5 年」判定已覆盖者\n跳过），中途失败重跑会自动续跑。进度与结果经应用日志查看。\n\n**单飞**（行动项 8，§6.2）：已在播种中再次触发 → 不新建任务，返回 409\n「已有播种任务在运行」，避免连点并发启动多个 19h 任务打满限流预算。",
+        "description": "手动触发历史分红播种（§5.7；admin-only）。\n\n遍历巨潮可服务的沪深京证券（asset_class=STOCK，约 5923 只），按 rate_limit 串行\n逐只调巨潮，长耗时（约 10 小时）故 fire-and-forget 立即返回；支持断点续跑\n（按「当前明细源 + 近 5 年」判定已覆盖者跳过），中途失败重跑会自动续跑，也可经\n``POST /seed-initial-dividends/cancel`` 主动取消（已完成部分保留）。进度经\n``GET /seed-initial-dividends/progress`` 轮询。\n\n**单飞**（行动项 8，§6.2）：已在播种中再次触发 → 不新建任务，返回 409\n「已有播种任务在运行」，避免连点并发启动多个任务打满限流预算。",
         "operationId": "seed_initial_dividends_api_dividend_yield_seed_initial_dividends_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ]
+      }
+    },
+    "/api/dividend-yield/seed-initial-dividends/cancel": {
+      "post": {
+        "tags": [
+          "dividend-yield"
+        ],
+        "summary": "Cancel Seed Initial Dividends",
+        "description": "取消正在运行的历史分红播种（admin-only）。\n\n经 ``seed_task.cancel()`` 请求取消，播种协程在下一个 await 中断点（单只网络请求或\ncommit）抛出 CancelledError 而停止——**已完成部分（按「当前明细源 + 近 5 年」判定为\n已覆盖）保留**，进程重启或再次触发会从断点续跑，不丢数据、不重复写入。\n\n**单飞锁不在本端点释放**：取消信号传播后 ``_run_seed`` 的 ``finally`` 才释放\n``_seed_lock``，避免此处与 finally 重复释放导致竞态。\n\n**无运行任务 → 409**：``seed_task is None``（从未触发）或 ``seed_task.done()``\n（已正常结束/已取消完成）均视为「无运行任务」，不重复取消。",
+        "operationId": "cancel_seed_initial_dividends_api_dividend_yield_seed_initial_dividends_cancel_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ]
+      }
+    },
+    "/api/dividend-yield/seed-initial-dividends/progress": {
+      "get": {
+        "tags": [
+          "dividend-yield"
+        ],
+        "summary": "Seed Initial Dividends Progress",
+        "description": "查询首跑播种运行进度（admin-only，与 POST 同权限）。\n\n返回进程内内存态进度（不入库、不跨进程）：state(idle|running|done|error) /\ntotal / processed / hits / failed / covered / started_at / finished_at /\nerror / message。前端据此轮询展示进度条与失败只数；进程重启后归零为 idle。",
+        "operationId": "seed_initial_dividends_progress_api_dividend_yield_seed_initial_dividends_progress_get",
         "responses": {
           "200": {
             "description": "Successful Response",

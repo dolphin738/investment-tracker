@@ -167,10 +167,14 @@ def test_openapi_pending_contract_paths_and_schemas():
 
     E6：``/{master_id}/dividends`` 补 response_model 后，``SecurityDividendItemOut`` /
     ``SecurityDividendListOut`` 进契约，``dividendLabel`` 字段可见。
+
+    2026-09-22 补齐历史分红进度可视化再 +2（seed progress GET / cancel POST）→ 103 → 105。
     """
     spec = client.get("/api/openapi.json").json()
     paths = spec["paths"]
-    assert len(paths) == 103, f"paths 计数应为 103（96 + 7 pending），实得 {len(paths)}"
+    assert len(paths) == 105, (
+        f"paths 计数应为 105（96 + 7 pending + 2 seed 进度/取消），实得 {len(paths)}"
+    )
     for p in (
         "/api/dividend-yield/pending-dividends",
         "/api/dividend-yield/pending-dividends/summary",
@@ -179,8 +183,11 @@ def test_openapi_pending_contract_paths_and_schemas():
         "/api/dividend-yield/pending-dividends/{pending_id}/ignore",
         "/api/dividend-yield/pending-dividends/batch-ignore",
         "/api/dividend-yield/pending-dividends/{pending_id}/reopen",
+        # 补齐历史分红进度可视化（2026-09-22）
+        "/api/dividend-yield/seed-initial-dividends/progress",
+        "/api/dividend-yield/seed-initial-dividends/cancel",
     ):
-        assert p in paths, f"缺少 pending path：{p}"
+        assert p in paths, f"缺少 path：{p}"
 
     schemas = spec["components"]["schemas"]
     for name in (
