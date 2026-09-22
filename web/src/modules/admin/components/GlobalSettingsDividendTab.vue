@@ -16,6 +16,7 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
   Select,
@@ -25,6 +26,10 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { SELECT_EMPTY_VALUE } from '@/lib/constants';
+
+/** 分红留存年数合法区间（与后端 settings_router 的 RETENTION_YEARS_MIN/MAX 一致） */
+const RETENTION_MIN = 1;
+const RETENTION_MAX = 10;
 
 /** 接口候选项形状（与父级 listAllInterfaces 过滤结果一致） */
 interface InterfaceOption {
@@ -40,6 +45,8 @@ defineProps<{
   priceSourceInterfaceId: string;
   /** 公司公告接口 id（含哨兵值） */
   announcementSourceInterfaceId: string;
+  /** 分红留存窗年数（1~10，默认 5）：采集窗与留存清理窗共用 */
+  dividendRetentionYears: number;
   /** 股息明细源接口候选（category_id === '3' && enabled） */
   dividendDetailOptions: InterfaceOption[];
   /** 行情源候选（category_id === '2' && enabled） */
@@ -54,7 +61,19 @@ const emit = defineEmits<{
   (e: 'update:dividendDetailSourceInterfaceId', v: string): void;
   (e: 'update:priceSourceInterfaceId', v: string): void;
   (e: 'update:announcementSourceInterfaceId', v: string): void;
+  (e: 'update:dividendRetentionYears', v: number): void;
 }>();
+
+/**
+ * 留存年数输入：number input 的 model-value 是 string，须转数字并夹到合法区间。
+ * 非法（空串 / NaN）不回传——保持表单原值，避免把 NaN 写进 payload 触发后端 400。
+ */
+function onRetentionYearsInput(v: unknown): void {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return;
+  const clamped = Math.min(RETENTION_MAX, Math.max(RETENTION_MIN, Math.round(n)));
+  emit('update:dividendRetentionYears', clamped);
+}
 </script>
 
 <template>
@@ -138,6 +157,25 @@ const emit = defineEmits<{
               </SelectItem>
             </SelectContent>
           </Select>
+        </div>
+
+        <!-- 分红留存年数（D-4）：采集窗与留存清理窗共用同一配置 -->
+        <div class="space-y-2">
+          <Label for="dy-retention-years">分红留存年数</Label>
+          <Input
+            id="dy-retention-years"
+            :model-value="String(dividendRetentionYears)"
+            type="number"
+            :min="RETENTION_MIN"
+            :max="RETENTION_MAX"
+            step="1"
+            class="w-full"
+            @update:model-value="onRetentionYearsInput"
+          />
+          <p class="text-xs text-muted-foreground">
+            保留最近 N 个财年（{{ RETENTION_MIN }}~{{ RETENTION_MAX }}，默认 5）。
+            分红采集窗口与留存清理窗口共用此值，二者始终对齐。
+          </p>
         </div>
       </div>
     </CardContent>

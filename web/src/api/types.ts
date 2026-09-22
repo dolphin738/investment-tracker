@@ -853,4 +853,7 @@ export interface UpdateDividendYieldSettingsDto {
   /** 交易日历刷新起始日期（YYYY-MM-DD）；空串/不传 = 不改（保留既有值）；
    *  结束上限受数据源限制为当年末，故前端不提供结束日期 */
   trade_calendar_start_date?: string | null;
+  /** 分红留存窗年数（D-4 配置化，1~10，默认 5）：保留最近 N 个财年 [cur-N+1, cur]；
+   *  采集窗（播种/每日扫描裁剪）与留存清理窗共用此值，保证二者对齐 */
+  dividend_retention_years?: number | null;
 }

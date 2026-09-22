@@ -79,6 +79,8 @@ const settingsForm = reactive({
   announcementSourceInterfaceId: SELECT_EMPTY_VALUE,
   /** 交易日历刷新起始日期（YYYY-MM-DD）；空串 = 未配置（后端默认「去年 1 月 1 日」） */
   tradeCalendarStartDate: '',
+  /** 分红留存窗年数（1~10）：采集窗与留存清理窗共用；服务端未配置回落 5 */
+  dividendRetentionYears: 5,
 });
 const settingsFormError = ref('');
 
@@ -100,6 +102,8 @@ watch(
       s.announcement_source?.id ?? SELECT_EMPTY_VALUE;
     // 交易日历刷新起始日期：服务端 null → 空串（未配置，后端用默认下限）
     settingsForm.tradeCalendarStartDate = s.trade_calendar_start_date ?? '';
+    // 分红留存窗年数：服务端 null → 默认 5（后端 _settings_out 恒返回有效值，兜底防 undefined）
+    settingsForm.dividendRetentionYears = s.dividend_retention_years ?? 5;
   },
   { immediate: true },
 );
@@ -116,7 +120,9 @@ const settingsHasChanges = computed(() => {
     settingsForm.announcementSourceInterfaceId !==
       (s.announcement_source?.id ?? SELECT_EMPTY_VALUE) ||
     // 交易日历刷新起始日期：服务端 null → 空串，与 watch 回填口径一致
-    settingsForm.tradeCalendarStartDate !== (s.trade_calendar_start_date ?? '')
+    settingsForm.tradeCalendarStartDate !== (s.trade_calendar_start_date ?? '') ||
+    // 分红留存窗年数：服务端 null → 默认 5，与 watch 回填口径一致
+    settingsForm.dividendRetentionYears !== (s.dividend_retention_years ?? 5)
   );
 });
 
@@ -135,6 +141,8 @@ function handleSaveSettings(): void {
     ),
     // 交易日历刷新起始日期：空串 → null（后端视为「不改」）
     trade_calendar_start_date: settingsForm.tradeCalendarStartDate || null,
+    // 分红留存窗年数：恒传有效值（子组件已夹到 1~10），不传 null 以免被解读为「不改」
+    dividend_retention_years: settingsForm.dividendRetentionYears,
   };
   settingsMutation.mutate(payload);
 }
@@ -188,6 +196,7 @@ function handleSaveSettings(): void {
           v-model:announcement-source-interface-id="
             settingsForm.announcementSourceInterfaceId
           "
+          v-model:dividend-retention-years="settingsForm.dividendRetentionYears"
           :dividend-detail-options="dividendDetailOptions"
           :price-source-options="priceSourceOptions"
           :announcement-source-options="announcementSourceOptions"
