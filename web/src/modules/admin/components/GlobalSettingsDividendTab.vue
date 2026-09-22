@@ -40,7 +40,7 @@ defineProps<{
   priceSourceInterfaceId: string;
   /** 公司公告接口 id（含哨兵值） */
   announcementSourceInterfaceId: string;
-  /** 股息补充源候选（category_id === '3' && enabled） */
+  /** 分红明细源候选（category_id === '3' && enabled） */
   dividendDetailOptions: InterfaceOption[];
   /** 行情源候选（category_id === '2' && enabled） */
   priceSourceOptions: InterfaceOption[];
@@ -67,7 +67,7 @@ const emit = defineEmits<{
     </CardHeader>
     <CardContent class="space-y-6">
       <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <!-- 股息补充源 -->
+        <!-- 分红明细源 -->
         <div class="space-y-2">
           <Label for="dy-detail-source">股息明细源接口（按证券逐只）</Label>
           <Select

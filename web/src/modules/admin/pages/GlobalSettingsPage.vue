@@ -52,7 +52,7 @@ const interfacesQuery = useDividendYieldInterfaces(true);
 const category3Enabled = computed(() =>
   (interfacesQuery.data.value ?? []).filter((i) => i.category_id === '3' && i.enabled),
 );
-/** 股息补充源候选（category_id === '3' && enabled） */
+/** 分红明细源候选（category_id === '3' && enabled） */
 const dividendDetailOptions = category3Enabled;
 /** 行情源候选（category_id === '2'） */
 const priceSourceOptions = computed(() =>
