@@ -1,3 +1,5 @@
+> 📦 **归档说明（2026-09-22）**：本文件原置于 docs/adr/，编号与 ADR-002 主决策撞车。它实为 ADR-002 的**增量任务清单**（非 ADR，自述「上游：ADR-002（已冻结）」），且清单内任务已全部落地（reorder → test_quote_interface_reorder.py + web reorder.ts；站内信 → Notification + test_notification.py + NotificationBell；SDK 路径 → pyproject.toml akshare 懒导入；行情时效红点 → price-freshness.ts）。按 AGENTS.md「adr/ 仅放 ADR」移入 docs/archive/。ADR-002 本体：docs/adr/ADR-002-quote-interface-priority-chain.md。
+
 # ADR-002 增量任务清单 — 第 3 / 4 / 5 步 + Q2 / Q3 / Q4 默认落地
 
 > 架构师：高见远（software-architect）｜ 上游：ADR-002（已冻结，§5 为落地范围，§3 为待确认项默认建议）
