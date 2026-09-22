@@ -156,7 +156,7 @@ export function seedInitialDividends(): Promise<{ message: string }> {
 
 /** 首跑播种运行进度（进程内内存态；admin-only 读端点） */
 export interface SeedProgress {
-  /** idle | running | done | error */
+  /** idle | running | done | error | cancelled */
   state: string;
   total: number;
   processed: number;
@@ -176,6 +176,13 @@ export interface SeedProgress {
 export function getSeedProgress(): Promise<SeedProgress> {
   return http.get<SeedProgress>(
     '/dividend-yield/seed-initial-dividends/progress',
+  );
+}
+
+/** 取消正在运行的历史分红补齐 / 播种（admin-only）；已完成部分保留，可再次触发续跑 */
+export function cancelSeedInitialDividends(): Promise<{ message: string }> {
+  return http.post<{ message: string }>(
+    '/dividend-yield/seed-initial-dividends/cancel',
   );
 }
 

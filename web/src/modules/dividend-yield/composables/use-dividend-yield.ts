@@ -25,6 +25,7 @@ import {
   getSeedProgress,
   rebuildDividendYield,
   seedInitialDividends,
+  cancelSeedInitialDividends,
   updateDividendYieldSettings,
   type DividendYieldRankFilters,
 } from '@/api/dividend-yield.api';
@@ -223,5 +224,23 @@ export function useSeedProgress(enabled: MaybeRefOrGetter<boolean> = true) {
     staleTime: 0,
     refetchInterval: (query) =>
       query.state.data?.state === 'running' ? 3000 : false,
+  });
+}
+
+/**
+ * 取消正在运行的历史分红补齐 / 播种（admin-only）。
+ *
+ * 后端经 ``task.cancel()`` 在下一个中断点停止，已完成部分保留、可再次触发续跑
+ * （断点续跑语义）。无运行任务时后端返回 409，此处统一提示失败。
+ */
+export function useCancelSeed() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => cancelSeedInitialDividends(),
+    onSuccess: (data) => {
+      toast.success(data.message || '已发送取消信号，任务将在下一个中断点停止');
+      queryClient.invalidateQueries({ queryKey: [...DIVIDEND_YIELD_KEY, 'seed-progress'] });
+    },
+    onError: () => toast.error('取消失败：当前可能无运行中的补齐任务'),
   });
 }

@@ -35,6 +35,7 @@ import {
   useRebuildDividendYield,
   useSeedInitialDividends,
   useSeedProgress,
+  useCancelSeed,
 } from '@/modules/dividend-yield/composables/use-dividend-yield';
 import { usePendingDividendSummary } from '@/modules/dividend-yield/composables/use-pending-dividends';
 
@@ -65,8 +66,21 @@ const progress = useSeedProgress(isAdmin);
 const progressData = computed(() => progress.data.value ?? null);
 const progressStateLabel = computed(() => {
   const s = progressData.value?.state;
-  return s === 'running' ? '运行中' : s === 'done' ? '已完成' : s === 'error' ? '失败' : '空闲';
+  return s === 'running' ? '运行中' : s === 'done' ? '已完成'
+    : s === 'error' ? '失败' : s === 'cancelled' ? '已取消' : '空闲';
 });
+
+// ── 取消在途补齐（仅 admin；running 态可取消，已完成部分保留、可续跑） ──
+const cancel = useCancelSeed();
+const cancelling = computed(() => cancel.isPending.value);
+const cancelConfirmOpen = ref(false);
+function onCancel(): void {
+  cancelConfirmOpen.value = true;
+}
+function confirmCancel(): void {
+  cancelConfirmOpen.value = false;
+  cancel.mutate();
+}
 const progressPercent = computed(() => {
   const p = progressData.value;
   if (!p || !p.total) return 0;
@@ -97,7 +111,7 @@ function goPending(): void {
       <Button
         variant="outline"
         :disabled="seeding"
-        title="一次性补齐全市场近 5 年历史分红（约 19 小时，可断点续跑）"
+        title="一次性补齐沪深京 A股近 5 年历史分红（约 10 小时，可断点续跑，运行中可取消）"
         @click="onSeed"
       >
         <Loader2 v-if="seeding" class="mr-2 h-4 w-4 animate-spin" />
@@ -132,7 +146,9 @@ function goPending(): void {
               ? '补齐历史分红进行中'
               : progressData.state === 'done'
                 ? '补齐历史分红完成'
-                : '补齐历史分红失败'
+                : progressData.state === 'cancelled'
+                  ? '补齐历史分红已取消'
+                  : '补齐历史分红失败'
           }}
         </span>
         <span
@@ -142,11 +158,24 @@ function goPending(): void {
               ? 'bg-blue-500/15 text-blue-400'
               : progressData.state === 'done'
                 ? 'bg-green-500/15 text-green-400'
-                : 'bg-destructive/15 text-destructive'
+                : progressData.state === 'cancelled'
+                  ? 'bg-amber-500/15 text-amber-400'
+                  : 'bg-destructive/15 text-destructive'
           "
         >
           {{ progressStateLabel }}
         </span>
+        <Button
+          v-if="progressData.state === 'running'"
+          variant="ghost"
+          size="sm"
+          class="h-7 text-xs text-muted-foreground hover:text-destructive"
+          :disabled="cancelling"
+          @click="onCancel"
+        >
+          <Loader2 v-if="cancelling" class="mr-1 h-3 w-3 animate-spin" />
+          取消
+        </Button>
       </div>
 
       <!-- 进度条（已处理 / 全表） -->
@@ -178,6 +207,12 @@ function goPending(): void {
         错误：{{ progressData.error }}
       </p>
       <p
+        v-else-if="progressData.state === 'cancelled' && progressData.message"
+        class="mt-2 text-xs text-amber-400"
+      >
+        {{ progressData.message }}
+      </p>
+      <p
         v-else-if="progressData.state === 'done' && progressData.message"
         class="mt-2 text-xs text-muted-foreground"
       >
@@ -194,7 +229,7 @@ function goPending(): void {
         <AlertDialogHeader>
           <AlertDialogTitle>确认补齐历史分红？</AlertDialogTitle>
           <AlertDialogDescription>
-            将串行拉取全市场约 11430 只证券近 5 年的历史分红（接口限流 10/min，约 19 小时），属一次性补齐操作，支持断点续跑；进度见应用日志。
+            将串行拉取沪深京 A股（约 5900 只）近 5 年的历史分红（巨潮仅覆盖沪深京，接口限流 10/min，约 10 小时），属一次性补齐操作，支持断点续跑，运行中可随时取消（已完成部分保留）；进度见下方面板。
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
@@ -206,6 +241,32 @@ function goPending(): void {
           >
             <Loader2 v-if="seeding" class="mr-2 h-4 w-4 animate-spin" />
             确认补齐
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+
+    <!-- 取消在途补齐二次确认（已完成部分保留，可再次触发续跑） -->
+    <AlertDialog
+      :open="cancelConfirmOpen"
+      @update:open="(o) => !o && (cancelConfirmOpen = false)"
+    >
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>取消补齐历史分红？</AlertDialogTitle>
+          <AlertDialogDescription>
+            任务将在下一个中断点停止，已补齐的证券保留（按「当前明细源 + 近 5 年」判定为已覆盖），可再次触发从断点续跑，不丢数据、不重复写入。
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel :disabled="cancelling">暂不取消</AlertDialogCancel>
+          <AlertDialogAction
+            :disabled="cancelling"
+            class="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            @click="confirmCancel"
+          >
+            <Loader2 v-if="cancelling" class="mr-2 h-4 w-4 animate-spin" />
+            确认取消
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
