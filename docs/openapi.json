@@ -2768,7 +2768,7 @@
           "dividend-yield"
         ],
         "summary": "Seed Initial Dividends",
-        "description": "手动触发历史分红播种（§5.7；admin-only）。\n\n遍历巨潮可服务的沪深京证券（asset_class=STOCK，约 5923 只），按 rate_limit 串行\n逐只调巨潮，长耗时（约 10 小时）故 fire-and-forget 立即返回；支持断点续跑\n（按「当前明细源 + 近 5 年」判定已覆盖者跳过），中途失败重跑会自动续跑，也可经\n``POST /seed-initial-dividends/cancel`` 主动取消（已完成部分保留）。进度经\n``GET /seed-initial-dividends/progress`` 轮询。\n\n**单飞**（行动项 8，§6.2）：已在播种中再次触发 → 不新建任务，返回 409\n「已有播种任务在运行」，避免连点并发启动多个任务打满限流预算。",
+        "description": "手动触发历史分红播种（§5.7；admin-only）。\n\n遍历巨潮可服务的沪深京证券（asset_class=STOCK，约 5923 只），按 rate_limit 串行\n逐只调巨潮，长耗时（约 10 小时）故 fire-and-forget 立即返回；支持断点续跑\n（按「当前明细源 + 近 5 年」判定已覆盖者跳过），中途失败重跑会自动续跑，也可经\n``POST /seed-initial-dividends/cancel`` 主动取消（已完成部分保留）。进度经\n``GET /seed-initial-dividends/progress`` 轮询。\n\n**单飞**（行动项 8，§6.2）：已在播种中再次触发 → 不新建任务，返回 409\n「已有播种任务在运行」，避免连点并发启动多个任务打满限流预算。分两层：\n进程内 ``asyncio.Lock``（第一层，零 DB 往返）+ DB 行级锁 ``admin_locks``\n（第二层，跨进程 / 多 worker 生效）。",
         "operationId": "seed_initial_dividends_api_dividend_yield_seed_initial_dividends_post",
         "responses": {
           "200": {
