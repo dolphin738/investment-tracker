@@ -67,6 +67,8 @@ def test_metadata_tables_and_enums():
         "market_trade_calendar",
         # 增量：批次 B——待人工划分分红 staging 队列
         "security_dividend_pending",
+        # 增量：跨进程管理端动作互斥锁（多进程单飞补强；行级锁 + TTL，表 admin_locks）
+        "admin_locks",
     } == tables
 
     enums = {
