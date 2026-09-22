@@ -163,7 +163,7 @@ async def _ensure_categories(session) -> None:
 async def _seed_detail_source(session) -> QuoteInterface:
     """建分类 3 明细源 + 提供方 + 全局设置指向它；返回明细源接口。
 
-    播种只消费明细源（不解析公告），故无需建分类 4 公告源。
+    播种只消费明细源（不解析公告），故无需建分类 4 公司公告接口。
     """
     await _ensure_categories(session)
     provider = SecuritiesDataProvider(

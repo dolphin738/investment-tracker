@@ -271,7 +271,7 @@ async def _seed_category3_interfaces(session):
 
 
 async def _seed_category4_interface(session, *, enabled: bool = True):
-    """分类 4「公司公告」+ 公告接口行（params 含 symbol，逐只形态），供公告源校验测试。"""
+    """分类 4「公司公告」+ 公告接口行（params 含 symbol，逐只形态），供公司公告接口校验测试。"""
     session.add(InterfaceCategory(id=NOTICE_CAT_ID, label="公司公告", system=True))
     provider = SecuritiesDataProvider(
         id=_uid(), name="akshare", access_method=QuoteProviderAccessMethod.SDK,
@@ -360,10 +360,10 @@ async def test_settings_put_interface_shape_validation(session, client):
     assert data["dividend_detail_source"]["id"] == detail_itf.id
 
 
-# ───────────────────────── 公告源可配置化（§15.3 T1 / §5.4） ─────────────────────────
+# ───────────────────────── 公司公告接口可配置化（§15.3 T1 / §5.4） ─────────────────────────
 @pytest.mark.asyncio
 async def test_settings_put_announcement_source_valid(session, client):
-    """守护 §15.3 T1/§5.4：PUT 合法公告源（分类 4 + enabled + 逐只形态）→ 200，
+    """守护 §15.3 T1/§5.4：PUT 合法公司公告接口（分类 4 + enabled + 逐只形态）→ 200，
     响应含 announcement_source {id, name}。"""
     admin = await _make_admin(session, client)
     itf = await _seed_category4_interface(session)
@@ -382,7 +382,7 @@ async def test_settings_put_announcement_source_valid(session, client):
 
 @pytest.mark.asyncio
 async def test_settings_put_announcement_source_wrong_category(session, client):
-    """守护 §15.3 T1/§5.4：公告源填分类 3 接口 → 400，message 含「分类不符」。"""
+    """守护 §15.3 T1/§5.4：公司公告接口填分类 3 接口 → 400，message 含「分类不符」。"""
     admin = await _make_admin(session, client)
     main_itf, _ = await _seed_category3_interfaces(session)
     h = auth(admin["token"])
@@ -400,7 +400,7 @@ async def test_settings_put_announcement_source_wrong_category(session, client):
 
 @pytest.mark.asyncio
 async def test_settings_put_announcement_source_disabled(session, client):
-    """守护 §15.3 T1/§5.4：公告源未启用 → 400（fail closed 不落库）。"""
+    """守护 §15.3 T1/§5.4：公司公告接口未启用 → 400（fail closed 不落库）。"""
     admin = await _make_admin(session, client)
     itf = await _seed_category4_interface(session, enabled=False)
     h = auth(admin["token"])
@@ -418,7 +418,7 @@ async def test_settings_put_announcement_source_disabled(session, client):
 
 @pytest.mark.asyncio
 async def test_settings_get_announcement_source_null_by_default(session, client):
-    """守护 §15.3 T1：GET /settings 未配置公告源时 announcement_source 为 null（契约扩展键）。"""
+    """守护 §15.3 T1：GET /settings 未配置公司公告接口时 announcement_source 为 null（契约扩展键）。"""
     info = await register_login(client)
     r = await client.get("/api/dividend-yield/settings", headers=auth(info["token"]))
     status, _, data, _ = env(r)

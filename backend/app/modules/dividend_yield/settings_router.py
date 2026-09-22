@@ -177,10 +177,10 @@ async def put_dividend_yield_settings(
         db, body.price_source_interface_id, QUOTE_CAT_ID,
         source_label="行情源", require_per_symbol=False,
     )
-    # 公告源：分类 4「公司公告」；stock_notice_report 接口 params 含 symbol → 逐只形态
+    # 公司公告接口：分类 4「公司公告」；stock_notice_report 接口 params 含 symbol → 逐只形态
     await _validate_interface(
         db, body.announcement_source_interface_id, NOTICE_CAT_ID,
-        source_label="公告源", require_per_symbol=True,
+        source_label="公司公告接口", require_per_symbol=True,
     )
     # 留存窗年数（D-4）：范围 1~10；越界 400（None = 不改，豁免校验）
     if body.dividend_retention_years is not None and not (

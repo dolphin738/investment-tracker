@@ -50,7 +50,7 @@ logger = logging.getLogger(__name__)
 
 
 class NoticeMetaMixin:
-    """公告标题二筛 + 公告源/明细源解析 + 失败后重解析（混入 ``DividendNoticeScanService``）。
+    """公告标题二筛 + 公司公告接口/明细源解析 + 失败后重解析（混入 ``DividendNoticeScanService``）。
 
     依赖宿主实例提供：
     - ``self.session``：异步会话（查询设置 / 接口 / 证券）。
@@ -131,7 +131,7 @@ class NoticeMetaMixin:
     async def _resolve_notice_itf(
         self, settings: Optional[DividendYieldSettings]
     ) -> QuoteInterface:
-        """解析公告源（§5.4）：优先读全局配置，未配置回退分类 4 priority 最小。
+        """解析公司公告接口（§5.4）：优先读全局配置，未配置回退分类 4 priority 最小。
 
         - 配置了 ``announcement_source_interface_id``：校验（存在性 + 分类 4 + 接口/
           提供方 enabled），任一不符 → fail fast raise，**不静默回退**——把失效/非公告

@@ -58,7 +58,7 @@ const dividendDetailOptions = category3Enabled;
 const priceSourceOptions = computed(() =>
   (interfacesQuery.data.value ?? []).filter((i) => i.category_id === '2' && i.enabled),
 );
-/** 公司公告源候选（category_id === '4' && enabled） */
+/** 公司公告接口候选（category_id === '4' && enabled） */
 const announcementSourceOptions = computed(() =>
   (interfacesQuery.data.value ?? []).filter((i) => i.category_id === '4' && i.enabled),
 );

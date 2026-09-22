@@ -33,7 +33,7 @@ const interfaces = vi.hoisted(() => [
   { id: 'i2', provider_id: 'p2', category_id: '3', name: '新浪-分红配股', enabled: true },
   { id: 'i3', provider_id: 'p1', category_id: '2', name: '腾讯财经-A股行情', enabled: true },
   { id: 'i4', provider_id: 'p1', category_id: '4', name: '沪深京A股公告', enabled: true },
-  // 分类 4 但未启用：不应出现在公告源下拉
+  // 分类 4 但未启用：不应出现在公司公告接口下拉
   { id: 'i5', provider_id: 'p2', category_id: '4', name: '东财-公告扫描', enabled: false },
 ]);
 
@@ -279,7 +279,7 @@ describe('GlobalSettingsPage — 顶层 TAB 与全局设置', () => {
     // 已移除的「回补模式 / 复权方式」属旧配置，切走后不在 DOM
     expect(wrapper.find('#dy-backfill-mode').exists()).toBe(false);
 
-    // 公告源下拉（按 id 锚定）：仅含启用的分类 4 接口
+    // 公司公告接口下拉（按 id 锚定）：仅含启用的分类 4 接口
     expect(
       interfaceOptions(wrapper.find('#dy-announcement-source')).map((o) =>
         o.attributes('value'),

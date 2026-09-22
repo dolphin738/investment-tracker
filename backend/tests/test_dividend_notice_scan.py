@@ -156,7 +156,7 @@ async def _ensure_categories(session) -> None:
 
 async def _seed_sources(session, *, detail_params=None, provider_enabled=True,
                         notice_enabled=True, detail_enabled=True):
-    """建分类行 + 公告源（分类 4）+ 明细源（分类 3）+ 全局设置指向二者。"""
+    """建分类行 + 公司公告接口（分类 4）+ 明细源（分类 3）+ 全局设置指向二者。"""
     await _ensure_categories(session)
     provider = SecuritiesDataProvider(
         id=_uid(), name="akshare", access_method="sdk", config={}, enabled=provider_enabled,
@@ -718,7 +718,7 @@ async def test_westward_dup_skips_cross_source_duplicate(session):
     assert stats["new"] == 0 and stats["anchor"] == 1
 
 
-# ───────────── 公告源解析（§5.4 可配置化） ─────────────
+# ───────────── 公司公告接口解析（§5.4 可配置化） ─────────────
 async def _seed_cat4(session, *, priority=1, enabled=True, name="沪深京 A 股公告",
                      provider_enabled=True):
     """分类 4「公司公告」+ 公告接口行（params 含 symbol，逐只形态）；分类行幂等。"""
@@ -754,7 +754,7 @@ async def test_resolve_notice_itf_uses_configured_source(session):
 
 @pytest.mark.asyncio
 async def test_resolve_notice_itf_configured_disabled_fails_closed(session):
-    """守护 §5.4 fail closed：配置的公告源已停用 → fail fast raise，不静默回退分类 4 其他接口。"""
+    """守护 §5.4 fail closed：配置的公司公告接口已停用 → fail fast raise，不静默回退分类 4 其他接口。"""
     itf = await _seed_cat4(session, enabled=False)
     await _seed_cat4(session, priority=1, name="备用公告接口")  # 若静默回退会选中它
     session.add(DividendYieldSettings(
@@ -788,7 +788,7 @@ async def test_resolve_notice_itf_no_candidate_fails_fast(session):
 
 @pytest.mark.asyncio
 async def test_resolve_notice_itf_provider_disabled_fails_closed(session):
-    """守护 ADR-002 #1 口径：配置的公告源接口 enabled 但**提供方**已停用 → fail fast，
+    """守护 ADR-002 #1 口径：配置的公司公告接口 enabled 但**提供方**已停用 → fail fast，
     不静默回退（所有选源路径须过滤提供方 enabled，否则停用提供方被照常选用）。"""
     itf = await _seed_cat4(session, provider_enabled=False)
     await _seed_cat4(session, priority=1, name="备用公告接口")  # 若静默回退会选中它

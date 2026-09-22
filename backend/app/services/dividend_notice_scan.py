@@ -7,7 +7,7 @@
 ``(master_id, report_year, report_quarter, period_type)`` upsert。
 
 要点：
-- 公告源可配置化（§5.4）：读 ``announcement_source_interface_id``（存在性 + 分类 4
+- 公司公告接口可配置化（§5.4）：读 ``announcement_source_interface_id``（存在性 + 分类 4
   + enabled 三重校验，fail closed 不静默回退）；未配置回退分类 4 priority 升序首个。
   ``symbol=财务报告`` 一级预过滤，**不得**按公告类型列过滤；缺失/停用 → fail fast。
 - 标题二筛白名单 = 代码常量（``_TITLE_*_RE``），改模式须补单测。§5.5 起候选放宽为
@@ -89,7 +89,7 @@ class DividendNoticeScanService(NoticeMetaMixin):
     async def scan(self, cfg: Any) -> str:
         """每日公告扫描 + 巨潮历史分红采集（§5 全流程）。"""
         day = today_app_tz()
-        # 第一步：公告源（§5.4 可配置化）；缺失/停用 → fail fast
+        # 第一步：公司公告接口（§5.4 可配置化）；缺失/停用 → fail fast
         notice_itf = await self._resolve_notice_itf(await self._settings())
         params = {"symbol": "财务报告", "date": day.strftime("%Y%m%d")}
         # 异常计失败（≥3 发站内信）已下沉到 call_interface_raw（P1-4），此处不再手工接线

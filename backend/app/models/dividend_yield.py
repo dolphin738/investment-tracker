@@ -4,7 +4,7 @@
 - ``security_dividends``：分红事件（按报告期季度粒度，5 年留存）
 - ``market_security_daily_prices``：市场级日线收盘价（不复权）
 - ``security_dividend_yields``：派生快照（每证券一行，事件驱动重算）
-- ``dividend_yield_settings``：全局配置（单行：股息明细源接口/行情源/公告源接口）
+- ``dividend_yield_settings``：全局配置（单行：股息明细源接口/行情源/公司公告接口）
 - ``market_trade_calendar``：交易日历
 - ``security_dividend_pending``：待人工划分分红 staging 队列（批次 B）
 
@@ -295,7 +295,7 @@ class DividendYieldSettings(Base, TimestampMixin):
         ForeignKey("quote_provider_interfaces.id", ondelete="SET NULL"),
         nullable=True,
     )
-    # 公告源（分类 4，公司公告扫描 §6.8 取代原写死分类 4）
+    # 公司公告接口（分类 4，公司公告扫描 §6.8 取代原写死分类 4）
     announcement_source_interface_id: Mapped[Optional[str]] = mapped_column(
         String(36),
         ForeignKey("quote_provider_interfaces.id", ondelete="SET NULL"),

@@ -1,4 +1,4 @@
-"""股息率方案 §5.4/§11.2-7：公告源 seed 默认（分类 4 priority 最小 enabled 接口）。
+"""股息率方案 §5.4/§11.2-7：公司公告接口 seed 默认（分类 4 priority 最小 enabled 接口）。
 
 为 ``dividend_yield_settings.announcement_source_interface_id``（0006 新增）补默认值：
 仅当该字段为 NULL 时，回填分类 4「公司公告」内 priority 最小的 enabled 接口
@@ -6,7 +6,7 @@
 admin 显式配置值；分类 4 无 enabled 接口时 FROM 子查询为空、零行更新，同样安全）。
 与 0005「默认源按调用形态重选」同口径：只 UPDATE 既有行，不 INSERT 配置行。
 
-downgrade 不清空该字段（幂等回填无破坏性；清空反而会让已生效的默认公告源失效，
+downgrade 不清空该字段（幂等回填无破坏性；清空反而会让已生效的默认公司公告接口失效，
 违背 §6.8 公告扫描 fail fast 前置条件）。
 
 Revision ID: 0007_announcement_source_seed

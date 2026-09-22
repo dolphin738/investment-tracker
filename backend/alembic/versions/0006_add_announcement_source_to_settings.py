@@ -1,7 +1,7 @@
-"""股息率方案 §15.1 B1：``dividend_yield_settings`` 新增公告源配置列。
+"""股息率方案 §15.1 B1：``dividend_yield_settings`` 新增公司公告接口配置列。
 
 - upgrade：加 ``announcement_source_interface_id``（可空 FK → ``quote_provider_interfaces.id``，
-  ``ondelete="SET NULL"``）。公告源 = 分类 4「公司公告」接口，供 §6.8 公告扫描使用
+  ``ondelete="SET NULL"``）。公司公告接口 = 分类 4「公司公告」接口，供 §6.8 公告扫描使用
   （取代原按分类 4 写死取接口的实现，变为可配置，§5.4/§11.2 第 7 条）。
 - 版本表扩容：本迁移 revision 字符串 43 字符，超过 ``alembic_version.version_num``
   默认 varchar(32) 上限（0003 注释的既有约束），故 upgrade 先扩列至 VARCHAR(64) 再落库；

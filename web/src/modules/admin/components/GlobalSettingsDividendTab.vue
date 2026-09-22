@@ -44,7 +44,7 @@ defineProps<{
   dividendDetailOptions: InterfaceOption[];
   /** 行情源候选（category_id === '2' && enabled） */
   priceSourceOptions: InterfaceOption[];
-  /** 公司公告源候选（category_id === '4' && enabled） */
+  /** 公司公告接口候选（category_id === '4' && enabled） */
   announcementSourceOptions: InterfaceOption[];
   /** 提供方 id → 名称（用于「接口名（提供方名）」拼接） */
   providerNameById: Map<string, string>;
@@ -115,7 +115,7 @@ const emit = defineEmits<{
           </Select>
         </div>
 
-        <!-- 公司公告源 -->
+        <!-- 公司公告接口 -->
         <div class="space-y-2">
           <Label for="dy-announcement-source">公司公告接口</Label>
           <Select
