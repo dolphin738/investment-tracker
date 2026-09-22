@@ -36,6 +36,7 @@ from sqlalchemy import select
 from app.core.date_utils import today_app_tz
 from app.models import Security, SecurityDividend, SecurityType
 from app.models.dividend_yield import DEFAULT_DIVIDEND_RETENTION_YEARS
+from app.services.admin_lock import LOCK_DIVIDEND_SEED, is_cancel_requested
 from app.services.dividend_cninfo_parse import retention_cutoff_year
 from app.services.dividend_notice_scan import DividendNoticeScanService, _bump
 from app.services.dividend_yield_refresh import refresh_yields_for_masters
@@ -138,7 +139,17 @@ class DividendSeedService:
         seed_progress.error = None
         seed_progress.message = None
 
+        cancelled = False
         for start in range(0, total, _SEED_CHUNK):
+            # 跨进程取消自检（每个检查点一次）：本进程的 seed_task 引用对其它 worker
+            # 不可见，故取消意图由 DB 标记承载，持锁 worker 在检查点自行退出。
+            # 已完成部分保留（断点续跑靠 security_dividends 判定），退出后照常走收尾重算。
+            if await is_cancel_requested(self.session, LOCK_DIVIDEND_SEED):
+                cancelled = True
+                logger.info(
+                    "收到跨进程取消请求，播种在检查点停止：已处理 %d/%d 只", start, total
+                )
+                break
             chunk = seed_rows[start : start + _SEED_CHUNK]
             # 检查点按批判定：避免一次性把「近 5 年全表 DISCTINCT master_id」拉进内存，
             # 批内 IN 列表只有 _SEED_CHUNK 个 UUID，走索引、结果集极小。
@@ -196,7 +207,12 @@ class DividendSeedService:
         # 失败占比过高 → 冒泡（行动项 8，§6.2；与 scan 同口径）：使 scheduler 记
         # FAILED。分母 = seed set 规模（serviceable STOCK 子集，约 5923 只）；
         # covered_skipped 是「已完成跳过」，不计失败。total==0（无证券）时不做除法、也不判失败。
-        if total > 0 and stats["skipped"] / total > _FAILURE_RATIO_RAISE:
+        # 用户主动取消时**不判失败率**：那是人为提前停止，非上游失效，冒泡成 FAILED 属误报。
+        if (
+            not cancelled
+            and total > 0
+            and stats["skipped"] / total > _FAILURE_RATIO_RAISE
+        ):
             # 进度可视化：失败率冒泡 → 置 error（与 _run_seed 的兜底异常捕获二选一生效）
             seed_progress.state = "error"
             seed_progress.error = (
@@ -224,19 +240,22 @@ class DividendSeedService:
         await refresh_yields_for_masters(self.session, list(changed))
         await self.session.commit()
         note = "；明细源缺失跳过逐只采集" if detail is None else ""
+        cancel_note = "（已由用户取消，已完成部分保留，可再次触发续跑）" if cancelled else ""
         summary = (
-            f"历史分红播种完成{note}：证券总数{stats['rows']}只，"
+            f"历史分红播种{'取消' if cancelled else '完成'}{note}："
+            f"证券总数{stats['rows']}只，"
             f"已覆盖跳过{covered_skipped}只，本轮处理{stats['hits']}只，"
             f"失败{stats['skipped']}只；"
             f"分红行新写{stats['new']}/更新{stats['upd']}；"
             f"窗口外{stats['window']}/无派息{stats['skip']}/无报告期{stats['no_period']}"
             f"/待划分{stats['staged']}；"
             f"标签撞键{stats['collision']}/未知标签{stats['unknown_label']}；"
-            f"去重跳过{stats['anchor']}；重算{len(changed)}只"
+            f"去重跳过{stats['anchor']}；重算{len(changed)}只{cancel_note}"
         )
-        # 进度可视化：整轮成功 → 置 done 并落摘要
-        seed_progress.state = "done"
+        # 进度可视化：正常跑完 → done；被跨进程取消标记中断 → cancelled（非 error）
+        seed_progress.state = "cancelled" if cancelled else "done"
         seed_progress.finished_at = _seed_progress_now()
+        seed_progress.error = None
         seed_progress.message = summary
         return summary
 

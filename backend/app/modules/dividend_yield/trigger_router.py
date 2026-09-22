@@ -22,6 +22,7 @@ from app.services.admin_lock import (
     LOCK_DIVIDEND_SEED,
     acquire_admin_lock,
     release_admin_lock,
+    request_cancel,
 )
 from app.services.auth import CurrentUser, require_admin
 from app.services.log import record
@@ -205,21 +206,33 @@ async def seed_initial_dividends_progress(
 @router_trigger.post("/seed-initial-dividends/cancel")
 async def cancel_seed_initial_dividends(
     admin: CurrentUser = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
 ):
     """取消正在运行的历史分红播种（admin-only）。
 
-    经 ``seed_task.cancel()`` 请求取消，播种协程在下一个 await 中断点（单只网络请求或
-    commit）抛出 CancelledError 而停止——**已完成部分（按「当前明细源 + 近 5 年」判定为
-    已覆盖）保留**，进程重启或再次触发会从断点续跑，不丢数据、不重复写入。
+    **两条取消路径**（缺一不可）：
+    - **本进程**：握有 ``seed_task`` 时直接 ``task.cancel()``，协程在下一个 await 中断点
+      （单只网络请求或 commit）抛 ``CancelledError`` 而停止。
+    - **跨进程**：置 ``admin_locks.cancel_requested_at`` 标记。``seed_task`` 是进程内变量，
+      多 worker 下任务若在别的进程则本进程拿不到引用（旧实现直接 409，用户点不动）；
+      持锁 worker 的播种循环在每个检查点自检该标记后自行退出。
+
+    **已完成部分保留**（按「当前明细源 + 近 5 年」判定为已覆盖），再次触发会从断点续跑，
+    不丢数据、不重复写入。
 
     **单飞锁不在本端点释放**：取消信号传播后 ``_run_seed`` 的 ``finally`` 才释放
-    ``_seed_lock``，避免此处与 finally 重复释放导致竞态。
+    ``_seed_lock`` 与 DB 锁，避免此处与 finally 重复释放导致竞态。
 
-    **无运行任务 → 409**：``seed_task is None``（从未触发）或 ``seed_task.done()``
-    （已正常结束/已取消完成）均视为「无运行任务」，不重复取消。
+    **无运行任务 → 409**：DB 标记置位失败（无人持锁）**且** 本进程无运行中任务，即判定
+    「无任务可取消」。仅置标记成功（任务在别的 worker）时返回 200。
     """
     global seed_task
-    if seed_task is None or seed_task.done():
+    # ① 跨进程信号：置 DB 取消标记（不依赖本进程是否持有任务对象）。
+    #    有人持锁 = 有任务在跑 → True；无人持锁 → False。
+    marked = await request_cancel(db, LOCK_DIVIDEND_SEED)
+    # ② 本进程快路径：握有任务对象时直接 cancel（协程在下一个 await 中断点停止）。
+    local_running = seed_task is not None and not seed_task.done()
+    if not marked and not local_running:
         raise BusinessException(
             code=BusinessErrorCode.VALIDATION_FAILED,
             message="当前没有正在运行的补齐历史分红任务",
@@ -227,9 +240,12 @@ async def cancel_seed_initial_dividends(
         )
     from app.services.dividend_seed import seed_progress, _seed_progress_now
 
-    seed_task.cancel()
-    seed_progress.state = "cancelled"
-    seed_progress.finished_at = _seed_progress_now()
-    seed_progress.error = None
-    seed_progress.message = "已由用户取消（已完成部分保留，可再次触发续跑）"
+    if local_running:
+        seed_task.cancel()
+        seed_progress.state = "cancelled"
+        seed_progress.finished_at = _seed_progress_now()
+        seed_progress.error = None
+        seed_progress.message = "已由用户取消（已完成部分保留，可再次触发续跑）"
+    # 仅置标记时（任务在其它 worker）不动本进程进度态——由持锁 worker 在检查点
+    # 自检后置 cancelled，避免本进程拿一个并非自己任务的进度乱写。
     return {"message": "已发送取消信号，任务将在下一个中断点停止"}
