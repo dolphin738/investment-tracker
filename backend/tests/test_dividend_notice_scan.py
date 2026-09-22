@@ -292,10 +292,20 @@ def test_parse_period_type_labels():
 
 
 def test_retention_cutoff_year_is_true_five_years():
-    """§9.3-A3：留存窗口为「真 5 年」``[cur-4, cur]``，与 retention_cleanup 对齐。"""
-    assert retention_cutoff_year(date(2026, 1, 1)) == 2022
-    assert retention_cutoff_year(date(2026, 12, 31)) == 2022
-    assert retention_cutoff_year(date(2027, 6, 1)) == 2023
+    """§9.3-A3：默认 5 年 → 留存窗 ``[cur-4, cur]``；years 由调用方传入（对齐 retention_cleanup）。"""
+    assert retention_cutoff_year(date(2026, 1, 1), years=5) == 2022
+    assert retention_cutoff_year(date(2026, 12, 31), years=5) == 2022
+    assert retention_cutoff_year(date(2027, 6, 1), years=5) == 2023
+
+
+def test_retention_cutoff_year_follows_configured_years():
+    """D-4：years 取配置值 → 与 cleanup 同公式，采集窗随配置伸缩（非硬编码 5）。
+
+    反向断言：若 years 被忽略（回退成硬编码 5），2026 年配 3 会得 2022 而非 2024 → 用例变红。
+    """
+    assert retention_cutoff_year(date(2026, 6, 1), years=3) == 2024
+    assert retention_cutoff_year(date(2026, 6, 1), years=8) == 2019
+    assert retention_cutoff_year(date(2026, 6, 1), years=1) == 2026
 
 
 # ───────────── §5.2 调用编排 ─────────────
@@ -623,10 +633,10 @@ async def test_scan_single_master_failure_continues(session, monkeypatch):
 
     original = DividendNoticeScanService.fetch_and_upsert_master
 
-    async def _flaky(self, mid, code, detail, stats):
+    async def _flaky(self, mid, code, detail, stats, retention_years=None):
         if code == code_a:  # 仅 A 失败
             raise RuntimeError("巨潮单只调用失败")
-        return await original(self, mid, code, detail, stats)
+        return await original(self, mid, code, detail, stats, retention_years)
 
     monkeypatch.setattr(DividendNoticeScanService, "fetch_and_upsert_master", _flaky)
 
@@ -1100,10 +1110,10 @@ async def test_scan_single_failure_logs_warning_with_exc_info(session, monkeypat
 
     original = DividendNoticeScanService.fetch_and_upsert_master
 
-    async def _flaky(self, mid, code, detail, stats):
+    async def _flaky(self, mid, code, detail, stats, retention_years=None):
         if code == code_a:  # 仅 A 失败（1/3 < 50%，不触发失败占比阈值）
             raise RuntimeError("boom")
-        return await original(self, mid, code, detail, stats)
+        return await original(self, mid, code, detail, stats, retention_years)
 
     monkeypatch.setattr(DividendNoticeScanService, "fetch_and_upsert_master", _flaky)
 
@@ -1138,7 +1148,7 @@ async def test_scan_aborts_when_failure_ratio_over_half(session, monkeypatch):
     fake, _calls = _make_raw({}, notice_rows)
     monkeypatch.setattr(MarketDataSyncService, "call_interface_raw", fake)
 
-    async def _boom(self, mid, code, detail, stats):  # 两只全失败 → 2/2 = 100%
+    async def _boom(self, mid, code, detail, stats, retention_years=None):  # 两只全失败 → 2/2 = 100%
         raise RuntimeError("上游整体失效（模拟）")
 
     monkeypatch.setattr(DividendNoticeScanService, "fetch_and_upsert_master", _boom)
@@ -1167,10 +1177,10 @@ async def test_scan_no_abort_when_failure_ratio_at_half(session, monkeypatch):
 
     original = DividendNoticeScanService.fetch_and_upsert_master
 
-    async def _flaky(self, mid, code, detail, stats):
+    async def _flaky(self, mid, code, detail, stats, retention_years=None):
         if code == code_a:  # 1/2 = 50%，恰不触发（> 0.5 才抛）
             raise RuntimeError("单只失败（模拟）")
-        return await original(self, mid, code, detail, stats)
+        return await original(self, mid, code, detail, stats, retention_years)
 
     monkeypatch.setattr(DividendNoticeScanService, "fetch_and_upsert_master", _flaky)
 

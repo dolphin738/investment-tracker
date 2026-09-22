@@ -73,9 +73,9 @@ def _cur_year() -> int:
     return today_app_tz().year
 
 
-def _cutoff_year() -> int:
-    """真 5 年留存窗口下界（与被测代码同源，避免测试里另写一份算术）。"""
-    return retention_cutoff_year(today_app_tz())
+def _cutoff_year(years: int = 5) -> int:
+    """留存窗口下界（与被测代码同源，避免测试里另写一份算术）；默认 5 年。"""
+    return retention_cutoff_year(today_app_tz(), years=years)
 
 
 def _digits(code: str) -> str:
@@ -160,10 +160,11 @@ async def _ensure_categories(session) -> None:
     await session.flush()
 
 
-async def _seed_detail_source(session) -> QuoteInterface:
+async def _seed_detail_source(session, retention_years: int | None = None) -> QuoteInterface:
     """建分类 3 明细源 + 提供方 + 全局设置指向它；返回明细源接口。
 
     播种只消费明细源（不解析公告），故无需建分类 4 公司公告接口。
+    ``retention_years`` 用于验证留存窗配置化（None → 回落 DEFAULT_DIVIDEND_RETENTION_YEARS）。
     """
     await _ensure_categories(session)
     provider = SecuritiesDataProvider(
@@ -180,6 +181,7 @@ async def _seed_detail_source(session) -> QuoteInterface:
     await session.flush()
     session.add(DividendYieldSettings(
         id=_uid(), dividend_detail_source_interface_id=detail.id,
+        dividend_retention_years=retention_years,
     ))
     await session.commit()
     return detail
@@ -361,8 +363,8 @@ async def test_single_master_failure_rolls_back_and_continues(session, monkeypat
 
     original = DividendNoticeScanService.fetch_and_upsert_master
 
-    async def _flaky(self, mid, code, detail, stats):
-        dirty = await original(self, mid, code, detail, stats)
+    async def _flaky(self, mid, code, detail, stats, retention_years=None):
+        dirty = await original(self, mid, code, detail, stats, retention_years)
         if code == code_a:  # A 在提交阶段失败（B 不受影响）
             raise RuntimeError("单只提交失败（模拟）")
         return dirty
@@ -401,8 +403,8 @@ async def test_failure_rolls_back_stats_snapshot_not_inflated(session, monkeypat
 
     original = DividendNoticeScanService.fetch_and_upsert_master
 
-    async def _flaky(self, mid, code, detail, stats):
-        dirty = await original(self, mid, code, detail, stats)
+    async def _flaky(self, mid, code, detail, stats, retention_years=None):
+        dirty = await original(self, mid, code, detail, stats, retention_years)
         if code == code_a:
             raise RuntimeError("单只提交失败（模拟）")
         return dirty
@@ -444,6 +446,34 @@ async def test_seed_cuts_rows_outside_true_five_year_window(session, monkeypatch
     assert [r.report_year for r in stored] == [_cutoff_year()]
     assert "窗口外1" in summary
     assert _cutoff_year() == cur - 4, "留存窗口须为真 5 年 [cur-4, cur]（§9.3-A3）"
+
+
+@pytest.mark.asyncio
+async def test_seed_crop_window_follows_configured_retention_years(session, monkeypatch):
+    """D-4 端到端（2026-09-22）：配置 ``dividend_retention_years=3`` → 播种采集窗 [cur-2, cur]。
+
+    修复前 ``retention_cutoff_year`` 硬编码 5 年 → cur-3 的行会被写入；配置化后与
+    ``retention_cleanup`` 同公式同配置，cur-3 判「窗口外」不落库。反向断言：若采集窗仍
+    硬编码 5，本例会多落 cur-3 一行 → 用例变红。
+    """
+    m = await _add_master(session, code="600519", name="证券A")
+    await _seed_detail_source(session, retention_years=3)
+    mid, code = m.id, m.code
+    await session.commit()
+
+    cur = _cur_year()
+    fake, _calls = _make_raw({_digits(code): [
+        _cn_row(report=f"{cur - 3}年报", cash="10"),  # 窗外（配置 3 年：cutoff=cur-2）
+        _cn_row(report=f"{cur - 2}年报", cash="20"),  # 窗内下界
+    ]})
+    monkeypatch.setattr(MarketDataSyncService, "call_interface_raw", fake)
+
+    summary = await DividendSeedService(session).seed_initial_dividends(None)
+    await session.commit()
+
+    years = {r.report_year for r in await _div_rows(session, mid)}
+    assert years == {cur - 2}, f"配置 3 年应只落 cur-2；实际={years}"
+    assert "窗口外1" in summary
 
 
 # ───────────── 摘要形态（运维对账） ─────────────
@@ -604,8 +634,8 @@ async def test_seed_single_failure_logs_warning_with_exc_info(session, monkeypat
     """行动项 8：播种单只失败必须打 WARNING 且带 ``exc_info=True``。
 
     走的是 ``app.services.dividend_seed`` 模块 logger（非 scan 的），须单独 pin。
-    注入方式：仅对一只有效抛 RuntimeError（其余照常）。失败数（1）**< 总数（3）的 50%**，
-    避免触发批次 E 新增的「失败占比过高抛错」阈值（该阈值另有独立用例守护）。
+    注入方式：仅对一只有效抛 RuntimeError（其余照常）。失败数（1）远低于绝对阈值 600 只，
+    避免触发「失败只数过多抛错」阈值（该阈值另有独立用例守护）。
     """
     import logging
     caplog.set_level(logging.WARNING)
@@ -621,10 +651,10 @@ async def test_seed_single_failure_logs_warning_with_exc_info(session, monkeypat
 
     original = DividendNoticeScanService.fetch_and_upsert_master
 
-    async def _flaky(self, mid, code, detail, stats):
-        if code == code_a:  # 仅 A 失败（1/3 < 50%）
+    async def _flaky(self, mid, code, detail, stats, retention_years=None):
+        if code == code_a:  # 仅 A 失败（1 只，远低于阈值 600）
             raise RuntimeError("boom")
-        return await original(self, mid, code, detail, stats)
+        return await original(self, mid, code, detail, stats, retention_years)
 
     monkeypatch.setattr(DividendNoticeScanService, "fetch_and_upsert_master", _flaky)
 
@@ -641,9 +671,16 @@ async def test_seed_single_failure_logs_warning_with_exc_info(session, monkeypat
 
 
 @pytest.mark.asyncio
-async def test_seed_aborts_when_failure_ratio_over_half(session, monkeypatch):
-    """行动项 8（§6.2）：整轮失败占比 > 50% → 冒泡（使 scheduler 记 FAILED 而非 SUCCESS）。"""
-    # seed set = 全表证券；两只全失败 → 2/2 = 100% > 50%
+async def test_seed_aborts_when_failure_count_exceeds_threshold(session, monkeypatch):
+    """行动项 8（§6.2；owner 2026-09-22 改**绝对只数**）：失败只数 > 阈值 → 冒泡（记 FAILED）。
+
+    生产阈值 600 只（约 seed set 5923 的 10%）；单测造不出 600 只失败证券，故 monkeypatch
+    阈值为 1，用「2 只全失败（2 > 1）」验证**判据本身**与错误消息口径。
+    """
+    from app.services import dividend_seed as ds
+
+    monkeypatch.setattr(ds, "_FAILURE_ABSOLUTE_RAISE", 1)
+    # 两只全失败 → 2 > 1
     await _add_master(session, code="600519", name="证券A")
     await _add_master(session, code="000001", name="证券B")
     await _seed_detail_source(session)
@@ -651,18 +688,21 @@ async def test_seed_aborts_when_failure_ratio_over_half(session, monkeypatch):
     fake, _calls = _make_raw({})
     monkeypatch.setattr(MarketDataSyncService, "call_interface_raw", fake)
 
-    async def _boom(self, mid, code, detail, stats):
+    async def _boom(self, mid, code, detail, stats, retention_years=None):
         raise RuntimeError("上游整体失效（模拟）")
 
     monkeypatch.setattr(DividendNoticeScanService, "fetch_and_upsert_master", _boom)
 
-    with pytest.raises(RuntimeError, match="失败占比过高"):
+    with pytest.raises(RuntimeError, match="失败只数过多"):
         await DividendSeedService(session).seed_initial_dividends(None)
 
 
 @pytest.mark.asyncio
-async def test_seed_no_abort_when_failure_ratio_at_half(session, monkeypatch):
-    """行动项 8（§6.2 边界）：失败占比 == 50% 时**不**冒泡（严格 ``> 0.5``）→ 摘要正常。"""
+async def test_seed_no_abort_when_failure_count_at_threshold(session, monkeypatch):
+    """行动项 8（§6.2 边界，绝对只数）：失败只数 == 阈值时**不**冒泡（严格 ``> 阈值``）→ 摘要正常。"""
+    from app.services import dividend_seed as ds
+
+    monkeypatch.setattr(ds, "_FAILURE_ABSOLUTE_RAISE", 1)
     a = await _add_master(session, code="600519", name="证券A")
     await _add_master(session, code="000001", name="证券B")
     await _seed_detail_source(session)
@@ -673,10 +713,10 @@ async def test_seed_no_abort_when_failure_ratio_at_half(session, monkeypatch):
 
     original = DividendNoticeScanService.fetch_and_upsert_master
 
-    async def _flaky(self, mid, code, detail, stats):
-        if code == code_a:  # 1/2 = 50%，恰不触发
+    async def _flaky(self, mid, code, detail, stats, retention_years=None):
+        if code == code_a:  # 1 只失败 == 阈值 1，恰不触发（严格 >）
             raise RuntimeError("单只失败（模拟）")
-        return await original(self, mid, code, detail, stats)
+        return await original(self, mid, code, detail, stats, retention_years)
 
     monkeypatch.setattr(DividendNoticeScanService, "fetch_and_upsert_master", _flaky)
 
@@ -717,7 +757,7 @@ async def test_seed_progress_transitions_to_done(session, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_seed_progress_reports_failed_count(session, monkeypatch):
-    """进度可视化：单只失败 rollback 续跑 → failed==1，state 仍为 done（未超 50% 阈值）。"""
+    """进度可视化：单只失败 rollback 续跑 → failed==1，state 仍为 done（1 只远低于阈值 600）。"""
     from app.services.dividend_seed import seed_progress
 
     a = await _add_master(session, code="600519", name="证券A")
@@ -731,10 +771,10 @@ async def test_seed_progress_reports_failed_count(session, monkeypatch):
 
     original = DividendNoticeScanService.fetch_and_upsert_master
 
-    async def _flaky(self, mid, code, detail, stats):
-        if code == code_a:  # 仅 A 失败（1/3 < 50%）
+    async def _flaky(self, mid, code, detail, stats, retention_years=None):
+        if code == code_a:  # 仅 A 失败（1 只，远低于阈值 600）
             raise RuntimeError("单只失败（模拟）")
-        return await original(self, mid, code, detail, stats)
+        return await original(self, mid, code, detail, stats, retention_years)
 
     monkeypatch.setattr(DividendNoticeScanService, "fetch_and_upsert_master", _flaky)
 
@@ -748,10 +788,12 @@ async def test_seed_progress_reports_failed_count(session, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_seed_progress_error_on_ratio_bubble(session, monkeypatch):
-    """进度可视化：失败率 >50% 冒泡 → state=error，failed 反映失败只数，error 含原因。"""
+async def test_seed_progress_error_on_failure_bubble(session, monkeypatch):
+    """进度可视化：失败只数超阈值冒泡 → state=error，failed 反映失败只数，error 含原因。"""
+    from app.services import dividend_seed as ds
     from app.services.dividend_seed import seed_progress
 
+    monkeypatch.setattr(ds, "_FAILURE_ABSOLUTE_RAISE", 1)
     await _add_master(session, code="600519", name="证券A")
     await _add_master(session, code="000001", name="证券B")
     await _seed_detail_source(session)
@@ -759,15 +801,15 @@ async def test_seed_progress_error_on_ratio_bubble(session, monkeypatch):
     fake, _calls = _make_raw({})
     monkeypatch.setattr(MarketDataSyncService, "call_interface_raw", fake)
 
-    async def _boom(self, mid, code, detail, stats):
+    async def _boom(self, mid, code, detail, stats, retention_years=None):
         raise RuntimeError("上游整体失效（模拟）")
 
     monkeypatch.setattr(DividendNoticeScanService, "fetch_and_upsert_master", _boom)
 
-    with pytest.raises(RuntimeError, match="失败占比过高"):
+    with pytest.raises(RuntimeError, match="失败只数过多"):
         await DividendSeedService(session).seed_initial_dividends(None)
 
     assert seed_progress.state == "error"
     assert seed_progress.failed == 2
-    assert seed_progress.error is not None and "失败占比过高" in seed_progress.error
+    assert seed_progress.error is not None and "失败只数过多" in seed_progress.error
     assert seed_progress.finished_at is not None

@@ -18,8 +18,8 @@ serviceable 子集（约 5923 只），而非 ``securities`` 全表（约 11430 
 **与 DividendNoticeScanService 的关系是「组合」而非「继承」**：本类持有自己的
 session，内部实例化一个 scan service 作为采集能力提供方，复用它的两个既有能力——
 - ``fetch_and_upsert_master``（单只入口，内部已做纯数字 symbol → 调巨潮 → 遍历
-  全行 → ``parse_cninfo_row_ex`` → 真 5 年裁剪 ``retention_cutoff_year`` → upsert）；
-  播种**不得**另写一套解析。
+  全行 → ``parse_cninfo_row_ex`` → 近 N 年裁剪 ``retention_cutoff_year``（years 取配置，
+  默认 5）→ upsert）；播种**不得**另写一套解析。
 - ``_reresolve_detail_safe``（``rollback()`` 后重解析明细源，防 MissingGreenlet
   连锁失败）。
 拼接它的实例而非继承，是因为播种不改写 scan 的任何行为，只需要这两项能力。
@@ -35,6 +35,7 @@ from sqlalchemy import select
 
 from app.core.date_utils import today_app_tz
 from app.models import Security, SecurityDividend, SecurityType
+from app.models.dividend_yield import DEFAULT_DIVIDEND_RETENTION_YEARS
 from app.services.dividend_cninfo_parse import retention_cutoff_year
 from app.services.dividend_notice_scan import DividendNoticeScanService, _bump
 from app.services.dividend_yield_refresh import refresh_yields_for_masters
@@ -49,13 +50,13 @@ _STATS_KEYS: frozenset = frozenset({
 # 分批粒度：同时用作「每 200 只打一条进度日志」的间隔与断点检查点的 IN 批大小（§5.7）
 _SEED_CHUNK = 200
 
-# 失败占比阈值（行动项 8，设计 §6.2；与 scan 同口径同取值）。逐只容错是「单只异常 →
-# rollback 续下一只」；但整轮失败率超过该阈值即判定为「上游整体失效」，必须冒泡
-# （RuntimeError）让 scheduler 记 FAILED，而非把上万只吞成 skipped、摘要仍报「完成」。
-# 分母 = seed set 规模（serviceable STOCK 子集，约 5923 只，非 securities 全表 11430）；
-# 50% ≈ 2962 只真异常 → 巨潮对沪深京出现灾难性整体失效才触发，属「上游挂了」而非
-# 「个别板块抖动」（局部失败被逐只容错吞掉，符合设计意图）。
-_FAILURE_RATIO_RAISE = 0.5
+# 失败只数阈值（行动项 8，设计 §6.2；owner 2026-09-22 裁定：由**比例**改为**绝对只数**）。
+# 逐只容错是「单只异常 → rollback 续下一只」；但整轮失败只数超过该阈值即判定为「上游整体
+# 失效」，必须冒泡（RuntimeError）让 scheduler 记 FAILED，而非把上万只吞成 skipped、摘要
+# 仍报「完成」。用绝对只数而非比例的理由：① seed set 是已知有界的 serviceable STOCK 子集
+# （约 5923 只），600 只真异常已足以表征巨潮对沪深京出现灾难性整体失效（约 10%），远比
+# 「半场崩盘（50%≈2962 只）才中止」更早止损；② 语义不受 set 规模变化影响，运维可直接解读。
+_FAILURE_ABSOLUTE_RAISE = 600
 
 logger = logging.getLogger(__name__)
 
@@ -113,7 +114,14 @@ class DividendSeedService:
         stats: dict[str, int] = {k: 0 for k in _STATS_KEYS}
         stats["rows"] = total  # seed set 规模（serviceable STOCK 子集，约 5923 只）
         # 明细源缺失/停用沿用 scan():232 口径：不 fail fast，跳过逐只采集并在摘要里标注
-        detail = await self._scan._resolve_detail_itf(await self._scan._settings())
+        settings = await self._scan._settings()
+        detail = await self._scan._resolve_detail_itf(settings)
+        # 留存窗年数：与 retention_cleanup 共用同一配置，保证「采集窗 == 清理窗」
+        retention_years = (
+            settings.dividend_retention_years
+            if settings is not None and settings.dividend_retention_years is not None
+            else DEFAULT_DIVIDEND_RETENTION_YEARS
+        )
         covered_skipped = 0  # 断点续跑：已覆盖而跳过的只数
         changed: set[str] = set()
 
@@ -134,7 +142,9 @@ class DividendSeedService:
             # 检查点按批判定：避免一次性把「近 5 年全表 DISCTINCT master_id」拉进内存，
             # 批内 IN 列表只有 _SEED_CHUNK 个 UUID，走索引、结果集极小。
             covered = (
-                await self._covered_masters(detail.name, [mid for mid, _ in chunk])
+                await self._covered_masters(
+                    detail.name, [mid for mid, _ in chunk], retention_years
+                )
                 if detail is not None
                 else set()
             )
@@ -149,7 +159,7 @@ class DividendSeedService:
                 try:
                     dirty = False
                     if detail is not None and await self._scan.fetch_and_upsert_master(
-                        mid, code, detail, stats
+                        mid, code, detail, stats, retention_years
                     ):
                         dirty = True
                     await self.session.commit()
@@ -182,20 +192,21 @@ class DividendSeedService:
             seed_progress.failed = stats["skipped"]
             seed_progress.covered = covered_skipped
 
-        # 失败占比过高 → 冒泡（行动项 8，§6.2；与 scan 同口径同阈值）：使 scheduler 记
-        # FAILED。total 为 seed set 规模（serviceable STOCK 子集，约 5923 只）；
-        # covered_skipped 是「已完成跳过」，不计失败。total==0（无证券）时不做除法、也不判失败。
-        if total > 0 and stats["skipped"] / total > _FAILURE_RATIO_RAISE:
-            # 进度可视化：失败率冒泡 → 置 error（与 _run_seed 的兜底异常捕获二选一生效）
+        # 失败只数过多 → 冒泡（行动项 8，§6.2；owner 2026-09-22 改绝对只数）：使 scheduler 记
+        # FAILED。判据只看真异常只数 stats["skipped"]，与 seed set 规模（约 5923 只）无关；
+        # covered_skipped 是「已完成跳过」，不计失败。绝对阈值无需 total>0 守卫（无证券时
+        # skipped 恒为 0，不会误判）。
+        if stats["skipped"] > _FAILURE_ABSOLUTE_RAISE:
+            # 进度可视化：失败只数冒泡 → 置 error（与 _run_seed 的兜底异常捕获二选一生效）
             seed_progress.state = "error"
             seed_progress.error = (
-                f"失败占比过高：{stats['skipped']}/{total} 只"
-                f"（阈值 {_FAILURE_RATIO_RAISE:.0%}），疑似上游整体失效"
+                f"失败只数过多：{stats['skipped']} 只（阈值 {_FAILURE_ABSOLUTE_RAISE} 只），"
+                f"疑似上游整体失效"
             )
             seed_progress.finished_at = _seed_progress_now()
             raise RuntimeError(
-                f"历史分红播种失败占比过高：{stats['skipped']}/{total} 只失败"
-                f"（阈值 {_FAILURE_RATIO_RAISE:.0%}），疑似上游整体失效，终止并标记 FAILED"
+                f"历史分红播种失败只数过多：{stats['skipped']} 只失败"
+                f"（阈值 {_FAILURE_ABSOLUTE_RAISE} 只），疑似上游整体失效，终止并标记 FAILED"
             )
 
         # 未收录标签聚合告警：整轮仅一条（样例取出现频次最高的 3 种），与 scan 同口径。
@@ -250,8 +261,10 @@ class DividendSeedService:
         ).all()
         return [(str(row[0]), str(row[1])) for row in rows]
 
-    async def _covered_masters(self, source: str, mids: list[str]) -> set[str]:
-        """断点续跑检查点：本批 mids 中「已由当前明细源写入近 5 年记录」的 master_id。
+    async def _covered_masters(
+        self, source: str, mids: list[str], retention_years: int
+    ) -> set[str]:
+        """断点续跑检查点：本批 mids 中「已由当前明细源写入近 N 年记录」的 master_id。
 
         **为什么必须带 ``source = :source``（关键陷阱）**：P1 才会删除旧新浪存量行
         （``source='新浪-分红配股'``，方案 §6）。在 P1 执行前，大量未播种的证券在
@@ -269,7 +282,7 @@ class DividendSeedService:
         不再等于新名，这批证券会被判定为未覆盖而重跑一遍——upsert 幂等，代价仅为一次
         约 19 小时的重跑，不追求该场景下的极致省时（正确性优先）。
         """
-        cutoff_year = retention_cutoff_year(today_app_tz())  # 真 5 年：[cur-4, cur]
+        cutoff_year = retention_cutoff_year(today_app_tz(), retention_years)  # 真 N 年：[cur-N+1, cur]
         rows = (
             await self.session.execute(
                 select(SecurityDividend.master_id)

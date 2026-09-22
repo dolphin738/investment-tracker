@@ -37,6 +37,7 @@ from sqlalchemy import select
 
 from app.core.date_utils import today_app_tz
 from app.models import QuoteInterface, SecurityDividend
+from app.models.dividend_yield import DEFAULT_DIVIDEND_RETENTION_YEARS
 from app.models.enums import DividendStatus
 from app.services.dividend_cninfo_parse import (
     CninfoDividendRow,
@@ -119,7 +120,13 @@ class DividendNoticeScanService(NoticeMetaMixin):
         )
         all_mids = candidate_mids | cancel_mids | proposed_mids
         sec_code = await self._master_code_map(all_mids)
-        detail = await self._resolve_detail_itf(await self._settings())
+        settings = await self._settings()
+        detail = await self._resolve_detail_itf(settings)
+        retention_years = (
+            settings.dividend_retention_years
+            if settings is not None and settings.dividend_retention_years is not None
+            else DEFAULT_DIVIDEND_RETENTION_YEARS
+        )
         changed: set[str] = set()
 
         # 按证券独立处理 + commit（断点即数据本身）
@@ -140,7 +147,7 @@ class DividendNoticeScanService(NoticeMetaMixin):
                 # 同一证券若另有候选公告，仍须照常拉全历史。
                 want_fetch = (mid in candidate_mids) or (not is_cancel)
                 if want_fetch and detail is not None:
-                    if await self.fetch_and_upsert_master(mid, code, detail, stats):
+                    if await self.fetch_and_upsert_master(mid, code, detail, stats, retention_years):
                         dirty = True
                 await self.session.commit()
                 if dirty:
@@ -196,9 +203,10 @@ class DividendNoticeScanService(NoticeMetaMixin):
         )
 
     async def fetch_and_upsert_master(
-        self, mid: str, code: str, detail: QuoteInterface, stats: dict
+        self, mid: str, code: str, detail: QuoteInterface, stats: dict,
+        retention_years: int | None = None,
     ) -> bool:
-        """单只证券：调巨潮拉全历史 → 按 §5.3 映射 → 5 年裁剪 → upsert。返回是否有变更。
+        """单只证券：调巨潮拉全历史 → 按 §5.3 映射 → 近 N 年裁剪（years 取配置，默认 5）→ upsert。返回是否有变更。
 
         供每日 ``scan()`` 与首跑播种（§5.7）共用：代码取参数 ``code`` 的纯数字部分
         （响应无代码列），遍历**全部返回行**（不再是「取当天那一条」）。
@@ -214,7 +222,12 @@ class DividendNoticeScanService(NoticeMetaMixin):
         digits = re.sub(r"\D", "", code)  # sh600519 → 600519
         params = {**(detail.params or {}), "symbol": digits}
         rows = await self._mds.call_interface_raw(detail, params, None)
-        cutoff_year = retention_cutoff_year(today_app_tz())  # 真 5 年：[cur-4, cur]
+        years = (
+            retention_years
+            if retention_years is not None
+            else DEFAULT_DIVIDEND_RETENTION_YEARS
+        )
+        cutoff_year = retention_cutoff_year(today_app_tz(), years)  # 真 N 年：[cur-years+1, cur]
         dirty = False
         for r in rows:
             parsed, skip_reason = parse_cninfo_row_ex(r)

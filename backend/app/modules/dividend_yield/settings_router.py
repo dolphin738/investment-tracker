@@ -24,6 +24,7 @@ from app.models import (
     DividendYieldSettings,
     QuoteInterface,
 )
+from app.models.dividend_yield import DEFAULT_DIVIDEND_RETENTION_YEARS
 from app.services.auth import CurrentUser, get_current_user, require_admin
 from app.services.log import record
 from app.services.market_data_sync import (
@@ -34,10 +35,10 @@ from app.services.market_data_sync import (
 
 router_settings = APIRouter(route_class=EnvelopeRoute)
 
-# 留存窗年数（D-4 配置化）：可配范围与默认（对齐 dividend_sync._RETENTION_YEARS=5 的兜底）。
+# 留存窗年数（D-4 配置化）：可配范围；默认值取模型 ``DEFAULT_DIVIDEND_RETENTION_YEARS``
+# （亦即 DB 列 server_default='5'），全局唯一默认值来源。
 RETENTION_YEARS_MIN = 1
 RETENTION_YEARS_MAX = 10
-DEFAULT_RETENTION_YEARS = 5
 
 
 class SettingsUpdateBody(BaseModel):
@@ -147,7 +148,7 @@ async def _settings_out(db: AsyncSession, row: DividendYieldSettings) -> dict[st
         "dividend_retention_years": (
             row.dividend_retention_years
             if row.dividend_retention_years is not None
-            else DEFAULT_RETENTION_YEARS
+            else DEFAULT_DIVIDEND_RETENTION_YEARS
         ),
     }
 

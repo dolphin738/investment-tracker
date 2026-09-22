@@ -49,9 +49,10 @@ _PERIOD_TYPE_BY_LABEL: dict[str, ReportPeriodType] = {
 # 已收录的「分红类型」原文标签（撞键/未知标签判定用）：命中则不记 unknown_label。
 KNOWN_LABELS = frozenset(_PERIOD_TYPE_BY_LABEL)
 
-# 留存财年数（真 5 年，§9.3-A3）：保留 [cur-4, cur]，与 dividend_sync.retention_cleanup
-# 的 cutoff = cur - 5 + 1 严格对齐，否则播种写入的第 6 个年度会被下次清理删掉。
-RETAIN_YEARS = 5
+# 留存财年数（§9.3-A3）：保留 [cur-years+1, cur]，与 ``dividend_sync.retention_cleanup`` 的
+# cutoff 公式一致。years 由调用方从 ``settings.dividend_retention_years`` 传入（默认回落
+# ``DEFAULT_DIVIDEND_RETENTION_YEARS``），采集窗与清理窗共用同一配置 → 由构造保证对齐；
+# 不再在此硬编码常量，否则配置改非 5 时写入的年度会被下次清理删掉。
 
 
 @dataclass(frozen=True)
@@ -72,9 +73,13 @@ class CninfoDividendRow:
     dividend_label: Optional[str]
 
 
-def retention_cutoff_year(today: date) -> int:
-    """留存窗口下界财年：保留 [today.year - RETAIN_YEARS + 1, today.year]。"""
-    return today.year - RETAIN_YEARS + 1
+def retention_cutoff_year(today: date, years: int) -> int:
+    """留存窗口下界财年：保留 [today.year - years + 1, today.year]（真 N 年）。
+
+    ``years`` 由调用方从 ``settings.dividend_retention_years`` 传入，确保采集窗与
+    ``retention_cleanup`` 的清理窗使用同一配置值（默认回落 ``DEFAULT_DIVIDEND_RETENTION_YEARS``）。
+    """
+    return today.year - years + 1
 
 
 def _normalize_text(raw: Any) -> Optional[str]:

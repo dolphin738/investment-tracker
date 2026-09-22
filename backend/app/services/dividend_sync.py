@@ -7,7 +7,8 @@
 本模块同时承载两个采集 handler 共享的派生快照重建入口：
 ``refresh_yields_for_masters``（market_daily_price_sync / dividend_notice_scan 复用）。
 
-- ``dividend_retention_cleanup``：按 ``report_year`` 清理 5 年前记录，顺带刷新交易日历（决策 A9）。
+- ``dividend_retention_cleanup``：按 ``report_year`` 清理 N 年前记录（N 取配置，默认 5），
+  顺带刷新交易日历（决策 A9）。
 - ``dividend_yield_rebuild``：全量重建派生快照（默认禁用，admin 手动 trigger）。
 """
 from __future__ import annotations
@@ -27,6 +28,7 @@ from app.models import (
     SecurityDividend,
     SecurityDividendYield,
 )
+from app.models.dividend_yield import DEFAULT_DIVIDEND_RETENTION_YEARS
 from app.services.market_data_sync import MarketDataSyncService
 from app.services.response_fields import code_candidates_for
 from app.services.dividend_period import subtract_years
@@ -37,8 +39,8 @@ from app.services.dividend_yield_refresh import (
 
 logger = logging.getLogger(__name__)
 
-# 留存窗口（§6.3）：保留最近 5 个财年
-_RETENTION_YEARS = 5
+# 留存窗口（§6.3）：保留最近 N 个财年；N 读配置 ``dividend_retention_years``（D-4 配置化），
+# 缺失回落 ``DEFAULT_DIVIDEND_RETENTION_YEARS``（与 DB 列 server_default='5' 一致）。
 # 日线留存（§6.3）：曲线只需 1 年，留 1 年余量，保留 2 年
 _PRICE_RETENTION_YEARS = 2
 
@@ -81,15 +83,15 @@ class DividendSyncService:
         日线按 trade_date 保留 ``_PRICE_RETENTION_YEARS`` 年。
 
         年数读全局配置 ``dividend_yield_settings.dividend_retention_years``（D-4 配置化，
-        owner 定「完整可配」）；未配置（无配置行 / 显式 NULL）时回落常量
-        ``_RETENTION_YEARS`` 作默认，避免前端硬编码 ``cur-4`` 漂移。
+        owner 定「完整可配」）；未配置（无配置行 / 显式 NULL）时回落
+        ``DEFAULT_DIVIDEND_RETENTION_YEARS`` 作默认，避免前端硬编码 ``cur-4`` 漂移。
         """
         today = today_app_tz()
         settings = await self._settings()
         years = (
             settings.dividend_retention_years
             if settings is not None and settings.dividend_retention_years is not None
-            else _RETENTION_YEARS
+            else DEFAULT_DIVIDEND_RETENTION_YEARS
         )
         cutoff = today.year - years + 1
         doomed_masters = set(

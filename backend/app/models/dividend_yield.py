@@ -307,10 +307,19 @@ class DividendYieldSettings(Base, TimestampMixin):
     trade_calendar_start_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     # 分红留存窗年数（D-4 配置化）：retention_cleanup 保留 [cur-years+1, cur] 个财年；
     # 可空 + server_default '5'（存量行自动获 5；显式 NULL 语义为「用默认值」）。
+    # 默认值全局唯一定义于模块级 ``DEFAULT_DIVIDEND_RETENTION_YEARS``（与 server_default 一致），
+    # 采集窗（retention_cutoff_year）与清理窗（retention_cleanup）均回落它，避免多处硬编码 5 漂移。
     dividend_retention_years: Mapped[Optional[int]] = mapped_column(
         Integer, nullable=True, server_default=text("'5'")
     )
     updated_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+
+
+# 分红留存窗默认年数（D-4 配置化，2026-09-22 收口）：与 ``DividendYieldSettings.dividend_retention_years``
+# 列的 ``server_default='5'`` 一致；配置缺失 / 显式 NULL 时采集窗（retention_cutoff_year）与清理窗
+# （retention_cleanup）均回落此值。全局唯一默认值来源，取代原分散的 ``RETAIN_YEARS`` /
+# ``_RETENTION_YEARS`` 硬编码常量。
+DEFAULT_DIVIDEND_RETENTION_YEARS = 5
 
 
 class MarketTradeCalendar(Base):
