@@ -154,6 +154,31 @@ export function seedInitialDividends(): Promise<{ message: string }> {
   );
 }
 
+/** 首跑播种运行进度（进程内内存态；admin-only 读端点） */
+export interface SeedProgress {
+  /** idle | running | done | error */
+  state: string;
+  total: number;
+  processed: number;
+  /** 本轮实际拉取并落库的证券只数 */
+  hits: number;
+  /** 单只异常 rollback 续跑的只数（≡ 失败只数） */
+  failed: number;
+  /** 断点续跑判定「已完成」而跳过的只数 */
+  covered: number;
+  started_at: string | null;
+  finished_at: string | null;
+  error: string | null;
+  message: string | null;
+}
+
+/** 查询历史分红补齐 / 播种的实时进度（admin-only） */
+export function getSeedProgress(): Promise<SeedProgress> {
+  return http.get<SeedProgress>(
+    '/dividend-yield/seed-initial-dividends/progress',
+  );
+}
+
 // ============================================================================
 // 待人工划分分红（批次 C/D · /dividend-yield/pending-dividends/*）
 //

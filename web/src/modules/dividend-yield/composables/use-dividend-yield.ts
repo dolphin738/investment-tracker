@@ -22,6 +22,7 @@ import {
   getDividendYieldRank,
   getDividendYieldSettings,
   getDividendYieldTop20,
+  getSeedProgress,
   rebuildDividendYield,
   seedInitialDividends,
   updateDividendYieldSettings,
@@ -194,11 +195,33 @@ export function useRebuildDividendYield() {
  * 用户可在跑完后手动刷新。该取舍与原回补 composable 保持一致。
  */
 export function useSeedInitialDividends() {
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: () => seedInitialDividends(),
     onSuccess: (data) => {
       toast.success(data.message || '已触发历史分红补齐，后台执行中');
+      // 触发成功后立即拉一次进度，使前端轮询从 running 态开始
+      queryClient.invalidateQueries({
+        queryKey: [...DIVIDEND_YIELD_KEY, 'seed-progress'],
+      });
     },
     onError: () => toast.error('历史分红补齐触发失败，请稍后重试'),
+  });
+}
+
+/**
+ * 查询历史分红补齐 / 播种的实时进度（admin-only）。
+ *
+ * 仅在 running 态以 3s 间隔轮询；done/error/idle 不轮询（避免空转）。
+ * 仅 admin 启用（GET 端点本身也 require_admin，非 admin 调用会 403）。
+ */
+export function useSeedProgress(enabled: MaybeRefOrGetter<boolean> = true) {
+  return useQuery({
+    queryKey: [...DIVIDEND_YIELD_KEY, 'seed-progress'],
+    queryFn: () => getSeedProgress(),
+    enabled: toValue(enabled),
+    staleTime: 0,
+    refetchInterval: (query) =>
+      query.state.data?.state === 'running' ? 3000 : false,
   });
 }

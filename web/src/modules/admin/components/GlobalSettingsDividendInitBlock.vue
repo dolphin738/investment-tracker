@@ -34,6 +34,7 @@ import { useIsAdmin } from '@/stores/auth.store';
 import {
   useRebuildDividendYield,
   useSeedInitialDividends,
+  useSeedProgress,
 } from '@/modules/dividend-yield/composables/use-dividend-yield';
 import { usePendingDividendSummary } from '@/modules/dividend-yield/composables/use-pending-dividends';
 
@@ -58,6 +59,19 @@ function confirmSeed(): void {
   seedConfirmOpen.value = false;
   seed.mutate();
 }
+
+// ── 补齐历史分红进度可视化（仅 admin；running 态由 composable 内部轮询） ──
+const progress = useSeedProgress(isAdmin);
+const progressData = computed(() => progress.data.value ?? null);
+const progressStateLabel = computed(() => {
+  const s = progressData.value?.state;
+  return s === 'running' ? '运行中' : s === 'done' ? '已完成' : s === 'error' ? '失败' : '空闲';
+});
+const progressPercent = computed(() => {
+  const p = progressData.value;
+  if (!p || !p.total) return 0;
+  return Math.min(100, Math.round((p.processed / p.total) * 100));
+});
 
 // ── 待人工划分入口（仅 admin；非授权不发请求，staleTime 30s） ──
 const summary = usePendingDividendSummary(isAdmin);
@@ -104,6 +118,71 @@ function goPending(): void {
       >
         {{ pendingCount > 0 ? `待人工划分 ${pendingCount} 笔 →` : '暂无待划分' }}
       </Button>
+    </div>
+
+    <!-- 补齐历史分红进度可视化：running/done/error 态展示；idle 不渲染 -->
+    <div
+      v-if="progressData && progressData.state !== 'idle'"
+      class="rounded-md border border-border bg-muted/30 p-3 text-sm"
+    >
+      <div class="mb-2 flex items-center justify-between">
+        <span class="font-medium">
+          {{
+            progressData.state === 'running'
+              ? '补齐历史分红进行中'
+              : progressData.state === 'done'
+                ? '补齐历史分红完成'
+                : '补齐历史分红失败'
+          }}
+        </span>
+        <span
+          class="rounded px-2 py-0.5 text-xs"
+          :class="
+            progressData.state === 'running'
+              ? 'bg-blue-500/15 text-blue-400'
+              : progressData.state === 'done'
+                ? 'bg-green-500/15 text-green-400'
+                : 'bg-destructive/15 text-destructive'
+          "
+        >
+          {{ progressStateLabel }}
+        </span>
+      </div>
+
+      <!-- 进度条（已处理 / 全表） -->
+      <div class="mb-2 h-2 w-full overflow-hidden rounded bg-muted">
+        <div
+          class="h-full bg-primary transition-all"
+          :style="{ width: `${progressPercent}%` }"
+        />
+      </div>
+
+      <div
+        class="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground sm:grid-cols-4"
+      >
+        <div>
+          已处理
+          <span class="text-foreground">{{ progressData.processed }} / {{ progressData.total }}</span>
+        </div>
+        <div>本轮处理 <span class="text-foreground">{{ progressData.hits }}</span></div>
+        <div>已覆盖跳过 <span class="text-foreground">{{ progressData.covered }}</span></div>
+        <div>
+          失败 <span class="text-destructive">{{ progressData.failed }}</span>
+        </div>
+      </div>
+
+      <p
+        v-if="progressData.state === 'error' && progressData.error"
+        class="mt-2 text-xs text-destructive"
+      >
+        错误：{{ progressData.error }}
+      </p>
+      <p
+        v-else-if="progressData.state === 'done' && progressData.message"
+        class="mt-2 text-xs text-muted-foreground"
+      >
+        {{ progressData.message }}
+      </p>
     </div>
 
     <!-- 补齐历史分红二次确认（约 19 小时的重操作，必须确认） -->
