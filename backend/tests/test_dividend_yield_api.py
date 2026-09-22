@@ -32,7 +32,11 @@ from app.models.enums import (
     ReportPeriodType,
     SecurityType,
 )
-from app.services.market_data_sync import DIVIDEND_LIST_CAT_ID, NOTICE_CAT_ID
+from app.services.market_data_sync import (
+    DIVIDEND_LIST_CAT_ID,
+    NOTICE_CAT_ID,
+    QUOTE_CAT_ID,
+)
 from tests.helpers import auth, env, register_login
 
 _DIVIDEND_CAT_ID = DIVIDEND_LIST_CAT_ID
@@ -285,15 +289,41 @@ async def _seed_category4_interface(session, *, enabled: bool = True):
     return itf
 
 
+async def _seed_quote_per_symbol_interface(session):
+    """分类 2「证券行情」+ 逐只形态行情接口（params 含 symbol），供行情源形态校验测试。
+
+    正常行情源应为「按报告期全量」（params 无 symbol）；此处故意造逐只形态的行情接口，
+    用于断言 require_per_symbol=False 分支的错误提示（修复回归守护）。
+    """
+    session.add(InterfaceCategory(id=QUOTE_CAT_ID, label="证券行情", system=True))
+    provider = SecuritiesDataProvider(
+        id=_uid(), name="akshare", access_method=QuoteProviderAccessMethod.SDK,
+        config={}, enabled=True,
+    )
+    session.add(provider)
+    await session.flush()
+    itf = QuoteInterface(
+        id=_uid(), provider_id=provider.id, category_id=QUOTE_CAT_ID,
+        name="逐只行情-误配", endpoint="stock_zh_a_hist", enabled=True,
+        params={"symbol": "600012"},
+    )
+    session.add(itf)
+    await session.commit()
+    return itf
+
+
 @pytest.mark.asyncio
 async def test_settings_put_interface_shape_validation(session, client):
-    """守护 §5.4 四重校验（P1-4）：补充源选「按报告期全量」接口（无 symbol）→ 400；
+    """守护 §5.4 四重校验（P1-4）+ 形态错误提示按源动态生成（两种错配各提示各自要求）：
+    分红明细源（require_per_symbol=True）误选「按报告期全量」→ 400，提示「须为按证券逐只」；
+    行情源（require_per_symbol=False）误选「按证券逐只」→ 400，提示「须为按报告期全量」；
     补充源逐只接口 → 200。"""
     admin = await _make_admin(session, client)
     main_itf, detail_itf = await _seed_category3_interfaces(session)
+    quote_itf = await _seed_quote_per_symbol_interface(session)
     h = auth(admin["token"])
 
-    # 补充源误选「按报告期全量」接口 → 400
+    # 分支一（require_per_symbol=True）：分红明细源误选「按报告期全量」接口 → 400
     r = await client.put(
         "/api/dividend-yield/settings",
         json={
@@ -301,7 +331,21 @@ async def test_settings_put_interface_shape_validation(session, client):
         },
         headers=h,
     )
-    assert r.status_code == 400
+    status, _, _, message = env(r)
+    assert status == 400
+    assert message == "接口调用形态不符：分红明细源须为按证券逐只接口（params 含 symbol）"
+
+    # 分支二（require_per_symbol=False）：行情源误选「按证券逐只」接口 → 400
+    r = await client.put(
+        "/api/dividend-yield/settings",
+        json={
+            "price_source_interface_id": quote_itf.id,
+        },
+        headers=h,
+    )
+    status, _, _, message = env(r)
+    assert status == 400
+    assert message == "接口调用形态不符：行情源须为按报告期全量接口（params 无 symbol）"
 
     # 各归其位 → 200 落库
     r = await client.put(

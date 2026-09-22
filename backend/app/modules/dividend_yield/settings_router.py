@@ -83,11 +83,14 @@ async def _validate_interface(
     interface_id: Optional[str],
     category_id: str,
     *,
+    source_label: str,
     require_per_symbol: bool,
 ) -> None:
     """接口四重校验（§5.4）：存在性 + 分类归属 + enabled + **调用形态**；缺省（null/省略）允许置空。
 
     形态不符须拒绝——接口形态与源的采集形态不匹配会让采集静默失效。
+    错误消息由 ``source_label``（调用方中文名）+ ``require_per_symbol`` 动态生成，
+    两种错配各提示各自的要求（旧版静态文案与校验方向相反，已废弃）。
     """
     if not interface_id:
         return
@@ -99,12 +102,14 @@ async def _validate_interface(
             status_code=400,
         )
     if _is_per_symbol_interface(itf) != require_per_symbol:
+        required = (
+            "按证券逐只接口（params 含 symbol）"
+            if require_per_symbol
+            else "按报告期全量接口（params 无 symbol）"
+        )
         raise BusinessException(
             code=BusinessErrorCode.VALIDATION_FAILED,
-            message=(
-                "接口调用形态不符：主源/行情源须为按报告期全量接口（params 无 symbol），"
-                "补充源须为按证券逐只接口（params 含 symbol）"
-            ),
+            message=f"接口调用形态不符：{source_label}须为{required}",
             status_code=400,
         )
 
@@ -165,14 +170,17 @@ async def put_dividend_yield_settings(
 ):
     """更新全局配置（§5.4/§6.6：非 admin 403；接口四重校验 400 不落库；AppLog 审计）。"""
     await _validate_interface(
-        db, body.dividend_detail_source_interface_id, DIVIDEND_LIST_CAT_ID, require_per_symbol=True
+        db, body.dividend_detail_source_interface_id, DIVIDEND_LIST_CAT_ID,
+        source_label="分红明细源", require_per_symbol=True,
     )
     await _validate_interface(
-        db, body.price_source_interface_id, QUOTE_CAT_ID, require_per_symbol=False
+        db, body.price_source_interface_id, QUOTE_CAT_ID,
+        source_label="行情源", require_per_symbol=False,
     )
     # 公告源：分类 4「公司公告」；stock_notice_report 接口 params 含 symbol → 逐只形态
     await _validate_interface(
-        db, body.announcement_source_interface_id, NOTICE_CAT_ID, require_per_symbol=True
+        db, body.announcement_source_interface_id, NOTICE_CAT_ID,
+        source_label="公告源", require_per_symbol=True,
     )
     # 留存窗年数（D-4）：范围 1~10；越界 400（None = 不改，豁免校验）
     if body.dividend_retention_years is not None and not (
