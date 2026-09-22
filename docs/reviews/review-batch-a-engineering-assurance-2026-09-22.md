@@ -3,27 +3,23 @@
 - 复核对象：`investment_return_tracker` 后端「分红报告期语义扩展」批次 A
 - 复核日期：2026-09-22
 - 复核角色：EngineeringAssuranceTeam（team `engineering-dividend-batch-a`，lead 综合 architect / testing-expert / code-reviewer / engineer-a 结论）
-- 代码状态：**工作树已实现、未提交**（部分文件 modified + 新增文件，详见文件清单）
+- 代码状态：**已实现，已提交（local，未 push）**（feat + docs 拆分两笔，author `senior-dev <dev@local>`）
 
 ---
 
 ## TL;DR
 
-批次 A 的**实现已完整落地并通过定向验证**：`ReportPeriodType` 追加 `OTHER` 枚举、
+批次 A 的**实现已完整落地并通过定向 + 全量验证**：`ReportPeriodType` 追加 `OTHER` 枚举、
 
 `security_dividends` 新增 `dividend_label` 原文标签列、巨潮「分红类型」5 项精确映射 + 未知标签兜底
 
 `OTHER`、撞键护栏（`effective_label` 对称口径 + 整行不更新）、`period_label()` 的 `OTHER` 分支定位、
 
-聚合 WARN 报文口径统一读 `stats["unknown_label"]`、Alembic 迁移 `0033`、以及 R1–R5 全部测试
-
-（共 +507 行，≤800 行数闸门通过）。
+聚合 WARN 报文口径统一读 `stats["unknown_label"]`、Alembic 迁移 `0033`、以及 R1–R5 全部测试。
 
 **定向 70 测试全绿、ruff 零告警、2 项只读自检通过，全量回归 697 passed / 3 xpassed / 0 failed（424.78s）**。
 
-**当前唯一阻塞是「未提交」**：所有改动还在工作树，需 owner / senior-dev 决策后提交。
-
-**未裁决项 L2**（`_westward_dup` 去重护栏未做 source 作用域）建议**单独立项**，不污染已验证的撞键护栏。
+**裁决**：L2（`_westward_dup` 去重护栏未做 source 作用域）已裁决 **③ 单独立项**；批次 A 已提交本地。
 
 ---
 
@@ -32,15 +28,15 @@
 | 维度 | 结论 | 证据 |
 |---|---|---|
 | 实现完整性 | ✅ 完成 | 枚举/模型/解析/period_label/scan+seed 护栏/router/迁移/测试 全部到位 |
-| 定向测试 | ✅ 70 passed / 0 failed | `pytest` 4 个 dividend 测试文件，`_t.log` |
+| 定向测试 | ✅ 70 passed / 0 failed | `pytest` 4 个 dividend 测试文件 |
 | 静态门禁 | ✅ ruff 0 问题 | `uvx --offline ruff check app tests conftest.py` → RUFF_EXIT=0 |
 | 只读自检 1 | ✅ 枚举含 OTHER | `backend/app/models/enums.py:157` |
 | 只读自检 2 | ✅ 列已存在 | `backend/app/models/dividend_yield.py` `dividend_label: Mapped[Optional[str]]` |
 | 行数闸门 | ✅ 507 ≤ 800 | `git diff --numstat` 加总行数（剔除 `.codebase-memory`） |
 | 全量回归 | ✅ 697 passed / 3 xpassed / 0 failed | task `YU8mle`，424.78s，0 失败 |
-| 提交状态 | ⚠️ 未提交 | `git status` 显示 modified + 新增文件 |
+| 提交状态 | ✅ 已提交（local，未 push） | feat + docs 两笔，author `senior-dev <dev@local>` |
 
-**整体判定：批次 A 实现层 🟢 通过 + 全量回归 🟢 0 失败；放行前仅剩「提交」一项动作（当前未提交）。**
+**整体判定：批次 A 实现层 🟢 + 全量回归 🟢 0 失败 + 已提交（local，未 push）；L2 已裁决单独立项。批次 A 放行完成。**
 
 ---
 
@@ -82,6 +78,7 @@
    - R5 两入口键集相等：`test_dividend_notice_scan.py:1024-1033` 断言 `set(scan._STATS_KEYS) == set(seed._STATS_KEYS)` 且含 `unknown_label/collision/no_period/skip`。
 
 7. **静态 + 行数**：`ruff` 0 问题；`git diff --numstat` 加总 507 行 ≤ 800。
+
 8. **全量回归（最终闸门）**：后台任务 `YU8mle` 跑完整 `pytest` —— **697 passed, 3 xpassed, 0 failed**（424.78s）。`xpassed` 为既有 xfail 标记用例实际通过（非新增），无新增失败。
 
 ---
@@ -90,14 +87,10 @@
 
 > 依交付约定：未裁决项**必须保留并列出**（ID + 选项 + 建议 + 依据），不得删除、不得只留行动清单。
 
-### U1 · L2 缺陷：`_westward_dup` 去重护栏未做 source 作用域（批次 A 内未修）
+### U1 · L2 缺陷：`_westward_dup` 去重护栏未做 source 作用域 —— ✅ 已裁决 ③ 单独立项
 - **现状**：`dividend_notice_scan.py:423` 注释「去重护栏只作用于『未命中目标格』的新增路径」；`_westward_dup` 仅按 `(mid, ex_date, year, quarter, cash)` 判重，**未含 source**。撞键护栏（命中路径）与之正交。
-- **选项**：
-  - ① 并入 A：本批次内直接给 `_westward_dup` 加 source 维度。
-  - ② 并入 C：随后续撞键/去重专项批次一起做。
-  - ③ **单独立项（建议）**：独立 issue，先确认「跨 source 同 ex_date 是否应视为同一笔」语义，再决定加 source 维度或保持现状。
-- **我的建议**：③。理由：与已验证的撞键护栏正交，混入 A 需重新走验证闸门、污染 70 测试已锁定的回归基线；且语义未定（跨 source 是否判重）不应在 A 内拍脑袋。
-- **依据**：`:423` 明确两护栏正交；A 已锁定定向 70 通过 + ruff clean，追加改动需重新验证，成本/收益上单独立项更优。
+- **✅ 已裁决（2026-09-22）：③ 单独立项。** 理由：与已验证的撞键护栏正交，混入 A 需重新走验证闸门、污染 70 测试已锁定的回归基线；且语义未定（跨 source 是否判重）不应在 A 内拍脑袋。
+- **后续动作**：单独立项时先确认「跨 source 同 ex_date 是否应视为同一笔」语义，再决定加 source 维度或保持现状。
 
 ### U2 · 前端 TS 联合类型补 `'OTHER'`（batch D）— ✅ 已实施（`1cc9b98`）
 - `period_type` 前端联合类型需补 `OTHER` 分支，否则类型收窄会丢 OTHER（前端页 batch D 一并处理）。非 A 阻塞。
@@ -123,21 +116,19 @@
 
 ## 需 owner 执行的事项（拍板后动手做）
 
-- **A1**：裁决 U1（L2）归属 —— 选 ① / ② / ③。若选 ③，立项并先定 source 语义。
-- **A2**：提交批次 A。当前为**未提交**状态（modified + 新增文件）。按项目约定由 `senior-dev <dev@local>` 以 Conventional Commits 提交，建议提交信息：
-  `feat(dividend): 分红报告期枚举扩展 OTHER + 原文标签列与撞键护栏`（本地 commit，不自动 push）。
+- **A1**：✅ 已裁决 **③ 单独立项**（2026-09-22）；后续立项时先定「跨 source 同 ex_date 是否判重」语义，不在 A 内改。
+- **A2**：✅ 已提交 —— 按项目约定由 `senior-dev <dev@local>` 以 Conventional Commits 提交（本地 commit，不自动 push），feat 与 docs 拆分两笔。
 - **A3**：✅ 全量回归已确认 —— `YU8mle` 实测 **697 passed / 3 xpassed / 0 failed**，可合入（本环境 conftest 会 session 级 DROP/CREATE 测试库，多个 pytest 进程会互毁，须串行）。
-- **A4**：✅ 已吸收 —— U2（batch D，`1cc9b98`）、U3（batch B）、U4（batch E）同批落地（`02dacbe`）；U5 已消解（数据清空）。
+- **A4**：✅ 已吸收 —— U2（batch D，`1cc9b98`）、U3（batch B）、U4（batch E）同批落地（`02dacbe`）；U5 已消解（数据清空）；L2 已单独立项（`89c666e`）。
 
 ---
 
 ## 免责声明（Disclaimer）
 
-本报告结论基于**当前工作树（未提交）**的静态核查 + 定向测试（70 passed）+ `ruff` 零告警 + 2 项只读自检 + 行数闸门（507≤800）。
-
-全量回归已由后台任务 `YU8mle` 实测完成：**697 passed / 3 xpassed / 0 failed**（424.78s），无新增失败。
+本报告结论基于工作树（已提交本地）的静态核查 + 定向测试（70 passed）+ `ruff` 零告警 + 2 项只读自检 + 行数闸门（507≤800）+ 全量回归实测（697 passed / 3 xpassed / 0 failed，424.78s）。
 
 已知约束不在本报告消解范围内：
 - 迁移 `0033` **非原子**（ALTER TYPE 与加列分两段事务），依赖 `IF NOT EXISTS` / 可重入自愈（见迁移 docstring）。
 - PG 枚举 `OTHER` 排序依赖「定义顺序 = 排序顺序」，已通过末尾追加保证；downgrade 对枚举值 **no-op**（PG 不支持 DROP VALUE）。
 - 结论不构成生产环境保证；上线前仍须走项目既有 CI 闸门（覆盖率 / knip / import-linter / check_line_budget）。
+- 本地提交未 push；如需推送，走 `dev-scripts/push-all.ps1` 或提供 `CNB_TOKEN`。
