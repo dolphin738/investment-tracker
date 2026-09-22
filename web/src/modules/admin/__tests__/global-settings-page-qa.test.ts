@@ -33,6 +33,7 @@ const settings = vi.hoisted<DividendYieldSettingsOut>(() => ({
   price_source: { id: 'i3', name: '腾讯财经-A股行情' },
   announcement_source: null,
   trade_calendar_start_date: null,
+  dividend_retention_years: 5,
 }));
 
 const mutateSpy = vi.hoisted(() => vi.fn());
@@ -47,6 +48,9 @@ vi.mock('@/modules/dividend-yield/composables/use-dividend-yield', () => ({
   }),
   useRebuildDividendYield: () => ({ isPending: ref(false), isError: ref(false), mutate: vi.fn() }),
   useSeedInitialDividends: () => ({ isPending: ref(false), isError: ref(false), mutate: vi.fn() }),
+  // 补齐历史分红进度轮询 + 取消（GlobalSettingsDividendInitBlock 消费）；null = 从未跑过（idle）
+  useSeedProgress: () => ({ data: ref(null) }),
+  useCancelSeed: () => ({ isPending: ref(false), isError: ref(false), mutate: vi.fn() }),
 }));
 
 vi.mock('@/modules/admin/composables/use-quote-provider', () => ({

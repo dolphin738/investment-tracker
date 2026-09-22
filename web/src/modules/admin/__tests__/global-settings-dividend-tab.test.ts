@@ -47,6 +47,7 @@ const settings = vi.hoisted<DividendYieldSettingsOut>(() => ({
   price_source: { id: 'i3', name: '腾讯财经-A股行情' },
   announcement_source: null,
   trade_calendar_start_date: null,
+  dividend_retention_years: 5,
 }));
 
 const mutateSpy = vi.hoisted(() => vi.fn());
@@ -70,6 +71,15 @@ vi.mock('@/modules/dividend-yield/composables/use-dividend-yield', () => ({
     mutate: vi.fn(),
   }),
   useSeedInitialDividends: () => ({
+    isPending: ref(false),
+    isError: ref(false),
+    mutate: vi.fn(),
+  }),
+  // 补齐历史分红进度轮询（GlobalSettingsDividendInitBlock 消费）；null = 从未跑过（idle）
+  useSeedProgress: () => ({
+    data: ref(null),
+  }),
+  useCancelSeed: () => ({
     isPending: ref(false),
     isError: ref(false),
     mutate: vi.fn(),
@@ -250,6 +260,7 @@ const DIVIDEND_INTERFACE_SELECT_IDS = [
 beforeEach(() => {
   vi.clearAllMocks();
   settings.trade_calendar_start_date = null;
+  settings.dividend_retention_years = 5;
   pendingSummaryState.isLoading = false;
   pendingSummaryState.data = { pending: 3 };
 });
@@ -341,6 +352,37 @@ describe('GlobalSettingsPage — 顶层 TAB 与全局设置', () => {
       .find((b) => b.text().includes('暂无待划分'))!;
     expect(idle).toBeTruthy();
     expect(idle.attributes('disabled')).toBeDefined();
+    wrapper.unmount();
+  });
+
+  it('④ 分红留存年数：回填默认 5、改动进保存载荷、越界值夹到 1~10', async () => {
+    wrapper = await mountPage();
+    await switchTab(wrapper, 'dividend');
+
+    // 回填服务端值 5，且限幅属性生效（与后端 RETENTION_YEARS_MIN/MAX 一致）
+    const input = wrapper.find<HTMLInputElement>('#dy-retention-years');
+    expect(input.exists()).toBe(true);
+    expect(input.element.value).toBe('5');
+    expect(input.attributes('min')).toBe('1');
+    expect(input.attributes('max')).toBe('10');
+
+    // 改为 8 → 出现未保存变更，点击保存后载荷带 dividend_retention_years: 8
+    await input.setValue('8');
+    const saveBtn = wrapper
+      .findAll('button')
+      .find((b) => b.text().includes('保存设置'))!;
+    expect(saveBtn.attributes('disabled')).toBeUndefined();
+    await saveBtn.trigger('click');
+    expect(mutateSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ dividend_retention_years: 8 }),
+    );
+
+    // 越界：输入 15 → 夹到 10（后端校验 1~10，前端先兜住避免 400）
+    await wrapper.find<HTMLInputElement>('#dy-retention-years').setValue('15');
+    expect(
+      wrapper.find<HTMLInputElement>('#dy-retention-years').element.value,
+    ).toBe('10');
+
     wrapper.unmount();
   });
 });
