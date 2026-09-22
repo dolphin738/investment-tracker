@@ -74,10 +74,21 @@ async def _run_seed() -> None:
     「锁的生命周期 = 后台任务的生命周期」。无论播种正常返回、抛错还是被取消，finally
     都释放锁，避免一次失败把播种永久锁死。
     """
-    from app.services.dividend_seed import run_dividend_seed
+    from app.services.dividend_seed import (
+        run_dividend_seed,
+        seed_progress,
+        _seed_progress_now,
+    )
 
     try:
         await run_dividend_seed(None)
+    except Exception as exc:
+        # 进度可视化：任何未捕获异常（含失败率冒泡 RuntimeError）→ 置 error；
+        # 正常成功路径由 seed_initial_dividends 内部置 done。
+        seed_progress.state = "error"
+        seed_progress.error = str(exc)
+        seed_progress.finished_at = _seed_progress_now()
+        raise
     finally:
         _seed_lock.release()
 
@@ -119,4 +130,30 @@ async def seed_initial_dividends(
         # §4.4 契约漂移：前端旧声明含 job_id，但后端从不返回 job_id（无 JobType、
         # 无 job_task 行可对应），故返回体只保留 message。
         "message": "已触发历史分红补齐，后台执行中；进度见应用日志",
+    }
+
+
+@router_trigger.get("/seed-initial-dividends/progress")
+async def seed_initial_dividends_progress(
+    admin: CurrentUser = Depends(require_admin),
+):
+    """查询首跑播种运行进度（admin-only，与 POST 同权限）。
+
+    返回进程内内存态进度（不入库、不跨进程）：state(idle|running|done|error) /
+    total / processed / hits / failed / covered / started_at / finished_at /
+    error / message。前端据此轮询展示进度条与失败只数；进程重启后归零为 idle。
+    """
+    from app.services.dividend_seed import seed_progress
+
+    return {
+        "state": seed_progress.state,
+        "total": seed_progress.total,
+        "processed": seed_progress.processed,
+        "hits": seed_progress.hits,
+        "failed": seed_progress.failed,
+        "covered": seed_progress.covered,
+        "started_at": seed_progress.started_at,
+        "finished_at": seed_progress.finished_at,
+        "error": seed_progress.error,
+        "message": seed_progress.message,
     }

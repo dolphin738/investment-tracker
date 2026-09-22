@@ -657,3 +657,91 @@ async def test_seed_no_abort_when_failure_ratio_at_half(session, monkeypatch):
     summary = await DividendSeedService(session).seed_initial_dividends(None)
     await session.commit()
     assert "失败1只" in summary and "失败2只" not in summary
+
+
+# ───────────── 进度可视化（管理端轮询；进程内内存态） ─────────────
+@pytest.mark.asyncio
+async def test_seed_progress_transitions_to_done(session, monkeypatch):
+    """进度可视化：正常跑完 → state=done，processed/total/hits/failed 口径正确，message=摘要。"""
+    from app.services.dividend_seed import seed_progress
+
+    a = await _add_master(session, code="600519", name="证券A")
+    b = await _add_master(session, code="000001", name="证券B")
+    await _seed_detail_source(session)
+    await session.commit()
+    cur = _cur_year()
+    fake, _calls = _make_raw({
+        _digits(a.code): [_cn_row(report=f"{cur - 1}年报", cash="100")],
+        _digits(b.code): [_cn_row(report=f"{cur - 1}年报", cash="50")],
+    })
+    monkeypatch.setattr(MarketDataSyncService, "call_interface_raw", fake)
+
+    summary = await DividendSeedService(session).seed_initial_dividends(None)
+    await session.commit()
+
+    assert seed_progress.state == "done"
+    assert seed_progress.total == 2
+    assert seed_progress.processed == 2
+    assert seed_progress.hits == 2
+    assert seed_progress.failed == 0
+    assert seed_progress.covered == 0
+    assert seed_progress.finished_at is not None
+    assert seed_progress.message == summary
+
+
+@pytest.mark.asyncio
+async def test_seed_progress_reports_failed_count(session, monkeypatch):
+    """进度可视化：单只失败 rollback 续跑 → failed==1，state 仍为 done（未超 50% 阈值）。"""
+    from app.services.dividend_seed import seed_progress
+
+    a = await _add_master(session, code="600519", name="证券A")
+    b = await _add_master(session, code="000001", name="证券B")
+    c = await _add_master(session, code="000002", name="证券C")
+    await _seed_detail_source(session)
+    code_a = a.code  # 失败路径 rollback 会 expire ORM 实例，先取纯字符串
+    await session.commit()
+    fake, _calls = _make_raw({})
+    monkeypatch.setattr(MarketDataSyncService, "call_interface_raw", fake)
+
+    original = DividendNoticeScanService.fetch_and_upsert_master
+
+    async def _flaky(self, mid, code, detail, stats):
+        if code == code_a:  # 仅 A 失败（1/3 < 50%）
+            raise RuntimeError("单只失败（模拟）")
+        return await original(self, mid, code, detail, stats)
+
+    monkeypatch.setattr(DividendNoticeScanService, "fetch_and_upsert_master", _flaky)
+
+    await DividendSeedService(session).seed_initial_dividends(None)
+    await session.commit()
+
+    assert seed_progress.state == "done"
+    assert seed_progress.total == 3
+    assert seed_progress.processed == 3
+    assert seed_progress.failed == 1
+
+
+@pytest.mark.asyncio
+async def test_seed_progress_error_on_ratio_bubble(session, monkeypatch):
+    """进度可视化：失败率 >50% 冒泡 → state=error，failed 反映失败只数，error 含原因。"""
+    from app.services.dividend_seed import seed_progress
+
+    await _add_master(session, code="600519", name="证券A")
+    await _add_master(session, code="000001", name="证券B")
+    await _seed_detail_source(session)
+    await session.commit()
+    fake, _calls = _make_raw({})
+    monkeypatch.setattr(MarketDataSyncService, "call_interface_raw", fake)
+
+    async def _boom(self, mid, code, detail, stats):
+        raise RuntimeError("上游整体失效（模拟）")
+
+    monkeypatch.setattr(DividendNoticeScanService, "fetch_and_upsert_master", _boom)
+
+    with pytest.raises(RuntimeError, match="失败占比过高"):
+        await DividendSeedService(session).seed_initial_dividends(None)
+
+    assert seed_progress.state == "error"
+    assert seed_progress.failed == 2
+    assert seed_progress.error is not None and "失败占比过高" in seed_progress.error
+    assert seed_progress.finished_at is not None

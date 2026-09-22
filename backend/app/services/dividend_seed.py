@@ -22,6 +22,8 @@ session，内部实例化一个 scan service 作为采集能力提供方，复�
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import select
@@ -50,6 +52,38 @@ _FAILURE_RATIO_RAISE = 0.5
 logger = logging.getLogger(__name__)
 
 
+# ── 进度可视化（管理端「补齐历史分红」按钮轮询；进程内内存态） ──
+# 仅用于前端实时展示「已处理 / 失败 / 已覆盖跳过」等运行进度；不入库、不跨进程。
+# 进程重启或后台任务被强制杀死会残留 stale 态（running），前端可据 finished_at 判断。
+def _seed_progress_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+@dataclass
+class SeedProgress:
+    """首跑播种运行进度（fire-and-forget 后台任务，单进程内存态）。
+
+    state: idle（本进程生命周期内从未跑 / 已复位）| running | done | error。
+    failed = 单只异常 rollback 续跑的只数（≡ stats["skipped"]），与「无派息」
+    （stats["skip"]）、「窗口外」（stats["window"]）严格区分，避免把正常零分红
+    证券误报为失败。
+    """
+
+    state: str = "idle"
+    total: int = 0
+    processed: int = 0
+    hits: int = 0          # 本轮实际拉取并落库的证券只数
+    failed: int = 0        # 单只异常 rollback 续跑的只数
+    covered: int = 0       # 断点续跑判定「已完成」而跳过的只数
+    started_at: str | None = None
+    finished_at: str | None = None
+    error: str | None = None
+    message: str | None = None
+
+
+seed_progress = SeedProgress()
+
+
 class DividendSeedService:
     """全市场历史分红首跑播种（§5.7；手动一次性、可断点续跑）。
 
@@ -73,6 +107,18 @@ class DividendSeedService:
         detail = await self._scan._resolve_detail_itf(await self._scan._settings())
         covered_skipped = 0  # 断点续跑：已覆盖而跳过的只数
         changed: set[str] = set()
+
+        # 进度可视化：进入 running 态（前端据此轮询；进程内内存态）
+        seed_progress.state = "running"
+        seed_progress.total = total
+        seed_progress.processed = 0
+        seed_progress.hits = 0
+        seed_progress.failed = 0
+        seed_progress.covered = 0
+        seed_progress.started_at = _seed_progress_now()
+        seed_progress.finished_at = None
+        seed_progress.error = None
+        seed_progress.message = None
 
         for start in range(0, total, _SEED_CHUNK):
             chunk = seed_rows[start : start + _SEED_CHUNK]
@@ -121,11 +167,23 @@ class DividendSeedService:
                 min(start + _SEED_CHUNK, total), total,
                 stats["hits"], stats["skipped"], stats["new"], stats["upd"],
             )
+            # 进度可视化：每个检查点（每 _SEED_CHUNK 只）刷新一次运行进度
+            seed_progress.processed = min(start + _SEED_CHUNK, total)
+            seed_progress.hits = stats["hits"]
+            seed_progress.failed = stats["skipped"]
+            seed_progress.covered = covered_skipped
 
         # 失败占比过高 → 冒泡（行动项 8，§6.2；与 scan 同口径同阈值）：使 scheduler 记
         # FAILED。total 为 seed set 规模（≈11430）；covered_skipped 是「已完成跳过」，
         # 不计失败。total==0（无证券）时不做除法、也不判失败。
         if total > 0 and stats["skipped"] / total > _FAILURE_RATIO_RAISE:
+            # 进度可视化：失败率冒泡 → 置 error（与 _run_seed 的兜底异常捕获二选一生效）
+            seed_progress.state = "error"
+            seed_progress.error = (
+                f"失败占比过高：{stats['skipped']}/{total} 只"
+                f"（阈值 {_FAILURE_RATIO_RAISE:.0%}），疑似上游整体失效"
+            )
+            seed_progress.finished_at = _seed_progress_now()
             raise RuntimeError(
                 f"历史分红播种失败占比过高：{stats['skipped']}/{total} 只失败"
                 f"（阈值 {_FAILURE_RATIO_RAISE:.0%}），疑似上游整体失效，终止并标记 FAILED"
@@ -146,7 +204,7 @@ class DividendSeedService:
         await refresh_yields_for_masters(self.session, list(changed))
         await self.session.commit()
         note = "；明细源缺失跳过逐只采集" if detail is None else ""
-        return (
+        summary = (
             f"历史分红播种完成{note}：证券总数{stats['rows']}只，"
             f"已覆盖跳过{covered_skipped}只，本轮处理{stats['hits']}只，"
             f"失败{stats['skipped']}只；"
@@ -156,6 +214,11 @@ class DividendSeedService:
             f"标签撞键{stats['collision']}/未知标签{stats['unknown_label']}；"
             f"去重跳过{stats['anchor']}；重算{len(changed)}只"
         )
+        # 进度可视化：整轮成功 → 置 done 并落摘要
+        seed_progress.state = "done"
+        seed_progress.finished_at = _seed_progress_now()
+        seed_progress.message = summary
+        return summary
 
     async def _seed_rows(self) -> list[tuple[str, str]]:
         """seed set：全市场证券 ``(id, code)``，按 id 排序保证重跑顺序稳定。
