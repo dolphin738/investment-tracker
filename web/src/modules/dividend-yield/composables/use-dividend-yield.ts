@@ -38,6 +38,15 @@ import type {
 /** 股息率领域 queryKey 前缀 */
 export const DIVIDEND_YIELD_KEY = ['dividend-yield'] as const;
 
+/**
+ * 进度轮询宽限期（ms）：点击「补齐历史分红」后，后端后台任务要先 `await self._seed_rows()`
+ * 取种子集（dividend_seed.py:114），才在第 131 行置 `state='running'`。首轮轮询（触发成功后的
+ * invalidate 引发）常落在该启动窗口内、命中 `idle`，若 `refetchInterval` 仅看 running 会立刻
+ * 停轮询、进度面板永不出现（须重进页面触发新轮询才显示）。故触发后置一个宽限期，期间强制轮询，
+ * 覆盖启动延迟；宽限内任一 tick 捕获 running/done/error 即转入正常轮询/停止。
+ */
+let seedProgressGraceUntil = 0;
+
 /** Top20 股息率看板（§8.3 双榜：top + consecutive，后端封顶 20、剔除 suspicious/僵尸行） */
 export function useTop20() {
   return useQuery({
@@ -201,7 +210,9 @@ export function useSeedInitialDividends() {
     mutationFn: () => seedInitialDividends(),
     onSuccess: (data) => {
       toast.success(data.message || '已触发历史分红补齐，后台执行中');
-      // 触发成功后立即拉一次进度，使前端轮询从 running 态开始
+      // 触发成功后立即拉一次进度，并置轮询宽限期（覆盖后端 _seed_rows 启动延迟，
+      // 避免首轮轮询命中 idle 后停轮询、进度面板不显示，须重进页面才出现）
+      seedProgressGraceUntil = Date.now() + 20_000;
       queryClient.invalidateQueries({
         queryKey: [...DIVIDEND_YIELD_KEY, 'seed-progress'],
       });
@@ -223,7 +234,9 @@ export function useSeedProgress(enabled: MaybeRefOrGetter<boolean> = true) {
     enabled: toValue(enabled),
     staleTime: 0,
     refetchInterval: (query) =>
-      query.state.data?.state === 'running' ? 3000 : false,
+      query.state.data?.state === 'running' || Date.now() < seedProgressGraceUntil
+        ? 3000
+        : false,
   });
 }
 
