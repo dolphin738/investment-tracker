@@ -69,7 +69,7 @@
 |---|---|---|---|
 | `backend/alembic/versions/0034_create_dividend_pending.py` | 建 pending 表 + `DividendPendingStatus` 原生枚举 + 索引；downgrade 先 `drop_table` 再 `DROP TYPE` | ~70 | B |
 | `backend/alembic/versions/0035_add_dividend_retention_years.py` | `dividend_yield_settings` 加列 `dividend_retention_years`（可空，`server_default='5'`） | ~30 | C |
-| `backend/app/services/dividend_pending.py` | pending 服务：`stage_pending()`（幂等写入，供 scan/seed）、`list/summary/assign/batch_assign/ignore/batch_ignore/reopen`、主表原子 upsert | ~230 | B（stage）/ C（其余） |
+| `backend/app/services/dividend_pending.py` | pending 服务：`stage_pending()`（幂等写入，供 scan/seed）、`list/summary`、主表原子 upsert。**2026-09-24 按 B4 拆分**：裁定写路径 → `dividend_pending_assign.py`（`PendingDividendAssignMixin`）、主表写入原语 → `dividend_pending_main_write.py`（`DividendMainWriteMixin`）；导入路径 `stage_pending` / `PendingDividendService` 不变 | ~230 | B（stage）/ C（其余） |
 | `backend/app/modules/dividend_yield/pending_router.py` | pending 七端点（六 + reopen）；子 router 自带 `route_class=EnvelopeRoute` | ~170 | C |
 | `backend/tests/test_dividend_pending.py` | 服务层单测：staging 幂等 / fingerprint 稳定 / assign 冲突 / reopen 回滚 / 状态机 | ~160 | B+C |
 | `backend/tests/test_dividend_pending_api.py` | 端点单测：鉴权矩阵 / 分页筛选 / 批量部分失败 / 契约字段 | ~180 | C |

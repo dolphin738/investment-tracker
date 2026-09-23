@@ -121,7 +121,9 @@
 - `backend/app/models/dividend_yield.py` — `SecurityDividend.dividend_label` / `SecurityDividendPending`
 - `backend/alembic/versions/0033_extend_report_period_type.py` / `0034_create_dividend_pending.py` / `0035_add_dividend_retention_years.py`
 - `backend/app/services/dividend_cninfo_parse.py` — `parse_pending_row` / `pending_fingerprint`
-- `backend/app/services/dividend_pending.py` — `stage_pending` / `list` / `summary` / `assign` / `reopen`
+- `backend/app/services/dividend_pending.py` — `stage_pending` / `list` / `summary` / 队列度量
+- `backend/app/services/dividend_pending_assign.py` — `assign` / `reopen` / `ignore`（含批量与报告期校验；2026-09-24 按 B4 拆分，原在 `dividend_pending.py`）
+- `backend/app/services/dividend_pending_main_write.py` — 主表 `security_dividends` 写入原语（`_locate_main` / `_insert_main` / `_delete_assigned_main`）
 - `backend/app/modules/dividend_yield/pending_router.py` — pending 七端点
 - `docs/adr/ADR-005-bonus-share-market-neutral-and-ex-dividend-restatement.md` — 送转口径（关联决策）
 - `docs/adr/ADR-002-quote-interface-priority-chain.md` — 分红明细源切换修订补记

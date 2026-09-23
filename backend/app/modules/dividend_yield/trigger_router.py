@@ -167,8 +167,8 @@ async def seed_initial_dividends(
     if _seed_lock.locked():
         raise BusinessException(
             # 项目无通用「资源占用」业务码（既有 409 均为领域专属：1003/1007/1008）；
-            # 对齐 pending 服务对「状态冲突」的既有表达（VALIDATION_FAILED + 显式 409，
-            # 见 dividend_pending._to_http_exception），不自创错误码（否则需同步 shared）。
+            # 对齐 pending 服务对「状态冲突」的既有表达（VALIDATION_FAILED + 显式 409，见
+            # dividend_pending_assign._to_http_exception），不自创错误码（否则需同步 shared）。
             code=BusinessErrorCode.VALIDATION_FAILED,
             message="已有播种任务在运行",
             status_code=409,
