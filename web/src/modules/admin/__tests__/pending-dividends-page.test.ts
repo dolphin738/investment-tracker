@@ -206,6 +206,54 @@ describe('PendingDividendsPage — 选中集与筛选联动', () => {
   });
 });
 
+describe('PendingDividendsPage — 行内忽略（单笔，B1 回归）', () => {
+  it('未勾选时点行内「忽略」→ 只忽略该行（走单笔端点，不动勾选集）', async () => {
+    wrapper = await mountPage();
+    apiMocks.ignorePendingDividend.mockResolvedValue({ id: 'p1', status: 'IGNORED' });
+
+    // 行内「忽略」（非批量条）——此时未勾选任何行：修复前会直接 return，点了没反应
+    const rowIgnore = wrapper
+      .findAll('tbody button')
+      .find((b) => b.text().trim() === '忽略');
+    expect(rowIgnore).toBeTruthy();
+    await rowIgnore!.trigger('click');
+    await settle();
+
+    // 弹窗计数应为 1（而非勾选集大小）
+    expect(document.body.textContent).toContain('将忽略 1 笔待划分分红');
+
+    buttonByText('确认').click();
+    await settle();
+
+    // 走单笔端点、只传被点行 id；不得调用批量端点
+    expect(apiMocks.ignorePendingDividend).toHaveBeenCalledWith('p1');
+    expect(apiMocks.batchIgnorePendingDividends).not.toHaveBeenCalled();
+  });
+
+  it('已勾选另一行时点行内「忽略」→ 仍只忽略被点行（不误伤勾选集）', async () => {
+    wrapper = await mountPage();
+    apiMocks.ignorePendingDividend.mockResolvedValue({ id: 'p2', status: 'IGNORED' });
+
+    // 勾选第一行，但对第二行点行内「忽略」
+    const boxes = wrapper.findAll('tbody input[type="checkbox"]');
+    await boxes[0].setValue(true);
+    await nextTick();
+
+    const rowIgnores = wrapper
+      .findAll('tbody button')
+      .filter((b) => b.text().trim() === '忽略');
+    await rowIgnores[1].trigger('click');
+    await settle();
+
+    expect(document.body.textContent).toContain('将忽略 1 笔待划分分红');
+    buttonByText('确认').click();
+    await settle();
+
+    expect(apiMocks.ignorePendingDividend).toHaveBeenCalledWith('p2');
+    expect(apiMocks.batchIgnorePendingDividends).not.toHaveBeenCalled();
+  });
+});
+
 describe('PendingDividendsPage — 批量忽略二次确认', () => {
   it('勾选 → 忽略 → 确认弹窗（写明不写主表）→ 调 batch-ignore', async () => {
     wrapper = await mountPage();

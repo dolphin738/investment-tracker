@@ -31,6 +31,7 @@ import {
   useAssignPendingDividend,
   useBatchAssignPendingDividends,
   useBatchIgnorePendingDividends,
+  useIgnorePendingDividend,
   usePendingDividendSummary,
   usePendingDividendsList,
   useReopenPendingDividend,
@@ -195,8 +196,11 @@ function onAssignSubmit(payload: PendingAssignPayload): void {
 // ── 批量：采纳建议 / 忽略（共用确认弹窗） ──
 const batchAssignMut = useBatchAssignPendingDividends();
 const batchIgnoreMut = useBatchIgnorePendingDividends();
+const ignoreMut = useIgnorePendingDividend();
 const confirmOpen = ref(false);
 const confirmMode = ref<'assign' | 'ignore'>('assign');
+/** 本次忽略确认弹窗的目标 id：行内点击 = 该行 1 个；批量条 = 勾选集 */
+const ignoreTargets = ref<string[]>([]);
 const lastBatchFailed = ref<{ id: string; code: string; reason: string }[]>([]);
 const lastBatchSucceeded = ref(0);
 
@@ -232,6 +236,19 @@ function openBatchAssign(): void {
 }
 function openBatchIgnore(): void {
   if (selectedIds.value.size === 0) return;
+  ignoreTargets.value = Array.from(selectedIds.value);
+  confirmMode.value = 'ignore';
+  confirmOpen.value = true;
+}
+/**
+ * 行内「忽略」：只忽略被点击的这一行。
+ *
+ * 此前该按钮 `emit('ignore', row)` 绑定的却是上面的无参批量处理函数 → row 被静默丢弃，
+ * 表现为「未勾选时点了没反应」/「有勾选时忽略的是整个勾选集而非被点行」。忽略不可撤销，
+ * 故单行走单笔端点（`useIgnorePendingDividend`），语义与失败提示都更准确。
+ */
+function openRowIgnore(row: PendingDividendOut): void {
+  ignoreTargets.value = [row.id];
   confirmMode.value = 'ignore';
   confirmOpen.value = true;
 }
@@ -258,9 +275,28 @@ function confirmBatch(): void {
       onError: () => toast.error('批量采纳失败，请稍后重试'),
     });
   } else {
-    batchIgnoreMut.mutate(Array.from(selectedIds.value), {
+    const ids = ignoreTargets.value;
+    if (ids.length === 0) return;
+    // 单笔（行内按钮）走单笔端点：语义清晰、失败原因更准确；多笔走批量端点（逐项报错）
+    if (ids.length === 1) {
+      const only = ids[0];
+      ignoreMut.mutate(only, {
+        onSuccess: () => {
+          // 只摘掉这一行，不清空其余勾选（点行内按钮不该影响勾选集）
+          const n = new Set(selectedIds.value);
+          n.delete(only);
+          selectedIds.value = n;
+          ignoreTargets.value = [];
+          toast.success('已忽略（未写入分红主表）');
+        },
+        onError: () => toast.error('忽略失败，请稍后重试'),
+      });
+      return;
+    }
+    batchIgnoreMut.mutate(ids, {
       onSuccess: (data) => {
         handleBatchResult('忽略', data);
+        ignoreTargets.value = [];
         resetSelection();
       },
       onError: () => toast.error('批量忽略失败，请稍后重试'),
@@ -338,7 +374,7 @@ function onReopen(row: PendingDividendOut): void {
             @row-select="onRowSelect"
             @page-change="onPageChange"
             @assign="openAssign"
-            @ignore="openBatchIgnore"
+            @ignore="openRowIgnore"
             @reopen="onReopen"
             @retry="() => list.refetch()"
           />
@@ -380,7 +416,7 @@ function onReopen(row: PendingDividendOut): void {
       :open="confirmOpen"
       :mode="confirmMode"
       :adopt-count="adoptablePayloads.length"
-      :selected-count="selectedIds.size"
+      :selected-count="ignoreTargets.length"
       :skipped="skippedNoCandidate"
       :preview="assignPreview"
       @confirm="confirmBatch"
