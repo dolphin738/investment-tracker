@@ -402,7 +402,7 @@ A7 裁决为「检查点前显式 `rollback()` 收口」。按字面实施后**�
 
 ### 11.1 分批推送与 CI 终态
 
-- **推送方式**：`git push cnb <中间提交sha>:main` 分 4 批（`b722e79` → `947a71e` → `dad8995` → `ae0ea16`），全部 fast-forward；远端 `main` = 本地 HEAD（70 提交）。
+- **推送方式**：`git push cnb <中间提交sha>:main` 分批推（`b722e79` → `947a71e` → `dad8995` → `ae0ea16` → `6a3c8a4`），全部 fast-forward；远端 `main` = 本地 HEAD（73 提交），无待推提交。
   - **凭据**：owner 提供的 PAT 推送被拒（`Repository Not Found`）。取证：该仓库为 **public**，`ls-remote` 成功**不能**作为令牌有效的证据（无凭据、甚至伪造 token 都能读），且伪造 token 的推送报错与真 token **逐字相同** → CNB 对「令牌无效」与「权限不足」做了同一掩码，git 层无法区分。最终改用本机 `cnb` CLI 的 OAuth 凭据助手完成：`git -c credential.helper= -c credential.helper='!cnb git-credential' push cnb <sha>:main`（先 `--dry-run` 验写权限）；token 未落盘，`git config`/remote URL 均无残留。
 - **`line-budget` 在 CI 中通过**（CI 侧基线解析为 HEAD → 新增 0 行）：§9.4 记录的那条本地 FAIL 是「未推送累计区间（70 提交 / +13390 行）」的**假阳性**，**不需要 `LARGE_PR_APPROVED=1`**。
 - **CI 终态**（每批 4 条流水线）：
@@ -413,6 +413,7 @@ A7 裁决为「检查点前显式 `rollback()` 收口」。按字面实施后**�
 | `cnb-les`（`947a71e`） | ✅ | ❌ `knip-dependency-gate` | ❌ `run-pytest` | ✅ |
 | `cnb-2u1`（`dad8995`） | ✅ | ✅ | ✅ | ✅ |
 | `cnb-2kp`（`ae0ea16`，tip） | ✅ | ✅ | ✅ | ✅ |
+| `cnb-fq3`（`6a3c8a4`，A11 收口，tip） | ✅ | ✅ | ✅ | ✅ |
 
 - **中间态两条红的归因**（按时序 + §9.5 自证）：`947a71e` 的 `run-pytest` 红 = §9.5 所记「修复前 763 passed + 2 failed（mock 未同步 `run_dividend_seed(lock_token)` 新签名）」，由批次一修复提交消除；`b722e79` 的 `knip` / `vitest` 红 = 「行内忽略未接线、单笔端点与 composable 零引用」，由 `f6198cc` 消除。**这正是分批推送的价值**：把「从未过 CI 的中间态」的真实状态暴露出来（这些红会永久留在远端历史，tip 全绿才是结论）。
 
@@ -428,6 +429,8 @@ A7 裁决为「检查点前显式 `rollback()` 收口」。按字面实施后**�
 - **纯位移**：AST 行号切片逐字搬运（一次性脚本，零手抄）；域模块间**单向依赖**（现值仅 `calc → market`），不成环。
 - **兼容性**：`__init__` 显式再导出全部 43 个符号并声明 `__all__` → 15 个引用文件的 `from app.schemas_resp import X` 与 `tests/test_contract.py:221` 的 `schemas_resp.X` **零改动**。
 - **硬护栏**：拆包后重跑 `gen_openapi.py`，`docs/openapi.json` **零 diff**（契约完全未变，证据强度高于「测试通过」）；`docs/架构治理规范.md` §1.1 的目录职责表同步更新为包 + 单向依赖约束。
+
+**A11 收口批次已推送并核验**：`ae0ea16..6a3c8a4`（第 5 批），构建 `cnb-fq3-1k3840err` **四条流水线全部 success**。收口后 `pre_commit_gate.py` **五项全过**（含此前假阳性的 `line-budget`：本地与 `cnb/main` 同步后累计区间为空）。
 
 ### 11.3 收口后的超限盘点（2026-09-24 实测）
 
