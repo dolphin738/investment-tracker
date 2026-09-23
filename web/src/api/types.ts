@@ -842,6 +842,9 @@ export interface DividendYieldSettingsOut {
   /** 交易日历刷新起始日期（YYYY-MM-DD）：「交易日历刷新」任务的窗口下限；
    *  null = 未配置（后端沿用默认「去年 1 月 1 日」）；结束上限受数据源限制为当年末，不暴露 */
   trade_calendar_start_date: string | null;
+  /** 分红留存窗年数（D-4 配置化，1~10，默认 5）：保留最近 N 个财年 [cur-N+1, cur]；
+   *  采集窗（播种/每日扫描裁剪）与留存清理窗共用此值，保证二者对齐（后端 GET 响应实际返回） */
+  dividend_retention_years?: number | null;
 }
 
 /** 股息率设置更新请求（PUT /dividend-yield/settings · admin-only；写时用 *_interface_id 字段） */
