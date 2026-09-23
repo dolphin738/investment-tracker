@@ -185,9 +185,9 @@ async def seed_initial_dividends_progress(
 
     返回进程内内存态进度（不入库、不跨进程）：state(idle|running|done|error|cancelled) /
     total / processed / hits / failed / covered / started_at / finished_at /
-    error / message / failed_master_ids（失败证券 master_id 清单，UI 展开查看，
-    上限见服务端 _FAILED_IDS_CAP，超出置 failed_truncated）/ failed_truncated。
-    前端据此轮询展示进度条、失败只数与失败证券清单；进程重启后归零为 idle。
+    error / message / failed_securities（失败证券清单，每条含 master_id/code/name，
+    UI 展开查看「代码 + 名称」，上限见服务端 _FAILED_IDS_CAP，超出置 failed_truncated）/
+    failed_truncated。前端据此轮询展示进度条、失败只数与失败证券清单；进程重启后归零为 idle。
     """
     from app.services.dividend_seed import seed_progress
 
@@ -202,7 +202,7 @@ async def seed_initial_dividends_progress(
         "finished_at": seed_progress.finished_at,
         "error": seed_progress.error,
         "message": seed_progress.message,
-        "failed_master_ids": seed_progress.failed_master_ids,
+        "failed_securities": seed_progress.failed_securities,
         "failed_truncated": seed_progress.failed_truncated,
     }
 

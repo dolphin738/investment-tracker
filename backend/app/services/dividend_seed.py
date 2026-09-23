@@ -95,8 +95,9 @@ class SeedProgress:
     finished_at: str | None = None
     error: str | None = None
     message: str | None = None
-    # 失败证券 master_id 清单（UI 进度面板展开查看；上限 _FAILED_IDS_CAP，超出置 truncated）
-    failed_master_ids: list[str] = field(default_factory=list)
+    # 失败证券清单（UI 进度面板展开查看；每条含 master_id/code/name，
+    # 上限 _FAILED_IDS_CAP，超出置 truncated；失败计数 failed 始终精确，不受上限影响）
+    failed_securities: list[dict] = field(default_factory=list)
     failed_truncated: bool = False
 
 
@@ -145,7 +146,7 @@ class DividendSeedService:
         seed_progress.finished_at = None
         seed_progress.error = None
         seed_progress.message = None
-        seed_progress.failed_master_ids = []
+        seed_progress.failed_securities = []
         seed_progress.failed_truncated = False
 
         cancelled = False
@@ -164,12 +165,12 @@ class DividendSeedService:
             # 批内 IN 列表只有 _SEED_CHUNK 个 UUID，走索引、结果集极小。
             covered = (
                 await self._covered_masters(
-                    detail.name, [mid for mid, _ in chunk], retention_years
+                    detail.name, [mid for mid, _, _ in chunk], retention_years
                 )
                 if detail is not None
                 else set()
             )
-            for offset, (mid, code) in enumerate(chunk):
+            for offset, (mid, code, name) in enumerate(chunk):
                 idx = start + offset + 1
                 if mid in covered:  # 已完成的历史证券不再重复消耗 rate_limit 预算
                     covered_skipped += 1
@@ -192,9 +193,11 @@ class DividendSeedService:
                         "历史分红播种单只失败 master_id=%s（rollback 续下一只）",
                         mid, exc_info=True,
                     )
-                    # 收集失败证券 master_id 供 UI 进度面板展开查看（超上限置 truncated）
-                    if len(seed_progress.failed_master_ids) < _FAILED_IDS_CAP:
-                        seed_progress.failed_master_ids.append(mid)
+                    # 收集失败证券（master_id + code + name）供 UI 进度面板展开查看（超上限置 truncated）
+                    if len(seed_progress.failed_securities) < _FAILED_IDS_CAP:
+                        seed_progress.failed_securities.append(
+                            {"master_id": mid, "code": code, "name": name}
+                        )
                     else:
                         seed_progress.failed_truncated = True
                     await self.session.rollback()
@@ -273,8 +276,8 @@ class DividendSeedService:
         seed_progress.message = summary
         return summary
 
-    async def _seed_rows(self) -> list[tuple[str, str]]:
-        """seed set：巨潮可服务的证券 ``(id, code)``，按 id 排序保证重跑顺序稳定。
+    async def _seed_rows(self) -> list[tuple[str, str, str]]:
+        """seed set：巨潮可服务的证券 ``(id, code, name)``，按 id 排序保证重跑顺序稳定。
 
         仅取 ``asset_class == STOCK``（沪深京 A股 + 北交所，含 B股）——明细源巨潮
         只覆盖这部分；港股/指数/基金/债券无巨潮分红数据，纳入只会稀释失败率分母并
@@ -282,17 +285,21 @@ class DividendSeedService:
 
         为什么一次性取出而非流式游标：① 播种期间会话要为每只证券穿插写库与 commit，
         ``session.stream()`` 的服务端游标不允许在其未消费完之前执行其它语句；
-        ② seed set 仅约 5923 行两列短字符串，内存开销可忽略；
-        ③ 取 ``Row`` 元组而非 ORM 实体，故不会被后续 ``rollback()`` expire。
+        ② seed set 仅约 5923 行三列短字符串，内存开销可忽略；
+        ③ 取 ``Row`` 元组而非 ORM 实体，故不会被后续 ``rollback()`` expire；
+        ④ 顺带取 ``name`` 供失败证券清单直接展示「代码 + 名称」（无需二次查询）。
         """
         rows = (
             await self.session.execute(
-                select(Security.id, Security.code)
+                select(Security.id, Security.code, Security.name)
                 .where(Security.asset_class == SecurityType.STOCK)
                 .order_by(Security.id)
             )
         ).all()
-        return [(str(row[0]), str(row[1])) for row in rows]
+        return [
+            (str(row[0]), str(row[1]), str(row[2]) if row[2] is not None else "")
+            for row in rows
+        ]
 
     async def _covered_masters(
         self, source: str, mids: list[str], retention_years: int

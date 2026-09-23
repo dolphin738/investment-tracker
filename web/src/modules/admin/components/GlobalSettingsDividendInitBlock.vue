@@ -203,7 +203,7 @@ function goPending(): void {
         </div>
       </div>
 
-      <!-- 失败证券清单：仅当 failed > 0 时渲染入口，支持展开查看 master_id 列表 -->
+      <!-- 失败证券清单：仅当 failed > 0 时渲染入口，支持展开查看「代码 + 名称」 -->
       <div
         v-if="progressData.failed > 0"
         class="mt-2"
@@ -224,15 +224,18 @@ function goPending(): void {
             v-if="progressData.failed_truncated"
             class="mb-1 text-[11px] text-muted-foreground"
           >
-            仅显示前 {{ progressData.failed_master_ids.length }} 只，失败共 {{ progressData.failed }} 只（清单上限 _FAILED_IDS_CAP）。
+            仅显示前 {{ progressData.failed_securities.length }} 只，失败共 {{ progressData.failed }} 只（清单上限 _FAILED_IDS_CAP）。
           </p>
           <ul class="space-y-0.5 text-[11px] text-muted-foreground">
             <li
-              v-for="mid in progressData.failed_master_ids"
-              :key="mid"
-              class="font-mono break-all"
+              v-for="sec in progressData.failed_securities"
+              :key="sec.master_id"
+              class="break-all"
+              :title="`master_id: ${sec.master_id}`"
             >
-              {{ mid }}
+              <span class="font-mono text-foreground">{{ sec.code }}</span>
+              <span class="mx-1 text-muted-foreground">·</span>
+              <span>{{ sec.name || '（无名）' }}</span>
             </li>
           </ul>
         </div>

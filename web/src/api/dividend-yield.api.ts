@@ -170,8 +170,8 @@ export interface SeedProgress {
   finished_at: string | null;
   error: string | null;
   message: string | null;
-  /** 失败证券 master_id 清单（上限 _FAILED_IDS_CAP，超出置 failed_truncated；失败计数 failed 始终精确，不受上限影响） */
-  failed_master_ids: string[];
+  /** 失败证券清单（每条含 master_id/code/name，上限 _FAILED_IDS_CAP，超出置 failed_truncated；失败计数 failed 始终精确，不受上限影响） */
+  failed_securities: Array<{ master_id: string; code: string; name: string }>;
   /** 失败清单是否因超上限被截断（仅展示前 N 只） */
   failed_truncated: boolean;
 }
