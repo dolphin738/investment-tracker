@@ -84,6 +84,23 @@ async def rebuild_dividend_yield(
 # 定时会每天重跑并打满 rate_limit=10/min 预算；播种本质是冷启动一次性动作，故沿用旧
 # 回补的 HTTP fire-and-forget 形态，唯一入口是管理端「补齐历史分红」按钮。
 # --------------------------------------------------------------------------- #
+async def _release_admin_lock_safely(lock_token: str) -> None:
+    """释放跨进程播种锁（自带会话；释放异常只记日志，不抛出）。
+
+    独立成函数是为了让 ``asyncio.shield`` 能保护**整个释放过程**（含 ``AsyncSessionLocal``
+    的上下文管理）：若把 ``async with`` 留在外层，外层被取消时上下文会立即退出并关闭会话，
+    令仍在执行的释放语句失败。释放失败只记日志——TTL 到期后后续触发者会自动接管，不必把
+    异常抛出掩盖播种本身的失败原因。
+    """
+    from app.db.database import AsyncSessionLocal
+
+    try:
+        async with AsyncSessionLocal() as session:
+            await release_admin_lock(session, LOCK_DIVIDEND_SEED, lock_token)
+    except Exception:  # pragma: no cover - 释放失败不应改变播种结果
+        logger.warning("释放跨进程播种锁失败（TTL 到期后将自动接管）", exc_info=True)
+
+
 async def _run_seed(lock_token: str) -> None:
     """后台执行首跑播种（独立会话，fire-and-forget）；结束时释放两层单飞锁。
 
@@ -93,8 +110,15 @@ async def _run_seed(lock_token: str) -> None:
     单飞锁在 ``seed_initial_dividends`` 内**获取**、在此处 ``finally`` **释放**——即
     「锁的生命周期 = 后台任务的生命周期」。无论播种正常返回、抛错还是被取消，finally
     都释放锁，避免一次失败把播种永久锁死。
+
+    **释放路径必须不可被取消**：取消端点可能在任务已进入本 ``finally`` 后再次
+    ``task.cancel()``（此时 ``done()`` 仍为 ``False``，取消端点据它判定「有运行中任务」），
+    而 ``CancelledError`` 继承 ``BaseException``、**不会被 ``except Exception`` 捕获**，
+    因此会跳过 ``_seed_lock.release()``——那是全仓唯一的释放点，一旦跳过，进程内单飞锁
+    永久占用（此后所有触发都被 409 拦下，只能重启后端恢复；且 ``bg.py`` 把 cancelled 当
+    正常路径、不打错误日志，故障无痕）。故 ``asyncio.shield`` 隔离 DB 释放，
+    ``_seed_lock.release()`` 落在内层 ``finally`` 无条件执行。
     """
-    from app.db.database import AsyncSessionLocal
     from app.services.dividend_seed import (
         run_dividend_seed,
         seed_progress,
@@ -102,7 +126,9 @@ async def _run_seed(lock_token: str) -> None:
     )
 
     try:
-        await run_dividend_seed(None)
+        # 传入持锁令牌：播种循环在每个检查点据此续期（TTL 只承担崩溃检测）并在锁被抢占时
+        # 体面退出，避免与抢占者并发跑（见 dividend_seed 的检查点实现）。
+        await run_dividend_seed(None, lock_token=lock_token)
     except Exception as exc:
         # 进度可视化：任何未捕获异常（含失败率冒泡 RuntimeError）→ 置 error；
         # 正常成功路径由 seed_initial_dividends 内部置 done。
@@ -111,15 +137,12 @@ async def _run_seed(lock_token: str) -> None:
         seed_progress.finished_at = _seed_progress_now()
         raise
     finally:
-        # 第二层（跨进程 DB 锁）：自建会话——请求会话在 fire-and-forget 返回后即关闭，
-        # 不能沿用。释放失败只记日志：TTL 到期后后续触发者会自动接管，不必把异常抛出
-        # 掩盖播种本身的失败原因。
         try:
-            async with AsyncSessionLocal() as session:
-                await release_admin_lock(session, LOCK_DIVIDEND_SEED, lock_token)
-        except Exception:  # pragma: no cover - 释放失败不应改变播种结果
-            logger.warning("释放跨进程播种锁失败（TTL 到期后将自动接管）", exc_info=True)
-        _seed_lock.release()
+            await asyncio.shield(_release_admin_lock_safely(lock_token))
+        finally:
+            # 防御：未持有时 release() 会抛 RuntimeError，掩盖真正的取消/异常
+            if _seed_lock.locked():
+                _seed_lock.release()
 
 
 @router_trigger.post("/seed-initial-dividends")
@@ -140,7 +163,7 @@ async def seed_initial_dividends(
     进程内 ``asyncio.Lock``（第一层，零 DB 往返）+ DB 行级锁 ``admin_locks``
     （第二层，跨进程 / 多 worker 生效）。
     """
-        # 单飞判定放在依赖校验（require_admin）之后：非 admin 已在依赖层被 403 拦下。
+    # 单飞判定放在依赖校验（require_admin）之后：非 admin 已在依赖层被 403 拦下。
     if _seed_lock.locked():
         raise BusinessException(
             # 项目无通用「资源占用」业务码（既有 409 均为领域专属：1003/1007/1008）；
@@ -229,6 +252,11 @@ async def cancel_seed_initial_dividends(
 
     **无运行任务 → 409**：DB 标记置位失败（无人持锁）**且** 本进程无运行中任务，即判定
     「无任务可取消」。仅置标记成功（任务在别的 worker）时返回 200。
+
+    **幂等**：本进程任务已在取消中（``cancelling() > 0``，含「已收到取消、正在 finally
+    释放锁」的窗口，此时 ``done()`` 仍为 False）时**不重复注入** ``task.cancel()``——二次
+    注入会让 ``CancelledError`` 落在 ``_run_seed`` 的 ``finally`` 上，跳过进程内单飞锁的
+    释放（详见 ``_run_seed`` 的说明）。此路径返回 200 + 提示，不报错。
     """
     global seed_task
     # ① 跨进程信号：置 DB 取消标记（不依赖本进程是否持有任务对象）。
@@ -245,6 +273,11 @@ async def cancel_seed_initial_dividends(
     from app.services.dividend_seed import seed_progress, _seed_progress_now
 
     if local_running:
+        # 幂等去重（防二次注入）：任务已收到取消请求但尚未结束（含在 finally 中释放锁的
+        # 窗口）时不重复 cancel——二次注入的 CancelledError 会落在 finally 的 await 上，
+        # 使 _seed_lock.release() 被跳过（全仓唯一释放点，泄漏后只能重启恢复）。
+        if seed_task.cancelling() > 0:
+            return {"message": "取消信号已发送，任务正在停止"}
         seed_task.cancel()
         seed_progress.state = "cancelled"
         seed_progress.finished_at = _seed_progress_now()

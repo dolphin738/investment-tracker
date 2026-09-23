@@ -29,6 +29,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from time import monotonic
 from typing import Any
 
 from sqlalchemy import select
@@ -36,7 +37,11 @@ from sqlalchemy import select
 from app.core.date_utils import today_app_tz
 from app.models import Security, SecurityDividend, SecurityType
 from app.models.dividend_yield import DEFAULT_DIVIDEND_RETENTION_YEARS
-from app.services.admin_lock import LOCK_DIVIDEND_SEED, is_cancel_requested
+from app.services.admin_lock import (
+    LOCK_DIVIDEND_SEED,
+    is_cancel_requested,
+    renew_admin_lock,
+)
 from app.services.dividend_cninfo_parse import retention_cutoff_year
 from app.services.dividend_notice_scan import DividendNoticeScanService, _bump
 from app.services.dividend_yield_refresh import refresh_yields_for_masters
@@ -50,6 +55,14 @@ _STATS_KEYS: frozenset = frozenset({
 
 # 分批粒度：同时用作「每 200 只打一条进度日志」的间隔与断点检查点的 IN 批大小（§5.7）
 _SEED_CHUNK = 200
+
+# 跨进程取消检查点（A7）：主循环每处理 N 只检查一次；且距上次检查不足下述秒数时跳过查库
+# （时间节流，避免「每只都很快命中缓存」的场景把查询量放大 20 倍）。原实现只在每个
+# _SEED_CHUNK（200 只）边界检查一次，按单只约 6s 计最坏延迟约 20 分钟——用户会认为
+# 「点了没反应」并反复点击取消（恰好触发二次注入，见 trigger_router 的幂等去重），
+# 现压到约 1 分钟以内。
+_CANCEL_CHECK_EVERY = 10
+_CANCEL_CHECK_MIN_INTERVAL_S = 15.0
 
 # 失败证券 master_id 清单上限（UI 进度面板展开查看；超出置 failed_truncated，
 # 但失败计数 failed 始终精确，不受上限影响）
@@ -117,8 +130,16 @@ class DividendSeedService:
         # 组合关系（非继承）：借用 scan service 的单只采集与失败后重解析能力
         self._scan = DividendNoticeScanService(session)
 
-    async def seed_initial_dividends(self, cfg: Any) -> str:
-        """按 seed set 逐只补历史分红；返回可运维对账的摘要字符串。"""
+    async def seed_initial_dividends(
+        self, cfg: Any, lock_token: str | None = None
+    ) -> str:
+        """按 seed set 逐只补历史分红；返回可运维对账的摘要字符串。
+
+        ``lock_token``：跨进程锁的持锁令牌（由触发端 ``trigger_router`` 传入）。非 None 时
+        主循环在每个检查点调 ``renew_admin_lock`` 续期（TTL 因此只承担崩溃检测），并在续期
+        失败（锁已被抢占）时停止；None 表示调用方未持有跨进程锁（如单测直接驱动服务），
+        此时跳过续期、仅做取消自检。
+        """
         seed_rows = await self._seed_rows()
         total = len(seed_rows)
         stats: dict[str, int] = {k: 0 for k in _STATS_KEYS}
@@ -150,16 +171,10 @@ class DividendSeedService:
         seed_progress.failed_truncated = False
 
         cancelled = False
+        preempted = False  # 锁被他人抢占（区别于「用户主动取消」，摘要文案须区分）
+        # 取消检查点计时基准：0.0 使首只必查（monotonic() 起点远大于节流阈值）
+        last_cancel_check = 0.0
         for start in range(0, total, _SEED_CHUNK):
-            # 跨进程取消自检（每个检查点一次）：本进程的 seed_task 引用对其它 worker
-            # 不可见，故取消意图由 DB 标记承载，持锁 worker 在检查点自行退出。
-            # 已完成部分保留（断点续跑靠 security_dividends 判定），退出后照常走收尾重算。
-            if await is_cancel_requested(self.session, LOCK_DIVIDEND_SEED):
-                cancelled = True
-                logger.info(
-                    "收到跨进程取消请求，播种在检查点停止：已处理 %d/%d 只", start, total
-                )
-                break
             chunk = seed_rows[start : start + _SEED_CHUNK]
             # 检查点按批判定：避免一次性把「近 5 年全表 DISCTINCT master_id」拉进内存，
             # 批内 IN 列表只有 _SEED_CHUNK 个 UUID，走索引、结果集极小。
@@ -172,6 +187,50 @@ class DividendSeedService:
             )
             for offset, (mid, code, name) in enumerate(chunk):
                 idx = start + offset + 1
+                # ── 取消 / 抢占检查点（A7）──
+                # 本进程的 seed_task 引用对其它 worker 不可见，故取消意图由 DB 标记承载，
+                # 持锁 worker 在此自检后自行退出；已完成部分保留（断点续跑靠
+                # security_dividends 判定），退出后照常走收尾重算。
+                # 位置在「covered 跳过」判定**之前**：整批已完成而全部跳过的长续跑场景，
+                # 也必须能及时响应取消。
+                #
+                # ⚠️ 检查点**不做事务收口**（不 rollback）——取消标记的可见性靠
+                # 「READ COMMITTED 下每条语句取新快照」保证，而该隔离级别已在
+                # ``app/db/database.py`` 的 engine 上**显式声明**（不依赖 PG 隐式默认，
+                # 避免有人改默认为 REPEATABLE READ 后跨进程取消静默失效）。
+                # 事务边界由每只证券结束时的 commit 天然给出。
+                # 曾试过在此 rollback 收口：它会 expire 会话内全部实例（detail/settings），
+                # 必须在检查点就地重解析；而 ``_reresolve_detail_safe`` 在「过程异常」时
+                # 返回 None（见 dividend_notice_meta），于是留下**已过期对象** → 下一只访问
+                # 其属性即 MissingGreenlet（实测导致 20+ 用例失败）。故改为固定隔离级别。
+                if offset % _CANCEL_CHECK_EVERY == 0 and (
+                    monotonic() - last_cancel_check >= _CANCEL_CHECK_MIN_INTERVAL_S
+                ):
+                    last_cancel_check = monotonic()
+                    if await is_cancel_requested(self.session, LOCK_DIVIDEND_SEED):
+                        cancelled = True
+                        logger.info(
+                            "收到跨进程取消请求，播种在检查点停止：已处理 %d/%d 只",
+                            idx - 1,
+                            total,
+                        )
+                        break
+                    # TTL 续期（A6）：使 TTL 只承担「崩溃检测」、与任务实际时长解耦；续期
+                    # 失败说明锁已被他人抢占（本进程已非持锁者）→ 立即停止，避免并发跑。
+                    if lock_token is not None and not await renew_admin_lock(
+                        self.session, LOCK_DIVIDEND_SEED, lock_token
+                    ):
+                        cancelled = True
+                        preempted = True
+                        logger.warning(
+                            "本进程已失去播种锁（被抢占），在检查点停止：已处理 %d/%d 只",
+                            idx - 1,
+                            total,
+                        )
+                        break
+                    # 注：续期内部的 commit 会收口事务，但因 ``expire_on_commit=False``
+                    # （见 app/db/database.py）不会 expire 会话内实例，故这里**无需**重解析
+                    # detail——这正是选择「不做 rollback 收口」的原因之一。
                 if mid in covered:  # 已完成的历史证券不再重复消耗 rate_limit 预算
                     covered_skipped += 1
                     continue
@@ -220,6 +279,9 @@ class DividendSeedService:
             seed_progress.hits = stats["hits"]
             seed_progress.failed = stats["skipped"]
             seed_progress.covered = covered_skipped
+            # 取消 / 被抢占：在**本批进度落定后**退出外层循环（进度面板据此停在准确进度点）
+            if cancelled:
+                break
 
         # 失败占比过高 → 冒泡（行动项 8，§6.2；与 scan 同口径）：使 scheduler 记
         # FAILED。分母 = seed set 规模（serviceable STOCK 子集，约 5923 只）；
@@ -257,9 +319,14 @@ class DividendSeedService:
         await refresh_yields_for_masters(self.session, list(changed))
         await self.session.commit()
         note = "；明细源缺失跳过逐只采集" if detail is None else ""
-        cancel_note = "（已由用户取消，已完成部分保留，可再次触发续跑）" if cancelled else ""
+        if preempted:
+            cancel_note = "（跨进程锁已被抢占，本进程主动停止；已完成部分保留）"
+        elif cancelled:
+            cancel_note = "（已由用户取消，已完成部分保留，可再次触发续跑）"
+        else:
+            cancel_note = ""
         summary = (
-            f"历史分红播种{'取消' if cancelled else '完成'}{note}："
+            f"历史分红播种{'停止' if preempted else '取消' if cancelled else '完成'}{note}："
             f"证券总数{stats['rows']}只，"
             f"已覆盖跳过{covered_skipped}只，本轮处理{stats['hits']}只，"
             f"失败{stats['skipped']}只；"
@@ -337,7 +404,7 @@ class DividendSeedService:
         return set(rows)
 
 
-async def run_dividend_seed(cfg: Any) -> str:
+async def run_dividend_seed(cfg: Any, lock_token: str | None = None) -> str:
     """模块级 handler：首跑播种（§5.7）。
 
     会话建立写法与同仓库既有 handler 一致（``run_dividend_yield_rebuild`` 等同仓储

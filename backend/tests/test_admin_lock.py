@@ -1,12 +1,17 @@
-"""app.services.admin_lock 单测：跨进程互斥锁（DB 行级 + TTL）。
+"""app.services.admin_lock 单测：跨进程互斥锁（DB 行级 + TTL + 取消标记）。
 
-覆盖（多进程单飞缺口补强）：
+覆盖（多进程单飞缺口补强 + 2026-09-24 审查修复）：
 1. 首次获取成功（行不存在 → INSERT 分支）
 2. 未释放再获取失败（他人持有且未过 TTL → 获取失败，且不改写持有者）
 3. 释放后可再获取
 4. 错误令牌释放无效（「谁持有谁释放」）
 5. 陈旧锁（持锁进程崩溃来不及释放）超过 TTL 后可被抢占
 6. TTL 参数生效（ttl_hours=0 时同一锁可被立即抢占）
+7. 无人持锁时请求取消 → False
+8. 有人持锁时置标记，释放须一并清标记
+9. **抢占陈旧锁须清空残留取消标记**（B2：否则新任务在第一个检查点即「秒取消」）
+10. **renew 续期**：持有者续期刷新 acquired_at（TTL 只承担崩溃检测，与任务时长解耦）
+11. **renew 是「是否仍持锁」探针**：非持有者 / 已释放 → False（调用方据此停止工作）
 
 每个用例开头清表：避免用例间相互污染（不依赖 conftest 是否回滚）。
 """
@@ -20,6 +25,7 @@ from app.services.admin_lock import (
     acquire_admin_lock,
     is_cancel_requested,
     release_admin_lock,
+    renew_admin_lock,
     request_cancel,
 )
 
@@ -143,3 +149,80 @@ async def test_request_cancel_sets_marker_and_release_clears_it(session):
     assert (
         await is_cancel_requested(session, LOCK_DIVIDEND_SEED) is False
     ), "释放锁须清空取消标记，否则下次播种一启动就在检查点自行退出"
+
+
+@pytest.mark.asyncio
+async def test_preempt_clears_stale_cancel_marker(session):
+    """⑨ 抢占 TTL 陈旧锁时**须清空残留取消标记**（B2）。
+
+    可达链路：上一轮置过取消标记 → 持锁进程崩溃 / 释放路径被取消打断 → 标记残留非 NULL；
+    若抢占不清，新一轮会在**第一个检查点**自检即退出（表现为「刚点播种就秒取消」），
+    且必须再点一次才能跑。这正是 TTL 抢占（唯一存在意义=崩溃恢复）与取消标记的正面冲突。
+    """
+    await _reset(session)
+    await acquire_admin_lock(session, LOCK_DIVIDEND_SEED)
+    assert await request_cancel(session, LOCK_DIVIDEND_SEED) is True
+    # 模拟持锁进程崩溃：acquired_at 回拨过 TTL（取消标记仍残留）
+    await session.execute(
+        text(
+            "UPDATE admin_locks SET acquired_at = now() - make_interval(hours => 100)"
+            " WHERE name = :n"
+        ),
+        {"n": LOCK_DIVIDEND_SEED},
+    )
+    await session.commit()
+    assert await is_cancel_requested(session, LOCK_DIVIDEND_SEED) is True
+
+    new_tok = await acquire_admin_lock(session, LOCK_DIVIDEND_SEED)
+    assert new_tok is not None, "陈旧锁须可被抢占"
+    assert (
+        await is_cancel_requested(session, LOCK_DIVIDEND_SEED) is False
+    ), "抢占陈旧锁须一并清空上一轮残留的取消标记（否则新任务首个检查点即自杀）"
+
+
+@pytest.mark.asyncio
+async def test_renew_refreshes_ttl_for_holder(session):
+    """⑩ renew 续期：持有者续期返回 True，且把 acquired_at 刷新到当前时刻。
+
+    这是「TTL 只承担崩溃检测、与任务实际时长解耦」的实现基础：长任务（播种约 10h）在每个
+    检查点续期后，不会再因「运行超过 TTL」而被第二个进程合法抢占。
+    """
+    await _reset(session)
+    tok = await acquire_admin_lock(session, LOCK_DIVIDEND_SEED)
+    # 先回拨到「接近过期」（25h 前，TTL=26h）
+    await session.execute(
+        text(
+            "UPDATE admin_locks SET acquired_at = now() - make_interval(hours => 25)"
+            " WHERE name = :n"
+        ),
+        {"n": LOCK_DIVIDEND_SEED},
+    )
+    await session.commit()
+
+    assert await renew_admin_lock(session, LOCK_DIVIDEND_SEED, tok) is True
+    still_stale = (
+        await session.execute(
+            text(
+                "SELECT acquired_at < now() - make_interval(hours => 1)"
+                " FROM admin_locks WHERE name = :n"
+            ),
+            {"n": LOCK_DIVIDEND_SEED},
+        )
+    ).scalar()
+    assert still_stale is False, "续期须把 acquired_at 刷新到当前时刻（不再算陈旧）"
+
+
+@pytest.mark.asyncio
+async def test_renew_fails_when_not_holder(session):
+    """⑪ renew 同时是「我是否仍持锁」的探针：非持有者 / 已释放 → False。
+
+    调用方（播种循环）据此在检查点停止工作，避免与抢占者并发跑。
+    """
+    await _reset(session)
+    tok = await acquire_admin_lock(session, LOCK_DIVIDEND_SEED)
+    assert await renew_admin_lock(session, LOCK_DIVIDEND_SEED, "not-the-owner") is False
+    # 未持有者续期不得改写 acquired_at（仍是持有者的锁）
+    assert await renew_admin_lock(session, LOCK_DIVIDEND_SEED, tok) is True
+
+    await release_admin_lock(session, LOCK_DIVIDEND_SEED, tok)
+    assert await renew_admin_lock(session, LOCK_DIVIDEND_SEED, tok) is False

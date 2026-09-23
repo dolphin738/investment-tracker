@@ -842,6 +842,10 @@ async def test_seed_stops_at_checkpoint_when_cancel_requested(session, monkeypat
 
     为在少量证券上复现「跨检查点」行为，把 ``_SEED_CHUNK`` 压到 1（每只在独立检查点），并让
     ``is_cancel_requested`` 在第二个检查点返回 True（模拟别的 worker 置了标记）。
+
+    另把检查点的**时间节流**（A7：两次查库间隔须 > ``_CANCEL_CHECK_MIN_INTERVAL_S``）压到 0：
+    否则毫秒级跑完的用例里，第二个检查点会因「距上次不足阈值」而被跳过，测不到取消逻辑本身。
+    节流的语义由 ``test_cancel_checkpoint_is_throttled_by_time`` 单独钉住。
     """
     from app.services import dividend_seed as ds
     from app.services.dividend_seed import seed_progress
@@ -858,6 +862,7 @@ async def test_seed_stops_at_checkpoint_when_cancel_requested(session, monkeypat
     })
     monkeypatch.setattr(MarketDataSyncService, "call_interface_raw", fake)
     monkeypatch.setattr(ds, "_SEED_CHUNK", 1)
+    monkeypatch.setattr(ds, "_CANCEL_CHECK_MIN_INTERVAL_S", 0.0)
 
     # 首个检查点（处理 A 前）放行；第二个检查点（处理 B 前）已置标记 → 停止
     checks = {"n": 0}
@@ -875,10 +880,62 @@ async def test_seed_stops_at_checkpoint_when_cancel_requested(session, monkeypat
     assert seed_progress.error is None, "跨进程取消不得误判失败率冒泡"
     assert "历史分红播种取消" in summary
     assert "已完成部分保留" in summary
-    assert _symbols(calls) == {_digits(code_a)}, (
-        "仅首个检查点前的证券被处理，其余在断点停止"
+    # ⚠️ 顺序无关断言：`_seed_rows` 按 **id 排序**，而测试里的 id 是 uuid4（随机）→
+    # 不得假定「code_a 一定是第一只被处理的证券」。原断言 `calls == {code_a}` 依赖该随机
+    # 顺序，本质 flaky（实测 3 连跑 1 失败）。此处改为刻画行为本身：
+    # 「恰好在第二个检查点停止」+「恰好处理 1 只」+「恰好一只证券的写入被保留」。
+    processed = _symbols(calls)
+    assert len(processed) == 1, (
+        f"首个检查点放行、第二个检查点停止 → 应恰好处理 1 只，实得 {processed}"
     )
+    assert checks["n"] == 2, "应恰好自检两次（首个放行、第二个置位后停止）"
     assert "本轮处理1只" in summary
     # 已完成部分照常落库（收尾重算仍执行），可断点续跑
-    stored_a = await _div_rows(session, a.id)
-    assert any(r.source == _DETAIL_NAME for r in stored_a), "已处理证券的写入须保留"
+    rows_a = await _div_rows(session, a.id)
+    rows_b = await _div_rows(session, b.id)
+    assert sum(1 for r in rows_a + rows_b if r.source == _DETAIL_NAME) == 1, (
+        "被处理的那只证券写入须保留（另一只未处理、无落库行）"
+    )
+
+
+# ───────────── 取消检查点的时间节流（A7） ─────────────
+@pytest.mark.asyncio
+async def test_cancel_checkpoint_is_throttled_by_time(session, monkeypatch):
+    """A7：检查点**每 10 只**给一次机会，但距上次查库不足 ``_CANCEL_CHECK_MIN_INTERVAL_S``
+    时跳过查库——避免「每只都很快」的场景把查询量放大数十倍。
+
+    本例把 ``_SEED_CHUNK`` 压到 1（每只都落在检查点机会上）但保持默认节流，故 3 只证券全程
+    只应查 1 次库（首个检查点必查，其后均被节流拦住）。这也解释了：真实播种（每只 ≈6s）下
+    节流必然满足、等价「每 10 只一查」；而毫秒级用例必须显式把节流压到 0 才能测到取消本身。
+    """
+    from app.services import dividend_seed as ds
+
+    a = await _add_master(session, code="600519", name="证券A")
+    b = await _add_master(session, code="000001", name="证券B")
+    c = await _add_master(session, code="000002", name="证券C")
+    await _seed_detail_source(session)
+    await session.commit()
+    cur = _cur_year()
+    fake, _calls = _make_raw({
+        _digits(a.code): [_cn_row(report=f"{cur - 1}年报", cash="100")],
+        _digits(b.code): [_cn_row(report=f"{cur - 1}年报", cash="50")],
+        _digits(c.code): [_cn_row(report=f"{cur - 1}年报", cash="30")],
+    })
+    monkeypatch.setattr(MarketDataSyncService, "call_interface_raw", fake)
+    monkeypatch.setattr(ds, "_SEED_CHUNK", 1)
+
+    checks = {"n": 0}
+
+    async def _count_only(_session, _name):
+        checks["n"] += 1
+        return False  # 永不取消：只统计查库次数
+
+    monkeypatch.setattr(ds, "is_cancel_requested", _count_only)
+
+    summary = await DividendSeedService(session).seed_initial_dividends(None)
+    await session.commit()
+
+    assert checks["n"] == 1, (
+        f"默认节流下 3 只只应触发首个检查点（1 次查库），实得 {checks['n']} 次"
+    )
+    assert "历史分红播种完成" in summary

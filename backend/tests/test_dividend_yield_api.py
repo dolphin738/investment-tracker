@@ -651,9 +651,11 @@ async def test_seed_triggers_job_async(session, client, monkeypatch):
     import app.services.dividend_seed as seed_mod
 
     captured: list = []
-    # 即时桩：记录被调用的 cfg（应为 None），返回占位摘要
-    async def _noop(cfg):
+    lock_tokens: list = []
+    # 即时桩：记录被调用的 cfg（应为 None）与 lock_token（须非空），返回占位摘要
+    async def _noop(cfg, lock_token=None):
         captured.append(cfg)
+        lock_tokens.append(lock_token)
         return "noop"
 
     monkeypatch.setattr(seed_mod, "run_dividend_seed", _noop)
@@ -675,6 +677,9 @@ async def test_seed_triggers_job_async(session, client, monkeypatch):
         await asyncio.sleep(0.01)
     assert captured, "须以 fire-and-forget 调起 run_dividend_seed(None)"
     assert captured[0] is None, "按钮版直接调用服务函数，不再经系统任务 cfg"
+    assert lock_tokens and lock_tokens[0], (
+        "须把持锁令牌透传给播种服务——检查点续期（A6）与「被抢占即停止」依赖它"
+    )
 
 
 # ───────────────────────── 播种单飞锁（行动项 8，§6.2） ─────────────────────────
@@ -700,7 +705,7 @@ async def test_seed_single_flight_rejects_concurrent(session, client, monkeypatc
     release = _asyncio.Event()
     calls = {"n": 0}
 
-    async def _blocking(cfg):
+    async def _blocking(cfg, lock_token=None):
         calls["n"] += 1
         started.set()
         await release.wait()
