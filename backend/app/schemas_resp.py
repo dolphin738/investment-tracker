@@ -465,3 +465,31 @@ class SecurityDividendItemOut(BaseModel):
 class SecurityDividendListOut(BaseModel):
     masterId: str
     items: list[SecurityDividendItemOut] = []
+
+
+# ───────────────────────── 股息率全局配置（§9 / D-4） ─────────────────────────
+# 字段名必须与 modules/dividend_yield/settings_router.py 的 ``_settings_out`` 手工 dict 的
+# 键**逐字一致**——两者是同一契约的两半。此前 GET/PUT /settings 未声明 response_model，
+# 导致 `docs/openapi.json` 中该 path 的 200 schema 为 `{}`、components 里**不存在**
+# DividendYieldSettingsOut，前端唯一真相源只能是手写类型（`web/src/api/types.ts`），
+# `dividend_retention_years` 漏字段缺陷即由此复发过一次（A8/B7）。
+# 五字段**不给默认值**：`_settings_out` 恒返回全部五个键（未配置回落默认/None），
+# 故「必填但可空」才是准确契约；护栏见
+# tests/test_dividend_yield_api.py::test_settings_wire_matches_response_model（逐字比对）。
+class DividendYieldSourceRefOut(BaseModel):
+    """已 resolve 的数据源接口引用（读侧投影 ``{id, name}``；未配置为 null）。"""
+
+    id: str
+    name: str
+
+
+class DividendYieldSettingsOut(BaseModel):
+    """股息率全局配置（GET /settings 与 PUT /settings **同形**）。"""
+
+    dividend_detail_source: Optional[DividendYieldSourceRefOut]
+    price_source: Optional[DividendYieldSourceRefOut]
+    announcement_source: Optional[DividendYieldSourceRefOut]
+    trade_calendar_start_date: Optional[date]  # YYYY-MM-DD；None = 未配置（后端用默认下限）
+    # 1~10，**非空**：`_settings_out` 保证「未配置（无行 / 显式 NULL）→ 回落默认 5」，
+    # 故契约上该字段恒为有效值（前端据此算建议留存窗，不必再自行兜底）。
+    dividend_retention_years: int

@@ -2850,7 +2850,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/DividendYieldSettingsOut"
+                }
               }
             }
           }
@@ -2883,7 +2885,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/DividendYieldSettingsOut"
+                }
               }
             }
           },
@@ -8117,6 +8121,85 @@
           "STOCK_DIVIDEND"
         ],
         "title": "DividendType"
+      },
+      "DividendYieldSettingsOut": {
+        "properties": {
+          "dividend_detail_source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DividendYieldSourceRefOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "price_source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DividendYieldSourceRefOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "announcement_source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DividendYieldSourceRefOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "trade_calendar_start_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trade Calendar Start Date"
+          },
+          "dividend_retention_years": {
+            "type": "integer",
+            "title": "Dividend Retention Years"
+          }
+        },
+        "type": "object",
+        "required": [
+          "dividend_detail_source",
+          "price_source",
+          "announcement_source",
+          "trade_calendar_start_date",
+          "dividend_retention_years"
+        ],
+        "title": "DividendYieldSettingsOut",
+        "description": "股息率全局配置（GET /settings 与 PUT /settings **同形**）。"
+      },
+      "DividendYieldSourceRefOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "DividendYieldSourceRefOut",
+        "description": "已 resolve 的数据源接口引用（读侧投影 ``{id, name}``；未配置为 null）。"
       },
       "DrawdownPointOut": {
         "properties": {

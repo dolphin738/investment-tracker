@@ -33,7 +33,7 @@ import {
 } from '@/modules/dividend-yield/composables/use-dividend-yield';
 import { useQuoteProviders } from '@/modules/admin/composables/use-quote-provider';
 import { SELECT_EMPTY_VALUE } from '@/lib/constants';
-import type { UpdateDividendYieldSettingsDto } from '@/api/types';
+import type { SettingsUpdateBody } from '@/api/dividend-yield.api';
 
 const isAdmin = useIsAdmin();
 /** 当前激活子 TAB；初始化在前（默认激活），股息率次之 */
@@ -129,7 +129,7 @@ const settingsHasChanges = computed(() => {
 /** 保存全局设置（覆盖两个 TAB 的全部字段） */
 function handleSaveSettings(): void {
   settingsFormError.value = '';
-  const payload: UpdateDividendYieldSettingsDto = {
+  const payload: SettingsUpdateBody = {
     dividend_detail_source_interface_id: toInterfaceIdOrNull(
       settingsForm.dividendDetailSourceInterfaceId,
     ),

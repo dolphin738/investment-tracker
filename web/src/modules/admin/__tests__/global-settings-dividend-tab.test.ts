@@ -22,7 +22,7 @@ import {
 } from '@vue/test-utils';
 import { ref, defineComponent, h } from 'vue';
 import { ROUTE_PATH, SELECT_EMPTY_VALUE } from '@/lib/constants';
-import type { DividendYieldSettingsOut } from '@/api/types';
+import type { DividendYieldSettingsOut } from '@/api/dividend-yield.api';
 
 // ---------------------------------------------------------------------------
 // 测试数据（模块级共享：mock 工厂与断言共用）

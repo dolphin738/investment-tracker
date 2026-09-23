@@ -827,36 +827,8 @@ export interface ImpliedPriceResult {
   current_dividend_yield: number | null;
 }
 
-/** 股息率设置中「已 resolve」的接口引用（读取返回对象，非 *_interface_id） */
-export interface DividendYieldSourceRef {
-  id: string;
-  name: string;
-}
-
-/** 股息率设置读取响应（GET /dividend-yield/settings；标色阈值已迁「用户偏好」，不在本响应内） */
-export interface DividendYieldSettingsOut {
-  dividend_detail_source: DividendYieldSourceRef | null;
-  price_source: DividendYieldSourceRef | null;
-  /** 公司公告接口（§5.4；未配置为 null） */
-  announcement_source: DividendYieldSourceRef | null;
-  /** 交易日历刷新起始日期（YYYY-MM-DD）：「交易日历刷新」任务的窗口下限；
-   *  null = 未配置（后端沿用默认「去年 1 月 1 日」）；结束上限受数据源限制为当年末，不暴露 */
-  trade_calendar_start_date: string | null;
-  /** 分红留存窗年数（D-4 配置化，1~10，默认 5）：保留最近 N 个财年 [cur-N+1, cur]；
-   *  采集窗（播种/每日扫描裁剪）与留存清理窗共用此值，保证二者对齐（后端 GET 响应实际返回） */
-  dividend_retention_years?: number | null;
-}
-
-/** 股息率设置更新请求（PUT /dividend-yield/settings · admin-only；写时用 *_interface_id 字段） */
-export interface UpdateDividendYieldSettingsDto {
-  dividend_detail_source_interface_id?: string | null;
-  price_source_interface_id?: string | null;
-  /** 公司公告接口（§5.4；null = 不设置） */
-  announcement_source_interface_id?: string | null;
-  /** 交易日历刷新起始日期（YYYY-MM-DD）；空串/不传 = 不改（保留既有值）；
-   *  结束上限受数据源限制为当年末，故前端不提供结束日期 */
-  trade_calendar_start_date?: string | null;
-  /** 分红留存窗年数（D-4 配置化，1~10，默认 5）：保留最近 N 个财年 [cur-N+1, cur]；
-   *  采集窗（播种/每日扫描裁剪）与留存清理窗共用此值，保证二者对齐 */
-  dividend_retention_years?: number | null;
-}
+// 股息率全局配置（GET/PUT /dividend-yield/settings）的**响应与请求体类型不在本文件**：
+// 后端已为两端点声明 response_model（A8/B7），契约由生成物 `web/src/types/api.ts` 唯一承载，
+// api 层再导出具名别名供业务侧消费——
+// `@/api/dividend-yield.api` 的 `DividendYieldSettingsOut`（响应）与 `SettingsUpdateBody`（请求体）。
+// 保留手写副本必然与生成物漂移：`dividend_retention_years` 就曾因「后端已返回、手写没抄」漏过。`

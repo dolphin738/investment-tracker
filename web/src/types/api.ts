@@ -209,6 +209,23 @@ app_logs（message/trace/detail 均为无界 Text/JSON 列）。 */
       };
     /** DividendType */
     DividendType: 'CASH' | 'STOCK_DIVIDEND';
+    /** 股息率全局配置（GET /settings 与 PUT /settings **同形**）。 */
+    DividendYieldSettingsOut: {
+        dividend_detail_source: components['schemas']['DividendYieldSourceRefOut'] | null;
+        price_source: components['schemas']['DividendYieldSourceRefOut'] | null;
+        announcement_source: components['schemas']['DividendYieldSourceRefOut'] | null;
+        /** Trade Calendar Start Date */
+        trade_calendar_start_date: string | null;
+        /** Dividend Retention Years */
+        dividend_retention_years: number;
+      };
+    /** 已 resolve 的数据源接口引用（读侧投影 ``{id, name}``；未配置为 null）。 */
+    DividendYieldSourceRefOut: {
+        /** Id */
+        id: string;
+        /** Name */
+        name: string;
+      };
     /** DrawdownPointOut */
     DrawdownPointOut: {
         /** Date */

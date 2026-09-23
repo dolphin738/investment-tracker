@@ -32,6 +32,7 @@ from app.models.enums import (
     ReportPeriodType,
     SecurityType,
 )
+from app.schemas_resp import DividendYieldSettingsOut, DividendYieldSourceRefOut
 from app.services.market_data_sync import (
     DIVIDEND_LIST_CAT_ID,
     NOTICE_CAT_ID,
@@ -449,6 +450,52 @@ async def test_settings_retention_years_default_and_update(session, client):
         "/api/dividend-yield/settings", json={"dividend_retention_years": 11}, headers=h
     )
     assert env(r)[0] == 400
+
+
+@pytest.mark.asyncio
+async def test_settings_wire_matches_response_model(session, client):
+    """B7/A8 护栏：GET/PUT ``/settings`` 的实际 wire 键集 == `response_model` 字段集。
+
+    背景：信封机制下 ``response_model`` **不参与运行时校验**（EnvelopeRoute 原样透传
+    Response 子类），故「后端已返回、schema 没声明」不会被 500 抓到——这正是
+    ``dividend_retention_years`` 漏过两次（契约里没有该类型 → 前端只能手写 → 加/改字段
+    静默漂移）的机制。本用例把两半逐字绑定：任一侧加/改/删字段而未同步另一侧即 FAIL。
+
+    覆盖三点：① 五个顶层键逐字一致；② 嵌套 source ref 键集一致（有值分支）；
+    ③ 留存窗恒为有效值（schema 声明为非空 int）。
+    """
+    admin = await _make_admin(session, client)
+    itf = await _seed_category4_interface(session)
+    h = auth(admin["token"])
+
+    # PUT：顺带覆盖「有值分支」（announcement_source 非 null、留存窗非默认）
+    status, _, data, _ = env(await client.put(
+        "/api/dividend-yield/settings",
+        json={
+            "announcement_source_interface_id": itf.id,
+            "dividend_retention_years": 7,
+        },
+        headers=h,
+    ))
+    assert status == 200
+    model_fields = set(DividendYieldSettingsOut.model_fields)
+    assert set(data) == model_fields, (
+        f"PUT /settings 的 wire 键集与 DividendYieldSettingsOut 不一致："
+        f"多={sorted(set(data) - model_fields)} 缺={sorted(model_fields - set(data))}"
+    )
+    assert set(data["announcement_source"]) == set(
+        DividendYieldSourceRefOut.model_fields
+    ), "source ref 的 wire 键集与 DividendYieldSourceRefOut 不一致"
+    assert data["dividend_retention_years"] == 7
+    assert isinstance(data["dividend_retention_years"], int)  # schema 声明为非空 int
+
+    # GET 必须与 PUT **同形**（契约的显式承诺：两端点共用 _settings_out）
+    status, _, data, _ = env(await client.get("/api/dividend-yield/settings", headers=h))
+    assert status == 200
+    assert set(data) == model_fields, (
+        f"GET /settings 的 wire 键集与 DividendYieldSettingsOut 不一致："
+        f"多={sorted(set(data) - model_fields)} 缺={sorted(model_fields - set(data))}"
+    )
 
 
 # ───────────────────────── 可排序列扩到 5 列（§8.1，P2-6） ─────────────────────────

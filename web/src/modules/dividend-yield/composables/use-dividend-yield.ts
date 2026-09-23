@@ -5,7 +5,8 @@
  * - useTop20(): Top20 看板（后端封顶 + 剔除 suspicious）
  * - useRank(page,pageSize,sort,enabled): 榜单分页（按股息率 / 连续分红年数排序）
  * - useImpliedPrice(masterId,targetRatio,enabled): 目标收益率反推隐含价格
- * - useDividendYieldSettings(enabled): 阈值 + 接口源设置（admin-only，非 admin 传 enabled=false）
+ * - useDividendYieldSettings(enabled): 全局配置读取（端点要求 admin|auditor；其它角色传
+ *   enabled=false，免发必然 403 的请求）
  * - useUpdateDividendYieldSettings(): 更新设置（admin-only）
  * - useSeedInitialDividends(): 触发历史分红补齐 / 播种（admin-only，fire-and-forget）
  * - useDividendYieldInterfaces(enabled): 设置页双源下拉候选接口（复用 listAllInterfaces）
@@ -28,12 +29,11 @@ import {
   cancelSeedInitialDividends,
   updateDividendYieldSettings,
   type DividendYieldRankFilters,
+  // 设置请求体契约（单一真相源 = OpenAPI 生成物，见 api 模块注释）
+  type SettingsUpdateBody,
 } from '@/api/dividend-yield.api';
 import { listAllInterfaces } from '@/api/quote-interface.api';
-import type {
-  DividendYieldSort,
-  UpdateDividendYieldSettingsDto,
-} from '@/api/types';
+import type { DividendYieldSort } from '@/api/types';
 
 /** 股息率领域 queryKey 前缀 */
 export const DIVIDEND_YIELD_KEY = ['dividend-yield'] as const;
@@ -133,7 +133,7 @@ export function useImpliedPrice(
   });
 }
 
-/** 股息率阈值 + 接口源设置（admin-only；非 admin 传 enabled=false 不发起） */
+/** 股息率全局配置读取（要求 admin|auditor；其它角色传 enabled=false 免发 403） */
 export function useDividendYieldSettings(
   enabled: MaybeRefOrGetter<boolean> = true,
 ) {
@@ -149,7 +149,7 @@ export function useDividendYieldSettings(
 export function useUpdateDividendYieldSettings() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (payload: UpdateDividendYieldSettingsDto) =>
+    mutationFn: (payload: SettingsUpdateBody) =>
       updateDividendYieldSettings(payload),
     onSuccess: () => {
       toast.success('股息率设置已保存');

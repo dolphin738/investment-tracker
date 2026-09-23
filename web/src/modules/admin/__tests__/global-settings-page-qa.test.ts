@@ -14,7 +14,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import { ref, defineComponent, h } from 'vue';
 import { SELECT_EMPTY_VALUE } from '@/lib/constants';
-import type { DividendYieldSettingsOut } from '@/api/types';
+import type { DividendYieldSettingsOut } from '@/api/dividend-yield.api';
 
 const interfaces = vi.hoisted(() => [
   { id: 'i1', provider_id: 'p1', category_id: '3', name: '东财-分红配送', enabled: true },

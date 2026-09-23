@@ -7,8 +7,8 @@
  * - GET  /dividend-yield/{master_id}/dividends  — 单证券分红明细（按报告期，仅有分红期次）
  * - GET  /dividend-yield/{master_id}/curve      — 单证券股息率曲线（近 days 天）
  * - GET  /dividend-yield/{master_id}/implied-price — 按目标收益率反推隐含价格
- * - GET  /dividend-yield/settings       — 阈值 + 三接口源设置（admin-only）
- * - PUT  /dividend-yield/settings       — 更新设置（admin-only）
+ * - GET  /dividend-yield/settings       — 全局配置读取（登录可读）
+ * - PUT  /dividend-yield/settings       — 更新全局配置（admin-only）
  * - POST /dividend-yield/rebuild                — 全量重建派生快照（admin-only）
  * - POST /dividend-yield/seed-initial-dividends — 触发历史分红补齐 / 播种（admin-only，fire-and-forget）
  *
@@ -20,10 +20,8 @@ import type {
   DividendYieldRankResponse,
   DividendYieldTop20Response,
   DividendYieldSort,
-  DividendYieldSettingsOut,
   ImpliedPriceResult,
   PaginatedResponse,
-  UpdateDividendYieldSettingsDto,
 } from './types';
 // 待人工划分分红端点响应契约直接复用 OpenAPI 生成类型（批次 C 已重生成 types/api.ts）。
 import type { components } from '../types/api';
@@ -34,6 +32,15 @@ type PendingAssignResultOut = components['schemas']['PendingAssignResultOut'];
 type PendingIgnoreResultOut = components['schemas']['PendingIgnoreResultOut'];
 type PendingReopenResultOut = components['schemas']['PendingReopenResultOut'];
 type BatchOperationOut = components['schemas']['BatchOperationOut'];
+
+// 股息率全局配置契约（B7/A8）：**响应与请求体都**直接复用 OpenAPI 生成类型——这两个端点
+// 此前未声明 response_model，`docs/openapi.json` 里根本没有该类型，前端只能手写
+// （原 `api/types.ts` 的 DividendYieldSettingsOut / UpdateDividendYieldSettingsDto），
+// 「后端加字段、前端手写漏抄」因此静默漂移过一次（`dividend_retention_years`）。
+// 现由生成物唯一承载；若后端改字段，前端类型自动跟随（`pnpm run lint` 即报错）。
+export type DividendYieldSettingsOut =
+  components['schemas']['DividendYieldSettingsOut'];
+export type SettingsUpdateBody = components['schemas']['SettingsUpdateBody'];
 
 /** 股息率榜单过滤参数（§8.1；include_no_dividend 默认 false=剔除近两年无分红） */
 export interface DividendYieldRankFilters {
@@ -109,26 +116,14 @@ export function getDividendYieldImpliedPrice(
   );
 }
 
-/**
- * GET /dividend-yield/settings 响应（在既有 DividendYieldSettingsOut 上补 D-4 留存窗年数）。
- *
- * 后端 `_settings_out` 始终返回有效 `dividend_retention_years`（未配置回落 5）。因
- * `api/types.ts` 非本链路手写契约（不改动该文件），此处以扩展接口承载该新字段；
- * 待人工划分页据此算建议留存窗，不再硬编码 `cur-4`（避免与后端清理窗漂移）。
- */
-export interface DividendYieldSettings extends DividendYieldSettingsOut {
-  /** 分红留存窗年数（可配 1~10；未配置后端回落 5） */
-  dividend_retention_years: number | null;
+/** 股息率全局配置读取（登录可读；响应形状 = OpenAPI `DividendYieldSettingsOut`） */
+export function getDividendYieldSettings(): Promise<DividendYieldSettingsOut> {
+  return http.get<DividendYieldSettingsOut>('/dividend-yield/settings');
 }
 
-/** 股息率阈值 + 三接口源设置（登录可读；含 D-4 留存窗年数） */
-export function getDividendYieldSettings(): Promise<DividendYieldSettings> {
-  return http.get<DividendYieldSettings>('/dividend-yield/settings');
-}
-
-/** 更新股息率阈值 + 三接口源设置（admin-only；写时用 *_interface_id 字段） */
+/** 更新股息率全局配置（admin-only；写时用 *_interface_id 字段） */
 export function updateDividendYieldSettings(
-  payload: UpdateDividendYieldSettingsDto,
+  payload: SettingsUpdateBody,
 ): Promise<DividendYieldSettingsOut> {
   return http.put<DividendYieldSettingsOut>(
     '/dividend-yield/settings',

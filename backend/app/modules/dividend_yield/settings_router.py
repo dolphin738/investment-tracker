@@ -25,6 +25,7 @@ from app.models import (
     QuoteInterface,
 )
 from app.models.dividend_yield import DEFAULT_DIVIDEND_RETENTION_YEARS
+from app.schemas_resp import DividendYieldSettingsOut
 from app.services.auth import CurrentUser, get_current_user, require_admin
 from app.services.log import record
 from app.services.market_data_sync import (
@@ -153,7 +154,7 @@ async def _settings_out(db: AsyncSession, row: DividendYieldSettings) -> dict[st
     }
 
 
-@router_settings.get("/settings")
+@router_settings.get("/settings", response_model=DividendYieldSettingsOut)
 async def get_dividend_yield_settings(
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -163,7 +164,7 @@ async def get_dividend_yield_settings(
     return await _settings_out(db, row)
 
 
-@router_settings.put("/settings")
+@router_settings.put("/settings", response_model=DividendYieldSettingsOut)
 async def put_dividend_yield_settings(
     body: SettingsUpdateBody,
     admin: CurrentUser = Depends(require_admin),
