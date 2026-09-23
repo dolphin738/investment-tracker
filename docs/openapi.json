@@ -2793,7 +2793,7 @@
           "dividend-yield"
         ],
         "summary": "Cancel Seed Initial Dividends",
-        "description": "取消正在运行的历史分红播种（admin-only）。\n\n经 ``seed_task.cancel()`` 请求取消，播种协程在下一个 await 中断点（单只网络请求或\ncommit）抛出 CancelledError 而停止——**已完成部分（按「当前明细源 + 近 5 年」判定为\n已覆盖）保留**，进程重启或再次触发会从断点续跑，不丢数据、不重复写入。\n\n**单飞锁不在本端点释放**：取消信号传播后 ``_run_seed`` 的 ``finally`` 才释放\n``_seed_lock``，避免此处与 finally 重复释放导致竞态。\n\n**无运行任务 → 409**：``seed_task is None``（从未触发）或 ``seed_task.done()``\n（已正常结束/已取消完成）均视为「无运行任务」，不重复取消。",
+        "description": "取消正在运行的历史分红播种（admin-only）。\n\n**两条取消路径**（缺一不可）：\n- **本进程**：握有 ``seed_task`` 时直接 ``task.cancel()``，协程在下一个 await 中断点\n  （单只网络请求或 commit）抛 ``CancelledError`` 而停止。\n- **跨进程**：置 ``admin_locks.cancel_requested_at`` 标记。``seed_task`` 是进程内变量，\n  多 worker 下任务若在别的进程则本进程拿不到引用（旧实现直接 409，用户点不动）；\n  持锁 worker 的播种循环在每个检查点自检该标记后自行退出。\n\n**已完成部分保留**（按「当前明细源 + 近 5 年」判定为已覆盖），再次触发会从断点续跑，\n不丢数据、不重复写入。\n\n**单飞锁不在本端点释放**：取消信号传播后 ``_run_seed`` 的 ``finally`` 才释放\n``_seed_lock`` 与 DB 锁，避免此处与 finally 重复释放导致竞态。\n\n**无运行任务 → 409**：DB 标记置位失败（无人持锁）**且** 本进程无运行中任务，即判定\n「无任务可取消」。仅置标记成功（任务在别的 worker）时返回 200。\n\n**幂等**：本进程任务已在取消中（``cancelling() > 0``，含「已收到取消、正在 finally\n释放锁」的窗口，此时 ``done()`` 仍为 False）时**不重复注入** ``task.cancel()``——二次\n注入会让 ``CancelledError`` 落在 ``_run_seed`` 的 ``finally`` 上，跳过进程内单飞锁的\n释放（详见 ``_run_seed`` 的说明）。此路径返回 200 + 提示，不报错。",
         "operationId": "cancel_seed_initial_dividends_api_dividend_yield_seed_initial_dividends_cancel_post",
         "responses": {
           "200": {
@@ -2818,7 +2818,7 @@
           "dividend-yield"
         ],
         "summary": "Seed Initial Dividends Progress",
-        "description": "查询首跑播种运行进度（admin-only，与 POST 同权限）。\n\n返回进程内内存态进度（不入库、不跨进程）：state(idle|running|done|error) /\ntotal / processed / hits / failed / covered / started_at / finished_at /\nerror / message。前端据此轮询展示进度条与失败只数；进程重启后归零为 idle。",
+        "description": "查询首跑播种运行进度（admin-only，与 POST 同权限）。\n\n返回进程内内存态进度（不入库、不跨进程）：state(idle|running|done|error|cancelled) /\ntotal / processed / hits / failed / covered / started_at / finished_at /\nerror / message / failed_securities（失败证券清单，每条含 master_id/code/name，\nUI 展开查看「代码 + 名称」，上限见服务端 _FAILED_IDS_CAP，超出置 failed_truncated）/\nfailed_truncated。前端据此轮询展示进度条、失败只数与失败证券清单；进程重启后归零为 idle。",
         "operationId": "seed_initial_dividends_progress_api_dividend_yield_seed_initial_dividends_progress_get",
         "responses": {
           "200": {
