@@ -19,13 +19,16 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import select, update
 
+from app.core.date_utils import today_app_tz
 from app.models import Security, SecurityDividend, SecurityDividendPending, User
+from app.models.dividend_yield import DEFAULT_DIVIDEND_RETENTION_YEARS
 from app.models.enums import (
     DividendPendingStatus,
     DividendStatus,
     ReportPeriodType,
     SecurityType,
 )
+from app.services.dividend_cninfo_parse import retention_cutoff_year
 from tests.helpers import auth, env, register_login
 
 _BASE = datetime(2026, 1, 1, tzinfo=timezone.utc)
@@ -570,6 +573,103 @@ async def test_reopen_requires_assigned(session, client):
         f"/api/dividend-yield/pending-dividends/{pid}/reopen", headers=h
     )
     assert r.status_code == 409
+
+
+# ───────────── assign：留存窗硬拒（A3=①） ─────────────
+@pytest.mark.asyncio
+async def test_assign_rejects_year_outside_retention_window(session, client):
+    """留存窗外年份**硬拒**（400）且不写主表。
+
+    窗外年份会被留存清理（``dividend_sync.retention_cleanup``）删除，划分等于「成功但过一阵
+    静默消失」；而待划分队列主力恰是股改类窗外年份。把关必须在后端——前端
+    （``suggest-report-period``）只给提示，直连 API 可绕过。
+    """
+    admin = await _make_role(session, client, "adm-win@example.com", "admin")
+    h = auth(admin["token"])
+    mid = await _master(session)
+    p = _pending(mid, cash="8.0", label="股改分红")
+    session.add(p)
+    await session.commit()
+    pid = p.id
+
+    # 早于留存窗下界一年（窗内按同一函数取，故不依赖测试库里留存年数配置的具体值）
+    outside = retention_cutoff_year(today_app_tz(), DEFAULT_DIVIDEND_RETENTION_YEARS) - 1
+    r = await client.post(
+        f"/api/dividend-yield/pending-dividends/{pid}/assign",
+        json={"reportYear": outside, "reportQuarter": 4, "periodType": "ANNUAL"},
+        headers=h,
+    )
+    assert r.status_code == 400, "留存窗外年份须 400（而非静默写入后被清理）"
+
+    session.expire_all()
+    assert (
+        await session.execute(
+            select(SecurityDividend).where(SecurityDividend.master_id == mid)
+        )
+    ).scalars().all() == [], "被拒的划分不得写入主表"
+    p2 = await session.get(SecurityDividendPending, pid)
+    await session.refresh(p2)
+    assert p2.status.value == "PENDING", "被拒后须仍为待划分态"
+
+
+# ───────────── reopen：来源守卫（A4=②） ─────────────
+@pytest.mark.asyncio
+async def test_reopen_keeps_non_assign_row(session, client):
+    """assign 命中「主表同格已存在」（本次未写入任何行）→ reopen 不得删采集侧那行。
+
+    原实现只按 ``resolved_*`` 四元组键删，会把采集侧写入的合法行一并删掉却报
+    ``rolledBack=true``；加 ``source = 人工划分`` 守卫后，该情形退化为「不删」（安全侧）。
+    """
+    admin = await _make_role(session, client, "adm-rbg@example.com", "admin")
+    h = auth(admin["token"])
+    mid = await _master(session)
+    inside = retention_cutoff_year(today_app_tz(), DEFAULT_DIVIDEND_RETENTION_YEARS)
+    session.add(
+        SecurityDividend(
+            master_id=mid,
+            report_year=inside,
+            report_quarter=4,
+            period_type=ReportPeriodType.OTHER,
+            cash_per_share=Decimal("9.9"),
+            status=DividendStatus.PAID,
+            dividend_label="采集侧标签",
+            source="巨潮",
+        )
+    )
+    p = _pending(mid, cash="8.0", label="股改分红")
+    session.add(p)
+    await session.commit()
+    pid = p.id
+
+    st, _, data, _ = env(
+        await client.post(
+            f"/api/dividend-yield/pending-dividends/{pid}/assign",
+            json={
+                "reportYear": inside,
+                "reportQuarter": 4,
+                "periodType": "OTHER",
+            },
+            headers=h,
+        )
+    )
+    assert st == 200
+    assert data["conflict"] is True, "同格已存在 → conflict=True（本次未写入任何行）"
+
+    st2, _, data2, _ = env(
+        await client.post(
+            f"/api/dividend-yield/pending-dividends/{pid}/reopen", headers=h
+        )
+    )
+    assert st2 == 200
+    assert data2["rolledBack"] is False, "未写入任何行 → 无行可撤（守卫失效方向须为「不删」）"
+
+    session.expire_all()
+    rows = (
+        await session.execute(
+            select(SecurityDividend).where(SecurityDividend.master_id == mid)
+        )
+    ).scalars().all()
+    assert len(rows) == 1 and rows[0].source == "巨潮", "采集侧写入的行须被保留"
 
 
 # ───────────────────────── ignore ─────────────────────────
