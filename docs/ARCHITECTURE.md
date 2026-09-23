@@ -49,7 +49,7 @@
 │  ├─ core/         security(JWT+bcrypt) / envelope / exceptions /  │
 │  │                enums / config                                  │
 │  ├─ schemas.py    请求体 DTO（金额统一 DecimalStr）               │
-│  └─ schemas_resp.py 响应体 DTO（*Out）                            │
+│  └─ schemas_resp/   响应体 DTO（*Out）                            │
 └───────────┬───────────────────────────────┬────────────────────┘
             │ SQLAlchemy 2.0 async            │
 ┌───────────▼────────────┐          ┌─────────▼─────────────────┐
@@ -88,7 +88,7 @@ backend/app/
 │   ├── cashflow.py  snapshot.py  calc.py  dividend.py
 │   ├── quote_provider.py  quote_interface.py  interface_category.py   # 系统管理扩展（多提供方）
 ├── schemas.py           # 请求体 Pydantic DTO（金额统一 DecimalStr）
-├── schemas_resp.py      # 响应体 Pydantic DTO（*Out，OpenAPI 单一真相源）
+├── schemas_resp/        # 响应体 Pydantic DTO（*Out，OpenAPI 单一真相源；按域分包 common/portfolio/market/calc/transfer/dividend_yield）
 ├── finance_core/        # 纯函数：xirr.py / nav.py / holding.py
 ├── services/            # 资源 Service(10): cashflow / security / trade / price
 │                       #   / cashbalance / snapshot / dividend / portfolio
@@ -920,7 +920,7 @@ classDiagram
 
 > **退役状态：已完成**（数值策略 A）；**契约收敛 §5.2b 已完成**（2026-08-09 P1–P3）：后端 `*Out` 已补齐缺字段（portfolioId / userId / updatedAt 等）并将 6 领域枚举 + `ExportType`/`ImportType`/`ImportErrorCode` 提升为独立命名 schema（`types/api.ts` 生成 `components['schemas']['Xxx']` 联合类型），`lib/types.ts` 实体类型现可安全重导出。原 `shared` 别名与 `web/src/shared/index.ts` 垫片均已删除，全前端 ~60 处 `import` 改写为 `@/lib/types`；原测试 457/461 通过（4 失败为既存 `security-type-shared.test.tsx` 预存在问题）。
 
-- **`web/src/types/api.ts`**：由 `docs/openapi.json`（OpenAPI 3.1）经 `web/scripts/gen-api-types.py` 生成，产出 `components['schemas']`（全部 `*Out` 响应模型）与 `operations` 映射。`npm run generate:api` 可重新生成。后端是这些 schema 的权威实现（`models/enums.py` 6 领域枚举 / `ExportType`/`ImportType`/`ImportErrorCode` / `core/enums.py` `BusinessErrorCode` / `schemas_resp.py` `*Out` DTO），OpenAPI 即其导出。生成器已修正 `null` 类型映射（`Optional[str]` → `T | null`，原误映射为 `unknown`），可选字段更准确。
+- **`web/src/types/api.ts`**：由 `docs/openapi.json`（OpenAPI 3.1）经 `web/scripts/gen-api-types.py` 生成，产出 `components['schemas']`（全部 `*Out` 响应模型）与 `operations` 映射。`npm run generate:api` 可重新生成。后端是这些 schema 的权威实现（`models/enums.py` 6 领域枚举 / `ExportType`/`ImportType`/`ImportErrorCode` / `core/enums.py` `BusinessErrorCode` / `schemas_resp/` `*Out` DTO），OpenAPI 即其导出。生成器已修正 `null` 类型映射（`Optional[str]` → `T | null`，原误映射为 `unknown`），可选字段更准确。
 - **`web/src/lib/types.ts`**：前端契约聚合层（唯一类型真相源），按四类维护（详见文件头注释）：
   1. **实体类型**：`CashFlow` / `Portfolio` / `AssetSnapshot` / `UserPublic` 已改为 `components['schemas']['XxxOut']` 的 **re-export 别名**（§5.2b：P1 补齐后端缺字段、P2 枚举独立 schema 后 DTO 与前端视图模型 1:1 对齐；`UserPublicOut` 经 `3f478dd` 修正 `name` 可空 / `createdAt` 必填，与前端 `name: string|null` / `createdAt: string` 一致，遂由手写改为 re-export）。金额字段一律 `string` 透传（Decimal→str 铁律 C-02）。
   2. **枚举 / 业务错误码 / 金额工具**（`SecurityType` / `CashFlowType` / `SecuritySide` / `SnapshotSource` / `SnapshotValuation` / `DividendType` / `isMoneyString` / `computeNetAmount` / …）= 前后端约定常量 `as const`。后端枚举值已逐对校验一致；枚举的**运行时 `as const` 对象**仍留本文件（下拉遍历需要值），与 `types/api.ts` 生成的联合类型值一致。`BUSINESS_ERROR_CODE` 现由 `types/api.ts` 生成层自 `backend/app/core/enums.py` 的 `BusinessErrorCode` 解析产出（单一事实来源在后端 enums.py），本文件仅 re-export 转发（§5.2b `6f98080`）；`ACCOUNT_RETENTION_DAYS` 因是简单整型常量且 `ACCOUNT_RETENTION_MS` 由前端派生，**保留手写**（唯一保留的运行时值残留项）。
