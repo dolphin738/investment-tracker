@@ -21,17 +21,21 @@
   ``detail``（``NoticeMetaMixin._re_resolve_detail_after_rollback``），否则下一只读
   ``detail.params`` 会触发同步惰性加载 → MissingGreenlet 连锁失败。
 
-**模块拆分（§6.3）**：公告标题二筛（``_TITLE_*_RE`` / ``_classify_notices``）与选源 + 重解析
+**模块拆分（§6.3 / A11）**：公告标题二筛（``_TITLE_*_RE`` / ``_classify_notices``）与选源 + 重解析
 韧性（``_settings`` / ``_provider_enabled`` / ``_resolve_notice_itf`` / ``_resolve_detail_itf`` /
 ``_re_resolve_*`` / ``_master_code_map``）已抽到 ``dividend_notice_meta.py`` 的
-``NoticeMetaMixin``；本类继承之，私有方法访问口径不变。本模块只保留**落库主流程与 upsert**。
+``NoticeMetaMixin``；单只落库的定位 / 跨源去重 / 取消置位（``_locate_cell`` / ``_first`` /
+``_westward_dup`` / ``_reject_proposed``）已抽到 ``dividend_notice_upsert.py`` 的
+``NoticeUpsertMixin``（A11-②，本文件 431 → 359 行）。本类同时继承两个 mixin，
+私有方法访问口径不变；本模块只保留**落库主流程与 upsert 编排 + 计数与日志**
+（``_bump`` 为模块级函数，随方法迁出会形成环导入，故计数与日志一律留在本文件）。
 """
 from __future__ import annotations
 
 import logging
 import re
 from collections import Counter
-from typing import Any, Optional
+from typing import Any
 
 from sqlalchemy import select
 
@@ -47,6 +51,7 @@ from app.services.dividend_cninfo_parse import (
     retention_cutoff_year,
 )
 from app.services.dividend_notice_meta import NoticeMetaMixin
+from app.services.dividend_notice_upsert import NoticeUpsertMixin
 from app.services.dividend_pending import (
     pending_queue_age_text,
     pending_queue_metrics,
@@ -79,11 +84,12 @@ _STATS_KEYS: frozenset = frozenset({
 _FAILURE_RATIO_RAISE = 0.5
 
 
-class DividendNoticeScanService(NoticeMetaMixin):
+class DividendNoticeScanService(NoticeUpsertMixin, NoticeMetaMixin):
     """公告扫描 + 巨潮历史分红采集（复用 market_data_sync 既有分派机制）。
 
     选源 / 二筛 / 重解析能力来自 ``NoticeMetaMixin``（``dividend_notice_meta.py``）；
-    本类只负责落库主流程与 upsert。
+    单只落库的定位 / 跨源去重 / 取消置位来自 ``NoticeUpsertMixin``
+    （``dividend_notice_upsert.py``，A11-②）；本类只负责落库主流程、upsert 编排与计数日志。
     """
 
     def __init__(self, session) -> None:
@@ -347,78 +353,6 @@ class DividendNoticeScanService(NoticeMetaMixin):
         )
         _bump(stats, "new")
         return True
-
-    async def _locate_cell(self, mid: str, row: CninfoDividendRow) -> Optional[SecurityDividend]:
-        """按唯一键 (master_id, report_year, report_quarter, period_type) 定位存量行。"""
-        return (
-            await self.session.execute(
-                select(SecurityDividend)
-                .where(
-                    SecurityDividend.master_id == mid,
-                    SecurityDividend.report_year == row.report_year,
-                    SecurityDividend.report_quarter == row.report_quarter,
-                    SecurityDividend.period_type == row.period_type,
-                )
-                .limit(1)
-            )
-        ).scalar_one_or_none()
-
-    async def _first(self, *where: Any) -> Optional[Any]:
-        """去重护栏类查询收口：按条件取首行 id，无命中返回 None。"""
-        return (
-            await self.session.execute(select(SecurityDividend.id).where(*where).limit(1))
-        ).scalar_one_or_none()
-
-    async def _westward_dup(self, mid, ex_date, ry, rq, cash, source) -> bool:
-        """西向去重：同 master 已有「跨源 + ex_date 相等」或「跨源 + (ry,rq,cash) 全等」
-        记录 → 跳过重写。
-
-        **L2（2026-09-22）跨源限定**：两分支均追加 ``source != <入参 source>`` 条件，
-        **同源（含同一接口拆出的两行）一律豁免**。理由：巨潮把一次分配拆成「年度 + 特别」
-        两行、同 ``ex_date`` 异 ``cash``，二者是**兄弟分量而非重复**；旧口径仅按 ``ex_date``
-        判重会把第二个分量误杀（丢哪一半取决于源站行序），故同源必须豁免。
-        **反向陷阱**：两分支**不得**加 ``period_type`` 相等条件——旧新浪链路把每行都写
-        成 ``SPECIAL``，加 ``period_type`` 相等会让 ``SPECIAL≠ANNUAL`` 漏挡跨源重复。
-
-        **取舍（§5.6 二次护栏）**：本方法只在**新增**路径生效——目标格未命中时才调用。
-        旧代码每次写行前都先过本方法，其 ``(ry,rq,cash) 全等 → 跳过`` 分支会把「同格
-        同额」行判为重复，导致除权日/登记日/送转比例等后续事实永远无法刷新（全历史
-        重跑时预案期写入的 PROPOSED 行无法升级为 PAID）。故改为：先按唯一键定位
-        （命中即更新），未命中再走本护栏。
-        """
-        if ex_date is not None and await self._first(
-            SecurityDividend.master_id == mid,
-            SecurityDividend.ex_dividend_date == ex_date,
-            SecurityDividend.source != source,
-        ) is not None:
-            return True
-        return await self._first(
-            SecurityDividend.master_id == mid,
-            SecurityDividend.report_year == ry,
-            SecurityDividend.report_quarter == rq,
-            SecurityDividend.cash_per_share == cash,
-            SecurityDividend.source != source,
-        ) is not None
-
-    async def _reject_proposed(self, mid: str) -> int:
-        """取消/终止：该 master 的存量 PROPOSED 行置 REJECTED；返回置位数。
-
-        放宽为**不限 period_type**：旧链路只写 SPECIAL 故原查询带 ``period_type == SPECIAL``
-        过滤；批次 A 后新链路按「分红类型」写 ANNUAL/INTERIM/QUARTERLY/SPECIAL/OTHER
-        （含 SPECIAL 与 OTHER），沿用旧过滤会使取消/复查路径漏掉非 SPECIAL 的存量行
-        （取消公告命中后一行都置不上）。
-        """
-        rows = (
-            await self.session.execute(
-                select(SecurityDividend).where(
-                    SecurityDividend.master_id == mid,
-                    SecurityDividend.status == DividendStatus.PROPOSED,
-                )
-            )
-        ).scalars().all()
-        for r in rows:
-            r.status = DividendStatus.REJECTED
-        return len(rows)
 
 
 async def run_dividend_notice_scan(cfg: Any) -> str:
