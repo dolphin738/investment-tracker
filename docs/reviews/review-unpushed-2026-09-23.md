@@ -189,16 +189,16 @@
 
 | 编号 | 裁决 | 含义 | 实施状态 |
 | --- | --- | --- | --- |
-| A1 | **①** | 拆出 `dividend_pending_assign.py` 承载写路径 | ⏳ 随批次二（A10=② 定为「随后」） |
+| A1 | **①** | 拆出 `dividend_pending_assign.py` 承载写路径 | ✅ 批次二（实际拆 3 文件，见 §10.1） |
 | A2 | **①+③** | 单笔 assign/reopen 成功后立即重算快照；批量结束后统一重算一次 | ✅ 本批 |
 | A3 | **①** | 后端 `_validate_target` 硬拒留存窗外年份（400），与前端同口径 | ✅ 本批 |
 | A4 | **②** | 删除主表行时追加 `source == ASSIGN_SOURCE` 守卫（零迁移） | ✅ 本批 |
 | A5 | **③** | `asyncio.shield` 隔离 DB 释放 **+** 取消端点幂等去重，两者都做 | ✅ 本批 |
 | A6 | **①** | 检查点用 `renew_admin_lock` 顺手续期 `acquired_at`（TTL 只承担崩溃检测） | ✅ 本批 |
-| A7 | **②** | 检查点每 10 只 + 时间节流（>15s 才查库）；**检查点前显式 `rollback()` 收口** | ✅ 本批 |
-| A8 | **①** | settings 端点补 `response_model` + 重生成契约 + 删前端扩展接口 | ⏳ 随批次二（A10=② 定为「随后」） |
-| A9 | **①+②** | `no_period` 维持一律入队（只修注释）+ 增加队列龄期度量 | ⏳ 随批次二 |
-| A10 | **②** | 先修 B1/B2/B3/B5 + B6，B4/B7 随后 | ✅ 顺序已遵 |
+| A7 | **②** | 检查点每 10 只 + 时间节流（>15s 才查库）；**检查点前显式 `rollback()` 收口** | ✅ 本批（§9.2 偏离：改冻结隔离级别） |
+| A8 | **①** | settings 端点补 `response_model` + 重生成契约 + 删前端扩展接口 | ✅ 批次二（§10.2） |
+| A9 | **①+②** | `no_period` 维持一律入队（只修注释）+ 增加队列龄期度量 | ✅ 批次二（§10.3） |
+| A10 | **②** | 先修 B1/B2/B3/B5 + B6，B4/B7 随后 | ✅ 顺序已遵（批次二即 B4/B7 + A9） |
 
 **A4 的裁决说明（owner 原话：「A4 按主表数据可以清除掉」→ 选 ②）**：
 主表 `security_dividends` 的数据可由采集链路重新写入，故「撤销划分」连带删除采集侧行本身可接受；
@@ -341,3 +341,56 @@ A7 裁决为「检查点前显式 `rollback()` 收口」。按字面实施后**�
 1. **我自身的编辑失误**：给 `for` 循环加检查点时把 `if cancelled: break` 插在循环体中间，导致原有「单只处理」整段成为 `break` 之后**不可达的死代码** → 表现为「证券总数 2 只、本轮处理 0 只、失败 0 只」且**无任何异常**，24 个用例失败。定位关键：`log_cli` 下看不到预期的「单只失败」告警 → 反证异常分支未执行 → 是「条件判定为假」而非「异常被吞」。
 2. **A7 字面方案不可行**：检查点 `rollback()` 收口引发 `MissingGreenlet`（见 §9.2），改为「不 rollback + 显式固定 READ COMMITTED」。
 3. **mock 未同步新签名**：`run_dividend_seed` 新增 `lock_token` 后，`test_dividend_yield_api.py` 的两个桩函数未接受该形参 → fire-and-forget 后台任务 TypeError（接口仍返 200，故只在断言阶段暴露）。已修复并补「令牌须透传」护栏断言；另修掉 1 个既有 flaky 断言（§9.3）。
+
+---
+
+## 10. 批次二实施记录（2026-09-24，A1/B4 + A8/B7 + A9）
+
+> 对应 §6.0 中 A10=② 划为「随后」的三项：B4（拆文件）、B7（settings 契约）、A9（队列度量）。
+
+### 10.1 A1/B4：`dividend_pending.py` 拆分（654 行 → 3 文件）
+
+| 文件 | 行数 | 职责 |
+| --- | --- | --- |
+| `backend/app/services/dividend_pending.py` | **300** | staging 写入（`stage_pending`）+ 读侧（`PendingDividendService`：列表/概览/序列化）+ 队列度量（`pending_queue_metrics` 等，见 10.3） |
+| `backend/app/services/dividend_pending_assign.py` | **379** | 人工裁定写路径（assign / batch_assign / ignore / batch_ignore / reopen + 报告期校验 + 快照重算 + 项级错误映射）= `PendingDividendAssignMixin` |
+| `backend/app/services/dividend_pending_main_write.py` | **138** | 主表写入原语（`_locate_main` / `_insert_main` / `_delete_assigned_main` + `ASSIGN_SOURCE`）= `DividendMainWriteMixin` |
+
+**为何是 3 个文件而非 A1 选项里估的 2 个（约 230 行）**：裁定写路径自身即 379 行（`_assign_one` 73 行、`_insert_main` 47 行、`_validate_target` 41 行），与主表原语合并将回到约 470 行、仍破红线；故按「裁定编排 / 主表原语」再分一层，三者均 ≤400。
+
+**兼容性（零感知拆分）**：`PendingDividendService(PendingDividendAssignMixin)`，继承链 `service → assign → main_write`，因此
+`pending_router` / `dividend_notice_scan` / 测试的**导入路径与 `self._x` 调用口径逐字未变**；测试里
+`monkeypatch.setattr(PendingDividendService, "_assign_one", …)` 依旧生效（打的是子类属性，遮住 mixin 实现）。
+
+### 10.2 A8/B7：settings 契约进 OpenAPI（根因修复 + 逐字护栏）
+
+- **后端**：`schemas_resp.py` 新增 `DividendYieldSettingsOut`（五字段；`dividend_retention_years` 声明为**非空 int**，与 `_settings_out` 「恒返回有效值」一致）+ `DividendYieldSourceRefOut`；GET/PUT `/settings` 声明 `response_model`。`docs/openapi.json` 两处 `"schema": {}` → `$ref`，**根因消除**。
+- **前端收敛单一真相源**：删 `dividend-yield.api.ts` 的 `DividendYieldSettings` 扩展接口；`api/types.ts` 中 `DividendYieldSettingsOut` / `DividendYieldSourceRef` / `UpdateDividendYieldSettingsDto` 三份手写副本一并删除，改由 api 层导出生成类型别名（`DividendYieldSettingsOut` / `SettingsUpdateBody`），消费点（composable / 设置页 / 两个测试）随之改指向。
+- **护栏**：新增 `test_settings_wire_matches_response_model`——`_settings_out` 的实际 wire 键集与 `response_model` 字段集**双向逐字比对**（GET/PUT 各一次 + 嵌套 ref + 类型断言）。**要点**：信封机制下 `response_model` 不参与运行时校验（`schemas_resp.py:4-8`），故「后端已返回、契约没声明」不会被 500 抓到——这正是 `dividend_retention_years` 漏过两次的机制，只能靠此类比对测试。该测试模式可直接复用到任何新端点。
+
+### 10.3 A9：`no_period` 注释纠正 + 队列深度/龄期度量
+
+- **注释纠正（S19）**：`dividend_notice_scan.py` 原注释「纯送转（no_cash）与**窗口外行不入队**」与实现相反——入队发生在 `cutoff_year` 判定**之前**，无报告期行年份未知故**一律入队**（含 1998~2007 老行）；已改写并明确「窗口外不入队」只对**报告期可解析**的行成立。
+- **度量（A9=②）**：新增 `pending_queue_metrics()`（深度 / `oldestCreatedAt` / `oldestAgeDays` / 四段龄期分桶 / `stale`）+ `pending_queue_age_text()` + `pending_queue_warning()`（阈值 `PENDING_QUEUE_STALE_DAYS = 180`）。每日 `scan()` 摘要追加 `待划分队列N条/最老X天`；超阈值再打**一条** WARNING（进 app_logs），文案含分桶分布与处置动作。
+- 口径细节：判据为「**超过** 180 天」（恰 180 不告警）；空队列 `oldest=None`、`stale=False`（不空报）；**仅计 `PENDING`**，`ASSIGNED`/`IGNORED` 不参与深度与最老龄期。
+- 归属：阈值/分桶/措辞全部收口在 `dividend_pending.py`（队列语义的唯一归属地），`scan()` 只保留「取度量 → 有则告警 → 拼摘要」4 行，避免采集链路继续堆叠队列语义。
+
+### 10.4 验证结果（批次二）
+
+| 项 | 结果 |
+| --- | --- |
+| `ruff check app tests conftest.py` | All checks passed |
+| 后端 `uv run pytest`（全量） | **770 passed, 3 xpassed, 0 failed**（批次一后基线 765 + 3 xpass；本批新增 5 用例） |
+| 前端 `pnpm run lint`（`vue-tsc --noEmit`） | exit 0、零诊断 |
+| 前端 `pnpm test`（全量） | **82 文件 / 574 tests 全绿、0 失败**（2 个 unhandled error 为沙箱 fs shim 临时文件 EPERM，与代码无关） |
+| 契约重生成 | `docs/openapi.json` 仅 settings 相关 3 处 hunk；`web/src/types/api.ts` 新增 2 个 schema（共 113） |
+
+### 10.5 批次二新增未裁决项
+
+**A11｜两个「既有已超 400 行」的文件被本批增量推高，是否就地收口？**
+- 现状（2026-09-24 `wc -l` 实测）：`dividend_notice_scan.py` **431**（原 410，A9 +21）；`schemas_resp.py` **495**（原 467，A8 +28）。
+- 全仓 >400 行的 **app** 文件（均为**本批之前**既超，非本次引入）：`aggregation.py 604`、`classification.py 553`、`data_transfer.py 537`、`response_fields.py 486`、`calculation/router.py 466`、`asset_valuation.py 464`、`scheduler.py 457`、`log_center.py 436`（另需注意 `PendingDividendsPage.vue 435` = S17 未修）。
+- ① **本批不动**：B4 原文红线针对「**新文件**超 400 行」，本批新文件最大 379 行 ✓；既有文件属历史债。
+- ② 顺手收口 `dividend_notice_scan.py`：把 `_locate_cell`/`_first`/`_westward_dup`/`_reject_proposed`（`:351-423`，73 行）移入**新建** `dividend_notice_upsert.py`（`NoticeUpsertMixin`），主文件降到约 360 行。
+  - ⚠️ **需修正本报告 B4 原建议**：原文建议移入 `dividend_notice_meta.py`，但该模块自述「**只放选源 / 二筛 / 重解析，不含落库与 upsert**」（`dividend_notice_meta.py:10-13`）——移入会使其职责自相矛盾；且 `_upsert_one` 依赖 `_bump` 与模块 logger，贸然移出会形成环导入，故只宜移上述四个**不含计数与日志**的方法。
+- **建议：①**。依据：本批增量已在最小必要范围；一次性治理 8 个历史超限文件会显著放大本批 diff 与回归面，宜纳入下一次「结构债治理」批次（与 S17 一起做）。
