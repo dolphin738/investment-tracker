@@ -47,7 +47,12 @@ from app.services.dividend_cninfo_parse import (
     retention_cutoff_year,
 )
 from app.services.dividend_notice_meta import NoticeMetaMixin
-from app.services.dividend_pending import stage_pending
+from app.services.dividend_pending import (
+    pending_queue_age_text,
+    pending_queue_metrics,
+    pending_queue_warning,
+    stage_pending,
+)
 from app.services.dividend_yield_refresh import refresh_yields_for_masters
 from app.services.market_data_sync import MarketDataSyncService
 
@@ -191,6 +196,16 @@ class DividendNoticeScanService(NoticeMetaMixin):
         # 完成后：仅变更集重算（§5.2 末步 / §7 变更集重算）
         await refresh_yields_for_masters(self.session, list(changed))
         await self.session.commit()
+
+        # A9=②（审查项 S19）：待划分队列**深度 + 龄期**度量。队列不受留存清理约束
+        # （retention_cleanup 只删主表），故必须给运维一个随积压变化的红灯信号：
+        # 深度/最老龄期进摘要（每日任务日志可见），超阈值再单独打一条 WARNING（进 app_logs）。
+        # 阈值/分桶/措辞均收口在 dividend_pending（队列语义归属地），此处只做「有则告警」。
+        queue = await pending_queue_metrics(self.session)
+        queue_warn = pending_queue_warning(queue)
+        if queue_warn:
+            logger.warning("%s", queue_warn)
+
         no_source = detail is None and bool(candidate_mids | proposed_mids)
         note = "；明细源缺失跳过逐只采集" if no_source else ""
         return (
@@ -199,7 +214,8 @@ class DividendNoticeScanService(NoticeMetaMixin):
             f"窗口外{stats['window']}/无派息{stats['skip']}/无报告期{stats['no_period']}"
             f"/待划分{stats['staged']}；"
             f"标签撞键{stats['collision']}/未知标签{stats['unknown_label']}；"
-            f"重算{len(changed)}只；去重跳过{stats['anchor']}；失败{stats['skipped']}只"
+            f"重算{len(changed)}只；去重跳过{stats['anchor']}；失败{stats['skipped']}只；"
+            f"待划分队列{queue['pending']}条/最老{pending_queue_age_text(queue)}"
         )
 
     async def fetch_and_upsert_master(
@@ -235,8 +251,13 @@ class DividendNoticeScanService(NoticeMetaMixin):
                 _bump(stats, "skip" if skip_reason == "no_cash" else "no_period")
                 if skip_reason == "no_period":
                     # 现金 >0 但「报告时间」不可解析 → 落 staging 待人工划分（§3.7）。
-                    # 纯送转（no_cash）与窗口外行不入队；staging **不计入 changed**
-                    # （调用方不得据此把 mid 加入派生快照重算集，见 _STATS_KEYS 说明）。
+                    # ⚠️ **入队发生在留存窗判定之前**：无报告期行年份未知、无法判窗，故
+                    # **一律入队**（含 1998~2007 等窗外老行）。「窗口外行不入队」只对
+                    # 「报告期**可解析**」的行成立（见下方 cutoff_year 判定 → window 桶）。
+                    # 因此队列规模无界、且不随留存清理缩小，靠 pending_queue_metrics 的
+                    # 龄期度量兜底（A9 / 审查项 S19）。
+                    # staging **不计入 changed**（调用方不得据此把 mid 加入派生快照重算集，
+                    # 见 _STATS_KEYS 说明）。
                     if await stage_pending(self.session, mid, parse_pending_row(r)):
                         _bump(stats, "staged")
                 continue

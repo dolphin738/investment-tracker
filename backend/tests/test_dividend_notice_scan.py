@@ -13,7 +13,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
@@ -29,7 +29,12 @@ from app.models import (
     SecurityDividend,
     SecurityDividendPending,
 )
-from app.models.enums import DividendStatus, ReportPeriodType, SecurityType
+from app.models.enums import (
+    DividendPendingStatus,
+    DividendStatus,
+    ReportPeriodType,
+    SecurityType,
+)
 from app.services.dividend_cninfo_parse import (
     COL_ANN,
     COL_ARRIVE,
@@ -1003,6 +1008,82 @@ async def test_scan_summary_includes_new_bucket_fragments(session, monkeypatch):
 
     for frag in ("无派息1", "无报告期0", "待划分0", "未知标签1", "标签撞键1"):
         assert frag in result, f"scan() 摘要须含「{frag}」（运维对账）：{result}"
+
+
+def _pending_row(mid, *, days_old=0, status=DividendPendingStatus.PENDING):
+    """构造一条待划分 staging 行（``created_at`` 倒推 days_old 天，用于龄期分桶）。"""
+    ts = datetime.now(timezone.utc) - timedelta(days=days_old)
+    return SecurityDividendPending(
+        id=_uid(),
+        master_id=mid,
+        row_fingerprint=uuid.uuid4().hex,
+        cash_per_share=Decimal("10.0"),
+        status=status,
+        report_period_raw="未知报告期",
+        created_at=ts,
+        updated_at=ts,
+    )
+
+
+@pytest.mark.asyncio
+async def test_scan_summary_includes_pending_queue_metric(session, monkeypatch, caplog):
+    """A9/S19：摘要须含「待划分队列N条/最老X天」；未超阈值时不打积压 WARNING。
+
+    队列不受留存清理约束（清理只删主表），故「深度 + 龄期」是唯一能暴露静默积压的信号；
+    此用例锁死摘要片段与「不误报」两条（仅 PENDING 计入，已裁定行不影响龄期）。
+    """
+    import logging
+    caplog.set_level(logging.WARNING)
+    caplog.set_level(logging.WARNING, logger="app.services.dividend_notice_scan")
+    m = await _add_master(session)
+    await _seed_sources(session)
+    mid = m.id
+    session.add_all([
+        _pending_row(mid, days_old=40),
+        _pending_row(mid, days_old=1),
+        _pending_row(mid, days_old=0),
+        # 已裁定行不计入：即便其龄期远超阈值也不应影响最老龄期/告警
+        _pending_row(mid, days_old=999, status=DividendPendingStatus.ASSIGNED),
+        _pending_row(mid, days_old=999, status=DividendPendingStatus.IGNORED),
+    ])
+    await session.commit()
+    fake, _calls = _make_raw({}, [])
+    monkeypatch.setattr(MarketDataSyncService, "call_interface_raw", fake)
+
+    result = await DividendNoticeScanService(session).scan(None)
+    await session.commit()
+
+    assert "待划分队列3条/最老40天" in result, result
+    assert not any("待划分队列积压" in r.message for r in caplog.records), (
+        f"最老龄期 40 天 < 阈值，不应告警：{[r.message for r in caplog.records]}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_scan_warns_when_pending_queue_stale(session, monkeypatch, caplog):
+    """A9：最老龄期 > 阈值（180 天）→ 整轮打一条 WARNING（含龄期分布），摘要带真实天数。"""
+    import logging
+    caplog.set_level(logging.WARNING)
+    caplog.set_level(logging.WARNING, logger="app.services.dividend_notice_scan")
+    m = await _add_master(session)
+    await _seed_sources(session)
+    session.add_all([
+        _pending_row(m.id, days_old=200),
+        _pending_row(m.id, days_old=10),
+    ])
+    await session.commit()
+    fake, _calls = _make_raw({}, [])
+    monkeypatch.setattr(MarketDataSyncService, "call_interface_raw", fake)
+
+    result = await DividendNoticeScanService(session).scan(None)
+    await session.commit()
+
+    assert "待划分队列2条/最老200天" in result, result
+    stale_msgs = [r.message for r in caplog.records if "待划分队列积压" in r.message]
+    assert len(stale_msgs) == 1, f"积压告警整轮应恰有一条：{stale_msgs}"
+    # 告警须给出龄期分布与处置建议（否则收到告警也不知道从哪下手）
+    assert "≤30天1" in stale_msgs[0] and "181~365天1" in stale_msgs[0], stale_msgs[0]
+    assert "批量划分或忽略" in stale_msgs[0], stale_msgs[0]
 
 
 @pytest.mark.asyncio

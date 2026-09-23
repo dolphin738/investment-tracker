@@ -9,6 +9,9 @@
 2. **读侧**（``PendingDividendService``，批次 C）：列表 / 概览 / 序列化。排序固定
    ``created_at DESC, id DESC``（D-7）；筛选 ``status`` / ``label``（精确）/ ``q``（证券代码
    或名称 ilike）；分页复用 ``services.base.paged``。
+3. **队列度量**（``pending_queue_metrics``，A9）：深度 + 最老龄期 + 龄期分桶，供采集链路在
+   摘要与告警里给出「队列在腐化」的信号——队列不受留存清理约束（清理只动主表），
+   没有这个信号积压只会静默增长（审查项 S19）。
 
 **模块拆分（A1/B4）**：人工裁定**写路径**（assign / batch_assign / ignore / batch_ignore /
 reopen + 报告期校验 + 派生快照重算 + 项级错误映射）已抽到 ``dividend_pending_assign.py``
@@ -27,6 +30,7 @@ reopen + 报告期校验 + 派生快照重算 + 项级错误映射）已抽到 `
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from sqlalchemy import func, or_, select
@@ -77,6 +81,86 @@ async def stage_pending(session, master_id: str, row: PendingDividendRow) -> boo
     )
     result = await session.execute(stmt)
     return bool(result.rowcount)
+
+
+# 待划分队列「积压龄期」告警阈值（天）：最老 PENDING 行超过该龄期即判队列在腐化（A9）。
+# 取值理由：队列随每日扫描/播种增长，正常运维节奏应在数周内处理完（划分或忽略）；
+# 半年无人触碰意味着**没有人再看这个页面**，此时任何计数都不足以报警，必须有龄期信号。
+PENDING_QUEUE_STALE_DAYS = 180
+
+# 龄期分桶边界（天）：让告警一眼看出积压是「新近堆的」还是「陈年遗留」。
+_PENDING_AGE_BUCKETS: tuple[int, int, int] = (30, 180, 365)
+
+
+async def pending_queue_metrics(session) -> dict[str, Any]:
+    """待划分队列度量：深度 + 最老龄期 + 龄期分桶（A9=②，收口审查项 S19）。
+
+    只统计 ``PENDING``（真正待人工裁定的行）；``ASSIGNED``/``IGNORED`` 已裁定，不计入。
+
+    为什么需要它：``no_period`` 行因「报告时间不可解析、年份未知」**必然全部入队**
+    （含 1998~2007 等窗外老行），且队列**不受留存清理约束**——``retention_cleanup`` 只删
+    主表 ``security_dividends``，pending 行不会随年份流逝自行消失。没有随规模/龄期变化的
+    信号，积压会静默增长到「管理员不再相信页面计数」为止。
+
+    Returns:
+        ``{pending, oldestCreatedAt, oldestAgeDays, buckets, stale}``；
+        ``buckets`` 键固定为 ``lte30`` / ``d31_180`` / ``d181_365`` / ``gt365``。
+        队列为空时 ``oldestCreatedAt``/``oldestAgeDays`` 为 ``None``、分桶全 0、``stale=False``。
+    """
+    now = datetime.now(timezone.utc)
+    c30 = now - timedelta(days=_PENDING_AGE_BUCKETS[0])
+    c180 = now - timedelta(days=_PENDING_AGE_BUCKETS[1])
+    c365 = now - timedelta(days=_PENDING_AGE_BUCKETS[2])
+    created = SecurityDividendPending.created_at
+    row = (
+        await session.execute(
+            select(
+                func.count(),
+                func.min(created),
+                func.count().filter(created >= c30),
+                func.count().filter(created >= c180),
+                func.count().filter(created >= c365),
+            ).where(SecurityDividendPending.status == DividendPendingStatus.PENDING)
+        )
+    ).one()
+    pending, oldest, n30, n180, n365 = (int(row[0]), row[1], *map(int, row[2:]))
+    oldest_age = (now - oldest).days if oldest is not None else None
+    return {
+        "pending": pending,
+        "oldestCreatedAt": oldest.isoformat() if oldest is not None else None,
+        "oldestAgeDays": oldest_age,
+        "buckets": {
+            "lte30": n30,
+            "d31_180": n180 - n30,
+            "d181_365": n365 - n180,
+            "gt365": pending - n365,
+        },
+        "stale": oldest_age is not None and oldest_age > PENDING_QUEUE_STALE_DAYS,
+    }
+
+
+def pending_queue_age_text(metrics: dict[str, Any]) -> str:
+    """队列「最老龄期」文案：空队列为 ``—``（摘要片段复用，避免各调用方各写一份）。"""
+    age = metrics["oldestAgeDays"]
+    return "—" if age is None else f"{age}天"
+
+
+def pending_queue_warning(metrics: dict[str, Any]) -> Optional[str]:
+    """队列积压告警文案；未超阈值返回 ``None``。
+
+    阈值判据、龄期分桶与措辞全部收口在本模块（队列语义的唯一归属地），调用方（采集链路）
+    只负责「拿到非 None 就 WARNING」。文案给出分桶分布与**处置动作**——只报「积压」而
+    不说怎么办的告警，收件人只会习惯性忽略。
+    """
+    if not metrics["stale"]:
+        return None
+    b = metrics["buckets"]
+    return (
+        f"待划分队列积压：PENDING {metrics['pending']} 条、最老 "
+        f"{pending_queue_age_text(metrics)}（阈值 {PENDING_QUEUE_STALE_DAYS} 天）；龄期分布 "
+        f"≤30天{b['lte30']}/31~180天{b['d31_180']}/181~365天{b['d181_365']}/"
+        f">365天{b['gt365']}。队列不随留存清理缩小，请在「待人工划分」页批量划分或忽略。"
+    )
 
 
 class PendingDividendService(PendingDividendAssignMixin):

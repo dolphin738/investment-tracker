@@ -29,6 +29,11 @@ from app.models.enums import (
     SecurityType,
 )
 from app.services.dividend_cninfo_parse import retention_cutoff_year
+from app.services.dividend_pending import (
+    pending_queue_age_text,
+    pending_queue_metrics,
+    pending_queue_warning,
+)
 from tests.helpers import auth, env, register_login
 
 _BASE = datetime(2026, 1, 1, tzinfo=timezone.utc)
@@ -701,3 +706,63 @@ async def test_ignore_pending(session, client):
             select(SecurityDividend).where(SecurityDividend.master_id == mid)
         )
     ).scalars().all() == []
+
+
+# ───────────────────────── 队列度量（A9 / 审查项 S19） ─────────────────────────
+@pytest.mark.asyncio
+async def test_pending_queue_metrics_depth_age_and_buckets(session):
+    """A9：队列深度 / 最老龄期 / 龄期分桶；**只有 PENDING 计入**（已裁定行不参与）。
+
+    队列不受留存清理约束（``retention_cleanup`` 只删主表），故龄期度量是「静默积压」的唯一
+    红灯；此用例锁死分桶边界语义（左闭右开累计，逐段差分得桶值）与 stale 判据。
+    """
+    mid = await _master(session)
+    session.add_all([
+        _pending(mid),                                        # 0 天
+        _pending(mid, created_at=datetime.now(timezone.utc) - timedelta(days=10)),
+        _pending(mid, created_at=datetime.now(timezone.utc) - timedelta(days=100)),
+        _pending(mid, created_at=datetime.now(timezone.utc) - timedelta(days=200)),
+        _pending(mid, created_at=datetime.now(timezone.utc) - timedelta(days=400)),
+    ])
+    # 已裁定两行（龄期极老）→ 一律不计入深度与最老龄期
+    done = _pending(mid, created_at=datetime.now(timezone.utc) - timedelta(days=999))
+    done.status = DividendPendingStatus.ASSIGNED
+    ign = _pending(mid, created_at=datetime.now(timezone.utc) - timedelta(days=999))
+    ign.status = DividendPendingStatus.IGNORED
+    session.add_all([done, ign])
+    await session.commit()
+
+    m = await pending_queue_metrics(session)
+    assert m["pending"] == 5
+    assert m["oldestAgeDays"] == 400
+    assert m["oldestCreatedAt"] is not None
+    assert m["buckets"] == {"lte30": 2, "d31_180": 1, "d181_365": 1, "gt365": 1}
+    assert m["stale"] is True  # 400 > PENDING_QUEUE_STALE_DAYS
+    # 告警文案（纯函数）：含深度、阈值、分桶分布与处置动作
+    warn = pending_queue_warning(m)
+    assert warn is not None
+    for frag in ("PENDING 5 条", "阈值 180 天", ">365天1", "批量划分或忽略"):
+        assert frag in warn, f"积压告警文案须含「{frag}」：{warn}"
+    assert pending_queue_age_text(m) == "400天"
+
+
+@pytest.mark.asyncio
+async def test_pending_queue_metrics_empty_and_within_threshold(session):
+    """A9：空队列 → 深度 0 / 无最老（None）/ 分桶全 0 / **不判 stale**（不得空报）。"""
+    mid = await _master(session)
+    empty = await pending_queue_metrics(session)
+    assert empty["pending"] == 0
+    assert empty["oldestCreatedAt"] is None and empty["oldestAgeDays"] is None
+    assert empty["buckets"] == {"lte30": 0, "d31_180": 0, "d181_365": 0, "gt365": 0}
+    assert empty["stale"] is False
+    assert pending_queue_warning(empty) is None  # 空队列不得空报
+    assert pending_queue_age_text(empty) == "—"
+
+    # 恰在阈值内（179 天）→ 不告警；阈值本身（180）亦不告警（判据为「超过」）
+    session.add(_pending(
+        mid, created_at=datetime.now(timezone.utc) - timedelta(days=179)
+    ))
+    await session.commit()
+    m = await pending_queue_metrics(session)
+    assert m["pending"] == 1 and m["oldestAgeDays"] == 179 and m["stale"] is False
+    assert pending_queue_warning(m) is None
