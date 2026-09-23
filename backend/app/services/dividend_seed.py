@@ -27,7 +27,7 @@ session，内部实例化一个 scan service 作为采集能力提供方，复�
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
@@ -50,6 +50,10 @@ _STATS_KEYS: frozenset = frozenset({
 
 # 分批粒度：同时用作「每 200 只打一条进度日志」的间隔与断点检查点的 IN 批大小（§5.7）
 _SEED_CHUNK = 200
+
+# 失败证券 master_id 清单上限（UI 进度面板展开查看；超出置 failed_truncated，
+# 但失败计数 failed 始终精确，不受上限影响）
+_FAILED_IDS_CAP = 300
 
 # 失败占比阈值（行动项 8，设计 §6.2；owner 2026-09-22 最终裁定：**比例 10%**）。
 # 逐只容错是「单只异常 → rollback 续下一只」；但整轮失败率超过该阈值即判定为「上游整体
@@ -91,6 +95,9 @@ class SeedProgress:
     finished_at: str | None = None
     error: str | None = None
     message: str | None = None
+    # 失败证券 master_id 清单（UI 进度面板展开查看；上限 _FAILED_IDS_CAP，超出置 truncated）
+    failed_master_ids: list[str] = field(default_factory=list)
+    failed_truncated: bool = False
 
 
 seed_progress = SeedProgress()
@@ -138,6 +145,8 @@ class DividendSeedService:
         seed_progress.finished_at = None
         seed_progress.error = None
         seed_progress.message = None
+        seed_progress.failed_master_ids = []
+        seed_progress.failed_truncated = False
 
         cancelled = False
         for start in range(0, total, _SEED_CHUNK):
@@ -183,6 +192,11 @@ class DividendSeedService:
                         "历史分红播种单只失败 master_id=%s（rollback 续下一只）",
                         mid, exc_info=True,
                     )
+                    # 收集失败证券 master_id 供 UI 进度面板展开查看（超上限置 truncated）
+                    if len(seed_progress.failed_master_ids) < _FAILED_IDS_CAP:
+                        seed_progress.failed_master_ids.append(mid)
+                    else:
+                        seed_progress.failed_truncated = True
                     await self.session.rollback()
                     stats.update(snapshot)
                     _bump(stats, "skipped")

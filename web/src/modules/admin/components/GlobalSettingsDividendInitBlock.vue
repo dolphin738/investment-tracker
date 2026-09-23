@@ -87,6 +87,9 @@ const progressPercent = computed(() => {
   return Math.min(100, Math.round((p.processed / p.total) * 100));
 });
 
+// ── 失败证券清单展开开关（仅当 failed > 0 时渲染入口） ──
+const failedExpanded = ref(false);
+
 // ── 待人工划分入口（仅 admin；非授权不发请求，staleTime 30s） ──
 const summary = usePendingDividendSummary(isAdmin);
 const summaryLoading = computed(() => summary.isLoading.value);
@@ -197,6 +200,41 @@ function goPending(): void {
         <div>已覆盖跳过 <span class="text-foreground">{{ progressData.covered }}</span></div>
         <div>
           失败 <span class="text-destructive">{{ progressData.failed }}</span>
+        </div>
+      </div>
+
+      <!-- 失败证券清单：仅当 failed > 0 时渲染入口，支持展开查看 master_id 列表 -->
+      <div
+        v-if="progressData.failed > 0"
+        class="mt-2"
+      >
+        <button
+          type="button"
+          class="flex items-center gap-1 text-xs text-destructive hover:underline"
+          @click="failedExpanded = !failedExpanded"
+        >
+          <span>{{ failedExpanded ? '▾' : '▸' }}</span>
+          <span>查看失败证券（{{ progressData.failed }} 只）</span>
+        </button>
+        <div
+          v-if="failedExpanded"
+          class="mt-1 max-h-40 overflow-y-auto rounded border border-destructive/30 bg-destructive/5 p-2"
+        >
+          <p
+            v-if="progressData.failed_truncated"
+            class="mb-1 text-[11px] text-muted-foreground"
+          >
+            仅显示前 {{ progressData.failed_master_ids.length }} 只，失败共 {{ progressData.failed }} 只（清单上限 _FAILED_IDS_CAP）。
+          </p>
+          <ul class="space-y-0.5 text-[11px] text-muted-foreground">
+            <li
+              v-for="mid in progressData.failed_master_ids"
+              :key="mid"
+              class="font-mono break-all"
+            >
+              {{ mid }}
+            </li>
+          </ul>
         </div>
       </div>
 
