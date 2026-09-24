@@ -54,6 +54,7 @@ from app.services.dividend_notice_meta import (
     _TITLE_CANCEL_RE,
     _TITLE_DIVIDEND_RE,
 )
+from app.services.dividend_pending_main_write import ASSIGN_SOURCE
 from app.services.dividend_notice_scan import (
     DividendNoticeScanService,
 )
@@ -79,7 +80,7 @@ def _new_stats() -> dict:
     return {
         "rows": 0, "hits": 0, "new": 0, "upd": 0, "anchor": 0,
         "skip": 0, "no_period": 0, "unknown_label": 0, "collision": 0,
-        "window": 0, "skipped": 0, "staged": 0,
+        "window": 0, "skipped": 0, "staged": 0, "manual_keep": 0,
     }
 
 
@@ -908,6 +909,76 @@ async def test_collision_guard_keeps_old_label(session):
     assert stored[0].dividend_label == "股改分红"       # 保留旧标签
     assert second["collision"] == 1
     assert second["upd"] == 0
+
+
+@pytest.mark.asyncio
+async def test_manual_assign_source_guard_keeps_row(session):
+    """🔴 人工划分守卫（owner 2026-09-25）：命中格若由「人工划分」写入 → **整行不更新**。
+
+    背景：``_locate_cell`` 只按唯一键定位、不看 source，人工裁定写入的主表行会被后续采集
+    （每日 scan / 首跑播种）命中并刷新金额/状态，且把 source 改写成接口名——人工判定被静默
+    抹掉，且撤销指定依赖 ``source = 人工划分`` 守卫，被改写后该行再也删不掉。
+    本用例钉死：人工行金额/标签/source 均不变，manual_keep==1、upd==0。
+    """
+    m = await _add_master(session)
+    _notice, detail = await _seed_sources(session)
+    cur = _cur_year()
+    svc = DividendNoticeScanService(session)
+
+    # 先由人工划分写入同格（source=人工划分，标签为空——撞键护栏挡不住的正是这一支）
+    manual = SecurityDividend(
+        id=str(uuid.uuid4()), master_id=m.id, report_year=cur - 1, report_quarter=4,
+        period_type=ReportPeriodType.ANNUAL, cash_per_share=Decimal("3.5"),
+        status=DividendStatus.PAID, ex_dividend_date=date(cur - 1, 6, 10),
+        source=ASSIGN_SOURCE, dividend_label=None,
+    )
+    session.add(manual)
+    await session.commit()
+
+    svc._mds.call_interface_raw = _make_raw({"600519": [
+        _cn_row(report=f"{cur - 1}年报", ptype="年度分红", cash="10", ex=f"{cur - 1}-07-10"),
+    ]})[0]
+    st = _new_stats()
+    dirty = await svc.fetch_and_upsert_master(m.id, "sh600519", detail, st)
+    await session.commit()
+
+    stored = await _div_rows(session, m.id)
+    assert len(stored) == 1
+    assert stored[0].cash_per_share == Decimal("3.5")      # 人工金额未被覆盖
+    assert stored[0].source == ASSIGN_SOURCE               # source 未被改写成接口名
+    assert stored[0].ex_dividend_date == date(cur - 1, 6, 10)
+    assert st["manual_keep"] == 1 and st["upd"] == 0
+    assert dirty is False  # 不计入变更 → 不触发派生快照重算
+
+
+@pytest.mark.asyncio
+async def test_manual_guard_does_not_affect_collected_rows(session):
+    """守卫边界：非「人工划分」来源的存量行仍按原口径刷新（不被守卫误伤）。"""
+    m = await _add_master(session)
+    _notice, detail = await _seed_sources(session)
+    cur = _cur_year()
+    svc = DividendNoticeScanService(session)
+
+    svc._mds.call_interface_raw = _make_raw({"600519": [
+        _cn_row(report=f"{cur - 1}年报", ptype="年度分红", cash="10", ex=f"{cur - 1}-06-10"),
+    ]})[0]
+    first = _new_stats()
+    await svc.fetch_and_upsert_master(m.id, "sh600519", detail, first)
+    await session.commit()
+    assert first["new"] == 1
+
+    svc._mds.call_interface_raw = _make_raw({"600519": [
+        _cn_row(report=f"{cur - 1}年报", ptype="年度分红", cash="20", ex=f"{cur - 1}-08-10"),
+    ]})[0]
+    second = _new_stats()
+    dirty = await svc.fetch_and_upsert_master(m.id, "sh600519", detail, second)
+    await session.commit()
+
+    stored = await _div_rows(session, m.id)
+    assert len(stored) == 1
+    assert stored[0].cash_per_share == Decimal("2.0")  # 已刷新
+    assert second["manual_keep"] == 0 and second["upd"] == 1
+    assert dirty is True
 
 
 @pytest.mark.asyncio

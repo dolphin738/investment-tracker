@@ -51,6 +51,7 @@ from app.services.dividend_yield_refresh import refresh_yields_for_masters
 _STATS_KEYS: frozenset = frozenset({
     "rows", "hits", "new", "upd", "anchor", "skip",
     "no_period", "unknown_label", "collision", "window", "skipped", "staged",
+    "manual_keep",  # 与 scan 同桶：人工划分行被采集侧命中但保留不覆盖的格数
 })
 
 # 分批粒度：同时用作「每 200 只打一条进度日志」的间隔与断点检查点的 IN 批大小（§5.7）
@@ -333,7 +334,8 @@ class DividendSeedService:
             f"分红行新写{stats['new']}/更新{stats['upd']}；"
             f"窗口外{stats['window']}/无派息{stats['skip']}/无报告期{stats['no_period']}"
             f"/待划分{stats['staged']}；"
-            f"标签撞键{stats['collision']}/未知标签{stats['unknown_label']}；"
+            f"标签撞键{stats['collision']}/未知标签{stats['unknown_label']}"
+            f"/人工保留{stats['manual_keep']}；"
             f"去重跳过{stats['anchor']}；重算{len(changed)}只{cancel_note}"
         )
         # 进度可视化：正常跑完 → done；被跨进程取消标记中断 → cancelled（非 error）

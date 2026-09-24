@@ -139,7 +139,7 @@ def _new_stats() -> dict:
     return {
         "rows": 0, "hits": 0, "new": 0, "upd": 0, "anchor": 0,
         "skip": 0, "no_period": 0, "unknown_label": 0, "collision": 0,
-        "window": 0, "skipped": 0, "staged": 0,
+        "window": 0, "skipped": 0, "staged": 0, "manual_keep": 0,
     }
 
 

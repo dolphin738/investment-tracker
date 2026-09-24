@@ -127,3 +127,36 @@
 - `backend/app/modules/dividend_yield/pending_router.py` — pending 七端点
 - `docs/adr/ADR-005-bonus-share-market-neutral-and-ex-dividend-restatement.md` — 送转口径（关联决策）
 - `docs/adr/ADR-002-quote-interface-priority-chain.md` — 分红明细源切换修订补记
+
+## 7. 补充决策（2026-09-25）：人工划分行不被采集侧覆盖（source 守卫）
+
+**问题**：`_locate_cell` 按唯一键 `(master_id, report_year, report_quarter, period_type)`
+定位存量行、**不看 `source`**。人工划分经 `_insert_main` 写入的行落在「主表同格原本为空」
+的格子里；后续每日 scan 或首跑播种若从巨潮拉到同一格数据，会命中该行并刷新金额/日期/
+状态，且把 `source` 改写成接口名。后果有二：
+
+1. **人工判定被静默抹掉**（用户裁定值被采集值覆盖）；
+2. 撤销指定 `_delete_assigned_main` 依赖 `source = 人工划分` 守卫，source 被改写后
+   该行**再也删不掉**（撤销只能清 staging 状态，主表行残留）。
+
+既有「撞键护栏」只在「新旧 `dividend_label` 均非空且不等」时生效——人工行标签为空时
+挡不住，故不足以覆盖本场景。
+
+**决策**：`_upsert_one` 命中格若 `existing.source == ASSIGN_SOURCE`（`人工划分`）→
+**整行不更新**，`return False`（不计入变更，不触发派生快照重算），计 `manual_keep`
+桶并打一条 WARNING（提示「如需改以采集值为准，请先撤销该笔人工划分」）。
+守卫位于撞键护栏**之前**，先按来源判定，再看标签。
+
+**边界**：
+- 只保护 `source == 人工划分` 的行；采集侧写入的行、旧新浪存量行仍按原口径刷新
+  （旧源行被新链路重写是既有设计意图，非本次变更）。
+- 不阻断「人工划分」反向覆盖：assign 的 `_insert_main` 仍是 `ON CONFLICT DO NOTHING`，
+  不会覆盖已有采集行——保护是单向的，人工优先。
+- 采集仍会把同格数据用于其他判断？否：命中即整行跳过，不写主表、不入 changed 集。
+
+**可观测性**：`_STATS_KEYS` 两入口（scan / seed）同步新增 `manual_keep` 桶，两份摘要
+均追加「人工保留{N}」片段（键集相等由既有用例守护）。
+
+**护栏**：`test_manual_assign_source_guard_keeps_row`（人工行金额/source/日期不变、
+`manual_keep==1`、`upd==0`、`dirty is False`）；`test_manual_guard_does_not_affect_collected_rows`
+（非人工行仍正常刷新，防守卫误伤）。全量 777 passed / 3 xpassed。

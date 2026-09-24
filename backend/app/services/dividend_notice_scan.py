@@ -50,6 +50,8 @@ from app.services.dividend_cninfo_parse import (
     parse_pending_row,
     retention_cutoff_year,
 )
+# 人工划分来源常量：主表行若由人工裁定写入（source=人工划分），采集侧不得覆盖
+from app.services.dividend_pending_main_write import ASSIGN_SOURCE
 from app.services.dividend_notice_meta import NoticeMetaMixin
 from app.services.dividend_notice_upsert import NoticeUpsertMixin
 from app.services.dividend_pending import (
@@ -75,6 +77,7 @@ def _bump(stats: dict, key: str, n: int = 1) -> None:
 _STATS_KEYS: frozenset = frozenset({
     "rows", "hits", "new", "upd", "anchor", "skip",
     "no_period", "unknown_label", "collision", "window", "skipped", "staged",
+    "manual_keep",  # 人工划分行被采集侧命中但**保留不覆盖**的格数（source 守卫）
 })
 
 # 失败占比阈值（行动项 8，设计 §6.2）。逐只容错是「单只异常 → rollback 续下一只」；但
@@ -219,7 +222,8 @@ class DividendNoticeScanService(NoticeUpsertMixin, NoticeMetaMixin):
             f"分红行新写{stats['new']}/更新{stats['upd']}；"
             f"窗口外{stats['window']}/无派息{stats['skip']}/无报告期{stats['no_period']}"
             f"/待划分{stats['staged']}；"
-            f"标签撞键{stats['collision']}/未知标签{stats['unknown_label']}；"
+            f"标签撞键{stats['collision']}/未知标签{stats['unknown_label']}"
+            f"/人工保留{stats['manual_keep']}；"
             f"重算{len(changed)}只；去重跳过{stats['anchor']}；失败{stats['skipped']}只；"
             f"待划分队列{queue['pending']}条/最老{pending_queue_age_text(queue)}"
         )
@@ -285,6 +289,23 @@ class DividendNoticeScanService(NoticeUpsertMixin, NoticeMetaMixin):
         """按唯一键定位后更新 / 未命中则插入；返回是否有变更。"""
         existing = await self._locate_cell(mid, row)
         if existing is not None:
+            # 人工划分守卫（owner 2026-09-25）：命中格若由「人工划分」写入 → **整行不更新**
+            # （保留人工裁定值，不覆盖）。
+            #
+            # 背景：``_locate_cell`` 只按唯一键定位、**不看 source**，故人工裁定写入的主表行
+            # 会被后续采集（每日 scan / 首跑播种）命中并刷新金额/日期/状态，且把 source 改写
+            # 成接口名——人工判定被静默抹掉；而撤销指定（``_delete_assigned_main``）依赖
+            # ``source = 人工划分`` 守卫，被改写后该行将**再也删不掉**。撞键护栏只在「新旧
+            # 标签均非空且不等」时生效，人工行标签为空时挡不住，故须显式 source 守卫。
+            if existing.source == ASSIGN_SOURCE:
+                _bump(stats, "manual_keep")
+                logger.warning(
+                    "人工划分行保留不覆盖（采集侧命中同格）：master=%s 格=(%dQ%d, %s) "
+                    "人工金额=%s 采集金额=%s；如需改以采集值为准，请先撤销该笔人工划分",
+                    mid, row.report_year, row.report_quarter, row.period_type.value,
+                    existing.cash_per_share, row.cash_per_share,
+                )
+                return False
             # 撞键护栏（批次 A）：命中唯一键且新旧「分红类型」标签均非空且不等 →
             # **整行不更新**（保留旧值，不覆盖）。四个条件缺一不可——``old_label``
             # 为空必须豁免，否则迁移后存量 NULL 行会被全表判为撞键。
