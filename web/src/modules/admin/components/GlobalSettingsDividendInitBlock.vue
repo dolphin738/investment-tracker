@@ -9,7 +9,7 @@
  * 命名口径：内部机制仍称「播种 / seed」（与后端 handler、日志术语一致），
  * 而面向用户的 UI 文案一律用「补齐历史分红」，不出现「播种」等技术黑话。
  *
- * 注：同 Block 的「全量重建」按钮无二次确认，而播种需串行跑约 19 小时（属重操作），
+ * 注：同 Block 的「全量重建」按钮无二次确认，而播种需串行跑约 10 小时（属重操作），
  * 故此处保留 AlertDialog 二次确认结构，只改文案与事件流。
  *
  * 注：「回补行情缺口」及其「取消在途回补」按钮（原价格缺口回补后端端点）已随价格缺口回补
@@ -49,7 +49,7 @@ function onRebuild(): void {
   rebuild.mutate();
 }
 
-// ── 补齐历史分红 / 播种（二次确认：全市场约 19 小时，属重操作，必须确认） ──
+// ── 补齐历史分红 / 播种（二次确认：约 5923 只 × ≈6s ≈ 10 小时，属重操作，必须确认） ──
 const seed = useSeedInitialDividends();
 const seeding = computed(() => seed.isPending.value);
 const seedConfirmOpen = ref(false);
@@ -64,10 +64,13 @@ function confirmSeed(): void {
 // ── 补齐历史分红进度可视化（仅 admin；running 态由 composable 内部轮询） ──
 const progress = useSeedProgress(isAdmin);
 const progressData = computed(() => progress.data.value ?? null);
+const progressError = computed(() => progress.isError.value);
 const progressStateLabel = computed(() => {
   const s = progressData.value?.state;
-  return s === 'running' ? '运行中' : s === 'done' ? '已完成'
-    : s === 'error' ? '失败' : s === 'cancelled' ? '已取消' : '空闲';
+  // S9 ②B：running_elsewhere = 任务在其它进程运行（本进程只看到 DB 锁被持有），
+  // 与本进程 running 区分展示，避免「看着在跑、点取消却行为不一致」的困惑。
+  if (s === 'running') return progressData.value?.running_elsewhere ? '其它进程运行中' : '运行中';
+  return s === 'done' ? '已完成' : s === 'error' ? '失败' : s === 'cancelled' ? '已取消' : '空闲';
 });
 
 // ── 取消在途补齐（仅 admin；running 态可取消，已完成部分保留、可续跑） ──
@@ -171,10 +174,12 @@ const pendingEntry = computed(() => {
       class="rounded-md border border-border bg-muted/30 p-3 text-sm"
     >
       <div class="mb-2 flex items-center justify-between">
-        <span class="font-medium">
+        <span class="font-medium" aria-live="polite">
           {{
             progressData.state === 'running'
-              ? '补齐历史分红进行中'
+              ? (progressData.running_elsewhere
+                  ? '补齐历史分红进行中（其它进程）'
+                  : '补齐历史分红进行中')
               : progressData.state === 'done'
                 ? '补齐历史分红完成'
                 : progressData.state === 'cancelled'
@@ -209,15 +214,31 @@ const pendingEntry = computed(() => {
         </Button>
       </div>
 
-      <!-- 进度条（已处理 / 全表） -->
-      <div class="mb-2 h-2 w-full overflow-hidden rounded bg-muted">
+      <!-- 进度条（已处理 / 全表）：跨进程态无本进程计数，不渲染（§4 无障碍补 aria 语义） -->
+      <div
+        v-if="!progressData.running_elsewhere"
+        role="progressbar"
+        :aria-valuenow="progressPercent"
+        aria-valuemin="0"
+        aria-valuemax="100"
+        aria-label="补齐历史分红进度"
+        class="mb-2 h-2 w-full overflow-hidden rounded bg-muted"
+      >
         <div
           class="h-full bg-primary transition-all"
           :style="{ width: `${progressPercent}%` }"
         />
       </div>
+      <!-- S9 ②B：任务在其它进程运行——本进程看不到对方内存态计数，如实说明而非显示 0% -->
+      <p
+        v-else
+        class="mb-2 text-xs text-muted-foreground"
+      >
+        任务在另一后端进程运行，本进程无法读取实时计数；可点「取消」发送跨进程取消信号（任务将在下一个中断点停止，已完成部分保留）。
+      </p>
 
       <div
+        v-if="!progressData.running_elsewhere"
         class="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground sm:grid-cols-4"
       >
         <div>
@@ -272,24 +293,43 @@ const pendingEntry = computed(() => {
       <p
         v-if="progressData.state === 'error' && progressData.error"
         class="mt-2 text-xs text-destructive"
+        aria-live="polite"
       >
         错误：{{ progressData.error }}
       </p>
       <p
         v-else-if="progressData.state === 'cancelled' && progressData.message"
         class="mt-2 text-xs text-amber-400"
+        aria-live="polite"
       >
         {{ progressData.message }}
       </p>
       <p
         v-else-if="progressData.state === 'done' && progressData.message"
         class="mt-2 text-xs text-muted-foreground"
+        aria-live="polite"
       >
         {{ progressData.message }}
       </p>
     </div>
 
-    <!-- 补齐历史分红二次确认（约 19 小时的重操作，必须确认） -->
+    <!-- 进度查询失败（§4）：查询不可达时面板静默消失 → 给出显式失败态 + 重试 -->
+    <div
+      v-if="isAdmin && progressError"
+      class="flex items-center justify-between rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm"
+    >
+      <span class="text-destructive" role="alert">补齐历史分红进度查询失败。</span>
+      <Button
+        variant="outline"
+        size="sm"
+        class="h-7 text-xs"
+        @click="() => progress.refetch()"
+      >
+        重试
+      </Button>
+    </div>
+
+    <!-- 补齐历史分红二次确认（约 10 小时的重操作，必须确认） -->
     <AlertDialog
       :open="seedConfirmOpen"
       @update:open="(o) => !o && (seedConfirmOpen = false)"

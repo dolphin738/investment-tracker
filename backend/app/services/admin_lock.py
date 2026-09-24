@@ -166,6 +166,31 @@ async def request_cancel(session: AsyncSession, name: str) -> bool:
     return True
 
 
+async def is_lock_held(
+    session: AsyncSession, name: str, ttl_hours: int = ADMIN_LOCK_TTL_HOURS
+) -> bool:
+    """只读探测：``name`` 锁当前是否被某进程持有且未过 TTL（S9 ②B 专用，零写入）。
+
+    与 ``acquire_admin_lock`` 的可抢占判据**同一口径**（``owner IS NOT NULL`` 且
+    ``acquired_at >= now() - TTL``）：TTL 过期的锁视为无人持有（持锁进程已崩溃，等价
+    于空闲——下一个触发者本就可合法接管）。供「进度」端点在本进程 idle 时区分
+    「真空闲」与「任务在其它进程运行」——本进程拿不到对方的协程引用，计数细节不可见，
+    但「在不在跑」可由 DB 锁行回答（见 trigger_router /seed-initial-dividends/progress）。
+    """
+    res = await session.execute(
+        text(
+            """
+            SELECT 1 FROM admin_locks
+             WHERE name = :name
+               AND owner IS NOT NULL
+               AND acquired_at >= now() - make_interval(hours => :ttl_hours)
+            """
+        ),
+        {"name": name, "ttl_hours": ttl_hours},
+    )
+    return res.first() is not None
+
+
 async def is_cancel_requested(session: AsyncSession, name: str) -> bool:
     """持锁 worker 侧自检：是否已有人请求取消（跨进程可见）。"""
     res = await session.execute(

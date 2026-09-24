@@ -49,7 +49,7 @@ vi.mock('@/modules/dividend-yield/composables/use-dividend-yield', () => ({
   useRebuildDividendYield: () => ({ isPending: ref(false), isError: ref(false), mutate: vi.fn() }),
   useSeedInitialDividends: () => ({ isPending: ref(false), isError: ref(false), mutate: vi.fn() }),
   // 补齐历史分红进度轮询 + 取消（GlobalSettingsDividendInitBlock 消费）；null = 从未跑过（idle）
-  useSeedProgress: () => ({ data: ref(null) }),
+  useSeedProgress: () => ({ data: ref(null), isError: ref(false), refetch: vi.fn() }),
   useCancelSeed: () => ({ isPending: ref(false), isError: ref(false), mutate: vi.fn() }),
 }));
 

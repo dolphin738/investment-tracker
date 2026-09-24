@@ -22,6 +22,7 @@ from app.schemas_resp import SeedProgressOut
 from app.services.admin_lock import (
     LOCK_DIVIDEND_SEED,
     acquire_admin_lock,
+    is_lock_held,
     release_admin_lock,
     request_cancel,
 )
@@ -38,7 +39,7 @@ router_trigger = APIRouter(route_class=EnvelopeRoute)
 # 立即拒绝（409）而不新建任务。
 # 为何「检查-获取」无竞态：单进程内 asyncio 事件循环单线程，locked() 判定与其后
 # acquire() 之间**没有 await 让出点**（acquire() 在未持有时同步完成），故相对其他请求
-# 是原子的。
+# 是原子的（该原子性保证第一层语义自洽；跨进程竞态本就由第二层 DB 锁兜底）。
 # ⚠️ 该锁**只覆盖单进程**：多 worker / 多副本部署下每个进程各持一个 Lock、互不可见，
 # 连点仍会各自起任务 → 第二层为 DB 行级锁 ``admin_locks``（见 ``app.services.admin_lock``）：
 # 先抢跨进程锁、再取本锁，两层都到手才真正创建任务（顺序不可颠倒，否则同进程连点会
@@ -108,7 +109,8 @@ async def _run_seed(lock_token: str) -> None:
     直接复用 services 的 ``run_dividend_seed(None)``（内部自建会话），此处仅包裹为
     后台任务并经 ``track_task`` 持有强引用防 GC 回收。
 
-    单飞锁在 ``seed_initial_dividends`` 内**获取**、在此处 ``finally`` **释放**——即
+    单飞锁在触发端点 ``seed_initial_dividends``（本模块下方的 POST 端点函数）内**获取**、
+    在此处 ``finally`` **释放**——即
     「锁的生命周期 = 后台任务的生命周期」。无论播种正常返回、抛错还是被取消，finally
     都释放锁，避免一次失败把播种永久锁死。
 
@@ -197,7 +199,7 @@ async def seed_initial_dividends(
     return {
         # §4.4 契约漂移：前端旧声明含 job_id，但后端从不返回 job_id（无 JobType、
         # 无 job_task 行可对应），故返回体只保留 message。
-        "message": "已触发历史分红补齐，后台执行中；进度见应用日志",
+        "message": "已触发历史分红补齐，后台执行中；进度见本页进度面板",
     }
 
 
@@ -206,19 +208,55 @@ async def seed_initial_dividends(
 )
 async def seed_initial_dividends_progress(
     admin: CurrentUser = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
 ):
     """查询首跑播种运行进度（admin-only，与 POST 同权限）。
 
-    返回进程内内存态进度（不入库、不跨进程）：state(idle|running|done|error|cancelled) /
+    进度本体是进程内内存态（不入库、不跨进程）：state(idle|running|done|error|cancelled) /
     total / processed / hits / failed / covered / started_at / finished_at /
     error / message / failed_securities（失败证券清单，每条含 master_id/code/name，
-    UI 展开查看「代码 + 名称」，上限见服务端 _FAILED_IDS_CAP，超出置 failed_truncated）/
-    failed_truncated。前端据此轮询展示进度条、失败只数与失败证券清单；进程重启后归零为 idle。
+    UI 展开查看「代码 + 名称」，上限见服务端 _FAILED_IDS_CAP，超出置 failed_truncated）。
+
+    **跨进程冲突态（S9 ②B）**：本进程 ``idle`` 时额外只读探测 DB 锁
+    （``admin_lock.is_lock_held``，与 acquire 同一 TTL 口径）——锁被其他进程持有且未过期
+    → 返回 ``state="running"`` + ``running_elsewhere=true``，前端显示「任务在其它进程
+    运行」而非误导性 idle（避免误点触发 → 409）。此态下本进程**看不到**对方的
+    total/processed 真实计数（字段为零值），取消端点仍可用（``request_cancel`` 走 DB
+    标记、跨进程生效）。代价（②B 已知边界）：持锁进程崩溃后 TTL（26h）内 B 仍显示
+    「运行中」；根治须进度落库（方案①，暂不做）。本进程非 idle（running/done/error/
+    cancelled）时以本进程态为准、``running_elsewhere=false``——done/error 是本进程
+    上一轮的真实终态，展示价值高于跨进程提示。
     """
     from app.services.dividend_seed import seed_progress
 
+    state = seed_progress.state
+    running_elsewhere = False
+    if state == "idle":
+        # 本进程空闲：查 DB 锁区分「真空闲」与「任务在其它进程运行」（S9 ②B）。
+        running_elsewhere = await is_lock_held(db, LOCK_DIVIDEND_SEED)
+        if running_elsewhere:
+            state = "running"
+            # 冲突态显式清零计数：本进程拿不到对方内存态，单例里的残留值（上一轮本地
+            # 运行的 total/failed 等）若透传会造成「running_elsewhere=true 却带旧计数」
+            # 的矛盾 wire——契约语义「计数为零值」由端点保证，不依赖单例恰好归零。
+            return {
+                "state": "running",
+                "running_elsewhere": True,
+                "total": 0,
+                "processed": 0,
+                "hits": 0,
+                "failed": 0,
+                "covered": 0,
+                "started_at": None,
+                "finished_at": None,
+                "error": None,
+                "message": None,
+                "failed_securities": [],
+                "failed_truncated": False,
+            }
     return {
-        "state": seed_progress.state,
+        "state": state,
+        "running_elsewhere": running_elsewhere,
         "total": seed_progress.total,
         "processed": seed_progress.processed,
         "hits": seed_progress.hits,

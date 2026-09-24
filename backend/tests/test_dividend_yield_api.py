@@ -837,3 +837,92 @@ async def test_seed_progress_wire_matches_response_model(session, client):
         seed_progress.failed_securities = []
 
 
+# ─────────── S9 ②B：跨进程冲突态（本进程 idle + DB 锁被他人持有 → running_elsewhere） ───────────
+@pytest.mark.asyncio
+async def test_seed_progress_reports_running_elsewhere(session, client):
+    """S9 ②B：本进程 idle 且 ``admin_locks`` 被（其它进程）持有未过期 → ``state=running`` +
+    ``running_elsewhere=true``。
+
+    此前 B 进程轮询进度只会拿到误导性 ``idle``，用户据此再点触发 → 409「另一进程持有」，
+    前端无法结构化识别、也无从提示。现由 DB 锁只读探测（``is_lock_held``，与 acquire 同一
+    TTL 口径）回答「在不在跑」；锁释放 / 已过 TTL → 回落 ``idle`` + ``running_elsewhere=false``。
+    """
+    from sqlalchemy import text as _text
+
+    from app.services.admin_lock import (
+        LOCK_DIVIDEND_SEED,
+        acquire_admin_lock,
+        release_admin_lock,
+    )
+    from app.services.dividend_seed import seed_progress
+
+    admin = await _make_admin(session, client)
+    h = auth(admin["token"])
+    url = "/api/dividend-yield/seed-initial-dividends/progress"
+
+    # 前置：本进程进度态强制 idle + 锁表无残留（state 是进程内单例，test_dividend_seed
+    # 等真实链路用例会把它停在 done/error/cancelled 且不复位——跨文件污染，故不 assert
+    # 前置而显式置 idle，finally 复位，同 wire 用例对 failed_securities 的手法）
+    original_state = seed_progress.state
+    seed_progress.state = "idle"
+    await session.execute(_text("DELETE FROM admin_locks"))
+    await session.commit()
+
+    try:
+        # 锁被「其它进程」持有：经生产路径 acquire 写入 owner + acquired_at=now()
+        token = await acquire_admin_lock(session, LOCK_DIVIDEND_SEED)
+        assert token is not None
+
+        status, _, data, _ = env(await client.get(url, headers=h))
+        assert status == 200
+        assert data["state"] == "running"
+        assert data["running_elsewhere"] is True
+        # 对方进程的内存态计数不可见（②B 已知边界）：字段为零值
+        assert data["total"] == 0 and data["processed"] == 0
+
+        # 释放锁 → 回落 idle（本进程空闲 + 无人持锁）
+        await release_admin_lock(session, LOCK_DIVIDEND_SEED, token)
+        status, _, data, _ = env(await client.get(url, headers=h))
+        assert status == 200
+        assert data["state"] == "idle"
+        assert data["running_elsewhere"] is False
+    finally:
+        seed_progress.state = original_state
+        await session.execute(_text("DELETE FROM admin_locks"))
+        await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_seed_progress_local_state_wins_over_lock(session, client):
+    """S9 ②B 边界：本进程**非 idle**（如 done）时以本进程态为准、``running_elsewhere=false``。
+
+    done/error/cancelled 是本进程上一轮的真实终态（含失败原因与摘要 message），展示价值
+    高于「任务在其它进程运行」的提示——改写 state 会把本进程终态吞掉，故只对 idle 生效。
+    """
+    from sqlalchemy import text as _text
+
+    from app.services.admin_lock import LOCK_DIVIDEND_SEED, acquire_admin_lock
+    from app.services.dividend_seed import seed_progress
+
+    admin = await _make_admin(session, client)
+    h = auth(admin["token"])
+    url = "/api/dividend-yield/seed-initial-dividends/progress"
+
+    await session.execute(_text("DELETE FROM admin_locks"))
+    await session.commit()
+    token = await acquire_admin_lock(session, LOCK_DIVIDEND_SEED)
+    assert token is not None
+
+    original_state = seed_progress.state
+    seed_progress.state = "done"
+    try:
+        status, _, data, _ = env(await client.get(url, headers=h))
+        assert status == 200
+        assert data["state"] == "done"
+        assert data["running_elsewhere"] is False
+    finally:
+        seed_progress.state = original_state
+        await session.execute(_text("DELETE FROM admin_locks"))
+        await session.commit()
+
+

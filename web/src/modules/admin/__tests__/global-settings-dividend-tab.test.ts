@@ -78,6 +78,9 @@ vi.mock('@/modules/dividend-yield/composables/use-dividend-yield', () => ({
   // 补齐历史分红进度轮询（GlobalSettingsDividendInitBlock 消费）；null = 从未跑过（idle）
   useSeedProgress: () => ({
     data: ref(null),
+    // §4：进度查询失败态（真实 useQuery 返回面含 isError/refetch；mock 须同步覆盖）
+    isError: ref(false),
+    refetch: vi.fn(),
   }),
   useCancelSeed: () => ({
     isPending: ref(false),
