@@ -49,6 +49,16 @@ _COL_NOTICE_TITLE = "公告标题"
 logger = logging.getLogger(__name__)
 
 
+class DetailSourceUnavailableError(RuntimeError):
+    """明细源在本次执行过程中变为不可用（停用/删除/分类不符/提供方停用）。
+
+    专用类型取代「RuntimeError + 消息子串（'变为不可用'）匹配」的旧判别（§4）：
+    子串匹配会把**恰好含该词**的无关异常误判为源失效并 fail fast 终止整轮。
+    继承 RuntimeError，保持既有 ``except Exception`` / 调用方语义不变。
+    """
+
+
+
 class NoticeMetaMixin:
     """公告标题二筛 + 公司公告接口/明细源解析 + 失败后重解析（混入 ``DividendNoticeScanService``）。
 
@@ -99,11 +109,11 @@ class NoticeMetaMixin:
         否则「源失效」会被伪装成「每只都失败」，掩盖真实原因。
 
         Raises:
-            RuntimeError: 明细源在本次执行过程中变为不可用。
+            DetailSourceUnavailableError: 明细源在本次执行过程中变为不可用。
         """
         fresh = await self._resolve_detail_itf(await self._settings())
         if fresh is None:
-            raise RuntimeError(
+            raise DetailSourceUnavailableError(
                 "明细源（巨潮历史分红）在本次执行过程中变为不可用"
                 "（接口被停用/删除、分类不符或提供方被停用），fail fast 终止："
                 "剩余证券无法继续逐只采集"
@@ -113,15 +123,16 @@ class NoticeMetaMixin:
     async def _reresolve_detail_safe(self, idx: int, total: int) -> Optional[QuoteInterface]:
         """失败后重解析明细源（L-3 韧性）。
 
-        - **真失效**：``_re_resolve_detail_after_rollback`` 抛 ``RuntimeError("…变为不可用")``
-          → 原样 raise，fail fast 终止（否则「源失效」被伪装成「每只都失败」）。
+        - **真失效**：``_re_resolve_detail_after_rollback`` 抛
+          ``DetailSourceUnavailableError`` → 原样 raise，fail fast 终止（否则「源失效」
+          被伪装成「每只都失败」）。
         - **过程异常**：重解析本身抛其它异常（DB 瞬时抖动）→ 记日志返回 ``None``，
           按失败续下一只，**不终止整轮**——剩余证券在 DB 恢复后经下一轮自愈。
         """
         try:
             return await self._re_resolve_detail_after_rollback()
         except Exception as e:
-            if isinstance(e, RuntimeError) and "变为不可用" in str(e):
+            if isinstance(e, DetailSourceUnavailableError):
                 raise
             logger.warning(
                 "扫描第 %d/%d 只重解析明细源过程异常（按失败续下一只）：%s", idx, total, e,

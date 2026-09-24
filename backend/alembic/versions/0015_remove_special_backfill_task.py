@@ -4,10 +4,11 @@
   ``run_dividend_special_backfill(None)``，不再依赖本系统任务，故删除迁移 0011 种子写入的任务行。
 - PG 原生枚举 ``JobTaskType`` 的 ``'DIVIDEND_SPECIAL_BACKFILL'`` 值**保留不回收**
   （PG 不支持 DROP VALUE，且已无行引用，残留值不影响运行，同 0011 downgrade 口径）。
-- 位置：紧随 0014 之后。
+- 位置：紧随 0012 之后（0013/0014 已物理删除，链上实际前驱是 0012；
+  本 docstring 曾写 Revises 0014 与 ``down_revision`` 不符，§4 已纠正）。
 
 Revision ID: 0015_remove_special_backfill_task
-Revises: 0014_add_price_backfill_quota
+Revises: 0012_add_response_fields
 """
 from alembic import op
 import sqlalchemy as sa

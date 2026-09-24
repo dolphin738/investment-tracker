@@ -11,6 +11,7 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query';
 import SecurityDetailPanel from '../components/SecurityDetailPanel.vue';
+import { Badge } from '@/components/ui/badge';
 import type { SecurityDividendItem } from '@/api/dividend-yield.api';
 
 const dividendItems = vi.hoisted(() => ({
@@ -132,9 +133,12 @@ describe('SecurityDetailPanel 分红明细', () => {
     ];
     const wrapper = await mountPanel();
     const rows = wrapper.findAll('li');
-    // 有标签行：Badge 文案等于原文标签
-    expect(rows[0].text()).toContain('股改分红');
-    // 无标签行：不出现空 Badge（不渲染标签文本）
-    expect(rows[1].text()).not.toContain('股改分红');
+    // 有标签行：Badge 组件存在且文案恰为原文标签（§4 补强：不再只比对整行文本，
+    // 「无 Badge」与「文案不同」此前无法区分）
+    const withBadge = rows[0].findComponent(Badge);
+    expect(withBadge.exists()).toBe(true);
+    expect(withBadge.text()).toBe('股改分红');
+    // 无标签行：Badge 组件不渲染（而非渲染了别的文案）
+    expect(rows[1].findComponent(Badge).exists()).toBe(false);
   });
 });

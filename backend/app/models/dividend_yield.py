@@ -148,7 +148,7 @@ class SecurityDividendPending(Base, TimestampMixin):
     )
     # sha1 hex 幂等键（唯一）：同源行重复 scan → 同指纹（§3.6）
     row_fingerprint: Mapped[str] = mapped_column(String(40), nullable=False)
-    # 源站「分红类型」原文（normalize_label 截断 32）；供人工判读
+    # 源站「分红类型」原文（dividend_cninfo_parse._normalize_text 截断 32）；供人工判读
     dividend_label: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     # 每股派息（元；源「每 10 股」÷10，与 SecurityDividend.cash_per_share 同口径）
     cash_per_share: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)

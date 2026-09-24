@@ -45,6 +45,9 @@ export const DIVIDEND_YIELD_KEY = ['dividend-yield'] as const;
  * 停轮询、进度面板永不出现（须重进页面触发新轮询才显示）。故触发后置一个宽限期，期间强制轮询，
  * 覆盖启动延迟；宽限内任一 tick 捕获 running/done/error 即转入正常轮询/停止。
  */
+export const SEED_PROGRESS_GRACE_MS = 20_000;
+
+/** 宽限期截止时间戳（模块级：跨 useSeedProgress 实例共享，触发 mutation 与轮询 query 通信） */
 let seedProgressGraceUntil = 0;
 
 /** Top20 股息率看板（§8.3 双榜：top + consecutive，后端封顶 20、剔除 suspicious/僵尸行） */
@@ -199,8 +202,8 @@ export function useRebuildDividendYield() {
 /**
  * 手动触发历史分红补齐 / 播种（admin-only；取代原「特别分红回补」入口）。
  *
- * 后端为 fire-and-forget：端点立即返回、全市场播种在后台跑约 19 小时，
- * 进度经应用日志查看，故此处**不失效**榜单查询——
+ * 后端为 fire-and-forget：端点立即返回、播种（serviceable STOCK 约 5923 只 × ≈6s）在后台
+ * 跑约 10 小时，进度经本页进度面板（``useSeedProgress``）轮询，故此处**不失效**榜单查询——
  * 此刻 invalidate 只会刷出旧数据（任务尚未完成、前端无从感知），
  * 用户可在跑完后手动刷新。该取舍与原回补 composable 保持一致。
  */
@@ -212,7 +215,7 @@ export function useSeedInitialDividends() {
       toast.success(data.message || '已触发历史分红补齐，后台执行中');
       // 触发成功后立即拉一次进度，并置轮询宽限期（覆盖后端 _seed_rows 启动延迟，
       // 避免首轮轮询命中 idle 后停轮询、进度面板不显示，须重进页面才出现）
-      seedProgressGraceUntil = Date.now() + 20_000;
+      seedProgressGraceUntil = Date.now() + SEED_PROGRESS_GRACE_MS;
       queryClient.invalidateQueries({
         queryKey: [...DIVIDEND_YIELD_KEY, 'seed-progress'],
       });

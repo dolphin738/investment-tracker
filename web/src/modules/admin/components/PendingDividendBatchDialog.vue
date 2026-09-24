@@ -6,6 +6,9 @@
  * - assign（采纳建议 → 写分红主表）：正文列**前 3 笔**预览 + 跳过无候选行数；可事后「重新划分」撤销。
  * - ignore（忽略 → 不写主表、不可撤销）：正文明确「不会写入分红主表」。
  * 确认动作经 confirm 上抛，由门面执行对应 mutation。纯展示，无副作用。
+ *
+ * 确认按钮语义色（§4）：destructive 红**仅用于 ignore**（不可逆、永久丢失）；assign 可经
+ * 「重新划分」撤销，红色会造成与真实风险不匹配的警示强度，用默认主色。
  */
 import {
   AlertDialog,
@@ -67,7 +70,9 @@ const emit = defineEmits<{
       <AlertDialogFooter>
         <AlertDialogCancel>取消</AlertDialogCancel>
         <AlertDialogAction
-          class="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+          :class="props.mode === 'ignore'
+            ? 'bg-destructive text-destructive-foreground hover:bg-destructive/90'
+            : ''"
           @click="emit('confirm')"
         >
           确认

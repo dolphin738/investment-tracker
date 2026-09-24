@@ -19,7 +19,7 @@ from app.services.dividend_cninfo_parse import (
     COL_PERIOD_TYPE,
     COL_RECORD,
     COL_REPORT,
-    normalize_label,
+    _normalize_text,
     parse_cninfo_row_ex,
     parse_pending_row,
     parse_period_type,
@@ -119,10 +119,10 @@ def test_parse_cninfo_row_ex_no_cash_priority_over_no_period():
     assert parsed is None and reason == "no_cash"
 
 
-def test_normalize_label_truncates_to_32_and_period_other():
+def test_normalize_text_truncates_to_32_and_period_other():
     """超长标签截断到 32 字符；未收录长标签落 OTHER 且 dividend_label 同步截断。"""
     long_label = "X" * 40
-    assert len(normalize_label(long_label)) == 32
+    assert len(_normalize_text(long_label)) == 32
 
     row, _reason = parse_cninfo_row_ex({
         COL_PERIOD_TYPE: long_label,

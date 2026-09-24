@@ -31,7 +31,7 @@ const emit = defineEmits<{
 <template>
   <div class="space-y-4">
     <p class="text-xs text-muted-foreground">
-      冷启动或数据修复时使用的手工动作；触发后任务在后台执行，进度见应用日志。
+      冷启动或数据修复时使用的手工动作；触发后任务在后台执行，进度见下方进度面板。
     </p>
 
     <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">

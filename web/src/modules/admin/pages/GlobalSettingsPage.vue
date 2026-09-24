@@ -176,7 +176,7 @@ function handleSaveSettings(): void {
           <CardHeader>
             <CardTitle class="text-base">初始化</CardTitle>
             <CardDescription>
-              冷启动 / 数据修复用的配置与手工动作；触发后任务在后台执行，进度见应用日志。
+              冷启动 / 数据修复用的配置与手工动作；触发后任务在后台执行，进度见「初始化」区块的进度面板。
             </CardDescription>
           </CardHeader>
           <CardContent class="space-y-6">

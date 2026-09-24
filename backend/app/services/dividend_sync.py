@@ -1,4 +1,4 @@
-"""股息率采集服务：五年留存清理 + 全量重建（方案 §6.3/§6.4）。
+"""股息率采集服务：分红留存清理 + 全量重建（方案 §6.3/§6.4）。
 
 数据源由配置表 ``dividend_yield_settings``（§6.5）驱动，复用 ``market_data_sync``
 既有的 ``_call_interface_raw``/``_upsert_masters``/``_RATE_LIMITER`` 链路（§11.3 复用红线），
@@ -75,7 +75,7 @@ class DividendSyncService:
         ).scalar_one_or_none()
 
     # ------------------------------------------------------------------ #
-    # 五年留存清理（§6.3）
+    # 分红留存清理（§6.3；年限配置化，默认 5 年）
     # ------------------------------------------------------------------ #
     async def retention_cleanup(self, cfg: Any) -> str:
         """留存清理：保留最近 ``settings.dividend_retention_years`` 个财年
@@ -162,7 +162,7 @@ class DividendSyncService:
 # 模块级 handler 入口（供 scheduler.py 薄注册；各自开独立会话对齐既有 handler 风格）
 # --------------------------------------------------------------------------- #
 async def run_dividend_retention_cleanup(cfg: Any) -> str:
-    """五年留存清理 handler。"""
+    """分红留存清理 handler（年限读 ``dividend_retention_years``，默认 5）。"""
     from app.db.database import AsyncSessionLocal
 
     async with AsyncSessionLocal() as session:

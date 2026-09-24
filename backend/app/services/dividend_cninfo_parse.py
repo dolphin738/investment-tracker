@@ -6,8 +6,9 @@
 ``dividend_notice_meta.py``（二筛 + 选源，§6.3），三者各自控制在单文件行数约定内。
 
 列名取 akshare 重命名后的中文列（实测响应 **无代码列**，证券代码来自调用方传入的
-``symbol``，与旧新浪路径口径一致）。三个未用列（派息日 / 股份到账日 / 实施方案分红说明）
-按 §9.3-A6 仅保留常量、**不落库**。
+``symbol``，与旧新浪路径口径一致）。两个未用列（股份到账日 / 实施方案分红说明）
+按 §9.3-A6 仅保留常量、**不落库**（派息日 ``COL_PAY`` 已随 staging 行落库为
+``pay_date``——§4 旧注释「派息日不落库」与实现漂移，已纠正）。
 """
 from __future__ import annotations
 
@@ -98,11 +99,6 @@ def _normalize_text(raw: Any) -> Optional[str]:
     return s[:32]
 
 
-def normalize_label(raw: Any) -> Optional[str]:
-    """「分红类型」原文标签归一（strip + 截断 32，空/全空白/NaN → None）。"""
-    return _normalize_text(raw)
-
-
 def parse_period_type(raw: Any) -> ReportPeriodType:
     """「分红类型」→ ReportPeriodType；未收录的标签一律 ``OTHER``（§5.3，批次 A）。"""
     return _PERIOD_TYPE_BY_LABEL.get(str(raw or "").strip(), ReportPeriodType.OTHER)
@@ -120,7 +116,7 @@ def parse_cninfo_row_ex(row: Any) -> tuple[Optional[CninfoDividendRow], Optional
 
     金额单位一律折算为**每股**（源为「每 10 股」÷10，与 ``cash_per_share`` 同口径）；
     ``status`` 按 §9.3-A2：除权日非空 → PAID，否则 → PROPOSED（巨潮无「进度」列）。
-    原文标签经 ``normalize_label`` 归一并截断，空标签落 ``dividend_label=None``。
+    原文标签经 ``_normalize_text`` 归一并截断，空标签落 ``dividend_label=None``。
     """
     cash = parse_cash(_row_get(row, COL_CASH))
     if cash is None or cash == 0:
@@ -141,7 +137,7 @@ def parse_cninfo_row_ex(row: Any) -> tuple[Optional[CninfoDividendRow], Optional
         announcement_date=parse_date(_row_get(row, COL_ANN)),
         bonus_share_ratio=parse_cash(_row_get(row, COL_BONUS)),
         convert_ratio=parse_cash(_row_get(row, COL_CONVERT)),
-        dividend_label=normalize_label(raw_label),
+        dividend_label=_normalize_text(raw_label),
     ), None
 
 
