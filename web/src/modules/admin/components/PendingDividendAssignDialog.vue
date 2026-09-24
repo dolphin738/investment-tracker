@@ -8,6 +8,8 @@
  * - 「提交」**始终可点**，校验失败以红字提示（不做禁用式隐藏，避免用户困惑）。
  * - 跨字段联动用「禁用」优于「报错」：选 ANNUAL → 季度自动置 4 且置灰；INTERIM → 置 2 且置灰。
  * - 留存窗外：建议值旁加 Badge「留存窗外」并说明「转正后可能被留存清理删除」。
+ * - 建议值展示统一走 lib/pending-dividends.formatSuggestionPreview（§4 收口，
+ *   owner 裁决以批量预览口径「600519 2022Q4 特别分配」为准），与 Table/BatchDialog 共用。
  *
  * 弹窗自身不做请求：表单值经 submit 上抛，由页面执行 useAssignPendingDividend mutation，
  * 以便统一处理 conflict / toast / 刷新。
@@ -44,6 +46,7 @@ import {
   suggestReportPeriod,
   type PendingPeriodType,
 } from '@/modules/dividend-yield/lib/suggest-report-period';
+import { formatSuggestionPreview } from '@/modules/dividend-yield/lib/pending-dividends';
 
 type PendingDividendOut = components['schemas']['PendingDividendOut'];
 
@@ -102,6 +105,8 @@ const candidates = computed(() =>
       })
     : [],
 );
+/** 展示用代码（code 缺失回落 masterId——与批量预览/表格列同口径，§4 格式收口） */
+const rowCode = computed(() => props.row?.code || props.row?.masterId || '');
 const primary = computed(() => candidates.value[0] ?? null);
 const alternate = computed(() => candidates.value[1] ?? null);
 const hasCandidate = computed(() => candidates.value.length > 0);
@@ -222,8 +227,7 @@ watch(
         <div class="text-sm">
           主候选：
           <span class="font-medium">
-            {{ primary?.reportYear }} 年 Q{{ primary?.reportQuarter }}
-            · {{ primary ? PERIOD_TYPE_LABELS[primary.periodType] : '' }}
+            {{ primary ? formatSuggestionPreview(rowCode, primary) : '' }}
           </span>
           <Badge
             v-if="primary && isOutsideRetention(primary.reportYear, currentYear, retentionYears)"
@@ -234,7 +238,7 @@ watch(
           </Badge>
         </div>
         <div v-if="alternate" class="text-xs text-muted-foreground">
-          备选（由除权日推定，粗略）：{{ alternate.reportYear }} 年 Q{{ alternate.reportQuarter }}
+          备选：{{ alternate ? formatSuggestionPreview(rowCode, alternate) : '' }}
         </div>
         <p
           v-if="primary && isOutsideRetention(primary.reportYear, currentYear, retentionYears)"
@@ -303,7 +307,7 @@ watch(
       <p v-if="outsideRetention" class="text-xs text-destructive">
         ⚠️ 当前报告年（{{ reportYear }}）落在留存窗外，转正后可能被留存清理删除。
       </p>
-      <p v-if="errorText" class="text-xs text-red-500">{{ errorText }}</p>
+      <p v-if="errorText" role="alert" class="text-xs text-red-500">{{ errorText }}</p>
 
       <DialogFooter>
         <Button variant="outline" @click="emit('update:open', false)">取消</Button>

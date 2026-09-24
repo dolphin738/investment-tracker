@@ -7,12 +7,21 @@
  */
 import type { components } from '@/types/api';
 import type { PendingAssignItemPayload } from '@/api/dividend-yield.api';
-import { suggestReportPeriod } from './suggest-report-period';
+import { PERIOD_TYPE_LABELS, suggestReportPeriod } from './suggest-report-period';
 
 type PendingDividendOut = components['schemas']['PendingDividendOut'];
 
 /** 批量端点 `failed[]` 元素（直接取生成契约，避免再手写一份同形副本） */
 export type BatchFailedItem = components['schemas']['BatchFailedItemOut'];
+
+/**
+ * 筛选状态联合类型（§4 收口）：门面与 FilterBar **必须共用**。
+ * 此前 FilterBar 把 `status` 声明为 `string` 抹平了门面的联合类型——父级收窄、子级放宽，
+ * 联合形同虚设（新状态拼错 `vue-tsc` 无感）。空串 = 「全部」。
+ */
+export type PendingStatusFilter =
+  | ''
+  | components['schemas']['DividendPendingStatus'];
 
 /**
  * 唯一「可勾选 / 可批量操作」判定：**仅 `PENDING` 行**。
@@ -46,4 +55,30 @@ export function suggestionPayload(
     reportQuarter: c.reportQuarter,
     periodType: c.periodType,
   };
+}
+
+/**
+ * 建议值统一展示格式（§4 收口，owner 裁决 2026-09-25：以批量预览口径为准）。
+ *
+ * 格式：`{code} {reportYear}Q{reportQuarter} {类型标签}` → 「600519 2022Q4 特别分配」。
+ * `approximate=true`（除权日推定的备选候选）时追加「（除权日推定，粗略）」后缀。
+ *
+ * **三处必须共用本函数**（此前各写一遍已漂移出三种格式）：
+ * Table 报告期列（PENDING 行）/ AssignDialog 候选区 / BatchDialog 批量预览。
+ */
+export function formatSuggestionPreview(
+  code: string | null | undefined,
+  candidate: {
+    reportYear: number;
+    reportQuarter: number;
+    periodType: string;
+    approximate?: boolean;
+  },
+): string {
+  const who = code && code.trim() ? code : '未知代码';
+  const approx = candidate.approximate ? '（除权日推定，粗略）' : '';
+  const label =
+    PERIOD_TYPE_LABELS[candidate.periodType as keyof typeof PERIOD_TYPE_LABELS] ??
+    '其他';
+  return `${who} ${candidate.reportYear}Q${candidate.reportQuarter} ${label}${approx}`;
 }

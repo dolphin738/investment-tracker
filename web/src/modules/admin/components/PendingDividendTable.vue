@@ -22,7 +22,10 @@ import {
   PERIOD_TYPE_LABELS,
   suggestReportPeriod,
 } from '@/modules/dividend-yield/lib/suggest-report-period';
-import { isSelectablePendingRow } from '@/modules/dividend-yield/lib/pending-dividends';
+import {
+  formatSuggestionPreview,
+  isSelectablePendingRow,
+} from '@/modules/dividend-yield/lib/pending-dividends';
 
 type PendingDividendOut = components['schemas']['PendingDividendOut'];
 type BadgeVariant = NonNullable<BadgeVariants['variant']>;
@@ -120,8 +123,9 @@ function suggestionLabel(row: PendingDividendOut): string {
     exDividendDate: row.exDividendDate ?? null,
   })[0];
   if (!c) return '无候选，须人工';
-  const approx = c.approximate ? '（除权日推定，粗略）' : '';
-  return `${c.reportYear} Q${c.reportQuarter} · ${PERIOD_TYPE_LABELS[c.periodType]}${approx}`;
+  // §4 收口（owner 裁决 2026-09-25）：建议值与批量预览 / 弹窗候选区统一口径
+  // 「600519 2022Q4 特别分配」；approximate 后缀由格式化函数按候选自带
+  return formatSuggestionPreview(row.code || row.masterId, c);
 }
 </script>
 

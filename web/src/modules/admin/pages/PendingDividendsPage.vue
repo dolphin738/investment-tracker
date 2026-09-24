@@ -37,6 +37,7 @@ import {
 } from '@/modules/dividend-yield/composables/use-pending-dividends';
 import { useDividendYieldSettings } from '@/modules/dividend-yield/composables/use-dividend-yield';
 import { isSelectablePendingRow } from '@/modules/dividend-yield/lib/pending-dividends';
+import type { PendingStatusFilter } from '@/modules/dividend-yield/lib/pending-dividends';
 import { usePendingDividendBatch } from '@/modules/admin/composables/use-pending-batch';
 import PendingDividendFilterBar from '@/modules/admin/components/PendingDividendFilterBar.vue';
 import PendingDividendTable from '@/modules/admin/components/PendingDividendTable.vue';
@@ -53,7 +54,8 @@ const canView = useHasRole('admin', 'auditor');
 const isAdmin = useIsAdmin();
 
 // ── 筛选（status 默认 PENDING = 待处理视图；label 精确；q 关键字 250ms 防抖） ──
-type PendingStatusFilter = '' | 'PENDING' | 'ASSIGNED' | 'IGNORED';
+// PendingStatusFilter 收口在 lib/pending-dividends.ts（§4）：与 FilterBar 共用同一联合类型，
+// 子组件不再以 string 抹平。
 const filters = reactive<{ status: PendingStatusFilter; label: string; q: string }>({
   status: 'PENDING',
   label: '',

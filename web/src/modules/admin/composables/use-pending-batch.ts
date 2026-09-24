@@ -16,8 +16,8 @@ import { computed, ref, watch, type ComputedRef, type Ref } from 'vue';
 import { toast } from '@/composables/use-toast';
 import type { components } from '@/types/api';
 import type { PendingAssignItemPayload } from '@/api/dividend-yield.api';
-import { PERIOD_TYPE_LABELS } from '@/modules/dividend-yield/lib/suggest-report-period';
 import {
+  formatSuggestionPreview,
   suggestionPayload,
   type BatchFailedItem,
 } from '@/modules/dividend-yield/lib/pending-dividends';
@@ -79,12 +79,9 @@ export function usePendingDividendBatch(options: {
         (x): x is { r: PendingDividendOut; p: PendingAssignItemPayload } => x.p !== null,
       )
       .slice(0, 3)
-      .map(
-        ({ r, p }) =>
-          `${r.code || r.masterId} ${p.reportYear}Q${p.reportQuarter} ${
-            PERIOD_TYPE_LABELS[p.periodType as keyof typeof PERIOD_TYPE_LABELS] ?? '其他'
-          }`,
-      ),
+      // §4 收口：格式统一走 lib/pending-dividends.formatSuggestionPreview（owner 裁决
+      // 以本预览口径为准），与 Table 报告期列 / AssignDialog 候选区共用同一实现
+      .map(({ r, p }) => formatSuggestionPreview(r.code || r.masterId, p)),
   );
 
   function openBatchAssign(): void {

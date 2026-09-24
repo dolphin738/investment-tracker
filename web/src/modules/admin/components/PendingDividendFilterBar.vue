@@ -11,6 +11,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import type { PendingStatusFilter } from '@/modules/dividend-yield/lib/pending-dividends';
 
 /**
  * 关键字长度上限（S18）：与后端 `GET /pending-dividends` 的 `q: Query(max_length=50)`
@@ -20,8 +21,8 @@ import { Label } from '@/components/ui/label';
 const KEYWORD_MAX_LENGTH = 50;
 
 const props = defineProps<{
-  /** 筛选条件（与门面同一响应式对象，子组件直改其字段） */
-  filters: { status: string; label: string; q: string };
+  /** 筛选条件（与门面同一响应式对象，子组件直改其字段；status 共用联合类型，不再抹平为 string） */
+  filters: { status: PendingStatusFilter; label: string; q: string };
   /** 原文标签候选集（概览 labels[]） */
   labelOptions: string[];
 }>();
@@ -42,7 +43,8 @@ const emit = defineEmits<{
           class="h-9 w-[140px] rounded-md border border-input bg-background px-2 text-sm"
           :value="props.filters.status"
           @change="
-            props.filters.status = ($event.target as HTMLSelectElement).value;
+            props.filters.status =
+              ($event.target as HTMLSelectElement).value as PendingStatusFilter;
             emit('change');
           "
         >
