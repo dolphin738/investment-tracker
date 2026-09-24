@@ -1,32 +1,21 @@
-"""聚合查询服务 — 对齐 docs/ARCHITECTURE.md §4.2.10/§4.2.14/§4.2.15/§4.2.16。
+"""AggregationService 的组合摘要 / 对比 / 账户统计 / 数据新鲜度方法（mixin）。
 
-全部为**只读**聚合，复用派生层落库结果（DailyNav / DailyXirr / AssetSnapshot），
-不触发任何重算；XIRR 仅对「窗口内现金流 + 期初/期末资产」做一次性 pyxirr 计算。
-
-口径：
-- PortfolioSummary：累计XIRR/总收益率/当年收益率 取最新落库值；maxDrawdown v1 恒 null（P1）。
-- Overview：总资产=最新快照；累计XIRR=最新落库；当年XIRR=本年窗口 XIRR；
-  navSeries=区间净值片段；recentCashflows=最近 N 笔出入金；freshness=数据新鲜度。
-- 对比 / 账户统计：跨组合聚合（账户级 XIRR = 组合现金流合并 + 各组合期末资产为终值）。
-- freshness：行情维度=持仓标的各自最新价 MAX(as_of) 的最小值（任一持仓标的无行情→null）；
-  现金维度=最新现金余额 as_of；滞后天数=as_of→今天(UTC+8)自然日差；超 staleDays 阈值才产出 reasons。
+原函数体从 ``aggregation`` 主类位移至此；主类继承后所有 ``self._x`` 调用经 MRO 解析，
+行为零变化。
 """
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date
 from decimal import Decimal
-from typing import Iterable, Optional
+from typing import Optional
 
-from sqlalchemy import case, func, select, tuple_
+from sqlalchemy import func, select
 
 from app.core.date_utils import today_app_tz
-from app.finance_core.holding import ZERO
-from app.finance_core.xirr import Cashflow, calculate_xirr
 from app.models import (
     AssetSnapshot,
     CashBalance,
     CashFlow,
-    CashFlowType,
     DailyNav,
     DailyXirr,
     Portfolio,
@@ -35,114 +24,10 @@ from app.models import (
     User,
     UserPreference,
 )
-from app.serializers import serialize_cashflow
 from app.services.holding import HoldingService
 
 
-class AggregationService:
-    def __init__(self, session) -> None:
-        self.session = session
-
-    # ── 基础读取 ──
-    async def _latest_snapshot(self, portfolio_id: str) -> Optional[AssetSnapshot]:
-        return (
-            await self.session.execute(
-                select(AssetSnapshot)
-                .where(AssetSnapshot.portfolio_id == portfolio_id)
-                .order_by(AssetSnapshot.date.desc())
-                .limit(1)
-            )
-        ).scalar_one_or_none()
-
-    async def _latest_nav(self, portfolio_id: str) -> Optional[DailyNav]:
-        return (
-            await self.session.execute(
-                select(DailyNav)
-                .where(DailyNav.portfolio_id == portfolio_id)
-                .order_by(DailyNav.date.desc())
-                .limit(1)
-            )
-        ).scalar_one_or_none()
-
-    async def _latest_xirr(self, portfolio_id: str) -> Optional[DailyXirr]:
-        return (
-            await self.session.execute(
-                select(DailyXirr)
-                .where(
-                    DailyXirr.portfolio_id == portfolio_id,
-                    DailyXirr.xirr_value.is_not(None),
-                )
-                .order_by(DailyXirr.date.desc())
-                .limit(1)
-            )
-        ).scalar_one_or_none()
-
-    # ── 跨组合批量读取（N+1 规避：全部组合常数次查询）──
-    async def _latest_by_portfolio(
-        self,
-        model,
-        date_col,
-        pids: list[str],
-        extra_filter=None,
-    ) -> dict[str, object]:
-        """每个组合取 date_col 最新一行，返回 {portfolio_id: row}。
-
-        两步查询（group-by max + tuple IN 回表），与组合数无关。
-        """
-        q = (
-            select(model.portfolio_id, func.max(date_col).label("max_date"))
-            .where(model.portfolio_id.in_(pids))
-            .group_by(model.portfolio_id)
-        )
-        if extra_filter is not None:
-            q = q.where(extra_filter)
-        latest = (await self.session.execute(q)).all()
-        if not latest:
-            return {}
-        rows = (
-            await self.session.execute(
-                select(model).where(
-                    tuple_(model.portfolio_id, date_col).in_(
-                        [(pid, md) for pid, md in latest]
-                    )
-                )
-            )
-        ).scalars().all()
-        return {r.portfolio_id: r for r in rows}
-
-    async def _net_invested_by_portfolio(self, pids: list[str]) -> dict[str, Decimal]:
-        """净投入 = Σ存入 − Σ取出，SQL 聚合一次覆盖全部组合（无出入金为 0）。"""
-        rows = (
-            await self.session.execute(
-                select(
-                    CashFlow.portfolio_id,
-                    func.sum(
-                        case(
-                            (CashFlow.type == CashFlowType.BUY, CashFlow.amount),
-                            else_=-CashFlow.amount,
-                        )
-                    ),
-                )
-                .where(CashFlow.portfolio_id.in_(pids))
-                .group_by(CashFlow.portfolio_id)
-            )
-        ).all()
-        return {pid: (s if s is not None else Decimal(0)) for pid, s in rows}
-
-    async def _last_trade_date_by_portfolio(
-        self, pids: list[str]
-    ) -> dict[str, Optional[date]]:
-        rows = (
-            await self.session.execute(
-                select(
-                    SecurityTrade.portfolio_id, func.max(SecurityTrade.date)
-                )
-                .where(SecurityTrade.portfolio_id.in_(pids))
-                .group_by(SecurityTrade.portfolio_id)
-            )
-        ).all()
-        return {pid: d for pid, d in rows}
-
+class SummaryMixin:
     # ── §4.2.14 统计摘要 ──
     async def portfolio_summary(self, p: Portfolio) -> dict:
         snap = await self._latest_snapshot(p.id)
@@ -159,85 +44,6 @@ class AggregationService:
             "latestDate": snap.date if snap else None,
             "inceptionDate": p.base_date,
         }
-
-    # ── §4.2.10 组合概览 ──
-    async def overview(self, p: Portfolio, range: str = "1y") -> dict:
-        today = today_app_tz()
-        snap = await self._latest_snapshot(p.id)
-        xirr = await self._latest_xirr(p.id)
-        cumulative_xirr = xirr.xirr_value if xirr else None
-
-        # 持仓汇总（缺陷4-A）：当前持仓市值/成本/盈亏/标的数
-        holdings = await HoldingService(self.session).derive(
-            p.id, today, include_closed=False
-        )
-        total_mv = sum((h.market_value for h in holdings), ZERO)
-        total_cost = sum((h.cost_total for h in holdings), ZERO)
-        total_pnl = total_mv - total_cost
-        sec_count = sum(1 for h in holdings if h.quantity != ZERO)
-        holdings_summary = {
-            "totalMarketValue": str(total_mv),
-            "totalCost": str(total_cost),
-            "totalProfit": str(total_pnl),
-            "securityCount": sec_count,
-        }
-
-        # 当年 XIRR：本年窗口（年初→今天）
-        year_start = date(today.year, 1, 1)
-        year_xirr = await self._xirr_scope([p.id], year_start, today)
-
-        start = _range_start(range, today)
-        nav_series = await self._nav_series(p.id, start, today)
-        recent = await self._recent_cashflows(p.id, 10)
-        fresh = await self.freshness(p, p.user_id)
-
-        # 净投入 = Σ存入 − Σ取出（概览 8 卡之「净投入」；summary_list 已算，此处补齐）
-        net_invested = (await self._net_invested_by_portfolio([p.id])).get(
-            p.id, Decimal(0)
-        )
-
-        return {
-            "totalAsset": snap.total_asset if snap else None,
-            "cumulativeXirr": cumulative_xirr,
-            "yearXirr": year_xirr,
-            # 净值口径对齐：概览页「净投入」卡的原始值（金额类，必填；无出入金为 '0'）
-            "netInvested": str(net_invested),
-            "holdingsSummary": holdings_summary,
-            "navSeries": nav_series,
-            "recentCashflows": recent,
-            "freshness": fresh,
-        }
-
-    # ── §4.2.15 最大回撤时间序列 ──
-    async def drawdown(
-        self, portfolio_id: str, start: Optional[date], end: Optional[date]
-    ) -> list[dict]:
-        stmt = select(DailyNav).where(DailyNav.portfolio_id == portfolio_id)
-        if start:
-            stmt = stmt.where(DailyNav.date >= start)
-        if end:
-            stmt = stmt.where(DailyNav.date <= end)
-        stmt = stmt.order_by(DailyNav.date)
-        rows = (await self.session.execute(stmt)).scalars().all()
-
-        out: list[dict] = []
-        peak: Optional[Decimal] = None
-        peak_date: Optional[date] = None
-        for r in rows:
-            nav = r.cumulative_nav
-            if peak is None or nav > peak:
-                peak = nav
-                peak_date = r.date
-            dd = (nav / peak - Decimal(1)) if (peak and peak > 0) else None
-            out.append(
-                {
-                    "date": r.date,
-                    "drawdown": dd,
-                    "peakDate": peak_date,
-                    "label": r.date.isoformat(),
-                }
-            )
-        return out
 
     # ── §4.2.10 多组合对比 ──
     async def comparison(self, user_id: str) -> list[dict]:
@@ -339,8 +145,6 @@ class AggregationService:
         - recordDays：账户使用天数（注册至今）
         - firstDate / lastDate：快照日期范围起止
         """
-        from sqlalchemy import func
-
         portfolios = (
             await self.session.execute(
                 select(Portfolio).where(Portfolio.user_id == user_id)
@@ -507,98 +311,3 @@ class AggregationService:
             "latestCashLagDays": cash_lag,
             "reasons": reasons,
         }
-
-    # ── 内部：净值序列片段 ──
-    async def _nav_series(
-        self, portfolio_id: str, start: Optional[date], end: date
-    ) -> list[dict]:
-        stmt = select(DailyNav).where(DailyNav.portfolio_id == portfolio_id)
-        if start:
-            stmt = stmt.where(DailyNav.date >= start)
-        stmt = stmt.where(DailyNav.date <= end).order_by(DailyNav.date)
-        rows = (await self.session.execute(stmt)).scalars().all()
-        rows = rows[-500:]  # 避免全量过长
-        return [
-            {
-                "date": r.date,
-                "cumulativeNav": r.cumulative_nav,
-                "yearNav": r.year_nav,
-                "shares": r.shares,
-                "label": r.date.isoformat(),
-            }
-            for r in rows
-        ]
-
-    async def _recent_cashflows(self, portfolio_id: str, n: int) -> list[dict]:
-        rows = (
-            await self.session.execute(
-                select(CashFlow)
-                .where(CashFlow.portfolio_id == portfolio_id)
-                .order_by(CashFlow.date.desc(), CashFlow.created_at.desc())
-                .limit(n)
-            )
-        ).scalars().all()
-        return [serialize_cashflow(c).model_dump() for c in reversed(rows)]
-
-    # ── 内部：窗口/账户级 XIRR ──
-    async def _xirr_scope(
-        self, portfolio_ids: Iterable[str], start: date, end: date
-    ) -> Optional[Decimal]:
-        pids = list(portfolio_ids)
-        if not pids:
-            return None
-        cfs: list[Cashflow] = []
-        # 窗口内出入金（BUY 负 / SELL 正）
-        rows = (
-            await self.session.execute(
-                select(CashFlow).where(
-                    CashFlow.portfolio_id.in_(pids),
-                    CashFlow.date >= start,
-                    CashFlow.date <= end,
-                )
-            )
-        ).scalars().all()
-        for cf in rows:
-            amt = -cf.amount if cf.type is CashFlowType.BUY else cf.amount
-            cfs.append(Cashflow(cf.date, amt))
-        # 期初持仓（窗口起点视为买入投资，负值）
-        for pid in pids:
-            opening = (
-                await self.session.execute(
-                    select(AssetSnapshot)
-                    .where(AssetSnapshot.portfolio_id == pid, AssetSnapshot.date < start)
-                    .order_by(AssetSnapshot.date.desc())
-                    .limit(1)
-                )
-            ).scalar_one_or_none()
-            if opening:
-                cfs.append(Cashflow(start, -opening.total_asset))
-        # 期末资产（正终值）
-        for pid in pids:
-            term = (
-                await self.session.execute(
-                    select(AssetSnapshot)
-                    .where(AssetSnapshot.portfolio_id == pid, AssetSnapshot.date <= end)
-                    .order_by(AssetSnapshot.date.desc())
-                    .limit(1)
-                )
-            ).scalar_one_or_none()
-            if term:
-                cfs.append(Cashflow(term.date, term.total_asset))
-        return calculate_xirr(cfs)
-
-
-def _range_start(range: str, today: date) -> Optional[date]:
-    """range → 区间起点（含）。all → None（不限）。"""
-    delta = {
-        "1w": 7,
-        "1m": 30,
-        "3m": 90,
-        "6m": 180,
-        "1y": 365,
-    }.get(range)
-    if range == "ytd":
-        return date(today.year, 1, 1)
-    if range == "all" or delta is None:
-        return None
-    return today - timedelta(days=delta)

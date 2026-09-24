@@ -8,145 +8,34 @@
 
 权限：读守卫 ``require_any_role("admin", "auditor")``（Task #1 已加）；
 写操作（若后续加）用 ``require_admin``。
+
+本模块为门面包：Pydantic 模型见 ``._models``、三源归一 CTE / 过滤片段见 ``._queries``、
+组装与解析辅助见 ``._helpers``；端点实现保留在本文件以维持 openapi 契约零 diff，
+并对外重导出模型/辅助符号，保证 ``from app.modules.admin.log_center import LogItem`` 等
+引用方式不变（零行为变更）。
 """
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Any, Literal, Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
-from sqlalchemy import bindparam, delete, select, text
-from sqlalchemy import DateTime, Integer, String
+from sqlalchemy import Integer, bindparam, delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.envelope import EnvelopeRoute
-from app.services.auth import CurrentUser, require_admin, require_any_role
 from app.db.database import get_db
 from app.models.job import JobConfig, JobRunLog
 from app.models.log import AppLog
 from app.models.notification import Notification
+from app.services.auth import CurrentUser, require_admin, require_any_role
+
+from ._helpers import _build_items, _parse_dt
+from ._models import LogDeleteBody, LogItem, LogListOut
+from ._queries import _CTE_INNER, _FILTER_BINDPARAMS, _FILTER_WHERE
 
 router_admin_log_center = APIRouter(
     prefix="/api/admin/logs", tags=["admin"], route_class=EnvelopeRoute
 )
-
-
-# --------------------------------------------------------------------------- #
-# 三源归一 CTE（统一列：id, source, level, scope, module, message, trace,
-# detail, user_id, created_at, read）
-# --------------------------------------------------------------------------- #
-_CTE_INNER = """
-SELECT
-    a.id AS id, 'app' AS source, a.level AS level, a.scope AS scope,
-    a.module AS module, a.message AS message, a.trace AS trace,
-    a.detail AS detail, a.user_id AS user_id, a.created_at AS created_at,
-    NULL::boolean AS read
-FROM app_logs a
-UNION ALL
-SELECT
-    n.id, 'notification', n.level, 'notification', 'notification',
-    n.message, NULL, NULL, NULL, n.created_at, n.read
-FROM notifications n
-UNION ALL
-SELECT
-    jrl.id, 'job',
-    CASE WHEN jrl.error IS NOT NULL THEN 'error' ELSE 'info' END,
-    'job', COALESCE(jc.name, 'scheduler'),
-    COALESCE(jrl.message, jrl.status::text), jrl.error, NULL, NULL,
-    jrl.started_at, NULL
-FROM job_run_logs jrl
-LEFT JOIN job_configs jc ON jc.id = jrl.job_id
-"""
-
-# 统一列上的过滤（level/scope/module 三源共用同一列，§7.3-3 推荐写法）
-_FILTER_WHERE = """
-WHERE (:level IS NULL OR level = :level)
-  AND (:scope IS NULL OR scope = :scope)
-  AND (:module IS NULL OR module = :module)
-  AND (:start IS NULL OR created_at >= :start)
-  AND (:end IS NULL OR created_at <= :end)
-  AND (:keyword IS NULL OR message ILIKE :keyword)
-"""
-
-# 显式声明过滤参数类型：当所有参数均为 NULL 时，asyncpg 在 prepare 阶段无法从
-# 字面量推断 $N 类型（AmbiguousParameterError → 全请求 500）。用 bindparam 给定
-# 类型后，即使全 NULL 也能正确编译。start/end 声明为 DateTime 以匹配 timestamptz 列。
-_FILTER_BINDPARAMS = [
-    bindparam("level", type_=String),
-    bindparam("scope", type_=String),
-    bindparam("module", type_=String),
-    bindparam("start", type_=DateTime(timezone=True)),
-    bindparam("end", type_=DateTime(timezone=True)),
-    bindparam("keyword", type_=String),
-]
-
-
-# --------------------------------------------------------------------------- #
-# schema
-# --------------------------------------------------------------------------- #
-class LogItem(BaseModel):
-    """三源归一后的统一日志条目（id 带来源前缀）。"""
-
-    id: str
-    source: Literal["app", "notification", "job"]
-    level: Optional[str] = None
-    scope: Optional[str] = None
-    module: Optional[str] = None
-    message: Optional[str] = None
-    trace: Optional[str] = None
-    detail: Optional[Any] = None
-    user_id: Optional[str] = None
-    created_at: datetime
-    read: Optional[bool] = None
-
-
-class LogListOut(BaseModel):
-    """聚合分页结果。"""
-
-    items: list[LogItem]
-    total: int
-    page: int
-    pageSize: int
-
-
-class LogDeleteBody(BaseModel):
-    """删除日志请求体。
-    - ids：待删除日志 id 列表（带来源前缀 app:/notif:/job:）；all=False 时必填，可含重复，后端去重。
-    - all=True：删除「当前筛选条件下全部日志」（跨所有页），忽略 ids；
-      level/scope/module/start/end/keyword 与列表端点一致，用于定位目标集合。
-    """
-
-    ids: list[str] = []
-    all: bool = False
-    level: Optional[str] = None
-    scope: Optional[str] = None
-    module: Optional[str] = None
-    start: Optional[str] = None
-    end: Optional[str] = None
-    keyword: Optional[str] = None
-
-
-def _build_items(rows: list[dict]) -> list[LogItem]:
-    """把 CTE 结果行组装为带前缀 id 的 LogItem 列表。"""
-    items: list[LogItem] = []
-    for r in rows:
-        items.append(
-            LogItem(
-                id=f"{r['source']}:{r['id']}",
-                source=r["source"],
-                level=r["level"],
-                scope=r["scope"],
-                module=r["module"],
-                message=r["message"],
-                trace=r["trace"],
-                detail=r["detail"],
-                user_id=r["user_id"],
-                created_at=r["created_at"],
-                read=r["read"],
-            )
-        )
-    return items
 
 
 # --------------------------------------------------------------------------- #
@@ -174,14 +63,6 @@ async def list_logs(
     # 与 datetime 对象比较 PG 自动按 timestamptz 处理。直接用字符串会因类型不匹配
     # 触发隐式转换失败；且 _FILTER_WHERE 内不得写 `::timestamptz`（与 SQLAlchemy
     # text() 的 :param 绑定解析冲突，会残留 `:` 导致 asyncpg 语法错误 → 全请求 500）。
-    def _parse_dt(v: Optional[str]) -> Optional[datetime]:
-        if not v:
-            return None
-        try:
-            return datetime.fromisoformat(v)
-        except ValueError:
-            return None
-
     filter_params: dict[str, Any] = {
         "level": level,
         "scope": scope,
@@ -291,16 +172,6 @@ async def get_log(
         )
 
     raise HTTPException(status_code=404, detail="日志不存在")
-
-
-def _parse_dt(v: Optional[str]) -> Optional[datetime]:
-    """把 ISO 字符串解析为 datetime，非法输入返回 None（与 list_logs 内解析逻辑一致）。"""
-    if not v:
-        return None
-    try:
-        return datetime.fromisoformat(v)
-    except ValueError:
-        return None
 
 
 @router_admin_log_center.delete("")
@@ -434,3 +305,16 @@ async def delete_logs(
 
     await db.commit()
     return {"deleted": deleted, "skipped": skipped}
+
+
+__all__ = [
+    "router_admin_log_center",
+    "LogItem",
+    "LogListOut",
+    "LogDeleteBody",
+    "_build_items",
+    "_parse_dt",
+    "_CTE_INNER",
+    "_FILTER_WHERE",
+    "_FILTER_BINDPARAMS",
+]
