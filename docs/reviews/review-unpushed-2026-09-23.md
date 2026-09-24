@@ -440,3 +440,70 @@ A7 裁决为「检查点前显式 `rollback()` 收口」。按字面实施后**�
 | `app/schemas_resp/`（7 文件） | ≤130 | ✅ 本批收口（原 495） |
 | `app/services/dividend_pending{,_assign,_main_write}.py` | 300 / 379 / 138 | ✅ 批次二拆分 |
 | 其余 >400 行的 app 文件 | aggregation 604 / classification 553 / data_transfer 537 / response_fields 486 / calculation-router 466 / asset_valuation 464 / scheduler 457 / log_center 436 | ⏳ 历史债，留待「结构债治理」批次（含 `PendingDividendsPage.vue` 435 = S17） |
+
+## 12. S 类条目现状复核与裁决（2026-09-24，owner 裁决「按建议批发实施」）
+
+### 12.1 复核结论：26 条中 7 条已随批次一/二修复，无须裁决
+
+| ID | 修复落点（当前路径） |
+| --- | --- |
+| S1 | `dividend_pending_main_write.py` `_delete_assigned_main` 的 `source == ASSIGN_SOURCE` 守卫 |
+| S2 | `dividend_pending_assign.py` `_touched_masters` + `_refresh_touched` |
+| S3 | `_validate_target` + `_retention_years`（留存窗外年份 400） |
+| S4 | `renew_admin_lock` 续期；检查点 `rowcount=0` → 「被抢占」可感知停止 |
+| S5 | 检查点 10 只 + >15s 节流（取消延迟 ~1min） |
+| S8 | `db/database.py:30` 显式 `isolation_level="READ COMMITTED"` |
+| S19 | `pending_queue_metrics` + `PENDING_QUEUE_STALE_DAYS=180` |
+
+⚠️ 复核中对原报告的两处严重性修正：**S6 下调**（`trigger_router.py` 快路径取消虽跳过收尾 refresh，但日线同步会对价格变动的证券重算——`market_daily_price_sync.py:187-188`——最长滞后到下一次有价格变动的日线同步，非「长期陈旧、仅 /rebuild 可修」）；**S21 维持不阻塞**（`alembic/env.py:48,59` 单事务包整个 upgrade，中途失败整体回滚，`IF NOT EXISTS` 护栏价值极低）。
+
+### 12.2 裁决结果（owner：按建议批发实施）
+
+**实施（S-1 低成本收口 9 条 / S-2 护栏补测 3 条 / S-3 契约收敛 2 条）**：S20、S24、S25、S18、S10、S14、S17、S22、S23、S7、S16、S15、S11。
+**暂不做（附依据）**：S6（严重性下调，③方案有二次取消风险）、S12（稳定常量 + 注释交叉引用已收敛，扩契约面收益 < 成本）、S21（见 12.1）、S26（改指纹会让已入队存量行按旧指纹重复插入，需一次性迁移，收益仅队列体验）。
+**并入其它批次**：S13 → 5.2b 枚举收敛批次（同一议题，不单点做）。
+
+### 12.3 实施记录
+
+**S-1｜低成本收口（后端 5 + 前端 4）**
+
+| ID | 改动 | 落点 |
+| --- | --- | --- |
+| S20 | summary `total` 改 `sum(counts.values())`（防新枚举值漏计） | `dividend_pending.py:257-261` |
+| S24 | `q` LIKE 转义 `_like_pattern()`（`%`/`_`/`\` 字面匹配，`escape="\\"`） | `dividend_pending.py:167-176`、`:210-219` |
+| S25 | 批量 `failed[].reason` 改通用文案 + 服务端 `logger.exception` 留原始栈 | `dividend_pending_assign.py` |
+| S22 | 0033/0034 downgrade 补「本步丢数据、不可再生」声明 | `0033_extend_report_period_type.py`、`0034_create_dividend_pending.py` |
+| S23 | 0031 宽面 DELETE 前后补 INFO 日志（行数 + 保留集）；rowcount 用 `getattr` 容错（护栏测试只 patch `op.execute`，日志路径不得绑架 DDL 可测试性——实施中踩坑一次已修） | `0031_remove_quarterly_dividend_fetch.py` |
+| S18 | 关键字输入 `maxlength=50`（与后端校验同界，防 422 泛化错误） | `PendingDividendFilterBar.vue` |
+| S10 | 「可勾选」口径唯一化：`isSelectablePendingRow()`（仅 PENDING）供表头全选 + 行内 checkbox 共用；行内对非 PENDING 禁用 | `lib/pending-dividends.ts`、`PendingDividendTable.vue` |
+| S14 | 待划分入口补 `isError` 态 + 重试按钮（查询失败不再静默不可达） | `GlobalSettingsDividendInitBlock.vue` |
+| S17 | `PendingDividendsPage.vue` 435 → **285** 行：抽 `PendingDividendBatchBar.vue`（82）+ `use-pending-batch.ts`（190） | 页面 + 两新文件 |
+
+**S-2｜护栏补测**
+
+| ID | 新增用例 | 落点 |
+| --- | --- | --- |
+| S7 | 两个会话并发 `acquire_admin_lock` → **恰一个成功**（多会话 gather，锁原子性的唯一直接护栏） | `test_admin_lock.py`（264 行） |
+| S16a | 进度轮询「宽限期」时序（done 后仍按宽限间隔轮询一次确认终态） | `use-seed-progress.test.ts`（新，140 行） |
+| S16b | 批量部分失败 → 失败行保持选中、成功行移出选中集 | `pending-dividends-page.test.ts` |
+| S15a | 9 个 dividend-yield 端点 URL 段序契约断言（web api 层 ↔ openapi paths） | `dividend-yield.api.test.ts`（1 → 5 例） |
+
+**S-3｜契约收敛**
+
+| ID | 改动 | 落点 |
+| --- | --- | --- |
+| S11 | `PendingDividendOut` 补 `planLabel` / `resolvedPeriodLabel`（后端复用 `dividend_period.plan_label`/`period_label` 产出，与 `/{master_id}/dividends` 同口径）；前端表格删自拼逻辑 + 金额格式化 | `schemas_resp/dividend_yield.py`、`dividend_pending.py _serialize`、`PendingDividendTable.vue` |
+| S15b | `SeedProgressOut`/`SeedFailedSecurityOut` 入契约 + progress 端点声明 `response_model`；前端手写 `SeedProgress` 接口删除、改用生成类型；护栏 `test_seed_progress_wire_matches_response_model` | `trigger_router.py`、`web/src/api/dividend-yield.api.ts`、`test_dividend_yield_api.py` |
+
+### 12.4 验证
+
+| 项 | 结果 |
+| --- | --- |
+| `ruff check app tests conftest.py` | All checks passed |
+| 后端全量 `uv run pytest` | **773 passed / 3 xpassed / 0 failed**（基线 770+3，本批 +3 用例：S7 并发 1 + S24 转义 1 + S15b wire 1） |
+| 前端 `vue-tsc --noEmit` | exit 0 |
+| 前端全量 `vitest run` | **83 文件 / 570 用例全绿、0 失败**（2 个 unhandled EPERM 为沙箱 fs shim 临时文件，非代码）；静态逐文件核对**零删除、净增 6 例** |
+| `gen_openapi.py` + `gen-api-types.py` | 契约产物随 S-3 重生成（新增 2 schema + `PendingDividendOut` 2 字段） |
+
+> 测试文件 `test_dividend_pending_api.py` 823 / `test_dividend_yield_api.py` 839 行：本批前已 768/785（>400 系历史债），本批各 +55/+54，未新引入违约；`line-budget` 按 merge-base 累计新增行数计（本批 +761 < 800），不触发 CI。
+
