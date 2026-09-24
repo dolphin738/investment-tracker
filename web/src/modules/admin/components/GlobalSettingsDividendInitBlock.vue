@@ -97,6 +97,37 @@ const pendingCount = computed(() => summary.data.value?.pending ?? 0);
 function goPending(): void {
   router.push(ROUTE_PATH.ADMIN_PENDING_DIVIDENDS);
 }
+/**
+ * 入口三态（S14）：加载中不渲染；**查询失败须可感知、可重试**。
+ *
+ * 此前只有 `pending ?? 0` → 查询失败时兜底成 0，按钮显示「暂无待划分」并置灰，且无错误态/
+ * 重试入口；而本页不挂侧边栏、唯一入口就是这个按钮——一次请求失败即等于**功能不可达**，
+ * 用户只会以为「确实没有待办」。失败态改为可点击重试，措辞明确指向「加载失败」而非「无数据」。
+ */
+const pendingEntry = computed(() => {
+  if (summary.isError.value) {
+    return {
+      label: '待划分计数加载失败，点击重试',
+      title: '概览查询失败（网络或后端异常），点击重新加载',
+      failed: true,
+      disabled: false,
+    };
+  }
+  if (pendingCount.value > 0) {
+    return {
+      label: `待人工划分 ${pendingCount.value} 笔 →`,
+      title: `有 ${pendingCount.value} 笔无报告期分红待人工划分`,
+      failed: false,
+      disabled: false,
+    };
+  }
+  return {
+    label: '暂无待划分',
+    title: '当前无待划分分红',
+    failed: false,
+    disabled: true,
+  };
+});
 </script>
 
 <template>
@@ -121,19 +152,16 @@ function goPending(): void {
         补齐历史分红
       </Button>
 
-      <!-- 待人工划分入口（仅 admin；加载中不渲染；空态置灰不隐藏） -->
+      <!-- 待人工划分入口（仅 admin；加载中不渲染；空态置灰不隐藏；**失败态可重试**） -->
       <Button
         v-if="isAdmin && !summaryLoading"
         variant="outline"
-        :disabled="pendingCount === 0"
-        :title="
-          pendingCount > 0
-            ? `有 ${pendingCount} 笔无报告期分红待人工划分`
-            : '当前无待划分分红'
-        "
-        @click="goPending"
+        :disabled="pendingEntry.disabled"
+        :class="pendingEntry.failed ? 'border-destructive/50 text-destructive' : ''"
+        :title="pendingEntry.title"
+        @click="pendingEntry.failed ? summary.refetch() : goPending()"
       >
-        {{ pendingCount > 0 ? `待人工划分 ${pendingCount} 笔 →` : '暂无待划分' }}
+        {{ pendingEntry.label }}
       </Button>
     </div>
 

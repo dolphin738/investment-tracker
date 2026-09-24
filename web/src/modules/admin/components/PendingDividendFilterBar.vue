@@ -12,6 +12,13 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
+/**
+ * 关键字长度上限（S18）：与后端 `GET /pending-dividends` 的 `q: Query(max_length=50)`
+ * **必须一致**——超限时后端直接 422（前端只显示泛化的请求失败，用户不知道是「关键字太长」）。
+ * 在输入层拦住是零成本的：粘贴超长串会被截到 50，而不是让整张列表请求失败。
+ */
+const KEYWORD_MAX_LENGTH = 50;
+
 const props = defineProps<{
   /** 筛选条件（与门面同一响应式对象，子组件直改其字段） */
   filters: { status: string; label: string; q: string };
@@ -69,6 +76,7 @@ const emit = defineEmits<{
           :model-value="props.filters.q"
           class="h-9 w-[220px]"
           placeholder="证券代码 / 名称"
+          :maxlength="KEYWORD_MAX_LENGTH"
           @update:model-value="(v) => (props.filters.q = String(v))"
         />
       </div>

@@ -60,12 +60,15 @@ vi.mock('@/modules/admin/composables/use-quote-provider', () => ({
 vi.mock('@/stores/auth.store', () => ({ useIsAdmin: () => true }));
 
 // 「补齐历史分红」区块内的待人工划分入口：概览查询与路由跳转到此替身
+// （替身须覆盖真实 hook 的完整对外面：isError / refetch —— 否则组件读 isError 会整文件崩）
 vi.mock('@/modules/dividend-yield/composables/use-pending-dividends', async () => {
   const { ref } = await import('vue');
   return {
     usePendingDividendSummary: () => ({
       isLoading: ref(false),
       data: ref({ pending: 0 }),
+      isError: ref(false),
+      refetch: vi.fn(),
     }),
   };
 });

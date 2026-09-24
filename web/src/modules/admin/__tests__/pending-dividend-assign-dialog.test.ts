@@ -101,6 +101,7 @@ function row(over: Partial<PendingDividendOut>): PendingDividendOut {
     exchange: 'SH',
     dividendLabel: '年度分红',
     cashPerShare: '1.000000',
+    planLabel: '10派10元',
     bonusShareRatio: null,
     convertRatio: null,
     recordDate: null,

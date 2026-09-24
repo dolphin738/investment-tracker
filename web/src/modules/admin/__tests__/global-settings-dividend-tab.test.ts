@@ -101,6 +101,10 @@ vi.mock('@/stores/auth.store', () => ({
 const pendingSummaryState = vi.hoisted(() => ({
   isLoading: false,
   data: { pending: 3 } as { pending: number } | undefined,
+  // 替身须覆盖真实 hook 的**完整**对外面（isError / refetch）——只给 isLoading+data 的
+  // 替身会让「失败态」分支在测试里根本走不到，组件一读 isError 就整文件崩（S14 实测踩到）。
+  isError: false,
+  refetch: vi.fn(),
 }));
 vi.mock('@/modules/dividend-yield/composables/use-pending-dividends', async () => {
   const { ref } = await import('vue');
@@ -108,6 +112,8 @@ vi.mock('@/modules/dividend-yield/composables/use-pending-dividends', async () =
     usePendingDividendSummary: () => ({
       isLoading: ref(pendingSummaryState.isLoading),
       data: ref(pendingSummaryState.data),
+      isError: ref(pendingSummaryState.isError),
+      refetch: pendingSummaryState.refetch,
     }),
   };
 });
@@ -263,6 +269,7 @@ beforeEach(() => {
   settings.dividend_retention_years = 5;
   pendingSummaryState.isLoading = false;
   pendingSummaryState.data = { pending: 3 };
+  pendingSummaryState.isError = false;
 });
 
 describe('GlobalSettingsPage — 顶层 TAB 与全局设置', () => {
@@ -352,6 +359,30 @@ describe('GlobalSettingsPage — 顶层 TAB 与全局设置', () => {
       .find((b) => b.text().includes('暂无待划分'))!;
     expect(idle).toBeTruthy();
     expect(idle.attributes('disabled')).toBeDefined();
+    wrapper.unmount();
+  });
+
+  it('③b 概览查询失败：入口显示「加载失败」且可重试（不得伪装成「暂无待划分」置灰）', async () => {
+    // S14 护栏：失败态此前被 `pending ?? 0` 兜底成 0 → 显示「暂无待划分」+ 置灰，
+    // 而本页不挂侧边栏、唯一入口就是这个按钮 → 一次请求失败即功能不可达。
+    pendingSummaryState.isLoading = false;
+    pendingSummaryState.data = undefined;
+    pendingSummaryState.isError = true;
+    wrapper = await mountPage();
+
+    const failed = wrapper
+      .findAll('button')
+      .find((b) => b.text().includes('加载失败'))!;
+    expect(failed).toBeTruthy();
+    expect(failed.text()).toContain('待划分计数加载失败');
+    expect(failed.attributes('disabled')).toBeUndefined(); // 必须可点
+    expect(
+      wrapper.findAll('button').some((b) => b.text().includes('暂无待划分')),
+    ).toBe(false);
+
+    await failed.trigger('click');
+    expect(pendingSummaryState.refetch).toHaveBeenCalledTimes(1); // 点击 → 重试
+    expect(pushSpy).not.toHaveBeenCalled(); // 重试不得误跳转
     wrapper.unmount();
   });
 

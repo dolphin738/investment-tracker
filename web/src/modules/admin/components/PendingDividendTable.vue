@@ -2,8 +2,9 @@
 /**
  * modules/admin/components/PendingDividendTable.vue — 待划分分红哑表格
  *
- * 9 列：☑ ｜ 证券（sticky 首列）｜ 原文标签 ｜ 派息（右对齐等宽）｜ 公告日 ｜ 除权日 ｜
- *       建议报告期（前端算）｜ 状态 Badge ｜ 操作（指定 / 忽略 / 重新划分）。
+ * 9 列：☑ ｜ 证券（sticky 首列）｜ 原文标签 ｜ 分红方案（后端 planLabel）｜ 公告日 ｜ 除权日 ｜
+ *       报告期（ASSIGNED 用后端 resolvedPeriodLabel；PENDING 显示前端建议值）｜ 状态 Badge ｜
+ *       操作（指定 / 忽略 / 重新划分）。
  *
  * 数据与已选态由页面（门面）下传；勾选 / 翻页 / 行操作一律经事件上抛，本组件无副作用。
  * **不提供列头排序**（后端 pending 端点未定义 sort，前端不得臆造）。
@@ -21,6 +22,7 @@ import {
   PERIOD_TYPE_LABELS,
   suggestReportPeriod,
 } from '@/modules/dividend-yield/lib/suggest-report-period';
+import { isSelectablePendingRow } from '@/modules/dividend-yield/lib/pending-dividends';
 
 type PendingDividendOut = components['schemas']['PendingDividendOut'];
 type BadgeVariant = NonNullable<BadgeVariants['variant']>;
@@ -58,15 +60,24 @@ const emit = defineEmits<{
   (e: 'retry'): void;
 }>();
 
+// ── 可勾选口径（S10）：与门面共用 isSelectablePendingRow（仅 PENDING）──
+// 表头三态**只统计可勾选行**：否则「全部」视图下（含 ASSIGNED/IGNORED 行）表头永远无法
+// 进入全选态（它要求 items 全部被选中，而其中非 PENDING 行不可勾选）。
+const selectableItems = computed(() => props.items.filter(isSelectablePendingRow));
+
 // ── 表头 checkbox 三态（indeterminate 非受控，须直设 DOM） ──
 const pageSelectedCount = computed(
-  () => props.items.filter((r) => props.selectedIds.has(r.id)).length,
+  () => selectableItems.value.filter((r) => props.selectedIds.has(r.id)).length,
 );
 const allPageSelected = computed(
-  () => props.items.length > 0 && pageSelectedCount.value === props.items.length,
+  () =>
+    selectableItems.value.length > 0 &&
+    pageSelectedCount.value === selectableItems.value.length,
 );
 const somePageSelected = computed(
-  () => pageSelectedCount.value > 0 && pageSelectedCount.value < props.items.length,
+  () =>
+    pageSelectedCount.value > 0 &&
+    pageSelectedCount.value < selectableItems.value.length,
 );
 function setHeaderIndeterminate(
   el: Element | ComponentPublicInstance | null,
@@ -92,9 +103,14 @@ function statusLabel(status: string): string {
   return status;
 }
 
-/** 前端建议报告期（仅 PENDING 行有意义；ASSIGNED 行显示已确定的报告期） */
+/**
+ * 报告期文案：ASSIGNED 行用后端产出的 `resolvedPeriodLabel`（与证券详情页 `periodLabel`
+ * 同口径，S11）；PENDING 行报告期未知，展示前端算的建议值。
+ */
 function suggestionLabel(row: PendingDividendOut): string {
   if (row.status === 'ASSIGNED') {
+    if (row.resolvedPeriodLabel) return row.resolvedPeriodLabel;
+    // 兜底：契约字段缺失（老数据 / 序列化异常）时才回退到本地拼装
     const type = (row.resolvedPeriodType ?? 'OTHER') as keyof typeof PERIOD_TYPE_LABELS;
     return `${row.resolvedReportYear ?? '?'} Q${row.resolvedReportQuarter ?? '?'} · ${PERIOD_TYPE_LABELS[type] ?? '其他'}`;
   }
@@ -142,6 +158,12 @@ function suggestionLabel(row: PendingDividendOut): string {
                 type="checkbox"
                 class="h-4 w-4 rounded border-input accent-primary"
                 :checked="allPageSelected"
+                :disabled="selectableItems.length === 0"
+                :title="
+                  selectableItems.length === 0
+                    ? '本页没有可勾选的待划分行（仅「待划分」状态可批量操作）'
+                    : '全选本页可勾选行'
+                "
                 :ref="setHeaderIndeterminate"
                 @change="
                   ($event) =>
@@ -153,7 +175,7 @@ function suggestionLabel(row: PendingDividendOut): string {
               证券
             </TableHead>
             <TableHead class="min-w-[96px] whitespace-nowrap">原文标签</TableHead>
-            <TableHead class="w-[110px] whitespace-nowrap text-right">派息（元/股）</TableHead>
+            <TableHead class="min-w-[110px] whitespace-nowrap text-right">分红方案</TableHead>
             <TableHead class="min-w-[104px] whitespace-nowrap">公告日</TableHead>
             <TableHead class="min-w-[104px] whitespace-nowrap">除权日</TableHead>
             <TableHead class="min-w-[180px] whitespace-nowrap">建议报告期</TableHead>
@@ -170,8 +192,14 @@ function suggestionLabel(row: PendingDividendOut): string {
             <TableCell class="sticky left-0 z-20 bg-background align-middle">
               <input
                 type="checkbox"
-                class="h-4 w-4 rounded border-input accent-primary"
+                class="h-4 w-4 rounded border-input accent-primary disabled:cursor-not-allowed disabled:opacity-40"
                 :checked="selectedIds.has(row.id)"
+                :disabled="!isSelectablePendingRow(row)"
+                :title="
+                  isSelectablePendingRow(row)
+                    ? ''
+                    : '仅「待划分」状态可勾选（已划分 / 已忽略行不可批量操作）'
+                "
                 :ref="noopRef"
                 @change="
                   ($event) =>
@@ -191,8 +219,11 @@ function suggestionLabel(row: PendingDividendOut): string {
               </Badge>
               <span v-else class="text-xs text-muted-foreground">—</span>
             </TableCell>
-            <TableCell class="whitespace-nowrap text-right align-middle font-mono tabular-nums">
-              {{ row.cashPerShare }}
+            <TableCell
+              class="whitespace-nowrap text-right align-middle font-mono tabular-nums"
+              :title="`每股 ${row.cashPerShare} 元`"
+            >
+              {{ row.planLabel }}
             </TableCell>
             <TableCell class="whitespace-nowrap align-middle text-xs">
               {{ row.announcementDate || '—' }}

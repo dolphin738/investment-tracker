@@ -72,6 +72,7 @@ function row(over: Partial<PendingDividendOut>): PendingDividendOut {
     exchange: 'SH',
     dividendLabel: '特别分红',
     cashPerShare: '1.000000',
+    planLabel: '10派10元',
     bonusShareRatio: null,
     convertRatio: null,
     recordDate: null,
@@ -277,5 +278,43 @@ describe('PendingDividendsPage — 批量忽略二次确认', () => {
 
     expect(apiMocks.batchIgnorePendingDividends).toHaveBeenCalledTimes(1);
     expect(apiMocks.batchIgnorePendingDividends).toHaveBeenCalledWith(['p1', 'p2']);
+  });
+});
+
+describe('PendingDividendsPage — 批量部分失败（S16 护栏）', () => {
+  it('部分失败：红条列失败明细 + **仅失败行保持选中**（重试只重发失败项）', async () => {
+    // 此前该分支零覆盖：既有用例把批量响应固定成「全部成功」，而「部分失败 → 红条 →
+    // 保持选中 → 重试」是全页最绕的交互（且是静默丢操作的高风险区）。
+    apiMocks.batchIgnorePendingDividends.mockResolvedValue({
+      succeeded: 1,
+      failed: [{ id: 'p2', code: 'INVALID_STATE', reason: '仅 PENDING 可忽略' }],
+    });
+    wrapper = await mountPage();
+
+    const boxes = wrapper.findAll('tbody input[type="checkbox"]');
+    await boxes[0].setValue(true);
+    await boxes[1].setValue(true);
+    await nextTick();
+
+    const ignoreBtn = wrapper
+      .findAll('button')
+      .find((b) => b.text().trim().startsWith('忽略 ('))!;
+    expect(ignoreBtn.text()).toContain('忽略 (2)');
+    await ignoreBtn.trigger('click');
+    await settle();
+    buttonByText('确认').click();
+    await settle();
+
+    // 结果红条：成功/失败计数 + 失败明细（代码与原因）可见
+    expect(wrapper.text()).toContain('成功 1 笔、失败 1 笔');
+    expect(wrapper.text()).toContain('仅 PENDING 可忽略');
+
+    // 选中集被收窄为「仅失败行」：p1 已成功 → 取消选中；p2 失败 → 保持选中
+    const after = wrapper.findAll('tbody input[type="checkbox"]');
+    expect((after[0].element as HTMLInputElement).checked).toBe(false);
+    expect((after[1].element as HTMLInputElement).checked).toBe(true);
+    expect(
+      wrapper.findAll('button').some((b) => b.text().trim().startsWith('忽略 (1)')),
+    ).toBe(true);
   });
 });
