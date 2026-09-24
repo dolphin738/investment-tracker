@@ -12,6 +12,7 @@
 9. **抢占陈旧锁须清空残留取消标记**（B2：否则新任务在第一个检查点即「秒取消」）
 10. **renew 续期**：持有者续期刷新 acquired_at（TTL 只承担崩溃检测，与任务时长解耦）
 11. **renew 是「是否仍持锁」探针**：非持有者 / 已释放 → False（调用方据此停止工作）
+12. **并发获取只有一个成功**（S7：两个独立会话并发，实证单语句原子性）
 
 每个用例开头清表：避免用例间相互污染（不依赖 conftest 是否回滚）。
 """
@@ -226,3 +227,38 @@ async def test_renew_fails_when_not_holder(session):
 
     await release_admin_lock(session, LOCK_DIVIDEND_SEED, tok)
     assert await renew_admin_lock(session, LOCK_DIVIDEND_SEED, tok) is False
+
+
+@pytest.mark.asyncio
+async def test_concurrent_acquire_only_one_wins(session):
+    """⑫ **两个独立会话并发**获取同一把锁 → 恰好一个成功（S7：核心原子性论证的实证）。
+
+    既有 11 例全部在同一 session 内串行执行，未覆盖模块 docstring 第 9-25 行的论证：
+    ``INSERT ... ON CONFLICT DO UPDATE ... WHERE 空闲 / 已过 TTL RETURNING owner`` 是**单条**
+    原子语句，故不存在「先 SELECT 再 UPDATE」的时间窗。
+
+    本用例用两个真实连接（``AsyncSessionLocal``）并发执行同一语句：
+    - 若实现退化成两步、或丢掉了 ``WHERE`` 守卫 → 两个会话都会成功，用例即红；
+    - 若守卫把「刚提交的新锁」误判为可抢占 → 同样会红。
+
+    失败者**不得留下任何痕迹**：库内 ``owner`` 必须等于胜出令牌。
+    """
+    import asyncio
+
+    import app.db.database as dbmod
+
+    await _reset(session)
+    async with dbmod.AsyncSessionLocal() as s1, dbmod.AsyncSessionLocal() as s2:
+        tok1, tok2 = await asyncio.gather(
+            acquire_admin_lock(s1, LOCK_DIVIDEND_SEED),
+            acquire_admin_lock(s2, LOCK_DIVIDEND_SEED),
+        )
+
+    winners = [t for t in (tok1, tok2) if t is not None]
+    assert len(winners) == 1, (
+        f"并发获取必须恰好一个成功，实得 {len(winners)} 个（tok1={tok1} / tok2={tok2}）"
+    )
+
+    row = await _row(session)
+    assert row is not None, "并发获取后锁行必须存在"
+    assert row[0] == winners[0], "库内 owner 必须等于胜出令牌（失败者不得改写持有者）"
