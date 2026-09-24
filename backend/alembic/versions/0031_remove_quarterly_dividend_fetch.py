@@ -15,9 +15,13 @@ Revision ID: 0031_remove_quarterly_dividend_fetch
 Revises: 0030_add_dividend_bonus_columns
 Create Date: 2026-09-10
 """
+import logging
+
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import text
+
+logger = logging.getLogger("alembic.runtime.migration")
 
 # revision identifiers, used by Alembic.
 revision: str = "0031_remove_quarterly_dividend_fetch"
@@ -54,8 +58,19 @@ def _rebuild_enum(values: list[str]) -> None:
     # USING task_type::text::"JobTaskType" 会因该行值无对应枚举成员而转换失败
     # （name 删除只覆盖已知种子行，无法防普通任务行引用被删枚举值）。
     quoted = ", ".join(f"'{v}'" for v in values)
-    op.execute(
-        sa.text(f"DELETE FROM job_configs WHERE task_type::text NOT IN ({quoted})")
+    # S23 留痕：这是**宽面** DELETE（按 task_type 值集合删，不是按 name 删种子行）——
+    # 静默删除事后无法对账，故记一行 INFO（行数 + 目标保留集）。rowcount 用 getattr
+    # 容错：护栏测试只 monkeypatch ``op.execute``（返回 None），真实迁移里才是
+    # CursorResult；日志路径不得反向绑架 DDL 的可测试性。
+    deleted = getattr(
+        op.execute(
+            sa.text(f"DELETE FROM job_configs WHERE task_type::text NOT IN ({quoted})")
+        ),
+        "rowcount",
+        None,
+    )
+    logger.info(
+        "0031：重建枚举前清理 job_configs %s 行（保留 task_type=%s）", deleted, values
     )
     enum_sql = ", ".join(f"'{v}'" for v in values)
     op.execute(
@@ -73,10 +88,13 @@ def _rebuild_enum(values: list[str]) -> None:
 
 def upgrade() -> None:
     """删除种子行 + 重建枚举剔除 DIVIDEND_QUARTERLY_FETCH。"""
-    # 1) 先删行（避免重建枚举后该行值无对应枚举成员）
-    op.execute(
-        sa.text("DELETE FROM job_configs WHERE name = '季度股息抓取'")
+    # 1) 先删行（避免重建枚举后该行值无对应枚举成员）；S23：留一行日志便于事后对账
+    deleted = getattr(
+        op.execute(sa.text("DELETE FROM job_configs WHERE name = '季度股息抓取'")),
+        "rowcount",
+        None,
     )
+    logger.info("0031：删除种子行「季度股息抓取」%s 行", deleted)
     # 2) 重建枚举（单列引用，安全）
     _rebuild_enum(_ENUM_VALUES_KEEP)
 

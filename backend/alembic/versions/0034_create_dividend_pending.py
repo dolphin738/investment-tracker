@@ -111,6 +111,14 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """删表 ``security_dividend_pending`` + 枚举类型。
+
+    ⚠️ **本步丢数据、不可再生（S22 声明）**：表内是「现金 >0 但报告时间不可解析」的行，
+    其报告期**从未写入主表** ``security_dividends``——删表后无法从库内任何地方恢复；只能等
+    下次 ``scan`` / ``seed`` 重新入队（指纹相同的同一源行会重新产生待办，但**人工已裁定的
+    ASSIGNED / IGNORED 状态一并丢失**）。表级降级无法保数据（可接受），此处显式写明，
+    以免运维据「downgrade 是安全的」误判可随手回滚。
+    """
     # 顺序不可颠倒：先索引 → 再删表 → 最后 DROP TYPE（反序会报类型依赖错误）。
     # 唯一索引 uq_..._fingerprint 随 drop_table 一并删除，无需显式 drop。
     op.drop_index(

@@ -41,6 +41,13 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """删除 ``security_dividends.dividend_label`` 列。
+
+    ⚠️ **本步丢数据、不可再生（S22 声明）**：该列存的是源站「分红类型」原文（L2 撞键护栏与
+    前端标签展示都依赖它）。DROP 后列值全失；再 upgrade 回来只会重建**空列**
+    （值全 NULL），要等采集侧全历史重跑才可能逐行回填。列级降级无法保数据（可接受），
+    此处显式写明，以免运维误判「可安全回滚」。
+    """
     with op.batch_alter_table("security_dividends") as batch_op:
         batch_op.drop_column("dividend_label")
     # 枚举值 OTHER **无法 DROP**（PG 不支持），保留之。仅注释说明，不执行任何 DDL。
