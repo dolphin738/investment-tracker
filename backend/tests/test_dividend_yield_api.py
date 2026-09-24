@@ -32,7 +32,12 @@ from app.models.enums import (
     ReportPeriodType,
     SecurityType,
 )
-from app.schemas_resp import DividendYieldSettingsOut, DividendYieldSourceRefOut
+from app.schemas_resp import (
+    DividendYieldSettingsOut,
+    DividendYieldSourceRefOut,
+    SeedFailedSecurityOut,
+    SeedProgressOut,
+)
 from app.services.market_data_sync import (
     DIVIDEND_LIST_CAT_ID,
     NOTICE_CAT_ID,
@@ -452,6 +457,7 @@ async def test_settings_retention_years_default_and_update(session, client):
     assert env(r)[0] == 400
 
 
+# ───────────────────────── 契约护栏：response_model ↔ wire 逐字一致（B7/A8） ─────────────────────────
 @pytest.mark.asyncio
 async def test_settings_wire_matches_response_model(session, client):
     """B7/A8 护栏：GET/PUT ``/settings`` 的实际 wire 键集 == `response_model` 字段集。
@@ -783,5 +789,51 @@ async def test_seed_single_flight_rejects_concurrent(session, client, monkeypatc
             break
         await _asyncio.sleep(0.01)
     assert not bf._seed_lock.locked(), "播种结束后单飞锁须释放（否则播种被永久锁死）"
+
+
+# ─────────────── 契约护栏：播种进度 wire ↔ SeedProgressOut（S15） ───────────────
+@pytest.mark.asyncio
+async def test_seed_progress_wire_matches_response_model(session, client):
+    """S15 护栏：``GET /seed-initial-dividends/progress`` 的 wire 键集 == `SeedProgressOut` 字段集。
+
+    动机：该形状此前只存在于**两处手写**——后端 `trigger_router` 的手工 dict 与前端
+    `dividend-yield.api.ts` 的 `SeedProgress` 接口。字段一旦改名，面板只会显示 `undefined`，
+    `vue-tsc` 无感、后端也不报错（信封机制跳过 response_model 校验）。本用例把两半逐字绑定，
+    并覆盖失败清单行的嵌套键集（`failed_securities[]` ↔ `SeedFailedSecurityOut`）。
+    """
+    from app.services.dividend_seed import seed_progress
+
+    admin = await _make_admin(session, client)
+    h = auth(admin["token"])
+
+    status, _, data, _ = env(
+        await client.get("/api/dividend-yield/seed-initial-dividends/progress", headers=h)
+    )
+    assert status == 200
+    fields = set(SeedProgressOut.model_fields)
+    assert set(data) == fields, (
+        f"progress wire 键集与 SeedProgressOut 不一致："
+        f"多={sorted(set(data) - fields)} 缺={sorted(fields - set(data))}"
+    )
+    assert isinstance(data["state"], str)
+    assert data["failed_securities"] == [] and data["failed_truncated"] is False
+
+    # 有失败证券时：清单行键集须与 SeedFailedSecurityOut 一致（本轮跑完自动清空，
+    # 故此处临时注入并在 finally 复位，避免污染同进程内的其它用例）
+    seed_progress.failed_securities = [
+        {"master_id": "m1", "code": "600001", "name": "证券A"}
+    ]
+    try:
+        status, _, data, _ = env(
+            await client.get(
+                "/api/dividend-yield/seed-initial-dividends/progress", headers=h
+            )
+        )
+        assert status == 200
+        assert set(data["failed_securities"][0]) == set(
+            SeedFailedSecurityOut.model_fields
+        ), "失败清单行的键集须与 SeedFailedSecurityOut 一致"
+    finally:
+        seed_progress.failed_securities = []
 
 

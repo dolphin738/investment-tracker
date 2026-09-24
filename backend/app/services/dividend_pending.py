@@ -47,6 +47,7 @@ from app.services.dividend_cninfo_parse import (
     pending_fingerprint,
 )
 from app.services.dividend_pending_assign import PendingDividendAssignMixin
+from app.services.dividend_period import period_label, plan_label
 
 
 async def stage_pending(session, master_id: str, row: PendingDividendRow) -> bool:
@@ -163,6 +164,17 @@ def pending_queue_warning(metrics: dict[str, Any]) -> Optional[str]:
     )
 
 
+# LIKE 模式转义（S24）：`q` 来自用户输入，`%` / `_` 必须按**字面**匹配——否则 `q=%`
+# 会命中全表（管理员一次「全选式」检索即把整库拉出），`q=_` 也会退化成任意单字符。
+_LIKE_ESCAPE = "\\"
+
+
+def _like_pattern(raw: str) -> str:
+    """把用户输入转成安全的 ``%...%`` LIKE 模式（先转义 ``\\``，再转义 ``%`` / ``_``）。"""
+    escaped = raw.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
+
+
 class PendingDividendService(PendingDividendAssignMixin):
     """待划分分红的查询与人工裁定服务（批次 C，§4）。
 
@@ -198,9 +210,14 @@ class PendingDividendService(PendingDividendAssignMixin):
 
         stmt = select(SecurityDividendPending)
         if q_kw is not None:
-            like = f"%{q_kw}%"
+            like = _like_pattern(q_kw)
             stmt = stmt.join(Security, Security.id == SecurityDividendPending.master_id)
-            conditions.append(or_(Security.code.ilike(like), Security.name.ilike(like)))
+            conditions.append(
+                or_(
+                    Security.code.ilike(like, escape=_LIKE_ESCAPE),
+                    Security.name.ilike(like, escape=_LIKE_ESCAPE),
+                )
+            )
         stmt = stmt.where(*conditions).order_by(
             SecurityDividendPending.created_at.desc(),
             SecurityDividendPending.id.desc(),
@@ -240,7 +257,9 @@ class PendingDividendService(PendingDividendAssignMixin):
             "pending": pending,
             "assigned": assigned,
             "ignored": ignored,
-            "total": pending + assigned + ignored,
+            # S20：不要手写 `pending + assigned + ignored` —— 枚举新增取值时会出现
+            # 「列表有行、汇总 total 不含」的口径分裂；直接对全枚举计数求和。
+            "total": sum(counts.values()),
             "labels": labels,
         }
 
@@ -275,7 +294,15 @@ class PendingDividendService(PendingDividendAssignMixin):
         金额字段**直接透传 ``Decimal``**、日期透传 ``date/datetime``，由信封编码器
         （``decimal_jsonable_encoder``）统一 str 化 / ISO 化——不在序列化层手动
         ``str()``（口径一致、避免 ``None`` 误转成字符串 ``"None"``）。
+
+        ``planLabel`` / ``resolvedPeriodLabel``（S11）由**后端**产出（复用
+        ``dividend_period.plan_label`` / ``period_label``），与 ``/{master_id}/dividends``
+        同口径——前端不再自行拼「YYYY QX · 类型中文」，避免同一报告期两处文案不一致。
+        ``resolvedPeriodLabel`` 仅对已裁定行有值（PENDING 行报告期未知，由前端给建议值）。
         """
+        resolved_year = row.resolved_report_year
+        resolved_quarter = row.resolved_report_quarter
+        resolved_period = row.resolved_period_type
         return {
             "id": row.id,
             "masterId": row.master_id,
@@ -284,6 +311,14 @@ class PendingDividendService(PendingDividendAssignMixin):
             "exchange": sec.exchange if sec else None,
             "dividendLabel": row.dividend_label,
             "cashPerShare": row.cash_per_share,
+            "planLabel": plan_label(row.cash_per_share),
+            "resolvedPeriodLabel": (
+                period_label(resolved_year, resolved_quarter, resolved_period)
+                if resolved_year is not None
+                and resolved_quarter is not None
+                and resolved_period
+                else None
+            ),
             "bonusShareRatio": row.bonus_share_ratio,
             "convertRatio": row.convert_ratio,
             "recordDate": row.record_date,

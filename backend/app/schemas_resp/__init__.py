@@ -44,6 +44,8 @@ from app.schemas_resp.dividend_yield import (
     BatchOperationOut,
     SecurityDividendItemOut,
     SecurityDividendListOut,
+    SeedFailedSecurityOut,
+    SeedProgressOut,
     DividendYieldSourceRefOut,
     DividendYieldSettingsOut,
 )
@@ -110,6 +112,8 @@ __all__ = [
     "RecalculationMeta",
     "SecurityDividendItemOut",
     "SecurityDividendListOut",
+    "SeedFailedSecurityOut",
+    "SeedProgressOut",
     "SecurityOut",
     "SnapshotOut",
     "TradeOut",

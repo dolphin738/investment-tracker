@@ -720,6 +720,10 @@ PG 原生枚举类型名 `interface_direction`（由迁移创建）。
         dividendLabel?: string | null;
         /** Cashpershare */
         cashPerShare: string;
+        /** Planlabel */
+        planLabel: string;
+        /** Resolvedperiodlabel */
+        resolvedPeriodLabel?: string | null;
         /** Bonusshareratio */
         bonusShareRatio?: string | null;
         /** Convertratio */
@@ -1195,6 +1199,42 @@ type 为可选 override；不传则读取时由代码前缀推断（infer_securi
     SecuritySide: 'BUY_SEC' | 'SELL_SEC';
     /** SecurityType */
     SecurityType: 'STOCK' | 'ON_EXCHANGE_FUND' | 'BOND' | 'OTHER' | 'HK_STOCK' | 'CONVERTIBLE_BOND' | 'INDEX' | 'OFF_EXCHANGE_FUND' | 'UNCATEGORIZED';
+    /** 播种失败证券（进度面板展开清单的一行）。 */
+    SeedFailedSecurityOut: {
+        /** Master Id */
+        master_id: string;
+        /** Code */
+        code: string;
+        /** Name */
+        name: string;
+      };
+    /** 首跑播种运行进度（GET /seed-initial-dividends/progress）。 */
+    SeedProgressOut: {
+        /** State */
+        state: string;
+        /** Total */
+        total: number;
+        /** Processed */
+        processed: number;
+        /** Hits */
+        hits: number;
+        /** Failed */
+        failed: number;
+        /** Covered */
+        covered: number;
+        /** Started At */
+        started_at: string | null;
+        /** Finished At */
+        finished_at: string | null;
+        /** Error */
+        error: string | null;
+        /** Message */
+        message: string | null;
+        /** Failed Securities */
+        failed_securities: components['schemas']['SeedFailedSecurityOut'][];
+        /** Failed Truncated */
+        failed_truncated: boolean;
+      };
     /** SettingsUpdateBody */
     SettingsUpdateBody: {
         /** Dividend Detail Source Interface Id */

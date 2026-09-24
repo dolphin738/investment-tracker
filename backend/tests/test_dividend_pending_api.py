@@ -188,6 +188,24 @@ async def test_pending_list_filters_and_fixed_order(session, client):
     )
     assert data["total"] == 0
 
+    # S24：LIKE 通配符按**字面**匹配 —— `q=%` 不得命中全表、`q=_` 不得退化为任意单字符
+    for wildcard in ("%", "_", "%%"):
+        st, _, data, _ = env(
+            await client.get(
+                "/api/dividend-yield/pending-dividends",
+                params={"q": wildcard},
+                headers=h,
+            )
+        )
+        assert st == 200 and data["total"] == 0, f"q={wildcard!r} 不得作为通配符命中"
+    # 正常关键字仍可命中（转义不误伤常规检索）
+    st, _, data, _ = env(
+        await client.get(
+            "/api/dividend-yield/pending-dividends", params={"q": "茅台"}, headers=h
+        )
+    )
+    assert data["total"] == 3
+
     # 分页：pageSize=2 → 2 条，total 仍 3
     st, _, data, _ = env(
         await client.get(
@@ -454,6 +472,10 @@ async def test_batch_assign_db_error_isolated(session, client, monkeypatch):
     assert len(data["failed"]) == 1
     assert data["failed"][0]["id"] == boom_id
     assert data["failed"][0]["code"] == "DB_ERROR"
+    # S25：对外只给通用文案，不透传原始异常（可能带出约束名 / SQL 片段 / 表结构）
+    assert data["failed"][0]["reason"] == "入库失败（详见服务端日志）"
+    assert "模拟单项入库失败" not in data["failed"][0]["reason"]
+    assert "RuntimeError" not in data["failed"][0]["reason"]
 
     # 其余两项已独立提交写回主表（2024Q4 + 2023Q4 各一行），失败项未写主表
     session.expire_all()
@@ -706,6 +728,39 @@ async def test_ignore_pending(session, client):
             select(SecurityDividend).where(SecurityDividend.master_id == mid)
         )
     ).scalars().all() == []
+
+
+# ───────────────────────── 展示文案由后端产出（S11） ─────────────────────────
+@pytest.mark.asyncio
+async def test_list_items_include_backend_labels(session, client):
+    """S11：列表项带后端产出的 `planLabel` / `resolvedPeriodLabel`（前端不再自行拼装）。
+
+    - `planLabel` = 源站口径「10派X元」（`dividend_period.plan_label` 从每股金额折算），
+      取代此前直接吐 `1.000000` 的原始 Decimal 字符串；
+    - `resolvedPeriodLabel` 仅**已裁定**行有值（与证券详情页 `periodLabel` 同口径），
+      PENDING 行为 `null`（报告期未知，由前端给建议值）。
+    """
+    admin = await _make_role(session, client, "adm-labels@example.com", "admin")
+    h = auth(admin["token"])
+    mid = await _master(session)
+    p = _pending(mid, cash="1.0")  # 未裁定
+    a = _pending(mid, cash="2.0")  # 已裁定 2024Q4 ANNUAL
+    a.status = DividendPendingStatus.ASSIGNED
+    a.resolved_period_type = "ANNUAL"
+    a.resolved_report_year = 2024
+    a.resolved_report_quarter = 4
+    session.add_all([p, a])
+    await session.commit()
+
+    st, _, data, _ = env(
+        await client.get("/api/dividend-yield/pending-dividends", headers=h)
+    )
+    assert st == 200
+    by_id = {i["id"]: i for i in data["items"]}
+    assert by_id[p.id]["planLabel"] == "10派10元"
+    assert by_id[p.id]["resolvedPeriodLabel"] is None
+    assert by_id[a.id]["planLabel"] == "10派20元"
+    assert by_id[a.id]["resolvedPeriodLabel"] == "2024年报"
 
 
 # ───────────────────────── 队列度量（A9 / 审查项 S19） ─────────────────────────

@@ -2825,7 +2825,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/SeedProgressOut"
+                }
               }
             }
           }
@@ -9851,6 +9853,21 @@
             "type": "string",
             "title": "Cashpershare"
           },
+          "planLabel": {
+            "type": "string",
+            "title": "Planlabel"
+          },
+          "resolvedPeriodLabel": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolvedperiodlabel"
+          },
           "bonusShareRatio": {
             "anyOf": [
               {
@@ -9992,6 +10009,7 @@
           "id",
           "masterId",
           "cashPerShare",
+          "planLabel",
           "status",
           "createdAt"
         ],
@@ -11690,6 +11708,130 @@
           "UNCATEGORIZED"
         ],
         "title": "SecurityType"
+      },
+      "SeedFailedSecurityOut": {
+        "properties": {
+          "master_id": {
+            "type": "string",
+            "title": "Master Id"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "master_id",
+          "code",
+          "name"
+        ],
+        "title": "SeedFailedSecurityOut",
+        "description": "播种失败证券（进度面板展开清单的一行）。"
+      },
+      "SeedProgressOut": {
+        "properties": {
+          "state": {
+            "type": "string",
+            "title": "State"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "processed": {
+            "type": "integer",
+            "title": "Processed"
+          },
+          "hits": {
+            "type": "integer",
+            "title": "Hits"
+          },
+          "failed": {
+            "type": "integer",
+            "title": "Failed"
+          },
+          "covered": {
+            "type": "integer",
+            "title": "Covered"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "failed_securities": {
+            "items": {
+              "$ref": "#/components/schemas/SeedFailedSecurityOut"
+            },
+            "type": "array",
+            "title": "Failed Securities"
+          },
+          "failed_truncated": {
+            "type": "boolean",
+            "title": "Failed Truncated"
+          }
+        },
+        "type": "object",
+        "required": [
+          "state",
+          "total",
+          "processed",
+          "hits",
+          "failed",
+          "covered",
+          "started_at",
+          "finished_at",
+          "error",
+          "message",
+          "failed_securities",
+          "failed_truncated"
+        ],
+        "title": "SeedProgressOut",
+        "description": "首跑播种运行进度（GET /seed-initial-dividends/progress）。"
       },
       "SettingsUpdateBody": {
         "properties": {

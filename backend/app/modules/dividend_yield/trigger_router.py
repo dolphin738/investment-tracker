@@ -18,6 +18,7 @@ from app.core.enums import BusinessErrorCode
 from app.core.envelope import EnvelopeRoute
 from app.core.exceptions import BusinessException
 from app.db.database import get_db
+from app.schemas_resp import SeedProgressOut
 from app.services.admin_lock import (
     LOCK_DIVIDEND_SEED,
     acquire_admin_lock,
@@ -200,7 +201,9 @@ async def seed_initial_dividends(
     }
 
 
-@router_trigger.get("/seed-initial-dividends/progress")
+@router_trigger.get(
+    "/seed-initial-dividends/progress", response_model=SeedProgressOut
+)
 async def seed_initial_dividends_progress(
     admin: CurrentUser = Depends(require_admin),
 ):

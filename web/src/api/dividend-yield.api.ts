@@ -149,31 +149,14 @@ export function seedInitialDividends(): Promise<{ message: string }> {
   );
 }
 
-/** 首跑播种运行进度（进程内内存态；admin-only 读端点） */
-export interface SeedProgress {
-  /** idle | running | done | error | cancelled */
-  state: string;
-  total: number;
-  processed: number;
-  /** 本轮实际拉取并落库的证券只数 */
-  hits: number;
-  /** 单只异常 rollback 续跑的只数（≡ 失败只数） */
-  failed: number;
-  /** 断点续跑判定「已完成」而跳过的只数 */
-  covered: number;
-  started_at: string | null;
-  finished_at: string | null;
-  error: string | null;
-  message: string | null;
-  /** 失败证券清单（每条含 master_id/code/name，上限 _FAILED_IDS_CAP，超出置 failed_truncated；失败计数 failed 始终精确，不受上限影响） */
-  failed_securities: Array<{ master_id: string; code: string; name: string }>;
-  /** 失败清单是否因超上限被截断（仅展示前 N 只） */
-  failed_truncated: boolean;
-}
-
-/** 查询历史分红补齐 / 播种的实时进度（admin-only） */
-export function getSeedProgress(): Promise<SeedProgress> {
-  return http.get<SeedProgress>(
+/**
+ * 查询历史分红补齐 / 播种的实时进度（admin-only）。
+ *
+ * 返回类型直接取生成契约 ``SeedProgressOut``（S15）：此前该形状只有前端手写接口 +
+ * 后端手工 dict 两处，字段改名只会让面板显示 ``undefined`` 而 ``vue-tsc`` 无感。
+ */
+export function getSeedProgress(): Promise<components['schemas']['SeedProgressOut']> {
+  return http.get<components['schemas']['SeedProgressOut']>(
     '/dividend-yield/seed-initial-dividends/progress',
   );
 }

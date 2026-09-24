@@ -27,6 +27,7 @@
 """
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from typing import Any
 
@@ -42,6 +43,8 @@ from app.services.dividend_cninfo_parse import retention_cutoff_year
 from app.services.dividend_pending_main_write import DividendMainWriteMixin
 from app.services.dividend_yield_refresh import refresh_yields_for_masters
 
+logger = logging.getLogger(__name__)
+
 # 报告年份合法区间下界（上界 = 当前年 + 1，见 ``_validate_target``）
 MIN_REPORT_YEAR = 1990
 
@@ -50,6 +53,10 @@ ITEM_NOT_FOUND = "NOT_FOUND"
 ITEM_INVALID_STATE = "INVALID_STATE"
 ITEM_VALIDATION_FAILED = "VALIDATION_FAILED"
 ITEM_DB_ERROR = "DB_ERROR"
+
+# 项级 DB 异常的**对外**文案（S25）：原始异常可能带出约束名 / SQL 片段 / 表结构信息，
+# 只落服务端日志（``logger.warning(exc_info=True)``），wire 上给通用文案。
+DB_ERROR_REASON = "入库失败（详见服务端日志）"
 
 
 class PendingItemError(Exception):
@@ -148,9 +155,10 @@ class PendingDividendAssignMixin(DividendMainWriteMixin):
             except PendingItemError as err:
                 await self.session.rollback()
                 failed.append({"id": pid, "code": err.code, "reason": err.reason})
-            except Exception as exc:  # 单项入库异常 → DB_ERROR（不中断整批）
+            except Exception:  # 单项入库异常 → DB_ERROR（不中断整批）
                 await self.session.rollback()
-                failed.append({"id": pid, "code": ITEM_DB_ERROR, "reason": str(exc)})
+                logger.warning("批量划分单项入库失败 pending_id=%s", pid, exc_info=True)
+                failed.append({"id": pid, "code": ITEM_DB_ERROR, "reason": DB_ERROR_REASON})
         # A2=③：批量结束后统一重算一次（集合已去重）——避免逐笔重算的 N 倍开销，同时满足
         # restate_cells「每只每轮恰一次」不变式。
         await self._refresh_touched()
@@ -175,9 +183,10 @@ class PendingDividendAssignMixin(DividendMainWriteMixin):
             except PendingItemError as err:
                 await self.session.rollback()
                 failed.append({"id": pid, "code": err.code, "reason": err.reason})
-            except Exception as exc:
+            except Exception:  # 单项入库异常 → DB_ERROR（不中断整批）
                 await self.session.rollback()
-                failed.append({"id": pid, "code": ITEM_DB_ERROR, "reason": str(exc)})
+                logger.warning("批量忽略单项入库失败 pending_id=%s", pid, exc_info=True)
+                failed.append({"id": pid, "code": ITEM_DB_ERROR, "reason": DB_ERROR_REASON})
         return {"succeeded": succeeded, "failed": failed}
 
     async def reopen(self, pending_id: str) -> dict[str, Any]:

@@ -23,6 +23,10 @@ class PendingDividendOut(BaseModel):
     exchange: Optional[str] = None
     dividendLabel: Optional[str] = None
     cashPerShare: str
+    # S11：展示文案由**后端**产出（与 `/{master_id}/dividends` 的 periodLabel/planLabel 同口径），
+    # 前端不再自行拼「YYYY QX · 类型中文」——否则同一报告期在两个页面文案不一致。
+    planLabel: str
+    resolvedPeriodLabel: Optional[str] = None
     bonusShareRatio: Optional[str] = None
     convertRatio: Optional[str] = None
     recordDate: Optional[date] = None
@@ -117,3 +121,33 @@ class DividendYieldSettingsOut(BaseModel):
     # 1~10，**非空**：`_settings_out` 保证「未配置（无行 / 显式 NULL）→ 回落默认 5」，
     # 故契约上该字段恒为有效值（前端据此算建议留存窗，不必再自行兜底）。
     dividend_retention_years: int
+
+
+# —— S15：首跑播种进度（进程内内存态）——
+# 此前 `SeedProgress` 只存在于前端手写类型与后端 `trigger_router` 的手工 dict 两处：
+# 字段改名只会让面板显示 `undefined`，而 `vue-tsc` 无感。现纳入契约，前端类型随生成物走。
+# 字段名/可选性必须与 `trigger_router.py` 的返回 dict 逐字一致
+# （护栏：tests/test_dividend_yield_api.py::test_seed_progress_wire_matches_response_model）。
+class SeedFailedSecurityOut(BaseModel):
+    """播种失败证券（进度面板展开清单的一行）。"""
+
+    master_id: str
+    code: str
+    name: str
+
+
+class SeedProgressOut(BaseModel):
+    """首跑播种运行进度（GET /seed-initial-dividends/progress）。"""
+
+    state: str  # idle | running | done | error | cancelled
+    total: int
+    processed: int
+    hits: int
+    failed: int
+    covered: int
+    started_at: Optional[str]
+    finished_at: Optional[str]
+    error: Optional[str]
+    message: Optional[str]
+    failed_securities: list[SeedFailedSecurityOut]  # 上限见服务端 _FAILED_IDS_CAP
+    failed_truncated: bool
