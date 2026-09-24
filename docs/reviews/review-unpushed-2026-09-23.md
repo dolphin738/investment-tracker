@@ -98,34 +98,34 @@
 
 ## 3. 🟡 建议（按严重度排序）
 
-| 编号 | 问题 | 位置 | 要点 |
-| --- | --- | --- | --- |
-| S1 | `reopen` 会删除**并非 assign 写入**的采集侧主表行，却报 `rolledBack=true` | `dividend_pending.py:318-338,488-512` | conflict 分支未落库，无法区分「assign 写的」与「本来就在的」；D-5 原文只承诺删「assign 写入的」行 |
-| S2 | assign/reopen 不触发派生快照重算 | `dividend_pending.py:339` | `/rankings`、`/top20` 默认读派生表（`router.py:200-206`），最长滞后到下一次日线同步（跨周末数日）；人工修正恰是最该立即生效的场景 |
-| S3 | assign 不校验留存窗，窗外年份写入后会被年度清理静默删除 | `dividend_pending.py:386-406` vs `dividend_sync.py:91-108` | 待划分队列**主力正是窗外年份**（股改 2006~2007，`review-dividend-manual-period-2026-09-21.md:149,287`）；把关只做在前端（`suggest-report-period.ts:207-221`） |
-| S4 | TTL 26h 是「获取时一次性写入」，无心跳续期 | `admin_lock.py:40-42,62,64` | 26h/10h ≈ 2.6 倍余量是**隐式**的（依赖 seed set 规模与单只耗时不漂移）；被抢占无告警 |
-| S5 | 跨进程取消生效延迟最坏 ≈20 分钟 | `dividend_seed.py:52,153-157` | `_SEED_CHUNK=200` × 6s；这会**反向放大连点取消**，正好撞上 B3 |
-| S6 | `task.cancel()` 快路径可能留下「分红行已提交、快照未刷新」且续跑不自愈 | `dividend_seed.py:166-177,256-258` | 下次续跑被 `_covered_masters` 跳过 → 不进 `changed` → 快照长期陈旧；仅 `/rebuild` 可修 |
-| S7 | 缺「两个并发获取者只有一个成功」的测试 | `tests/test_admin_lock.py:40-145` | 全部用例在同一 session 串行，未覆盖 `admin_lock.py:23-25` 的核心原子性论证（PG EvalPlanQual 重求值）；未来重构会静默破坏 |
-| S8 | `is_cancel_requested` 不 commit/rollback，正确性隐式依赖 READ COMMITTED | `admin_lock.py:124-131` | 续跑场景（大量 covered 跳过）易形成跨 chunk 长事务；若隔离级别被改为 REPEATABLE READ，跨进程取消会**静默失效**且无测试报警 |
-| S9 | 多 worker 下进度面板是进程内内存态，与跨进程锁语义错配 | `dividend_seed.py:70-72`、`trigger_router.py:180-207` | 触发落 A、轮询落 B → 显示 `idle` → 用户认为没成功 → 再点 → 409；取消同理（本进程面板仍 running） |
-| S10 | 非 PENDING 行可勾选 → 全选态错误 + 批量忽略送非 PENDING id | `PendingDividendTable.vue:62-70,171-180`、`Page.vue:102-111` | 两个组件各自定义「可选中」，口径分裂；用户看到「失败 N 笔」而非「这些行本不可忽略」 |
-| S11 | ASSIGNED 行报告期文案由前端拼装，违反「文案由后端产出」约定 | `PendingDividendTable.vue:96-100`、`cashPerShare` 直出 `1.000000`（`:194-196`） | 与证券详情页后端 `periodLabel` 口径不一；`PendingDividendOut` 应补 `periodLabel`/`planLabel` |
-| S12 | 留存窗/年份口径依赖浏览器时钟，4 个魔数在三处重复 | `suggest-report-period.ts:35,207-222`、`GlobalSettingsDividendTab.vue:31-32`、`Page.vue:91`、`GlobalSettingsPage.vue:82,105,125` | 跨年/跨时区会给出错提示；后端改 1990 或默认窗 5 时前端静默漂移 |
-| S13 | 报告期枚举集合散落三处，而契约里 `periodType` 只是 `string` | `suggest-report-period.ts:18-23`、`dividend-yield.api.ts:71`、`AssignDialog.vue:76-82` | 后端加枚举值时前端下拉静默漏项，`as keyof` 断言掩盖缺口 |
-| S14 | 「待人工划分」唯一入口在概览查询失败时静默置灰 | `GlobalSettingsDividendInitBlock.vue:94-96,125-137` | `pending ?? 0` → 失败也显示「暂无待划分」且 disabled，无错误态/重试；该页不挂侧边栏，失败即功能不可达 |
-| S15 | 新增 9 端点无路径契约测试；`SeedProgress` 在契约之外 | `dividend-yield.api.ts:157-207,212-268`、`trigger_router.py:194-207` | URL 段序/响应形状零断言（本次人工核过**是对的**）；`SeedProgress` 手写，字段改名只会让面板显示 `undefined`，`vue-tsc` 无感 |
-| S16 | 进度轮询宽限期、批量部分失败保持选中两块最绕逻辑零测试 | `use-dividend-yield.ts:230-241`、`Page.vue:238-274` | 现有测试把 `useSeedProgress`/`useCancelSeed` 整体替身掉、批量响应固定全成功 → 假绿风险最高处恰是无覆盖处 |
-| S17 | `PendingDividendsPage.vue` 399/400 行（设计预估 ~185） | 同左 | 贴上限等于把下一次小改变成拆分任务；建议把「批量结果红条 + 批量操作条」（`:309-376`）抽成子组件 |
-| S18 | 关键字输入无 `maxlength`，超 50 直接 422 且只显示泛化错误 | `PendingDividendFilterBar.vue:67-73`、`pending_router.py:92` | 可在输入层零成本拦住 |
-| S19 | `no_period` 入队发生在留存窗判定之前，注释「窗口外行不入队」与实现不符 | `dividend_notice_scan.py:232-246` | 无报告期行年份未知，**必定全部入队**（含 1998~2007 老行），队列规模无界；测试只覆盖「可解析且超窗」 |
-| S20 | `summary().total` 手写累加三种状态 | `dividend_pending.py:196-205` | 将来加枚举值会「列表有、汇总无」；改 `sum(counts.values())` |
-| S21 | 迁移 upgrade 段普遍缺 `IF NOT EXISTS` 幂等护栏 | `0033:32-36`、`0034:27-60`、`0035:26-33`、`0036:30-34`、`0037:31-34` | 因 `alembic_version` 只在整条成功后前进，重试路径实际安全，**不阻塞** |
-| S22 | `0033`/`0034` 的 downgrade 会静默销毁不可再生数据，docstring 未声明 | `0034:107-123`（DROP 表，内容是**从未写入主表**的行）、`0033:41-45`（DROP `dividend_label`，再 upgrade 回来值全 NULL） | 表/列级降级无法保数据（可接受），但须写明「本步丢数据」，否则运维误判可安全回滚 |
-| S23 | `0031` upgrade 的 DELETE 从「按 name 删种子行」扩面为「按 task_type 删全部行」，且无日志 | `0031:53-59` | 实测风险低（被删枚举值不在 `_CREATABLE_TYPES`），但静默 DELETE 事后无法对账 |
-| S24 | 检索串未转义 LIKE 通配符 | `dividend_pending.py:160-163` | `q=%` 会命中全表；建议 `contains(..., autoescape=True)` |
-| S25 | 批量失败原因透传原始异常文本 | `dividend_pending.py:256-258,280-282` | 可能带出约束名/SQL 片段（仅 admin 可见，风险有限） |
-| S26 | `row_fingerprint` 纳入可变日期字段 → 源站补日期会产生第二条待办 | `dividend_cninfo_parse.py:214-240` | 主表不会重复计价（有 `ON CONFLICT`），仅队列体验差；**设计已留痕**，按需收敛 |
+| 编号  | 问题                                                               | 位置                                                                                                                            | 要点                                                                                                                                |
+| --- | ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| S1  | `reopen` 会删除**并非 assign 写入**的采集侧主表行，却报 `rolledBack=true`         | `dividend_pending.py:318-338,488-512`                                                                                         | conflict 分支未落库，无法区分「assign 写的」与「本来就在的」；D-5 原文只承诺删「assign 写入的」行                                                                    |
+| S2  | assign/reopen 不触发派生快照重算                                          | `dividend_pending.py:339`                                                                                                     | `/rankings`、`/top20` 默认读派生表（`router.py:200-206`），最长滞后到下一次日线同步（跨周末数日）；人工修正恰是最该立即生效的场景                                              |
+| S3  | assign 不校验留存窗，窗外年份写入后会被年度清理静默删除                                  | `dividend_pending.py:386-406` vs `dividend_sync.py:91-108`                                                                    | 待划分队列**主力正是窗外年份**（股改 2006~2007，`review-dividend-manual-period-2026-09-21.md:149,287`）；把关只做在前端（`suggest-report-period.ts:207-221`） |
+| S4  | TTL 26h 是「获取时一次性写入」，无心跳续期                                        | `admin_lock.py:40-42,62,64`                                                                                                   | 26h/10h ≈ 2.6 倍余量是**隐式**的（依赖 seed set 规模与单只耗时不漂移）；被抢占无告警                                                                          |
+| S5  | 跨进程取消生效延迟最坏 ≈20 分钟                                               | `dividend_seed.py:52,153-157`                                                                                                 | `_SEED_CHUNK=200` × 6s；这会**反向放大连点取消**，正好撞上 B3                                                                                     |
+| S6  | `task.cancel()` 快路径可能留下「分红行已提交、快照未刷新」且续跑不自愈                      | `dividend_seed.py:166-177,256-258`                                                                                            | 下次续跑被 `_covered_masters` 跳过 → 不进 `changed` → 快照长期陈旧；仅 `/rebuild` 可修                                                               |
+| S7  | 缺「两个并发获取者只有一个成功」的测试                                              | `tests/test_admin_lock.py:40-145`                                                                                             | 全部用例在同一 session 串行，未覆盖 `admin_lock.py:23-25` 的核心原子性论证（PG EvalPlanQual 重求值）；未来重构会静默破坏                                              |
+| S8  | `is_cancel_requested` 不 commit/rollback，正确性隐式依赖 READ COMMITTED   | `admin_lock.py:124-131`                                                                                                       | 续跑场景（大量 covered 跳过）易形成跨 chunk 长事务；若隔离级别被改为 REPEATABLE READ，跨进程取消会**静默失效**且无测试报警                                                   |
+| S9  | 多 worker 下进度面板是进程内内存态，与跨进程锁语义错配                                  | `dividend_seed.py:70-72`、`trigger_router.py:180-207`                                                                          | 触发落 A、轮询落 B → 显示 `idle` → 用户认为没成功 → 再点 → 409；取消同理（本进程面板仍 running）                                                                 |
+| S10 | 非 PENDING 行可勾选 → 全选态错误 + 批量忽略送非 PENDING id                       | `PendingDividendTable.vue:62-70,171-180`、`Page.vue:102-111`                                                                   | 两个组件各自定义「可选中」，口径分裂；用户看到「失败 N 笔」而非「这些行本不可忽略」                                                                                       |
+| S11 | ASSIGNED 行报告期文案由前端拼装，违反「文案由后端产出」约定                               | `PendingDividendTable.vue:96-100`、`cashPerShare` 直出 `1.000000`（`:194-196`）                                                    | 与证券详情页后端 `periodLabel` 口径不一；`PendingDividendOut` 应补 `periodLabel`/`planLabel`                                                     |
+| S12 | 留存窗/年份口径依赖浏览器时钟，4 个魔数在三处重复                                       | `suggest-report-period.ts:35,207-222`、`GlobalSettingsDividendTab.vue:31-32`、`Page.vue:91`、`GlobalSettingsPage.vue:82,105,125` | 跨年/跨时区会给出错提示；后端改 1990 或默认窗 5 时前端静默漂移                                                                                              |
+| S13 | 报告期枚举集合散落三处，而契约里 `periodType` 只是 `string`                        | `suggest-report-period.ts:18-23`、`dividend-yield.api.ts:71`、`AssignDialog.vue:76-82`                                          | 后端加枚举值时前端下拉静默漏项，`as keyof` 断言掩盖缺口                                                                                                 |
+| S14 | 「待人工划分」唯一入口在概览查询失败时静默置灰                                          | `GlobalSettingsDividendInitBlock.vue:94-96,125-137`                                                                           | `pending ?? 0` → 失败也显示「暂无待划分」且 disabled，无错误态/重试；该页不挂侧边栏，失败即功能不可达                                                                  |
+| S15 | 新增 9 端点无路径契约测试；`SeedProgress` 在契约之外                              | `dividend-yield.api.ts:157-207,212-268`、`trigger_router.py:194-207`                                                           | URL 段序/响应形状零断言（本次人工核过**是对的**）；`SeedProgress` 手写，字段改名只会让面板显示 `undefined`，`vue-tsc` 无感                                              |
+| S16 | 进度轮询宽限期、批量部分失败保持选中两块最绕逻辑零测试                                      | `use-dividend-yield.ts:230-241`、`Page.vue:238-274`                                                                            | 现有测试把 `useSeedProgress`/`useCancelSeed` 整体替身掉、批量响应固定全成功 → 假绿风险最高处恰是无覆盖处                                                           |
+| S17 | `PendingDividendsPage.vue` 399/400 行（设计预估 ~185）                  | 同左                                                                                                                            | 贴上限等于把下一次小改变成拆分任务；建议把「批量结果红条 + 批量操作条」（`:309-376`）抽成子组件                                                                            |
+| S18 | 关键字输入无 `maxlength`，超 50 直接 422 且只显示泛化错误                          | `PendingDividendFilterBar.vue:67-73`、`pending_router.py:92`                                                                   | 可在输入层零成本拦住                                                                                                                        |
+| S19 | `no_period` 入队发生在留存窗判定之前，注释「窗口外行不入队」与实现不符                        | `dividend_notice_scan.py:232-246`                                                                                             | 无报告期行年份未知，**必定全部入队**（含 1998~2007 老行），队列规模无界；测试只覆盖「可解析且超窗」                                                                         |
+| S20 | `summary().total` 手写累加三种状态                                       | `dividend_pending.py:196-205`                                                                                                 | 将来加枚举值会「列表有、汇总无」；改 `sum(counts.values())`                                                                                         |
+| S21 | 迁移 upgrade 段普遍缺 `IF NOT EXISTS` 幂等护栏                             | `0033:32-36`、`0034:27-60`、`0035:26-33`、`0036:30-34`、`0037:31-34`                                                              | 因 `alembic_version` 只在整条成功后前进，重试路径实际安全，**不阻塞**                                                                                    |
+| S22 | `0033`/`0034` 的 downgrade 会静默销毁不可再生数据，docstring 未声明              | `0034:107-123`（DROP 表，内容是**从未写入主表**的行）、`0033:41-45`（DROP `dividend_label`，再 upgrade 回来值全 NULL）                                | 表/列级降级无法保数据（可接受），但须写明「本步丢数据」，否则运维误判可安全回滚                                                                                          |
+| S23 | `0031` upgrade 的 DELETE 从「按 name 删种子行」扩面为「按 task_type 删全部行」，且无日志 | `0031:53-59`                                                                                                                  | 实测风险低（被删枚举值不在 `_CREATABLE_TYPES`），但静默 DELETE 事后无法对账                                                                               |
+| S24 | 检索串未转义 LIKE 通配符                                                  | `dividend_pending.py:160-163`                                                                                                 | `q=%` 会命中全表；建议 `contains(..., autoescape=True)`                                                                                   |
+| S25 | 批量失败原因透传原始异常文本                                                   | `dividend_pending.py:256-258,280-282`                                                                                         | 可能带出约束名/SQL 片段（仅 admin 可见，风险有限）                                                                                                   |
+| S26 | `row_fingerprint` 纳入可变日期字段 → 源站补日期会产生第二条待办                       | `dividend_cninfo_parse.py:214-240`                                                                                            | 主表不会重复计价（有 `ON CONFLICT`），仅队列体验差；**设计已留痕**，按需收敛                                                                                   |
 
 ---
 
@@ -455,13 +455,23 @@ A7 裁决为「检查点前显式 `rollback()` 收口」。按字面实施后**�
 | S8 | `db/database.py:30` 显式 `isolation_level="READ COMMITTED"` |
 | S19 | `pending_queue_metrics` + `PENDING_QUEUE_STALE_DAYS=180` |
 
-⚠️ 复核中对原报告的两处严重性修正：**S6 下调**（`trigger_router.py` 快路径取消虽跳过收尾 refresh，但日线同步会对价格变动的证券重算——`market_daily_price_sync.py:187-188`——最长滞后到下一次有价格变动的日线同步，非「长期陈旧、仅 /rebuild 可修」）；**S21 维持不阻塞**（`alembic/env.py:48,59` 单事务包整个 upgrade，中途失败整体回滚，`IF NOT EXISTS` 护栏价值极低）。
+⚠️ 复核中对原报告的两处严重性修正：**S6 下调**（`trigger_router.py` 快路径取消虽跳过收尾 refresh，但日线同步会对价格变动的证券重算——`market_daily_price_sync.py:187-188`——最长滞后到下一次有价格变动的日线同步，非「长期陈旧、仅 /rebuild 可修」；⚠️ 但此自愈**仅限场景 A**（任务取消导致快照陈旧），**场景 B**（公告扫描 `_reject_proposed` 置 `REJECTED` 且后续无新分红候选公告）下 `scan()` 的 `want_fetch = (mid in candidate_mids) or (not is_cancel)` 两条件皆否 → 不重拉 → `REJECTED` 永久滞留，日线同步只重算快照不重拉故不自愈，恢复只能手动「补齐历史分红」——精确口径见 §12.2）；**S21 维持不阻塞**（`alembic/env.py:48,59` 单事务包整个 upgrade，中途失败整体回滚，`IF NOT EXISTS` 护栏价值极低）。
 
 ### 12.2 裁决结果（owner：按建议批发实施）
 
 **实施（S-1 低成本收口 9 条 / S-2 护栏补测 3 条 / S-3 契约收敛 2 条）**：S20、S24、S25、S18、S10、S14、S17、S22、S23、S7、S16、S15、S11。
-**暂不做（附依据）**：S6（严重性下调，③方案有二次取消风险）、S12（稳定常量 + 注释交叉引用已收敛，扩契约面收益 < 成本）、S21（见 12.1）、S26（改指纹会让已入队存量行按旧指纹重复插入，需一次性迁移，收益仅队列体验）。
+**暂不做（附依据）**：S6（严重性下调——① 场景 A：任务取消快路径跳过收尾 refresh 的快照陈旧，可由日线同步对价格变动证券重算自愈；② 场景 B：公告扫描置 `REJECTED` 且后续无新候选公告的纯取消情形，日线同步不重拉、`REJECTED` 永久滞留，仅手动「补齐历史分红」救回；③ 原③方案有二次取消风险）、S12（稳定常量 + 注释交叉引用已收敛，扩契约面收益 < 成本）、S21（见 12.1）、S26（改指纹会让已入队存量行按旧指纹重复插入，需一次性迁移，收益仅队列体验）。
+**待规划实施（owner 裁决：按建议修复，本次不落地）**：S9（多 worker 进度面板误导）。
+
+- **证据**：`seed_progress = SeedProgress()` 是 `dividend_seed.py:117` 模块级进程内存单例；`/seed-initial-dividends/progress`（`trigger_router.py:218-232`）只直读本进程 `seed_progress`、零 DB 查询；触发 409 虽已带「另一进程持有」自由文本（`trigger_router.py:179-185`），但前端无法结构化识别，且进度轮询落 B 仍显示误导性 `idle`。注意：跨进程互斥已由 `admin_locks` 表正确承载（`acquire_admin_lock` / `request_cancel`），**功能正确性不受影响**，S9 纯属 UX 体感缺陷。
+- **三方案对比（owner 2026-09-24 复核）**：
+  - **① 进度态落库（新表 + 迁移）**：根治，任意 worker 轮询都读真实 running 进度且进程重启不丢面板；但新增表 + Alembic 迁移（须先 `alembic heads` 顺延编号）、须设计写入节流（种子 ~10h/5923 只，高频写库放大 DB 负担与锁竞争）、回归面大（`_run_seed`/`/progress`/`/cancel` 三侧 + 与 `admin_locks` 生命周期对齐）；当前单 worker 收益为零。
+  - **② 端点返回「任务在其它进程运行」可感知提示（不动进度存储，推荐）**：②A（触发 409 的「另一进程持有」由自由文本提升为结构化信号——独立 business code 或响应体 `running_elsewhere: true`，前端据此显式提示）；②B（进度端点额外查 `admin_locks` 是否被人持锁——当前 `admin_lock.py` 无现成只读函数，仅 `request_cancel` 读 `cancel_requested_at`（`admin_lock.py:172`），须新增轻量 `SELECT owner, acquired_at`；逻辑：本进程 idle 且锁被他人持有未过期 → 返回 `state=running` + `running_elsewhere=true`）。改动极小、零写入负担、直接消除「误判 idle→误点→409」主困惑；代价：不根治跨进程进度细节可见（B 仅见 running 不见 total/processed 真实计数），且依赖 26h TTL 语义（持锁进程崩溃后 B 最长显示「运行中」26h 才被抢占）。
+  - **③ 不改（基线）**：单 worker 下零问题；多 worker 下仅 UX 困惑，功能正确性由 DB 锁保证不受影响。
+- **裁决**：当前单 worker 部署 → ③ 安全；未来上多 worker 时 → 优先 **②（尤其 ②B）** 性价比最高；① 仅当确需「跨进程真实进度计数」时才值得（种子 10h 任务用户通常只关心「在跑还是没跑」，细节价值有限，故 ① 偏过度设计）。
 **并入其它批次**：S13 → 5.2b 枚举收敛批次（同一议题，不单点做）。
+**owner 追认（2026-09-24）**：S13 维持「等枚举批次」——不单点实施，随 5.2b 枚举收敛批次统一处理（报告期枚举三处散落 + `periodType` 契约 string 属同一议题）。
+**实施（2026-09-25）**：5.2b 枚举收敛**续批**已执行，S13 结项——后端 DTO 7 处裸 `str` 改真实枚举类型 → OpenAPI 提取 `ReportPeriodType`/`DividendStatus`/`DividendPendingStatus` 命名 schema → 前端删手写联合改引用生成物（运行时 `as const` 与标签映射保留，以 `Record<PendingPeriodType, …>` 约束完整性，后端加值即 `vue-tsc` 报错）；契约护栏 `test_openapi_enum_schemas_extracted` 扩 3 枚举 + 6 处 `$ref` 断言。详见 §12.6。
 
 ### 12.3 实施记录
 
@@ -507,3 +517,67 @@ A7 裁决为「检查点前显式 `rollback()` 收口」。按字面实施后**�
 
 > 测试文件 `test_dividend_pending_api.py` 823 / `test_dividend_yield_api.py` 839 行：本批前已 768/785（>400 系历史债），本批各 +55/+54，未新引入违约；`line-budget` 按 merge-base 累计新增行数计（本批 +761 < 800），不触发 CI。
 
+### 12.5 第三批实施记录（2026-09-24：S9 ②B + §4 顺手项 + S13 归属确认）
+
+**S9 ②B：进度端点跨进程冲突态提示**
+
+| 项 | 改动 | 落点 |
+| --- | --- | --- |
+| 新增只读探测 | `is_lock_held(session, name, ttl_hours)`：`SELECT owner, acquired_at` + 与 `acquire_admin_lock` **同一 TTL 口径**（`acquired_at >= now() - TTL`），零写入 | `services/admin_lock.py` |
+| 端点逻辑 | progress 端点补 `db` 依赖；**仅本进程 `idle`** 且锁被他人持有未过期 → `state="running"` + `running_elsewhere=true`（计数零值）；本进程非 idle 时以本进程终态为准（done/error 的展示价值高于跨进程提示，②B 裁决口径） | `trigger_router.py` |
+| 契约 | `SeedProgressOut` 补 `running_elsewhere: bool = False`；`state` 由裸 `str` 收紧为 `Literal[...]`（openapi enum → 前端生成联合类型，新 state 漏分支由 vue-tsc 报错，§4「新 state 静默不轮询」收口） | `schemas_resp/dividend_yield.py` |
+| 前端 | 进度面板区分「运行中」/「其它进程运行中」badge 文案；跨进程态隐藏本进程进度条与计数、如实说明并保留跨进程可用的「取消」；进度条补 `role="progressbar"` + `aria-valuenow/min/max`，状态/错误/取消消息 `aria-live="polite"`；进度查询失败态 + 重试按钮（§4 `progress.isError` 未消费收口） | `GlobalSettingsDividendInitBlock.vue` |
+| 测试 | +2 用例：锁被持有 → running+true；锁释放 → idle+false；本进程 done → 不被改写。wire 护栏（`test_seed_progress_wire_matches_response_model`）沿用自动覆盖新字段 | `test_dividend_yield_api.py` |
+| 契约产物 | `gen_openapi.py` + `gen-api-types.py` 重生成（state enum + running_elsewhere；⚠️ 生成脚本需显式传参 `python scripts/gen-api-types.py ../docs/openapi.json src/types/api.ts`） | `docs/openapi.json`、`web/src/types/api.ts` |
+
+②B 已知边界（裁决时已接受）：持锁进程崩溃后 TTL（26h）内 B 仍显示「运行中」；不根治跨进程真实计数（方案①，暂不做）。
+
+**§4 细节顺手项（已修 15 项）**
+
+| # | 修复 | 落点 |
+| --- | --- | --- |
+| 1 | 头注释「三个未用列含派息日不落库」→ 实况两个未用列（`COL_PAY` 派息日已落 `pay_date`） | `dividend_cninfo_parse.py:8-11` |
+| 2 | `_normalize_text`/`normalize_label` 同实现两名 → 删别名收口单实现（零外部引用核实；连带改测试导入） | `dividend_cninfo_parse.py`、`test_dividend_cninfo_parse.py` |
+| 3 | 「五年留存清理」写死 → 配置化口径（`dividend_retention_years`，默认 5） | `dividend_sync.py:1,78,165`、`models/enums.py:115` |
+| 4 | 0015 docstring `Revises: 0014` 与 `down_revision="0012"` 不符 → 纠正为 0012 | `alembic/versions/0015_*.py` |
+| 5 | 源失效判别「RuntimeError + 子串『变为不可用』」→ 专用 `DetailSourceUnavailableError(RuntimeError)`（子串误判免疫；继承 RuntimeError 保持既有语义） | `dividend_notice_meta.py` |
+| 6 | 「检查-获取无竞态」注释补「跨进程竞态由 DB 锁兜底」；`_run_seed` docstring 端点名/服务方法名歧义澄清 | `trigger_router.py` |
+| 7 | POST 返回文案「进度见应用日志」→「进度见本页进度面板」（无测试断言旧文案，已核实） | `trigger_router.py` |
+| 8 | 头注释/区块注释/弹窗注释「约 19 小时」→「约 10 小时」（对齐后端 5923 只 × ≈6s 实况） | `GlobalSettingsDividendInitBlock.vue` ×3 |
+| 9 | 「全市场播种 19 小时 + 进度经应用日志查看」过期注释 → 10 小时 + 进度面板 | `use-dividend-yield.ts` |
+| 10 | 20s 轮询宽限魔数 → 导出常量 `SEED_PROGRESS_GRACE_MS` | `use-dividend-yield.ts` |
+| 11 | 「进度见应用日志」页面文案 ×2 → 进度面板 | `GlobalSettingsDividendInitSection.vue`、`GlobalSettingsPage.vue` |
+| 12 | FilterBar `status: string` 抹平联合 → `PendingStatusFilter` 联合类型收口 lib，门面/子组件共用 | `lib/pending-dividends.ts`、`PendingDividendsPage.vue`、`PendingDividendFilterBar.vue` |
+| 13 | BatchDialog 确认按钮 destructive 红 → 仅 ignore 模式（assign 可经「重新划分」撤销，警示强度不匹配） | `PendingDividendBatchDialog.vue` |
+| 14 | AssignDialog 错误 `<p>` 补 `role="alert"` | `PendingDividendAssignDialog.vue` |
+| 15 | 弱断言「无 Badge」→ `findComponent(Badge)` 精确断言（区分「无 Badge」与「文案不同」）；连带修 2 个测试 mock 缺 `isError`/`refetch` | `security-detail-panel-dividends.test.ts`、`global-settings-*.test.ts` |
+| 16 | **建议值展示格式三处统一**（owner 2026-09-25 裁决：以批量预览口径为准）：新增共享 `formatSuggestionPreview()`（`{code} {年}Q{季} {类型标签}`，approximate 自动带「（除权日推定，粗略）」后缀），Table 报告期列 / AssignDialog 主候选+备选 / BatchDialog 预览三处改同一实现；备选行前缀「（由除权日推定，粗略）」改由后缀承载避免重复；ASSIGNED 行正常路径仍用后端 `resolvedPeriodLabel`（非建议值口径，不动）；新增 4 断言单测 | `lib/pending-dividends.ts`、`PendingDividendTable.vue`、`PendingDividendAssignDialog.vue`、`use-pending-batch.ts`、`pending-dividends.test.ts`（新） |
+
+**§4 明确不修（附依据）**
+
+| 项                                      | 依据                                                                      |
+| -------------------------------------- | ----------------------------------------------------------------------- |
+| `Page.vue:65` placeholderData 保留上一页可操作 | 既有缓解已覆盖主要风险：翻页即清空选中；placeholder 行本身是真实 DB 行（非脏数据），批量操作不会作用到不存在/已删行      |
+| tab 切换 `click` vs `mousedown`          | reka-ui 真实组件依赖 mousedown 属既有手法（非本批引入），改动面含全部 tab 类测试，收益低                |
+| `trigger_router.py:143` 缩进异常           | 已随后续批次改动消除（现文件无该缩进问题），无需处理                                              |
+
+**验证**：ruff 全绿；定向后端 126 passed（admin_lock / dividend_yield_api / notice_scan / seed / contract）+ cninfo_parse 14 passed；前端 `vue-tsc --noEmit` exit 0、全量 vitest 82 文件 / 565 用例 0 失败（3 个 EPERM 为沙箱 fs shim 噪声；盘上 84 个测试文件与 git 跟踪集零差异，`dividend-yield.api.test.ts` 5 例单独运行全绿——全量计数差为 collect 阶段沙箱干扰假象，非回归）；后端全量 `uv run pytest` **775 passed / 3 xpassed / 0 failed**（基线 773+3，本批净增 2 例：S9 ②B 冲突态 + 本进程终态优先；其间全量曾抓出 ②B 用例被 `test_dividend_seed` 单例残留污染 → 端点冲突分支改为显式清零计数 + 用例改「保存-强制-恢复」手法，复验通过）。
+
+### 12.6 第四批：5.2b 枚举收敛续批（S13 结项，2026-09-25）
+
+**后端（单一事实源 = `models/enums.py`）**
+
+| 字段 | 原 | 现 |
+| --- | --- | --- |
+| `PendingDividendOut.status` / `.resolvedPeriodType` | `str` / `Optional[str]` | `DividendPendingStatus` / `Optional[ReportPeriodType]` |
+| `PendingAssignResultOut.status` / `.periodType` | `str` / `str` | `DividendPendingStatus` / `ReportPeriodType` |
+| `PendingIgnoreResultOut.status`、`PendingReopenResultOut.status` | `str` | `DividendPendingStatus` |
+| `SecurityDividendItemOut.periodType` / `.status` | `str` / `str` | `ReportPeriodType` / `DividendStatus` |
+
+**前端（删手写联合 → 引用生成物）**：`suggest-report-period.ts` `PendingPeriodType` 改 `components['schemas']['ReportPeriodType']`（`LEGAL_QUARTERS`/`PERIOD_TYPE_LABELS` 仍手写键值，靠 `Record<PendingPeriodType, …>` 完整性约束捕获新枚举值——这正是 S13「后端加值前端静默漏项」的护栏）；`dividend-yield.api.ts` 三处（`SecurityDividendItem.periodType`/`.status`、`PendingAssignPayload.periodType`、`PendingDividendFilters.status`）；`lib/pending-dividends.ts` `PendingStatusFilter`。
+
+**契约产物**：`docs/openapi.json` + `web/src/types/api.ts` 重生成（118 schema，新增 3 个枚举联合）。
+
+**类型收紧当场抓到 1 处**：`dividend-yield.api.test.ts` 批量夹具把 `periodType` 写成裸 `string` → 改 `PendingAssignItemPayload[]` 标注（护栏生效的实证，非回归）。
+
+**验证**：ruff 全绿；定向后端 60 passed（contract/dividend_yield_api/dividend_pending_api）；`vue-tsc --noEmit` exit 0；受影响前端 6 文件全绿；后端全量 `uv run pytest` **775 passed / 3 xpassed / 0 failed**（契约护栏仅扩断言，用例数不变）；前端全量 `vitest run` **606 例 / 0 失败**（1 个 EPERM 为沙箱噪声）。

@@ -928,7 +928,7 @@ classDiagram
   4. **`NavSeriesPoint` / `XirrSeriesPoint`** = **number 版展示类型**（ECharts 只认 number），移入 `web/src/types/series.ts`，`lib/types.ts` re-export 维持历史 import 点。后端返回 `string`（`NavPointOut` / `XirrPointOut`，字段名 `value` / `cumulativeNav` 等），由 `api/query.api.ts` 在取数边界用 `toNumberOrNull`（策略 A）转换产出。
 - **边界转换函数** `toNumberOrNull(v: unknown): number | null`（`lib/types.ts`，null 安全、非有限数返回 null）是策略 A 的唯一转换点；所有 `NavSeriesPoint` / `XirrSeriesPoint` 消费方均经此函数，无残留裸 `Number()` 直读后端 `string`。
 
-**同步约定**：后端改实体/枚举后，先 `npm run generate:api` 更新 `types/api.ts`，再确认 `lib/types.ts` 的 re-export 别名与新增命名字段/枚举同步——这是退役 + 收敛后的唯一同步点。详情见 `docs/plan-5.2b-enum-openapi-convergence.md`。
+**同步约定**：后端改实体/枚举后，先 `npm run generate:api` 更新 `types/api.ts`，再确认 `lib/types.ts` 的 re-export 别名与新增命名字段/枚举同步——这是退役 + 收敛后的唯一同步点。详情见 `docs/adr/plan-5.2b-enum-openapi-convergence.md`（原引用路径 `docs/plan-5.2b-…` 已随文档归拢 docs/adr/ 失效，2026-09-25 纠正）。
 
 ---
 

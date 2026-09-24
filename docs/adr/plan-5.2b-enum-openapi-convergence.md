@@ -202,3 +202,18 @@
 
 ### 环境校验说明
 - 本沙箱 `node_modules` 安装损坏（`@types/react` 缺条目、`echarts` 类型入口缺失、`execa`/`@vitest/runner` 缺文件等），致 `tsc --noEmit` 仅余 `echarts` 类型入口报错、`vitest` 无法启动——均属环境损坏，**非本次改动引入**。代码层面 `tsc` 仅余环境性报错；在健康 `node_modules` 环境下 `npm run lint/build/test` 应通过（4 个预存 `security-type-shared.test.tsx` 失败除外，与本次无关）。
+
+## 9. 续批（2026-09-25）：新业务枚举接入同一机制（S13）
+
+背景：P1–P5 只收敛了当时的 6 领域枚举 + 导入/导出枚举。此后新增的**分红域枚举**
+（`ReportPeriodType` / `DividendStatus` / `DividendPendingStatus`）在 `*Out` 里仍是裸
+`str`，契约无 enum → 前端手写联合 + `as keyof` 断言掩盖缺口（审查条目 S13）。
+
+续批沿用 §5 的 P2/P3 手法（不新发明机制）：
+1. `schemas_resp/dividend_yield.py` 7 处字段改真实枚举类型；
+2. `gen_openapi.py` + `gen-api-types.py` 重生成（新增 3 个命名 enum schema）；
+3. 前端类型改引用 `components['schemas']['Xxx']`；**运行时 `as const` 与标签映射保留**
+   （下拉遍历/标签需要实际值），以 `Record<PendingPeriodType, …>` 约束完整性。
+
+与 P3 一致的边界：运行时值（如 `PERIOD_TYPE_LABELS`）不进契约，属前端独有，但受生成
+类型的完整性约束——这正是「后端加枚举值前端静默漏项」的结构性解法。
