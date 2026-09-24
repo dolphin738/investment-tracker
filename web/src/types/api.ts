@@ -207,6 +207,14 @@ app_logs（message/trace/detail 均为无界 Text/JSON 列）。 */
         /** Note */
         note?: string | null;
       };
+    /** 待人工划分分红（staging）行状态（批次 B，§3.1）。
+
+承载巨潮「现金>0 但报告时间不可解析」的行，人工裁定报告期后写回主表。
+PG 原生枚举类型名同本类名。**无排序约束**（与 ``ReportPeriodType.OTHER`` 不同，
+不依赖定义顺序参与 ``ORDER BY``），故值顺序可自由。 */
+    DividendPendingStatus: 'PENDING' | 'ASSIGNED' | 'IGNORED';
+    /** 分红事件生命周期状态（§3.1）：仅 PROPOSED/PAID 计入分子，REJECTED 剔除。 */
+    DividendStatus: 'PROPOSED' | 'PAID' | 'REJECTED';
     /** DividendType */
     DividendType: 'CASH' | 'STOCK_DIVIDEND';
     /** 股息率全局配置（GET /settings 与 PUT /settings **同形**）。 */
@@ -681,8 +689,7 @@ PG 原生枚举类型名 `interface_direction`（由迁移创建）。
     PendingAssignResultOut: {
         /** Id */
         id: string;
-        /** Status */
-        status: string;
+        status: components['schemas']['DividendPendingStatus'];
         /** Conflict */
         conflict: boolean;
         /** Warning */
@@ -691,8 +698,7 @@ PG 原生枚举类型名 `interface_direction`（由迁移创建）。
         reportYear: number;
         /** Reportquarter */
         reportQuarter: number;
-        /** Periodtype */
-        periodType: string;
+        periodType: components['schemas']['ReportPeriodType'];
       };
     /** PendingBatchAssignBody */
     PendingBatchAssignBody: {
@@ -738,10 +744,8 @@ PG 原生枚举类型名 `interface_direction`（由迁移创建）。
         announcementDate?: string | null;
         /** Reportperiodraw */
         reportPeriodRaw?: string | null;
-        /** Status */
-        status: string;
-        /** Resolvedperiodtype */
-        resolvedPeriodType?: string | null;
+        status: components['schemas']['DividendPendingStatus'];
+        resolvedPeriodType?: components['schemas']['ReportPeriodType'] | null;
         /** Resolvedreportyear */
         resolvedReportYear?: number | null;
         /** Resolvedreportquarter */
@@ -768,15 +772,13 @@ PG 原生枚举类型名 `interface_direction`（由迁移创建）。
     PendingIgnoreResultOut: {
         /** Id */
         id: string;
-        /** Status */
-        status: string;
+        status: components['schemas']['DividendPendingStatus'];
       };
     /** PendingReopenResultOut */
     PendingReopenResultOut: {
         /** Id */
         id: string;
-        /** Status */
-        status: string;
+        status: components['schemas']['DividendPendingStatus'];
         /** Rolledback */
         rolledBack: boolean;
       };
@@ -1107,6 +1109,8 @@ PG 原生枚举类型名 `interface_direction`（由迁移创建）。
         /** Name */
         name?: string | null;
       };
+    /** 分红报告期类型（§5.1）：决定唯一键与取向解析。 */
+    ReportPeriodType: 'ANNUAL' | 'INTERIM' | 'QUARTERLY' | 'SPECIAL' | 'OTHER';
     /** RestoreReq */
     RestoreReq: {
         /** Email */
@@ -1120,8 +1124,7 @@ PG 原生枚举类型名 `interface_direction`（由迁移创建）。
         reportYear: number;
         /** Reportquarter */
         reportQuarter: number;
-        /** Periodtype */
-        periodType: string;
+        periodType: components['schemas']['ReportPeriodType'];
         /** Periodlabel */
         periodLabel: string;
         /** Planlabel */
@@ -1130,8 +1133,7 @@ PG 原生枚举类型名 `interface_direction`（由迁移创建）。
         cashPerShare: string;
         /** Dividendlabel */
         dividendLabel?: string | null;
-        /** Status */
-        status: string;
+        status: components['schemas']['DividendStatus'];
         /** Exdividenddate */
         exDividendDate?: string | null;
         /** Announcementdate */
@@ -1211,7 +1213,9 @@ type 为可选 override；不传则读取时由代码前缀推断（infer_securi
     /** 首跑播种运行进度（GET /seed-initial-dividends/progress）。 */
     SeedProgressOut: {
         /** State */
-        state: string;
+        state: 'idle' | 'running' | 'done' | 'error' | 'cancelled';
+        /** Running Elsewhere */
+        running_elsewhere?: boolean;
         /** Total */
         total: number;
         /** Processed */

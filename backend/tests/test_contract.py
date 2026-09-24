@@ -136,6 +136,10 @@ def test_openapi_enum_schemas_extracted():
         "ExportType",
         "ImportType",
         "ImportErrorCode",
+        # §5.2b 续批（S13）：报告期 / 分红状态 / 待划分状态三枚举进契约
+        "ReportPeriodType",
+        "DividendStatus",
+        "DividendPendingStatus",
     ]:
         assert name in schemas, f"{name} 应作为独立命名 schema 出现在 OpenAPI"
         assert "enum" in schemas[name], f"{name} 应为枚举 schema"
@@ -153,6 +157,31 @@ def test_openapi_enum_schemas_extracted():
     assert (
         schemas["ImportPreviewOut"]["properties"]["type"]["$ref"]
         == "#/components/schemas/ImportType"
+    )
+    # §5.2b 续批（S13）：待划分 / 明细行枚举字段须 $ref 对应命名 schema
+    # ——否则前端只能手写联合，后端加枚举值时静默漏项（S13 根因）
+    assert (
+        schemas["PendingDividendOut"]["properties"]["status"]["$ref"]
+        == "#/components/schemas/DividendPendingStatus"
+    )
+    assert schemas["PendingDividendOut"]["properties"]["resolvedPeriodType"]["anyOf"][0][
+        "$ref"
+    ] == "#/components/schemas/ReportPeriodType"
+    assert (
+        schemas["PendingAssignResultOut"]["properties"]["periodType"]["$ref"]
+        == "#/components/schemas/ReportPeriodType"
+    )
+    assert (
+        schemas["PendingIgnoreResultOut"]["properties"]["status"]["$ref"]
+        == "#/components/schemas/DividendPendingStatus"
+    )
+    assert (
+        schemas["SecurityDividendItemOut"]["properties"]["periodType"]["$ref"]
+        == "#/components/schemas/ReportPeriodType"
+    )
+    assert (
+        schemas["SecurityDividendItemOut"]["properties"]["status"]["$ref"]
+        == "#/components/schemas/DividendStatus"
     )
 
 

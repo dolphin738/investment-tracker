@@ -8,6 +8,7 @@
  *    本次补齐：URL 逐字断言（段序回归即拦）；批量端点另断言请求体是 `{items}` / `{ids}`
  *    包装（后端 Pydantic `extra="forbid"`，包装写错会直接 422）。
  */
+import type { PendingAssignItemPayload } from '../dividend-yield.api';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
 const calls = vi.hoisted(() => ({
@@ -94,7 +95,8 @@ describe('dividend-yield api 路径契约（P0-1 + S15）', () => {
   });
 
   it('pending 批量端点：静态段先于 {id}，请求体为 {items} / {ids} 包装', async () => {
-    const items = [
+    // §5.2b 续批：periodType 已是生成枚举联合，裸 string 字面量不再可赋值
+    const items: PendingAssignItemPayload[] = [
       { id: 'p1', reportYear: 2024, reportQuarter: 4, periodType: 'ANNUAL' },
     ];
     await batchAssignPendingDividends(items);

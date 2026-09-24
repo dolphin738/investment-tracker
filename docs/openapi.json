@@ -2818,7 +2818,7 @@
           "dividend-yield"
         ],
         "summary": "Seed Initial Dividends Progress",
-        "description": "查询首跑播种运行进度（admin-only，与 POST 同权限）。\n\n返回进程内内存态进度（不入库、不跨进程）：state(idle|running|done|error|cancelled) /\ntotal / processed / hits / failed / covered / started_at / finished_at /\nerror / message / failed_securities（失败证券清单，每条含 master_id/code/name，\nUI 展开查看「代码 + 名称」，上限见服务端 _FAILED_IDS_CAP，超出置 failed_truncated）/\nfailed_truncated。前端据此轮询展示进度条、失败只数与失败证券清单；进程重启后归零为 idle。",
+        "description": "查询首跑播种运行进度（admin-only，与 POST 同权限）。\n\n进度本体是进程内内存态（不入库、不跨进程）：state(idle|running|done|error|cancelled) /\ntotal / processed / hits / failed / covered / started_at / finished_at /\nerror / message / failed_securities（失败证券清单，每条含 master_id/code/name，\nUI 展开查看「代码 + 名称」，上限见服务端 _FAILED_IDS_CAP，超出置 failed_truncated）。\n\n**跨进程冲突态（S9 ②B）**：本进程 ``idle`` 时额外只读探测 DB 锁\n（``admin_lock.is_lock_held``，与 acquire 同一 TTL 口径）——锁被其他进程持有且未过期\n→ 返回 ``state=\"running\"`` + ``running_elsewhere=true``，前端显示「任务在其它进程\n运行」而非误导性 idle（避免误点触发 → 409）。此态下本进程**看不到**对方的\ntotal/processed 真实计数（字段为零值），取消端点仍可用（``request_cancel`` 走 DB\n标记、跨进程生效）。代价（②B 已知边界）：持锁进程崩溃后 TTL（26h）内 B 仍显示\n「运行中」；根治须进度落库（方案①，暂不做）。本进程非 idle（running/done/error/\ncancelled）时以本进程态为准、``running_elsewhere=false``——done/error 是本进程\n上一轮的真实终态，展示价值高于跨进程提示。",
         "operationId": "seed_initial_dividends_progress_api_dividend_yield_seed_initial_dividends_progress_get",
         "responses": {
           "200": {
@@ -8116,6 +8116,26 @@
         "type": "object",
         "title": "DividendPatchReq"
       },
+      "DividendPendingStatus": {
+        "type": "string",
+        "enum": [
+          "PENDING",
+          "ASSIGNED",
+          "IGNORED"
+        ],
+        "title": "DividendPendingStatus",
+        "description": "待人工划分分红（staging）行状态（批次 B，§3.1）。\n\n承载巨潮「现金>0 但报告时间不可解析」的行，人工裁定报告期后写回主表。\nPG 原生枚举类型名同本类名。**无排序约束**（与 ``ReportPeriodType.OTHER`` 不同，\n不依赖定义顺序参与 ``ORDER BY``），故值顺序可自由。"
+      },
+      "DividendStatus": {
+        "type": "string",
+        "enum": [
+          "PROPOSED",
+          "PAID",
+          "REJECTED"
+        ],
+        "title": "DividendStatus",
+        "description": "分红事件生命周期状态（§3.1）：仅 PROPOSED/PAID 计入分子，REJECTED 剔除。"
+      },
       "DividendType": {
         "type": "string",
         "enum": [
@@ -9715,8 +9735,7 @@
             "title": "Id"
           },
           "status": {
-            "type": "string",
-            "title": "Status"
+            "$ref": "#/components/schemas/DividendPendingStatus"
           },
           "conflict": {
             "type": "boolean",
@@ -9742,8 +9761,7 @@
             "title": "Reportquarter"
           },
           "periodType": {
-            "type": "string",
-            "title": "Periodtype"
+            "$ref": "#/components/schemas/ReportPeriodType"
           }
         },
         "type": "object",
@@ -9950,19 +9968,17 @@
             "title": "Reportperiodraw"
           },
           "status": {
-            "type": "string",
-            "title": "Status"
+            "$ref": "#/components/schemas/DividendPendingStatus"
           },
           "resolvedPeriodType": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/ReportPeriodType"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Resolvedperiodtype"
+            ]
           },
           "resolvedReportYear": {
             "anyOf": [
@@ -10060,8 +10076,7 @@
             "title": "Id"
           },
           "status": {
-            "type": "string",
-            "title": "Status"
+            "$ref": "#/components/schemas/DividendPendingStatus"
           }
         },
         "type": "object",
@@ -10078,8 +10093,7 @@
             "title": "Id"
           },
           "status": {
-            "type": "string",
-            "title": "Status"
+            "$ref": "#/components/schemas/DividendPendingStatus"
           },
           "rolledBack": {
             "type": "boolean",
@@ -11410,6 +11424,18 @@
         ],
         "title": "RegisterReq"
       },
+      "ReportPeriodType": {
+        "type": "string",
+        "enum": [
+          "ANNUAL",
+          "INTERIM",
+          "QUARTERLY",
+          "SPECIAL",
+          "OTHER"
+        ],
+        "title": "ReportPeriodType",
+        "description": "分红报告期类型（§5.1）：决定唯一键与取向解析。"
+      },
       "RestoreReq": {
         "properties": {
           "email": {
@@ -11440,8 +11466,7 @@
             "title": "Reportquarter"
           },
           "periodType": {
-            "type": "string",
-            "title": "Periodtype"
+            "$ref": "#/components/schemas/ReportPeriodType"
           },
           "periodLabel": {
             "type": "string",
@@ -11467,8 +11492,7 @@
             "title": "Dividendlabel"
           },
           "status": {
-            "type": "string",
-            "title": "Status"
+            "$ref": "#/components/schemas/DividendStatus"
           },
           "exDividendDate": {
             "anyOf": [
@@ -11737,7 +11761,19 @@
         "properties": {
           "state": {
             "type": "string",
+            "enum": [
+              "idle",
+              "running",
+              "done",
+              "error",
+              "cancelled"
+            ],
             "title": "State"
+          },
+          "running_elsewhere": {
+            "type": "boolean",
+            "title": "Running Elsewhere",
+            "default": false
           },
           "total": {
             "type": "integer",

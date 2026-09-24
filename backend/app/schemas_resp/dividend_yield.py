@@ -9,9 +9,13 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel
+
+# §5.2b 续批（S13）：枚举字段用**真实枚举类型**而非裸 str——否则 OpenAPI 里没有 enum，
+# 前端只能手写联合，后端加枚举值时前端下拉静默漏项（单一事实源在 models/enums.py）。
+from app.models.enums import DividendPendingStatus, DividendStatus, ReportPeriodType
 
 class PendingDividendOut(BaseModel):
     """待人工划分分红行（列表项）。金额 Decimal → str（信封编码器保证）。"""
@@ -34,8 +38,8 @@ class PendingDividendOut(BaseModel):
     payDate: Optional[date] = None
     announcementDate: Optional[date] = None
     reportPeriodRaw: Optional[str] = None
-    status: str  # PENDING|ASSIGNED|IGNORED
-    resolvedPeriodType: Optional[str] = None
+    status: DividendPendingStatus  # PENDING|ASSIGNED|IGNORED
+    resolvedPeriodType: Optional[ReportPeriodType] = None
     resolvedReportYear: Optional[int] = None
     resolvedReportQuarter: Optional[int] = None
     createdAt: datetime
@@ -54,22 +58,22 @@ class PendingDividendSummaryOut(BaseModel):
 
 class PendingAssignResultOut(BaseModel):
     id: str
-    status: str
+    status: DividendPendingStatus
     conflict: bool
     warning: Optional[str] = None
     reportYear: int
     reportQuarter: int
-    periodType: str
+    periodType: ReportPeriodType
 
 
 class PendingIgnoreResultOut(BaseModel):
     id: str
-    status: str
+    status: DividendPendingStatus
 
 
 class PendingReopenResultOut(BaseModel):
     id: str
-    status: str
+    status: DividendPendingStatus
     rolledBack: bool  # 是否连带删除了主表同键行
 
 
@@ -89,12 +93,12 @@ class BatchOperationOut(BaseModel):
 class SecurityDividendItemOut(BaseModel):
     reportYear: int
     reportQuarter: int
-    periodType: str
+    periodType: ReportPeriodType
     periodLabel: str
     planLabel: str
     cashPerShare: str
     dividendLabel: Optional[str] = None
-    status: str
+    status: DividendStatus
     exDividendDate: Optional[date] = None
     announcementDate: Optional[date] = None
 
@@ -139,7 +143,12 @@ class SeedFailedSecurityOut(BaseModel):
 class SeedProgressOut(BaseModel):
     """首跑播种运行进度（GET /seed-initial-dividends/progress）。"""
 
-    state: str  # idle | running | done | error | cancelled
+    # Literal（非裸 str）：进契约成 openapi enum → 前端生成联合类型，后端新增 state 时
+    # 前端 switch/三元漏分支会由 vue-tsc 报错，而非静默不轮询（§4 收口）。
+    state: Literal["idle", "running", "done", "error", "cancelled"]
+    # S9 ②B：state 语义为「任务在其它进程运行」（本进程 idle + DB 锁被他人持有未过期）。
+    # 此态下 total/processed 等计数为零值（本进程看不到对方内存态），取消仍可跨进程生效。
+    running_elsewhere: bool = False
     total: int
     processed: int
     hits: int

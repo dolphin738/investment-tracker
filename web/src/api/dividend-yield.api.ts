@@ -75,7 +75,8 @@ export function getDividendYieldTop20(): Promise<DividendYieldTop20Response> {
 export interface SecurityDividendItem {
   reportYear: number;
   reportQuarter: number;
-  periodType: 'ANNUAL' | 'INTERIM' | 'QUARTERLY' | 'SPECIAL' | 'OTHER';
+  /** 报告期类型：§5.2b 续批，取生成契约（后端 ReportPeriodType 为单一事实源） */
+  periodType: components['schemas']['ReportPeriodType'];
   /** 报告期展示名：2025年报 / 2025半年报 / 2025三季报 / 2023特别分配（§5.1 命名） */
   periodLabel: string;
   /** 分红方案展示名：源站口径「10派3元」（库内每股金额 ×10 折算） */
@@ -84,8 +85,8 @@ export interface SecurityDividendItem {
   cashPerShare: string;
   /** 源站「分红类型」原文标签（如「股改分红」「重整转增」）；无标签为 null（E6 修复） */
   dividendLabel: string | null;
-  /** PROPOSED 预案 / PAID 已派发 / REJECTED 否决 */
-  status: string;
+  /** PROPOSED 预案 / PAID 已派发 / REJECTED 否决（§5.2b 续批：取生成契约 DividendStatus） */
+  status: components['schemas']['DividendStatus'];
   exDividendDate: string | null;
   announcementDate: string | null;
 }
@@ -178,8 +179,8 @@ export function cancelSeedInitialDividends(): Promise<{ message: string }> {
 
 /** 待划分列表筛选/分页参数（排序固定 created_at DESC, id DESC，后端不提供 sort） */
 export interface PendingDividendFilters {
-  /** 状态筛选（不传 = 全部） */
-  status?: 'PENDING' | 'ASSIGNED' | 'IGNORED';
+  /** 状态筛选（不传 = 全部；§5.2b 续批：取生成契约 DividendPendingStatus） */
+  status?: components['schemas']['DividendPendingStatus'];
   /** 源站原文标签精确匹配（不传 = 全部） */
   label?: string;
   /** 关键字：证券代码 / 名称模糊（服务端 ilike） */
@@ -192,8 +193,8 @@ export interface PendingDividendFilters {
 export interface PendingAssignPayload {
   reportYear: number;
   reportQuarter: number;
-  /** ANNUAL | INTERIM | QUARTERLY | SPECIAL | OTHER（后端服务层枚举校验） */
-  periodType: string;
+  /** 报告期类型（§5.2b 续批：取生成契约，与 SecurityDividendItem 同枚举） */
+  periodType: components['schemas']['ReportPeriodType'];
 }
 
 /** 批量划分单条（= 单笔请求体 + 待划分行 id） */

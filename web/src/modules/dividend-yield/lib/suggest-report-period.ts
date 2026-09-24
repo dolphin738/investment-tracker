@@ -15,12 +15,17 @@
  *
  * 7 条真样本回归见 `__tests__/suggest-report-period.test.ts`。
  */
-export type PendingPeriodType =
-  | 'ANNUAL'
-  | 'INTERIM'
-  | 'QUARTERLY'
-  | 'SPECIAL'
-  | 'OTHER';
+import type { components } from '@/types/api';
+
+/**
+ * 报告期类型（§5.2b 续批 / S13）：**类型**直接取 OpenAPI 生成物——后端
+ * ``models/enums.ReportPeriodType`` 是单一事实源，加值时本类型自动跟随。
+ * 运行时集合（``LEGAL_QUARTERS`` / ``PERIOD_TYPE_LABELS``）仍须手写键值（下拉遍历、
+ * 标签映射需要实际值），但以 ``Record<PendingPeriodType, …>`` 约束完整性——
+ * 后端新增枚举值时，漏补标签会直接 ``vue-tsc`` 报错（此前靠手写联合 + ``as keyof``
+ * 断言掩盖缺口）。
+ */
+export type PendingPeriodType = components['schemas']['ReportPeriodType'];
 
 /** 报告期类型 → 合法季度格（其余季度在该类型下为非法键位） */
 const LEGAL_QUARTERS: Record<PendingPeriodType, readonly number[]> = {
@@ -220,3 +225,4 @@ export function isOutsideRetention(
 ): boolean {
   return reportYear < retentionMinYear(currentYear, retentionYears);
 }
+
