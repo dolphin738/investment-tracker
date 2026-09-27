@@ -815,6 +815,21 @@ export interface DividendYieldTop20Response {
   consecutive: DividendYieldRankItem[];
 }
 
+/** 股息价格推算选择框候选（所有有分红证券，无分页上限，§10.2；服务端返回 snake_case，与模块其它契约一致） */
+export interface DividendSecurityCandidate {
+  master_id: string;
+  code: string | null;
+  name: string | null;
+  exchange: string | null;
+  /** 每股现金分红（元；可能为 null，选中后推算回退服务端口径） */
+  numerator_per_share: number | null;
+}
+
+/** 所有有分红证券响应（§10.2 股息价格推算选择框） */
+export interface DividendSecurityListResponse {
+  items: DividendSecurityCandidate[];
+}
+
 /** 隐含股息收益率反推价格响应（含当前价/当前股息率对照，§9） */
 export interface ImpliedPriceResult {
   master_id: string;

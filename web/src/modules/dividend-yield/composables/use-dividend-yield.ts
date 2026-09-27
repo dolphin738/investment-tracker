@@ -21,6 +21,7 @@ import {
   getSecurityDividends,
   getDividendYieldImpliedPrice,
   getDividendYieldRank,
+  getDividendYieldSecurities,
   getDividendYieldSettings,
   getDividendYieldTop20,
   getSeedProgress,
@@ -56,6 +57,15 @@ export function useTop20() {
     queryKey: [...DIVIDEND_YIELD_KEY, 'top20'],
     queryFn: () => getDividendYieldTop20(),
     staleTime: 60 * 1000,
+  });
+}
+
+/** 所有有分红的证券（股息价格推算选择框候选，无分页上限，§10.2） */
+export function useDividendYieldSecurities() {
+  return useQuery({
+    queryKey: [...DIVIDEND_YIELD_KEY, 'securities'],
+    queryFn: () => getDividendYieldSecurities(),
+    staleTime: 5 * 60 * 1000,
   });
 }
 

@@ -287,6 +287,44 @@ async def top20_dividend_yield(
     }
 
 
+@router_dividend_yield.get("/securities")
+async def list_dividend_securities(
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """所有有分红的证券（供「股息价格推算」选择框；无分页上限，§10.2）。
+
+    - 过滤：``dividend_yield`` 非 NULL 且非 NaN（有股息率即视作有分红）；
+    - 排序：按证券代码升序（稳定、可浏览完整列表，前端再按代码/名称本地过滤）；
+    - 投影：master_id / code / name / exchange / numerator_per_share（够推算使用，避免大字段）。
+    """
+    _NAN = Decimal("NaN")
+    stmt = (
+        select(SecurityDividendYield)
+        .join(Security, Security.id == SecurityDividendYield.master_id)
+        .where(
+            SecurityDividendYield.dividend_yield.is_not(None),
+            SecurityDividendYield.dividend_yield != _NAN,
+        )
+        .order_by(Security.code.asc(), SecurityDividendYield.master_id.asc())
+    )
+    rows = (await db.execute(stmt)).scalars().all()
+    sec_map = await _fetch_sec_map(db, rows)
+    items: list[dict[str, Any]] = []
+    for r in rows:
+        sec = sec_map.get(r.master_id)
+        items.append(
+            {
+                "master_id": r.master_id,
+                "code": sec.code if sec else None,
+                "name": sec.name if sec else None,
+                "exchange": sec.exchange if sec else None,
+                "numerator_per_share": r.numerator_per_share,
+            }
+        )
+    return {"items": items}
+
+
 @router_dividend_yield.get(
     "/{master_id}/dividends", response_model=SecurityDividendListOut
 )

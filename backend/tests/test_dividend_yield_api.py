@@ -135,6 +135,31 @@ async def test_rankings_null_yield_excluded(session, client):
     assert codes == {"sh600200"}
 
 
+# ───────────────────────── 所有分红证券（§10.2 股息价格推算选择框，无上限） ─────────────────────────
+@pytest.mark.asyncio
+async def test_securities_lists_all_dividend_payers_excludes_null(session, client):
+    """守护 §10.2：/securities 返回所有有股息率证券（dividend_yield 非 NULL/NaN），
+    排除无股息率行，按代码升序，投影字段为 master_id/code/name/exchange/numerator_per_share。"""
+    info = await register_login(client)
+    await _seed_snapshot(session, "sh600100", dividend_yield="0.08")
+    await _seed_snapshot(session, "sh600200", dividend_yield="0.09")
+    await _seed_snapshot(session, "sh600050", dividend_yield=None)  # 无股息率 → 不入候选
+    await session.commit()
+    h = auth(info["token"])
+    r = await client.get("/api/dividend-yield/securities", headers=h)
+    status, _, data, _ = env(r)
+    assert status == 200
+    codes = [row["code"] for row in data["items"]]
+    assert codes == ["sh600100", "sh600200"]  # 仅两只有股息率，且按代码升序
+    assert set(data["items"][0].keys()) == {
+        "master_id",
+        "code",
+        "name",
+        "exchange",
+        "numerator_per_share",
+    }
+
+
 # ───────────────────────── 近两年无分红默认剔除（§8.2/§8.3，P0-3） ─────────────────────────
 @pytest.mark.asyncio
 async def test_rankings_excludes_no_recent_dividend_by_default(session, client):

@@ -198,11 +198,14 @@ def test_openapi_pending_contract_paths_and_schemas():
     ``SecurityDividendListOut`` 进契约，``dividendLabel`` 字段可见。
 
     2026-09-22 补齐历史分红进度可视化再 +2（seed progress GET / cancel POST）→ 103 → 105。
+    2026-09-26 新增 ``GET /api/dividend-yield/securities``（股息价格推算的全量候选证券，
+    注册在 ``/{master_id}/...`` 之前）→ 105 → 106。
     """
     spec = client.get("/api/openapi.json").json()
     paths = spec["paths"]
-    assert len(paths) == 105, (
-        f"paths 计数应为 105（96 + 7 pending + 2 seed 进度/取消），实得 {len(paths)}"
+    assert len(paths) == 106, (
+        f"paths 计数应为 106（96 + 7 pending + 2 seed 进度/取消 + 1 securities 全量候选），"
+        f"实得 {len(paths)}"
     )
     for p in (
         "/api/dividend-yield/pending-dividends",
@@ -215,6 +218,8 @@ def test_openapi_pending_contract_paths_and_schemas():
         # 补齐历史分红进度可视化（2026-09-22）
         "/api/dividend-yield/seed-initial-dividends/progress",
         "/api/dividend-yield/seed-initial-dividends/cancel",
+        # 股息价格推算的全量候选证券（2026-09-26）
+        "/api/dividend-yield/securities",
     ):
         assert p in paths, f"缺少 path：{p}"
 

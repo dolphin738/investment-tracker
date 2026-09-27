@@ -1,7 +1,7 @@
 /**
  * modules/dividend-yield/__tests__/implied-price-calculator.test.ts — 股息价格推算契约
  *
- * 守护（审查 M-2/M-3/L-2 收口）：候选渲染（榜单前 200 语义）与本地过滤、
+ * 守护（审查 M-2/M-3/L-2 收口）：候选渲染（全部有分红证券语义）与本地过滤、
  * 选中带出每股分红 + 快速参考折算、目标股息率换算与边界校验、
  * 键入即清残留选中（M-3）、候选加载失败错误态（L-2）。mock api 层，vue-query 真实。
  */
@@ -9,46 +9,34 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query';
 import ImpliedPriceCalculator from '../components/ImpliedPriceCalculator.vue';
-import type { DividendYieldRankItem } from '@/api/types';
+import type { DividendSecurityCandidate } from '@/api/types';
 
 const fixtures = vi.hoisted(() => {
-  const rankItem = (over: Partial<DividendYieldRankItem>): DividendYieldRankItem => ({
+  const candidate = (
+    over: Partial<DividendSecurityCandidate>,
+  ): DividendSecurityCandidate => ({
     master_id: 'm-0',
     code: '600000',
     name: '证券600000',
     exchange: 'SH',
-    mode: 'TTM',
-    dividend_yield: 0.08,
     numerator_per_share: 0.5,
-    latest_price: 10,
-    latest_trade_date: '2026-09-04',
-    consecutive_years: 3,
-    last_dividend_year: 2026,
-    stale: false,
-    suspicious: false,
-    computed_at: null,
     ...over,
   });
   return {
     failRank: false,
     impliedCalls: [] as Array<{ id: string; ratio: number }>,
-    ranks: [
-      rankItem({ master_id: 'm-1', code: '600001', name: '证券600001' }),
-      rankItem({ master_id: 'm-2', code: '000002', name: '万科A' }),
-      rankItem({ master_id: 'm-3', code: '600519', name: '贵州茅台', numerator_per_share: 6 }),
+    securities: [
+      candidate({ master_id: 'm-1', code: '600001', name: '证券600001' }),
+      candidate({ master_id: 'm-2', code: '000002', name: '万科A' }),
+      candidate({ master_id: 'm-3', code: '600519', name: '贵州茅台', numerator_per_share: 6 }),
     ],
   };
 });
 
 vi.mock('@/api/dividend-yield.api', () => ({
-  getDividendYieldRank: vi.fn(async () => {
+  getDividendYieldSecurities: vi.fn(async () => {
     if (fixtures.failRank) throw new Error('boom');
-    return {
-      items: fixtures.ranks,
-      total: fixtures.ranks.length,
-      page: 1,
-      pageSize: 200,
-    };
+    return { items: fixtures.securities };
   }),
   getDividendYieldImpliedPrice: vi.fn(
     async (masterId: string, targetRatio: number) => {
@@ -109,7 +97,7 @@ describe('ImpliedPriceCalculator（§10.2 股息价格推算 TAB）', () => {
     fixtures.impliedCalls.length = 0;
   });
 
-  it('候选渲染（榜单前 200 语义）与本地过滤（代码/名称）', async () => {
+  it('候选渲染（全部有分红证券语义）与本地过滤（代码/名称）', async () => {
     const wrapper = mountCalc();
     await flushPromises();
     await openCandidates(wrapper);

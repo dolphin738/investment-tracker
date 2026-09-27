@@ -71,6 +71,11 @@ export function getDividendYieldTop20(): Promise<DividendYieldTop20Response> {
   return http.get<DividendYieldTop20Response>('/dividend-yield/top20');
 }
 
+/** 所有有分红的证券（供股息价格推算选择框，无分页上限，§10.2） */
+export function getDividendYieldSecurities(): Promise<DividendSecurityListResponse> {
+  return http.get<DividendSecurityListResponse>('/dividend-yield/securities');
+}
+
 /** 单条分红明细（按报告期） */
 export interface SecurityDividendItem {
   reportYear: number;

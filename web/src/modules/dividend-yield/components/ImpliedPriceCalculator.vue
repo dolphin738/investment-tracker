@@ -5,9 +5,9 @@
  * 自 SecurityDetailPanel 迁出的「反推价格」功能独立化（对外名「股息价格推算」，参照外部模板丰富界面）：
  * - 选择股票：搜索式选择框（交互骨架复用全站通用 ComboboxShell，2026-09-09 审查
  *   M-1/债务收口；顺带获得键盘导航/ARIA（L-1）、错误态（L-2）），
- *   候选 = 股息率榜单前 200 家（有分红记录，按股息率降序），本地按代码 / 名称
- *   即时过滤（openOnFocus 浏览模式：聚焦即展示全部候选）；选中后自动带出该股
- *   每股分红（榜单行 numerator_per_share，服务端分红记录口径，只读展示）；
+ *   候选 = 全部有分红证券（GET /dividend-yield/securities，无分页上限，按代码升序），
+ *   本地按代码 / 名称即时过滤（openOnFocus 浏览模式：聚焦即展示全部候选）；选中后自动带出该股
+ *   每股分红（候选 numerator_per_share，服务端分红记录口径，只读展示）；
  *   开始键入即清掉残留选中（审查 M-3：避免结果卡仍显示旧股）；
  * - 目标股息率以百分比输入（如 6 = 6%），内部换算小数后仍走原服务端
  *   implied-price 接口计算（保留原有逻辑与当前价/当前股息率对照）；
@@ -24,29 +24,20 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { formatCurrency, formatPercent } from '@/lib/utils';
-import { useImpliedPrice, useRank } from '../composables/use-dividend-yield';
-import type { DividendYieldRankItem } from '@/api/types';
-import type { DividendYieldSort } from '@/api/types';
+import { useImpliedPrice, useDividendYieldSecurities } from '../composables/use-dividend-yield';
+import type { DividendSecurityCandidate } from '@/api/types';
 
-// ── 股票候选：榜单前 200（有分红记录，按股息率降序） ──
-const CANDIDATE_PAGE_SIZE = 200;
-const candidatePage = ref(1);
-const candidateSort = ref<DividendYieldSort>('dividend_yield');
-const candidatesQuery = useRank(
-  candidatePage,
-  CANDIDATE_PAGE_SIZE,
-  candidateSort,
-  true,
-);
-const candidates = computed<DividendYieldRankItem[]>(
-  () => candidatesQuery.data.value?.items ?? [],
+// ── 股票候选：所有有分红证券（无分页上限；按代码升序，本地按代码/名称即时过滤） ──
+const securitiesQuery = useDividendYieldSecurities();
+const candidates = computed<DividendSecurityCandidate[]>(
+  () => securitiesQuery.data.value?.items ?? [],
 );
 
 // ── 搜索式选择（通用外壳 + 本地过滤：代码 / 名称包含匹配，大小写不敏感） ──
-const selected = ref<DividendYieldRankItem | null>(null);
+const selected = ref<DividendSecurityCandidate | null>(null);
 const searchQuery = ref('');
 
-const filteredCandidates = computed<DividendYieldRankItem[]>(() => {
+const filteredCandidates = computed<DividendSecurityCandidate[]>(() => {
   const q = searchQuery.value.trim().toLowerCase();
   if (!q) return candidates.value;
   return candidates.value.filter(
@@ -69,7 +60,7 @@ function onSearch(v: string): void {
   if (selected.value) selected.value = null;
 }
 
-function handlePick(item: DividendYieldRankItem): void {
+function handlePick(item: DividendSecurityCandidate): void {
   selected.value = item;
   // 外壳选中后已复位自身输入；同步清本地过滤词，保证下次聚焦展示全部候选
   searchQuery.value = '';
@@ -80,7 +71,7 @@ function handleClear(): void {
   searchQuery.value = '';
 }
 
-/** 服务端权威每股分红（选中后优先用接口返回，回退榜单行值） */
+/** 服务端权威每股分红（选中后优先用接口返回，回退候选行值） */
 const numeratorPerShare = computed<number | null>(() => {
   const fromApi = implied.data.value?.numerator_per_share;
   if (fromApi != null) return fromApi;
@@ -142,18 +133,18 @@ const quickRefs = computed(() => {
 
 <template>
   <div class="space-y-5">
-    <!-- 选择股票（搜索式：候选 = 榜单前 200 有分红记录股票） -->
+    <!-- 选择股票（搜索式：候选 = 所有有分红证券） -->
     <div class="space-y-1.5">
       <Label for="dy-calc-security" class="text-sm font-medium">选择股票</Label>
       <ComboboxShell
         id="dy-calc-security"
         :value="selectedLabel"
-        placeholder="搜索代码 / 名称（候选为股息率榜单前 200 家）"
-        :loading="candidatesQuery.isLoading.value"
-        :error="candidatesQuery.isError.value"
+        placeholder="搜索代码 / 名称（候选为全部有分红证券）"
+        :loading="securitiesQuery.isLoading.value"
+        :error="securitiesQuery.isError.value"
         :candidate-count="filteredCandidates.length"
         open-on-focus
-        empty-text="无匹配结果（候选仅含股息率榜单前 200 家）"
+        empty-text="无匹配结果（候选为全部有分红证券）"
         @search="onSearch"
         @select-index="(i: number) => handlePick(filteredCandidates[i])"
         @clear="handleClear"
@@ -183,7 +174,7 @@ const quickRefs = computed(() => {
         </template>
       </ComboboxShell>
       <p class="text-xs text-muted-foreground">
-        候选为有分红记录的股票（按股息率降序前 200 家）；选中后自动带出每股分红
+        候选为全部有分红记录的证券（按代码升序）；选中后自动带出每股分红
       </p>
     </div>
 
