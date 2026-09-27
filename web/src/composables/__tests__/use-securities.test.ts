@@ -75,4 +75,21 @@ describe('useSecurities（翻页拉全，§标的字典）', () => {
     const api = await import('@/api/security.api');
     expect((api.listSecurities as Mock).mock.calls.length).toBe(1);
   });
+
+  it('护栏：恒返满页（后端分页异常）时在页数上限抛错，不做无限翻页', async () => {
+    // 每页都「装满 200」→ 后端分页异常场景；页数上限 50，第 51 页请求前中止
+    fixtures.pages = Array.from({ length: 200 }, (_, i) => ({
+      items: stub(200, `p${i}`),
+      total: Number.POSITIVE_INFINITY,
+      page: i + 1,
+      pageSize: 200,
+    }));
+    const wrapper = mountHarness();
+    await flushPromises();
+
+    // error 态：select 未产出数据 → data-count '0'
+    expect(wrapper.attributes('data-count')).toBe('0');
+    const api = await import('@/api/security.api');
+    expect((api.listSecurities as Mock).mock.calls.length).toBe(50);
+  });
 });
