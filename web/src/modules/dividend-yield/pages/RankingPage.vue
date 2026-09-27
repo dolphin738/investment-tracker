@@ -126,15 +126,16 @@ function isSorted(col: DividendYieldSort): boolean {
   return allSort.value === col;
 }
 
-/** 行点击 → 详情弹窗（默认不展示曲线图；关闭后清空选中返回榜单列表状态） */
+/** 行点击 → 详情弹窗（默认不展示曲线图；关闭后清空选中返回榜单列表状态）。
+ *  code/name 取生成契约（DividendYieldRankItemOut）的可选口径，与面板 prop 一致。 */
 const selected = ref<{
   master_id: string;
-  code: string | null;
-  name: string | null;
+  code?: string | null;
+  name?: string | null;
 } | null>(null);
 
 function selectRow(
-  item: { master_id: string; code: string | null; name: string | null },
+  item: { master_id: string; code?: string | null; name?: string | null },
 ): void {
   selected.value = { ...item };
 }

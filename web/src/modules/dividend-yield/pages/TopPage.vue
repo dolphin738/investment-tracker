@@ -42,15 +42,17 @@ const top20 = useTop20();
 const topItems = computed(() => top20.data.value?.top ?? []);
 const consecutiveItems = computed(() => top20.data.value?.consecutive ?? []);
 
-/** 行点击 → 下方展开详情面板（曲线 + 计算器） */
+/** 行点击 → 下方展开详情面板（曲线 + 计算器）。
+ *  code/name 取生成契约的可选口径（?: string | null | undefined），
+ *  展示层本就以 `||` 兜底，optional 不影响渲染语义。 */
 const selected = ref<{
   master_id: string;
-  code: string | null;
-  name: string | null;
+  code?: string | null;
+  name?: string | null;
 } | null>(null);
 
 function selectRow(
-  item: { master_id: string; code: string | null; name: string | null },
+  item: { master_id: string; code?: string | null; name?: string | null },
 ): void {
   selected.value = { ...item };
 }

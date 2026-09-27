@@ -46,11 +46,12 @@ vi.mock('@/api/dividend-yield.api', () => ({
         master_id: masterId,
         code: '600001',
         name: '证券600001',
-        numerator_per_share: 0.5,
-        target_ratio: targetRatio,
-        implied_price: 0.5 / targetRatio,
-        current_price: 10,
-        current_dividend_yield: 0.05,
+        // wire 口径：金额/比率字段 Decimal → str（生成契约 ImpliedPriceResultOut）
+        numerator_per_share: '0.5',
+        target_ratio: String(targetRatio),
+        implied_price: String(0.5 / targetRatio),
+        current_price: '10',
+        current_dividend_yield: '0.05',
       };
     },
   ),

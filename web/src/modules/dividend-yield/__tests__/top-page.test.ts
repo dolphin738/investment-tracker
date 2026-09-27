@@ -11,7 +11,10 @@ import { createMemoryHistory, createRouter, type Router } from 'vue-router';
 import { createPinia, setActivePinia, type Pinia } from 'pinia';
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query';
 import TopPage from '../pages/TopPage.vue';
-import type { DividendYieldRankItem, DividendYieldTop20Response } from '@/api/types';
+import type {
+  DividendYieldRankItem,
+  DividendYieldTop20Response,
+} from '@/api/dividend-yield.api';
 
 const fixtures = vi.hoisted(() => ({
   top20: { top: [], consecutive: [] } as unknown as DividendYieldTop20Response,
@@ -33,15 +36,16 @@ function item(code: string, over: Partial<DividendYieldRankItem> = {}): Dividend
     name: `证券${code}`,
     exchange: 'SH',
     mode: 'TTM',
-    dividend_yield: 0.08,
-    numerator_per_share: 1,
-    latest_price: 12.5,
+    // wire 口径：金额类字段 Decimal → str（生成契约 DividendYieldRankItemOut）
+    dividend_yield: '0.08',
+    numerator_per_share: '1',
+    latest_price: '12.5',
     latest_trade_date: '2026-09-04',
     consecutive_years: 3,
     last_dividend_year: 2026,
     stale: false,
     suspicious: false,
-    computed_at: null,
+    computed_at: '2026-09-04T15:00:00+08:00',
     ...over,
   };
 }

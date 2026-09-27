@@ -21,8 +21,9 @@ import {
 import SecurityDetailPanel from './SecurityDetailPanel.vue';
 
 const props = defineProps<{
-  /** 当前选中行（null = 弹窗关闭）；数据契约与 SecurityDetailPanel 一致 */
-  security: { master_id: string; code: string | null; name: string | null } | null;
+  /** 当前选中行（null = 弹窗关闭）；数据契约与 SecurityDetailPanel 一致
+   *  （code/name 取生成契约 DividendYieldRankItemOut 的可选口径） */
+  security: { master_id: string; code?: string | null; name?: string | null } | null;
 }>();
 
 const emit = defineEmits<{ 'update:open': [open: boolean] }>();

@@ -24,14 +24,25 @@ export function useYieldThresholds() {
     red_threshold: prefStore.getPreference('redThreshold'),
   }));
 
-  /** 股息率标色：≥绿色阈值 text-up(红)；≤红色阈值 text-down(绿)；其余/无值 灰显 */
-  function yieldClass(item: { dividend_yield: number | null }): string {
-    if (item.dividend_yield === null) return 'text-muted-foreground';
+  /**
+   * 股息率标色：≥绿色阈值 text-up(红)；≤红色阈值 text-down(绿)；其余/无值 灰显。
+   * wire 口径：dividend_yield 为 Decimal → str（生成契约 DividendYieldRankItemOut），
+   * 统一 Number() 归一后再比较（NaN/非法串按无值灰显，与 null 同待遇）。
+   */
+  function yieldClass(item: {
+    dividend_yield?: string | number | null;
+  }): string {
+    const raw = item.dividend_yield;
+    if (raw === null || raw === undefined || raw === '') {
+      return 'text-muted-foreground';
+    }
+    const y = typeof raw === 'string' ? Number(raw) : raw;
+    if (!Number.isFinite(y)) return 'text-muted-foreground';
     const { green_threshold: green, red_threshold: red } = thresholds.value;
-    if (green !== null && item.dividend_yield >= green) {
+    if (green !== null && y >= green) {
       return 'text-up';
     }
-    if (red !== null && item.dividend_yield <= red) {
+    if (red !== null && y <= red) {
       return 'text-down';
     }
     return 'text-muted-foreground';

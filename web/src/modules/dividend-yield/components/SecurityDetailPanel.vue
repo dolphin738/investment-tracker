@@ -22,7 +22,9 @@ import { useSecurityDividends } from '../composables/use-dividend-yield';
 import type { SecurityDividendItem } from '@/api/dividend-yield.api';
 
 const props = defineProps<{
-  security: { master_id: string; code: string | null; name: string | null };
+  // code/name 取生成契约（DividendYieldRankItemOut）的可选口径：RankItemOut 中二者
+  // 均为 `?: string | null`，调用方直接传榜单行/选中行，不必手写降级映射。
+  security: { master_id: string; code?: string | null; name?: string | null };
 }>();
 
 const emit = defineEmits<{ close: [] }>();

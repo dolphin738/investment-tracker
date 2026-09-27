@@ -17,10 +17,7 @@
 
 import { http } from '@/lib/api-client';
 import type {
-  DividendYieldRankResponse,
-  DividendYieldTop20Response,
   DividendYieldSort,
-  ImpliedPriceResult,
   PaginatedResponse,
 } from './types';
 // 待人工划分分红端点响应契约直接复用 OpenAPI 生成类型（批次 C 已重生成 types/api.ts）。
@@ -32,6 +29,21 @@ type PendingAssignResultOut = components['schemas']['PendingAssignResultOut'];
 type PendingIgnoreResultOut = components['schemas']['PendingIgnoreResultOut'];
 type PendingReopenResultOut = components['schemas']['PendingReopenResultOut'];
 type BatchOperationOut = components['schemas']['BatchOperationOut'];
+
+// 榜单/推算契约（R3 续批收口）：此前 rankings/top20/implied-price 三端点无 response_model，
+// 前端手写 DividendYieldRankItem/ImpliedPriceResult，wire 上 Decimal→str 的字段被声明为
+// number，与后端加字段一样静默漂移。现由生成物唯一承载（后端改字段 vue-tsc 即报错）。
+/** 股息率榜单行（DividendYieldRankItemOut；dividend_yield 等 Decimal 字段为 string） */
+export type DividendYieldRankItem =
+  components['schemas']['DividendYieldRankItemOut'];
+/** 股息率榜单分页响应 */
+export type DividendYieldRankResponse =
+  components['schemas']['DividendYieldRankPageOut'];
+/** Top20 + 连续分红榜双榜响应（§8.3） */
+export type DividendYieldTop20Response =
+  components['schemas']['DividendYieldTop20Out'];
+/** 隐含股息收益率反推价格响应（§9；target_ratio 等比率字段为 string） */
+export type ImpliedPriceResult = components['schemas']['ImpliedPriceResultOut'];
 
 // 股息率全局配置契约（B7/A8）：**响应与请求体都**直接复用 OpenAPI 生成类型——这两个端点
 // 此前未声明 response_model，`docs/openapi.json` 里根本没有该类型，前端只能手写

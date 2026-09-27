@@ -786,52 +786,9 @@ export type DividendYieldSort =
 /** 股息率口径：TTM=滚动 12 个月 / LFY=上个完整财年 */
 export type DividendYieldMode = 'TTM' | 'LFY';
 
-/** 股息率榜单行（RankItem） */
-export interface DividendYieldRankItem {
-  master_id: string;
-  code: string | null;
-  name: string | null;
-  exchange: string | null;
-  mode: DividendYieldMode;
-  dividend_yield: number | null;
-  numerator_per_share: number | null;
-  latest_price: number | null;
-  latest_trade_date: string | null;
-  consecutive_years: number | null;
-  last_dividend_year: number | null;
-  stale: boolean;
-  suspicious: boolean;
-  computed_at: string | null;
-  /** true = include_proposed=false 的「过滤态股息率」（§8.1，按过滤记录集现算） */
-  filtered?: boolean;
-}
-
-/** 股息率榜单分页响应 */
-export type DividendYieldRankResponse = PaginatedResponse<DividendYieldRankItem>;
-
-/** Top20 + 连续分红榜双榜响应（§8.3：top 剔除 suspicious 与近两年无分红；榜二 consecutive_years>=2） */
-export interface DividendYieldTop20Response {
-  top: DividendYieldRankItem[];
-  consecutive: DividendYieldRankItem[];
-}
-
-// 股息价格推算候选类型（DividendSecurityCandidate/DividendSecurityListResponse）
-// 已收口到 OpenAPI 生成类型（web/src/api/dividend-yield.api.ts，R3），手写件删除。
-
-/** 隐含股息收益率反推价格响应（含当前价/当前股息率对照，§9） */
-export interface ImpliedPriceResult {
-  master_id: string;
-  code: string | null;
-  name: string | null;
-  numerator_per_share: number | null;
-  target_ratio: number;
-  implied_price: number | null;
-  current_price: number | null;
-  current_dividend_yield: number | null;
-}
-
-// 股息率全局配置（GET/PUT /dividend-yield/settings）的**响应与请求体类型不在本文件**：
-// 后端已为两端点声明 response_model（A8/B7），契约由生成物 `web/src/types/api.ts` 唯一承载，
+// 榜单/推算/候选的响应类型均已收口到 OpenAPI 生成类型（web/src/types/api.ts），
 // api 层再导出具名别名供业务侧消费——
-// `@/api/dividend-yield.api` 的 `DividendYieldSettingsOut`（响应）与 `SettingsUpdateBody`（请求体）。
-// 保留手写副本必然与生成物漂移：`dividend_retention_years` 就曾因「后端已返回、手写没抄」漏过。`
+// `@/api/dividend-yield.api` 的 `DividendYieldRankItem` / `DividendYieldRankResponse` /
+// `DividendYieldTop20Response` / `ImpliedPriceResult` / `DividendSecurityCandidate` 等。
+// 保留手写副本必然与生成物漂移：榜单行 dividend_yield 等 Decimal 字段 wire 上是
+// string，手写却声明 number，曾长期掩盖口径漂移（R3 续批收口）。
