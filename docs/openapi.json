@@ -2762,6 +2762,31 @@
         ]
       }
     },
+    "/api/dividend-yield/securities": {
+      "get": {
+        "tags": [
+          "dividend-yield"
+        ],
+        "summary": "List Dividend Securities",
+        "description": "所有有分红的证券（供「股息价格推算」选择框；无分页上限，§10.2）。\n\n- 过滤：``dividend_yield`` 非 NULL 且非 NaN（有股息率即视作有分红）；\n- 排序：按证券代码升序（稳定、可浏览完整列表，前端再按代码/名称本地过滤）；\n- 投影：master_id / code / name / exchange / numerator_per_share（够推算使用，避免大字段）。",
+        "operationId": "list_dividend_securities_api_dividend_yield_securities_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "JWT-auth": []
+          }
+        ]
+      }
+    },
     "/api/dividend-yield/seed-initial-dividends": {
       "post": {
         "tags": [
@@ -2942,7 +2967,7 @@
           "dividend-yield"
         ],
         "summary": "List Security Dividends",
-        "description": "单证券分红明细（按报告期，供详情面板展示）。\n\n只列**有分红**的期次（``cash_per_share > 0``），按报告期倒序：\n- ``periodLabel``：2025年报 / 2025半年报 / 2025三季报 / 2023特别分配（§5.1 命名）；\n- ``planLabel``：每股金额折算回源站口径「10派X元」。\n\n契约：证券不存在时返回 **200 + 空 items**（不 404）：\n本端点语义是「该标的有哪些分红」，无记录与无标的是同一展示结果（面板只在已有榜单行上打开）。",
+        "description": "单证券分红明细（按报告期，供详情面板展示）。\n\n只列**有分红**的期次（``cash_per_share > 0``），按报告期倒序：\n- ``periodLabel``：2025年报 / 2025半年报 / 2025三季报 / 2023特别分配（§5.1 命名）；\n- ``planLabel``：每股金额折算回源站口径「10派X元」。\n- ``bonusShareRatio`` / ``convertRatio``：每股送股 / 转增比例（字符串，无则为 null），\n  前端折算为「送 Y 股 / 转 Z 股」（每 10 股口径），组合进方案列。\n\n契约：证券不存在时返回 **200 + 空 items**（不 404）：\n本端点语义是「该标的有哪些分红」，无记录与无标的是同一展示结果（面板只在已有榜单行上打开）。",
         "operationId": "list_security_dividends_api_dividend_yield__master_id__dividends_get",
         "security": [
           {
@@ -11490,6 +11515,28 @@
               }
             ],
             "title": "Dividendlabel"
+          },
+          "bonusShareRatio": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bonusshareratio"
+          },
+          "convertRatio": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Convertratio"
           },
           "status": {
             "$ref": "#/components/schemas/DividendStatus"
