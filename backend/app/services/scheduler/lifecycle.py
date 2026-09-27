@@ -17,6 +17,7 @@ from app.models import JobConfig, UserQuoteSyncConfig
 from app.models.enums import JobTriggerSource
 
 from . import _state
+from .reaper import reap_orphan_run_logs
 from .runner import _run_job
 from .user_sync import _run_user_quote_sync
 
@@ -65,7 +66,14 @@ def _register_user_job(sched: Any, cfg: UserQuoteSyncConfig) -> None:
 
 
 async def start_scheduler() -> None:
-    """应用启动时调用：受 SCHEDULER_ENABLED 总开关控制，加载库中 enabled 任务注册。"""
+    """应用启动时调用：先回收孤儿 RUNNING 日志，再受 SCHEDULER_ENABLED 控制注册任务。
+
+    回收**先于**总开关判定：手动触发（``run_task_now``）不依赖全局调度器，即使
+    ``SCHEDULER_ENABLED=false`` 也会写 RUNNING 日志，同样会留下孤儿行。
+    """
+    # 上一次进程被强杀/重部署时，正在跑的执行日志会永久停在 RUNNING（无 finished_at），
+    # 启动期统一收敛为 FAILED。详情见 reaper 模块 docstring。
+    await reap_orphan_run_logs()
     settings = get_settings()
     if not settings.SCHEDULER_ENABLED:
         return

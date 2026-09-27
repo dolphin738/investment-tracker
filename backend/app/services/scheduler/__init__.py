@@ -10,6 +10,7 @@
   ``enabled`` 任务并注册为 cron job；受 ``SCHEDULER_ENABLED`` 总开关控制。
 - ``reload_schedule``：任务增删改 / 启停后移除全部 job 并按库重载（保持调度与库一致）。
 - ``run_task_now``：管理员手动立即执行（不依赖全局调度器，即使调度总开关关闭也可用）。
+- ``reap_orphan_run_logs``：启动期回收孤儿 RUNNING 执行日志（进程被强杀遗留），闭环状态机。
 - 每次执行（定时或手动）写入 ``job_run_logs``：RUNNING → SUCCESS/FAILED + 起止时间 + 信息。
 
 设计取舍：
@@ -55,6 +56,7 @@ from .lifecycle import (
     shutdown_scheduler,
     start_scheduler,
 )
+from .reaper import reap_orphan_run_logs
 
 __all__ = [
     "AsyncSessionLocal",
@@ -78,4 +80,5 @@ __all__ = [
     "run_task_now",
     "shutdown_scheduler",
     "start_scheduler",
+    "reap_orphan_run_logs",
 ]
