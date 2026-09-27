@@ -39,6 +39,8 @@ vi.mock('@/api/security-trade.api', () => ({
 }));
 
 vi.mock('@/api/security.api', () => ({
+  // use-securities 会 import 此常量；mock 工厂缺导出时运行时访问即抛错 → query 恒 error 态
+  SECURITY_LIST_PAGE_SIZE: 200,
   listSecurities: apiMocks.listSecurities,
   resolveSecurity: apiMocks.resolveSecurity,
   updateSecurity: apiMocks.updateSecurity,

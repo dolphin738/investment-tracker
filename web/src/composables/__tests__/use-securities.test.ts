@@ -5,7 +5,7 @@
  * 前端曾一次性请求 pageSize=500，命中后端 GET /portfolios/:portfolioId/securities 的 le=200 约束。
  * 修复后 useSecurities 内部按 200/页翻页拉全；本测试守卫「翻页拼接完整字典」且「单页即停不冗余请求」。
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import { defineComponent, h } from 'vue';
 import { flushPromises, mount } from '@vue/test-utils';
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query';
@@ -63,7 +63,7 @@ describe('useSecurities（翻页拉全，§标的字典）', () => {
     expect(wrapper.attributes('data-count')).toBe('250');
     // 第 1 页装满 200 → 翻第 2 页（50）→ 末页不足一页即停，不发第 3 页
     const api = await import('@/api/security.api');
-    expect((api.listSecurities as unknown as vi.Mock).mock.calls.length).toBe(2);
+    expect((api.listSecurities as Mock).mock.calls.length).toBe(2);
   });
 
   it('单页：不足一页时不发多余请求', async () => {
@@ -73,6 +73,6 @@ describe('useSecurities（翻页拉全，§标的字典）', () => {
 
     expect(wrapper.attributes('data-count')).toBe('3');
     const api = await import('@/api/security.api');
-    expect((api.listSecurities as unknown as vi.Mock).mock.calls.length).toBe(1);
+    expect((api.listSecurities as Mock).mock.calls.length).toBe(1);
   });
 });
