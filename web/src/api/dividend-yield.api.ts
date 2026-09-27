@@ -17,7 +17,6 @@
 
 import { http } from '@/lib/api-client';
 import type {
-  DividendSecurityListResponse,
   DividendYieldRankResponse,
   DividendYieldTop20Response,
   DividendYieldSort,
@@ -71,6 +70,14 @@ export function getDividendYieldRank(
 export function getDividendYieldTop20(): Promise<DividendYieldTop20Response> {
   return http.get<DividendYieldTop20Response>('/dividend-yield/top20');
 }
+
+/** 所有有分红的证券（供股息价格推算选择框，无分页上限，§10.2）。
+ *  契约来自 OpenAPI 生成类型（DividendSecurityListOut，R3 补 response_model 后落契约）。 */
+export type DividendSecurityListResponse =
+  components['schemas']['DividendSecurityListOut'];
+/** 股息价格推算选择框候选行（DividendSecurityItemOut；numerator_per_share 为 Decimal→str） */
+export type DividendSecurityCandidate =
+  components['schemas']['DividendSecurityItemOut'];
 
 /** 所有有分红的证券（供股息价格推算选择框，无分页上限，§10.2） */
 export function getDividendYieldSecurities(): Promise<DividendSecurityListResponse> {

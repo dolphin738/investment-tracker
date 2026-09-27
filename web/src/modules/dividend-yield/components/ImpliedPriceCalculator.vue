@@ -25,7 +25,7 @@ import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { formatCurrency, formatPercent } from '@/lib/utils';
 import { useImpliedPrice, useDividendYieldSecurities } from '../composables/use-dividend-yield';
-import type { DividendSecurityCandidate } from '@/api/types';
+import type { DividendSecurityCandidate } from '@/api/dividend-yield.api';
 
 // ── 股票候选：所有有分红证券（无分页上限；按代码升序，本地按代码/名称即时过滤） ──
 const securitiesQuery = useDividendYieldSecurities();
@@ -71,10 +71,11 @@ function handleClear(): void {
   searchQuery.value = '';
 }
 
-/** 服务端权威每股分红（选中后优先用接口返回，回退候选行值） */
-const numeratorPerShare = computed<number | null>(() => {
+/** 服务端权威每股分红（选中后优先用接口返回，回退候选行值）。
+ *  wire 口径：numerator_per_share 为 Decimal → str（R3 契约），统一收敛为 string | null。 */
+const numeratorPerShare = computed<string | null>(() => {
   const fromApi = implied.data.value?.numerator_per_share;
-  if (fromApi != null) return fromApi;
+  if (fromApi != null) return String(fromApi);
   return selected.value?.numerator_per_share ?? null;
 });
 
@@ -122,8 +123,10 @@ const calculating = computed(
 // ── 快速参考：基于当前每股分红按 3%~8% 本地折算（纯展示） ──
 const QUICK_RATIOS = [0.03, 0.04, 0.05, 0.06, 0.07, 0.08] as const;
 const quickRefs = computed(() => {
-  const n = numeratorPerShare.value;
-  if (n == null || n <= 0) return [];
+  const raw = numeratorPerShare.value;
+  if (raw == null) return [];
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return [];
   return QUICK_RATIOS.map((r) => ({
     ratio: r,
     price: n / r,

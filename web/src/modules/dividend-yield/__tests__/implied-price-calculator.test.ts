@@ -9,7 +9,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query';
 import ImpliedPriceCalculator from '../components/ImpliedPriceCalculator.vue';
-import type { DividendSecurityCandidate } from '@/api/types';
+import type { DividendSecurityCandidate } from '@/api/dividend-yield.api';
 
 const fixtures = vi.hoisted(() => {
   const candidate = (
@@ -19,7 +19,8 @@ const fixtures = vi.hoisted(() => {
     code: '600000',
     name: '证券600000',
     exchange: 'SH',
-    numerator_per_share: 0.5,
+    // wire 口径：numerator_per_share 为 Decimal → str（R3 契约）
+    numerator_per_share: '0.5',
     ...over,
   });
   return {
@@ -28,7 +29,7 @@ const fixtures = vi.hoisted(() => {
     securities: [
       candidate({ master_id: 'm-1', code: '600001', name: '证券600001' }),
       candidate({ master_id: 'm-2', code: '000002', name: '万科A' }),
-      candidate({ master_id: 'm-3', code: '600519', name: '贵州茅台', numerator_per_share: 6 }),
+      candidate({ master_id: 'm-3', code: '600519', name: '贵州茅台', numerator_per_share: '6' }),
     ],
   };
 });
