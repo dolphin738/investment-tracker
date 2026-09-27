@@ -98,6 +98,10 @@ class SecurityDividendItemOut(BaseModel):
     planLabel: str
     cashPerShare: str
     dividendLabel: Optional[str] = None
+    # 每股送股 / 转增比例（股；字符串防前端类型漂移）；无送转为 null。
+    # 落入明细列表时前端折算为「送 Y 股 / 转 Z 股」（每 10 股口径）。
+    bonusShareRatio: Optional[str] = None
+    convertRatio: Optional[str] = None
     status: DividendStatus
     exDividendDate: Optional[date] = None
     announcementDate: Optional[date] = None

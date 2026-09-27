@@ -83,6 +83,10 @@ export interface SecurityDividendItem {
   planLabel: string;
   /** 每股现金分红（元；字符串防前端类型漂移） */
   cashPerShare: string;
+  /** 每股送股比例（股；字符串防前端类型漂移）；无送股为 null */
+  bonusShareRatio?: string | null;
+  /** 每股转增比例（股；字符串防前端类型漂移）；无转增为 null */
+  convertRatio?: string | null;
   /** 源站「分红类型」原文标签（如「股改分红」「重整转增」）；无标签为 null（E6 修复） */
   dividendLabel: string | null;
   /** PROPOSED 预案 / PAID 已派发 / REJECTED 否决（§5.2b 续批：取生成契约 DividendStatus） */

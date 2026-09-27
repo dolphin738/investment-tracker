@@ -94,7 +94,7 @@ describe('SecurityDetailPanel 分红明细', () => {
     const rows = wrapper.findAll('li');
     expect(rows.length).toBe(3);
     expect(rows[0].text()).toContain('2025年报');
-    expect(rows[0].text()).toContain('10派3元');
+    expect(rows[0].text()).toContain('10派3.00元');
     expect(rows[1].text()).toContain('2025三季报');
     expect(rows[2].text()).toContain('2023特别分配');
     expect(wrapper.text()).toContain('仅显示有分红的报告期');
@@ -140,5 +140,46 @@ describe('SecurityDetailPanel 分红明细', () => {
     expect(withBadge.text()).toBe('股改分红');
     // 无标签行：Badge 组件不渲染（而非渲染了别的文案）
     expect(rows[1].findComponent(Badge).exists()).toBe(false);
+  });
+
+  it('明细每行固定四列栅格（报告期/方案/金额/状态），金额列右对齐等宽数字', async () => {
+    dividendItems.list = [
+      item({ dividendLabel: '股改分红', status: 'PROPOSED', periodLabel: '2023特别分配', planLabel: '10派8元', cashPerShare: '0.800000' }),
+      item({ status: 'PAID', periodLabel: '2025年报', planLabel: '10派3元' }),
+    ];
+    const wrapper = await mountPanel();
+    const rows = wrapper.findAll('li');
+    expect(rows.length).toBe(2);
+    for (const row of rows) {
+      // 每行恰好 4 个直接子元素（四列），防止方案/金额又被合并成自由流
+      expect(row.element.children.length).toBe(4);
+    }
+    const amountCol = rows[0].element.children[2] as HTMLElement;
+    expect(amountCol.className).toContain('text-right');
+    expect(amountCol.className).toContain('tabular-nums');
+    expect(amountCol.textContent).toContain('10派8.00元');
+  });
+
+  it('含送转时组合显示「10派X元 送Y股 转Z股」，纯现金行只显示派息', async () => {
+    dividendItems.list = [
+      item({
+        periodLabel: '2024年报',
+        cashPerShare: '0.500000',
+        planLabel: '10派5元送2股转3股',
+        bonusShareRatio: '0.200000',
+        convertRatio: '0.300000',
+      }),
+      item({ periodLabel: '2023年报', cashPerShare: '0.300000' }),
+    ];
+    const wrapper = await mountPanel();
+    const rows = wrapper.findAll('li');
+    // 第一行含送转：组合文本
+    expect(rows[0].text()).toContain('10派5.00元');
+    expect(rows[0].text()).toContain('送2.00股');
+    expect(rows[0].text()).toContain('转3.00股');
+    // 第二行纯现金：只显示派息，不含送/转
+    expect(rows[1].text()).toContain('10派3.00元');
+    expect(rows[1].text()).not.toContain('送');
+    expect(rows[1].text()).not.toContain('转');
   });
 });

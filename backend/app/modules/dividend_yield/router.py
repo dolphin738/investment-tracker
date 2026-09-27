@@ -300,6 +300,8 @@ async def list_security_dividends(
     只列**有分红**的期次（``cash_per_share > 0``），按报告期倒序：
     - ``periodLabel``：2025年报 / 2025半年报 / 2025三季报 / 2023特别分配（§5.1 命名）；
     - ``planLabel``：每股金额折算回源站口径「10派X元」。
+    - ``bonusShareRatio`` / ``convertRatio``：每股送股 / 转增比例（字符串，无则为 null），
+      前端折算为「送 Y 股 / 转 Z 股」（每 10 股口径），组合进方案列。
 
     契约：证券不存在时返回 **200 + 空 items**（不 404）：
     本端点语义是「该标的有哪些分红」，无记录与无标的是同一展示结果（面板只在已有榜单行上打开）。
@@ -335,6 +337,8 @@ async def list_security_dividends(
                 "planLabel": plan_label(r.cash_per_share),
                 "cashPerShare": str(r.cash_per_share),
                 "dividendLabel": r.dividend_label,
+                "bonusShareRatio": str(r.bonus_share_ratio) if r.bonus_share_ratio is not None else None,
+                "convertRatio": str(r.convert_ratio) if r.convert_ratio is not None else None,
                 "status": _enum_value(r.status),
                 "exDividendDate": (
                     r.ex_dividend_date.isoformat() if r.ex_dividend_date else None
