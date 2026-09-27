@@ -247,26 +247,37 @@ const pendingEntry = computed(() => {
         </div>
         <div>本轮处理 <span class="text-foreground">{{ progressData.hits }}</span></div>
         <div>已覆盖跳过 <span class="text-foreground">{{ progressData.covered }}</span></div>
+        <!-- 失败数：failed > 0 时数字本身即展开入口（▸/▾ 仅作状态指示，装饰用） -->
         <div>
-          失败 <span class="text-destructive">{{ progressData.failed }}</span>
+          失败
+          <button
+            v-if="progressData.failed > 0"
+            type="button"
+            class="inline-flex items-center gap-0.5 text-xs text-destructive underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-destructive/60"
+            :title="failedExpanded ? '点击收起失败证券清单' : '点击展开失败证券清单'"
+            :aria-expanded="failedExpanded"
+            aria-controls="seed-failed-securities"
+            @click="failedExpanded = !failedExpanded"
+          >
+            <span>{{ progressData.failed }}</span>
+            <span aria-hidden="true">{{ failedExpanded ? '▾' : '▸' }}</span>
+          </button>
+          <span v-else class="text-destructive">{{ progressData.failed }}</span>
         </div>
       </div>
 
-      <!-- 失败证券清单：仅当 failed > 0 时渲染入口，支持展开查看「代码 + 名称」 -->
+      <!--
+        失败证券清单：入口即统计行的「失败 N」，展开后列出「代码 + 名称」。
+        隐藏条件须与上方统计网格一致（均排除 running_elsewhere）：跨进程态下网格不渲染、
+        触发器随之消失，若清单仍可见就会出现「展开着却无法收起」的孤儿面板。
+      -->
       <div
-        v-if="progressData.failed > 0"
+        v-if="progressData.failed > 0 && !progressData.running_elsewhere"
         class="mt-2"
       >
-        <button
-          type="button"
-          class="flex items-center gap-1 text-xs text-destructive hover:underline"
-          @click="failedExpanded = !failedExpanded"
-        >
-          <span>{{ failedExpanded ? '▾' : '▸' }}</span>
-          <span>查看失败证券（{{ progressData.failed }} 只）</span>
-        </button>
         <div
           v-if="failedExpanded"
+          id="seed-failed-securities"
           class="mt-1 max-h-40 overflow-y-auto rounded border border-destructive/30 bg-destructive/5 p-2"
         >
           <p
