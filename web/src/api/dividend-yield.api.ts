@@ -17,6 +17,7 @@
 
 import { http } from '@/lib/api-client';
 import type {
+  DividendSecurityListResponse,
   DividendYieldRankResponse,
   DividendYieldTop20Response,
   DividendYieldSort,
