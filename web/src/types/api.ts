@@ -237,6 +237,56 @@ PG 原生枚举类型名同本类名。**无排序约束**（与 ``ReportPeriodT
     DividendStatus: 'PROPOSED' | 'PAID' | 'REJECTED';
     /** DividendType */
     DividendType: 'CASH' | 'STOCK_DIVIDEND';
+    /** 股息率口径：TTM（滚动 12 个月）/ LFY（最近完整财年）。§2.2。 */
+    DividendYieldMode: 'TTM' | 'LFY';
+    /** 股息率榜单行（§8.1）。/rankings 与 /top20 两端点共用。
+
+字段名沿用 wire 实际形状（snake_case，与 DividendSecurityItemOut 同款
+「wire 逐字一致」惯例）；金额类字段 Decimal → str（信封编码器保证）。 */
+    DividendYieldRankItemOut: {
+        /** Master Id */
+        master_id: string;
+        /** Code */
+        code?: string | null;
+        /** Name */
+        name?: string | null;
+        /** Exchange */
+        exchange?: string | null;
+        mode: components['schemas']['DividendYieldMode'];
+        /** Dividend Yield */
+        dividend_yield?: string | null;
+        /** Numerator Per Share */
+        numerator_per_share?: string | null;
+        /** Latest Price */
+        latest_price?: string | null;
+        /** Latest Trade Date */
+        latest_trade_date?: string | null;
+        /** Consecutive Years */
+        consecutive_years?: number | null;
+        /** Last Dividend Year */
+        last_dividend_year?: number | null;
+        /** Stale */
+        stale: boolean;
+        /** Suspicious */
+        suspicious: boolean;
+        /** Computed At */
+        computed_at: string;
+        /** Filtered */
+        filtered?: boolean;
+        /** Ref Div Ids */
+        ref_div_ids?: string[] | null;
+      };
+    /** GET /rankings 响应（分页结构）。 */
+    DividendYieldRankPageOut: {
+        /** Items */
+        items?: components['schemas']['DividendYieldRankItemOut'][];
+        /** Total */
+        total: number;
+        /** Page */
+        page: number;
+        /** Pagesize */
+        pageSize: number;
+      };
     /** 股息率全局配置（GET /settings 与 PUT /settings **同形**）。 */
     DividendYieldSettingsOut: {
         dividend_detail_source: components['schemas']['DividendYieldSourceRefOut'] | null;
@@ -253,6 +303,13 @@ PG 原生枚举类型名同本类名。**无排序约束**（与 ``ReportPeriodT
         id: string;
         /** Name */
         name: string;
+      };
+    /** GET /top20 响应（§8.3 双榜，不分页；条数上限 20）。 */
+    DividendYieldTop20Out: {
+        /** Top */
+        top?: components['schemas']['DividendYieldRankItemOut'][];
+        /** Consecutive */
+        consecutive?: components['schemas']['DividendYieldRankItemOut'][];
       };
     /** DrawdownPointOut */
     DrawdownPointOut: {
@@ -371,6 +428,25 @@ PG 原生枚举类型名同本类名。**无排序约束**（与 ``ReportPeriodT
         totalProfit: string;
         /** Securitycount */
         securityCount: number;
+      };
+    /** GET /{master_id}/implied-price 响应（§9 反推价格 + 当前价/股息率对照）。 */
+    ImpliedPriceResultOut: {
+        /** Master Id */
+        master_id: string;
+        /** Code */
+        code?: string | null;
+        /** Name */
+        name?: string | null;
+        /** Numerator Per Share */
+        numerator_per_share?: string | null;
+        /** Target Ratio */
+        target_ratio: string;
+        /** Implied Price */
+        implied_price?: string | null;
+        /** Current Price */
+        current_price?: string | null;
+        /** Current Dividend Yield */
+        current_dividend_yield?: string | null;
       };
     /** ImportCommitOut */
     ImportCommitOut: {

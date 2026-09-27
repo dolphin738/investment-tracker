@@ -15,7 +15,7 @@ from pydantic import BaseModel
 
 # §5.2b 续批（S13）：枚举字段用**真实枚举类型**而非裸 str——否则 OpenAPI 里没有 enum，
 # 前端只能手写联合，后端加枚举值时前端下拉静默漏项（单一事实源在 models/enums.py）。
-from app.models.enums import DividendPendingStatus, DividendStatus, ReportPeriodType
+from app.models.enums import DividendPendingStatus, DividendStatus, DividendYieldMode, ReportPeriodType
 
 class PendingDividendOut(BaseModel):
     """待人工划分分红行（列表项）。金额 Decimal → str（信封编码器保证）。"""
@@ -130,6 +130,65 @@ class DividendSecurityListOut(BaseModel):
     """GET /securities 响应（无分页上限，全量候选）。"""
 
     items: list[DividendSecurityItemOut] = []
+
+
+class DividendYieldRankItemOut(BaseModel):
+    """股息率榜单行（§8.1）。/rankings 与 /top20 两端点共用。
+
+    字段名沿用 wire 实际形状（snake_case，与 DividendSecurityItemOut 同款
+    「wire 逐字一致」惯例）；金额类字段 Decimal → str（信封编码器保证）。
+    """
+
+    master_id: str
+    code: Optional[str] = None
+    name: Optional[str] = None
+    exchange: Optional[str] = None
+    mode: DividendYieldMode  # TTM | LFY（S13：真实枚举进契约 → 前端生成联合类型）
+    dividend_yield: Optional[str] = None
+    numerator_per_share: Optional[str] = None
+    latest_price: Optional[str] = None
+    latest_trade_date: Optional[date] = None
+    consecutive_years: Optional[int] = None
+    last_dividend_year: Optional[int] = None
+    stale: bool
+    suspicious: bool
+    computed_at: datetime
+    # 过滤态标注（§8.1「过滤态股息率」）：_serialize_rank 统一产出 False/null，
+    # rankings 端点 include_proposed=false 分支覆写——两端点行形状恒一致（16 键），
+    # wire 键集测试可做等值断言。
+    filtered: bool = False
+    # 过滤态现算的参考分红记录 id（§8.1）；非过滤态为 null。
+    ref_div_ids: Optional[list[str]] = None
+
+
+class DividendYieldRankPageOut(BaseModel):
+    """GET /rankings 响应（分页结构）。"""
+
+    items: list[DividendYieldRankItemOut] = []
+    total: int
+    page: int
+    pageSize: int
+
+
+class DividendYieldTop20Out(BaseModel):
+    """GET /top20 响应（§8.3 双榜，不分页；条数上限 20）。"""
+
+    top: list[DividendYieldRankItemOut] = []
+    consecutive: list[DividendYieldRankItemOut] = []
+
+
+class ImpliedPriceResultOut(BaseModel):
+    """GET /{master_id}/implied-price 响应（§9 反推价格 + 当前价/股息率对照）。"""
+
+    master_id: str
+    code: Optional[str] = None
+    name: Optional[str] = None
+    numerator_per_share: Optional[str] = None
+    # 目标股息率（小数比率 0 < x <= 1）：Decimal → str
+    target_ratio: str
+    implied_price: Optional[str] = None
+    current_price: Optional[str] = None
+    current_dividend_yield: Optional[str] = None
 
 
 class DividendYieldSourceRefOut(BaseModel):

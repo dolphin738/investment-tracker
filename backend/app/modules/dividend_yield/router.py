@@ -48,7 +48,13 @@ from app.services.dividend_yield import (
 from app.modules.dividend_yield.pending_router import router_pending
 from app.modules.dividend_yield.settings_router import router_settings
 from app.modules.dividend_yield.trigger_router import router_trigger
-from app.schemas_resp import DividendSecurityListOut, SecurityDividendListOut
+from app.schemas_resp import (
+    DividendSecurityListOut,
+    DividendYieldRankPageOut,
+    DividendYieldTop20Out,
+    ImpliedPriceResultOut,
+    SecurityDividendListOut,
+)
 
 router_dividend_yield = APIRouter(
     prefix="/api/dividend-yield", tags=["dividend-yield"], route_class=EnvelopeRoute
@@ -107,7 +113,12 @@ async def _fetch_sec_map(
 def _serialize_rank(
     row: SecurityDividendYield, sec: Optional[Security]
 ) -> dict[str, Any]:
-    """榜单行序列化（含证券 code/name/exchange）。"""
+    """榜单行序列化（含证券 code/name/exchange）。
+
+    过滤态两键（filtered/ref_div_ids）统一在此产出缺省值——rankings 端点的
+    include_proposed=false 分支覆写，top20 两榜保持缺省。两端点行形状恒一致
+    （16 键），与 ``DividendYieldRankItemOut.model_fields`` 等值（wire 测试守护）。
+    """
     return {
         "master_id": row.master_id,
         "code": sec.code if sec else None,
@@ -123,10 +134,12 @@ def _serialize_rank(
         "stale": row.stale,
         "suspicious": row.suspicious,
         "computed_at": row.computed_at,
+        "filtered": False,
+        "ref_div_ids": None,
     }
 
 
-@router_dividend_yield.get("/rankings")
+@router_dividend_yield.get("/rankings", response_model=DividendYieldRankPageOut)
 async def rank_dividend_yield(
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -148,6 +161,9 @@ async def rank_dividend_yield(
     - ``q`` 关键字过滤：按证券代码 / 名称模糊匹配（大小写不敏感，前后端统一搜索口径）；
     - ``include_proposed=false`` 时剔除 PROPOSED 后分子随之改变，按 §8.1 以过滤后记录集
       现调 §2.5 纯函数计算「过滤态股息率」，行内以 ``filtered=True`` 标注（排序仍用快照列）。
+
+    契约：金额类字段 Decimal → str；行形状与 top20 共用 ``DividendYieldRankItemOut``
+    （16 键恒一致），键集由 wire 比对测试守护。
     """
     q_kw = (q or "").strip() or None
     if sort not in _SORT_COLUMNS:
@@ -237,7 +253,7 @@ async def rank_dividend_yield(
     return {"items": items, "total": total, "page": page, "pageSize": pageSize}
 
 
-@router_dividend_yield.get("/top20")
+@router_dividend_yield.get("/top20", response_model=DividendYieldTop20Out)
 async def top20_dividend_yield(
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -248,6 +264,9 @@ async def top20_dividend_yield(
       避免僵尸记录污染榜单）；
     - 连续分红榜：``consecutive_years >= 2``，排序
       ``consecutive_years DESC, dividend_yield DESC, master_id ASC``（§8.3）。
+
+    契约：行形状与 /rankings 共用 ``DividendYieldRankItemOut``（filtered=False、
+    ref_div_ids=null），键集由 wire 比对测试守护。
     """
     cur_year = today_app_tz().year
     # §3.5 守卫：与 rank 一致，NaN 视为缺失一并排除（IS NOT NULL 拦不住 NaN）
@@ -395,14 +414,20 @@ async def list_security_dividends(
     }
 
 
-@router_dividend_yield.get("/{master_id}/implied-price")
+@router_dividend_yield.get(
+    "/{master_id}/implied-price", response_model=ImpliedPriceResultOut
+)
 async def implied_price_endpoint(
     master_id: str = Path(...),
     target_ratio: float = Query(..., gt=0, le=1),
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """反推价格（§9）：implied_price = 每股东分子 / target_ratio（小数比率）。"""
+    """反推价格（§9）：implied_price = 每股东分子 / target_ratio（小数比率）。
+
+    契约：金额/比率字段 Decimal → str（含 target_ratio 与三个对照字段），
+    键集由 wire 比对测试守护。
+    """
     snapshot = (
         await db.execute(
             select(SecurityDividendYield).where(

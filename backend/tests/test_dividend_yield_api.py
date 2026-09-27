@@ -34,8 +34,10 @@ from app.models.enums import (
 )
 from app.schemas_resp import (
     DividendSecurityItemOut,
+    DividendYieldRankItemOut,
     DividendYieldSettingsOut,
     DividendYieldSourceRefOut,
+    ImpliedPriceResultOut,
     SeedFailedSecurityOut,
     SeedProgressOut,
 )
@@ -124,16 +126,31 @@ async def test_rankings_mode_and_exchange_validation(session, client):
 # ───────────────────────── NULL 不进榜（§3.5） ─────────────────────────
 @pytest.mark.asyncio
 async def test_rankings_null_yield_excluded(session, client):
-    """守护 §3.5/§12：NULL 股息率不进榜。"""
+    """守护 §3.5/§12：NULL 股息率不进榜。
+
+    契约护栏：wire 键集 == ``DividendYieldRankItemOut.model_fields``（response_model
+    不参与运行时校验，键集漂移只能靠本断言拦截）；金额类字段 Decimal → str。
+    """
     info = await register_login(client)
     await _seed_snapshot(session, "sh600100", dividend_yield=None)
     await _seed_snapshot(session, "sh600200", dividend_yield="0.08")
     await session.commit()
-    r = await client.get("/api/dividend-yield/rankings", headers=auth(info["token"]))
+    h = auth(info["token"])
+    r = await client.get("/api/dividend-yield/rankings", headers=h)
     status, _, data, _ = env(r)
     assert status == 200
     codes = {row["code"] for row in data["items"]}
     assert codes == {"sh600200"}
+    fields = set(DividendYieldRankItemOut.model_fields)
+    row = data["items"][0]
+    assert set(row.keys()) == fields, (
+        f"rankings wire 键集与 DividendYieldRankItemOut 不一致："
+        f"多={sorted(set(row) - fields)} 缺={sorted(fields - set(row))}"
+    )
+    for k in ("dividend_yield", "numerator_per_share", "latest_price"):
+        assert row[k] is None or isinstance(row[k], str), (
+            f"{k} 须为 str（Decimal 信封编码）或 None，实得 {type(row[k])}"
+        )
 
 
 # ───────────────────────── 所有分红证券（§10.2 股息价格推算选择框，无上限） ─────────────────────────
@@ -266,6 +283,13 @@ async def test_top20_double_board_contract(session, client):
     assert "sh600404" not in cons_codes  # consecutive_years=1 不入榜二
     cy = [row["consecutive_years"] for row in cons]
     assert cy == sorted(cy, reverse=True)  # consecutive_years DESC
+    # 契约护栏：双榜行形状与 /rankings 共用 DividendYieldRankItemOut（16 键恒一致）
+    fields = set(DividendYieldRankItemOut.model_fields)
+    for row in (*data["top"], *cons):
+        assert set(row.keys()) == fields, (
+            f"top20 wire 键集与 DividendYieldRankItemOut 不一致："
+            f"多={sorted(set(row) - fields)} 缺={sorted(fields - set(row))}"
+        )
 
 
 # ───────────────────────── settings：GET 登录可读，PUT admin-only（§9，P1-1） ─────────────────────────
@@ -576,6 +600,17 @@ async def test_implied_price_route_segment_order(session, client):
     assert Decimal(data["numerator_per_share"]) == Decimal("2.0")
     assert Decimal(data["implied_price"]) == Decimal("50")  # 2.0 / 0.04
     assert Decimal(data["current_price"]) == Decimal("12.5")
+    # 契约护栏：wire 键集 == ImpliedPriceResultOut.model_fields；金额/比率 Decimal → str
+    fields = set(ImpliedPriceResultOut.model_fields)
+    assert set(data.keys()) == fields, (
+        f"implied-price wire 键集与 ImpliedPriceResultOut 不一致："
+        f"多={sorted(set(data) - fields)} 缺={sorted(fields - set(data))}"
+    )
+    for k in ("numerator_per_share", "target_ratio", "implied_price",
+              "current_price", "current_dividend_yield"):
+        assert data[k] is None or isinstance(data[k], str), (
+            f"{k} 须为 str（Decimal 信封编码）或 None，实得 {type(data[k])}"
+        )
 
     wrong = await client.get(
         f"/api/dividend-yield/implied-price/{m.id}",

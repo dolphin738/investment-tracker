@@ -2587,7 +2587,7 @@
           "dividend-yield"
         ],
         "summary": "Rank Dividend Yield",
-        "description": "股息率排名（§8.1/§9）。\n\n- NULL 股息率不进榜（§3.5）；B2 排序白名单 + ``NULLS LAST`` + master_id tiebreaker；\n- 过滤参数：``exchange``/``mode``/``min_consecutive``/``include_proposed``/``include_no_dividend``\n  （默认**剔除近两年无分红**，§8.2 窗口 [cur-1, cur] 由 ``last_dividend_year`` 表达）；\n- ``q`` 关键字过滤：按证券代码 / 名称模糊匹配（大小写不敏感，前后端统一搜索口径）；\n- ``include_proposed=false`` 时剔除 PROPOSED 后分子随之改变，按 §8.1 以过滤后记录集\n  现调 §2.5 纯函数计算「过滤态股息率」，行内以 ``filtered=True`` 标注（排序仍用快照列）。",
+        "description": "股息率排名（§8.1/§9）。\n\n- NULL 股息率不进榜（§3.5）；B2 排序白名单 + ``NULLS LAST`` + master_id tiebreaker；\n- 过滤参数：``exchange``/``mode``/``min_consecutive``/``include_proposed``/``include_no_dividend``\n  （默认**剔除近两年无分红**，§8.2 窗口 [cur-1, cur] 由 ``last_dividend_year`` 表达）；\n- ``q`` 关键字过滤：按证券代码 / 名称模糊匹配（大小写不敏感，前后端统一搜索口径）；\n- ``include_proposed=false`` 时剔除 PROPOSED 后分子随之改变，按 §8.1 以过滤后记录集\n  现调 §2.5 纯函数计算「过滤态股息率」，行内以 ``filtered=True`` 标注（排序仍用快照列）。\n\n契约：金额类字段 Decimal → str；行形状与 top20 共用 ``DividendYieldRankItemOut``\n（16 键恒一致），键集由 wire 比对测试守护。",
         "operationId": "rank_dividend_yield_api_dividend_yield_rankings_get",
         "security": [
           {
@@ -2720,7 +2720,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/DividendYieldRankPageOut"
+                }
               }
             }
           },
@@ -2944,14 +2946,16 @@
           "dividend-yield"
         ],
         "summary": "Top20 Dividend Yield",
-        "description": "Top20 + 连续分红榜（§8.3，不分页；条数上限 20，决策 A13）。\n\n- Top20 榜：剔除 ``suspicious``（A12）与**近两年无分红**（§8.3 窗口 [cur-1, cur]，\n  避免僵尸记录污染榜单）；\n- 连续分红榜：``consecutive_years >= 2``，排序\n  ``consecutive_years DESC, dividend_yield DESC, master_id ASC``（§8.3）。",
+        "description": "Top20 + 连续分红榜（§8.3，不分页；条数上限 20，决策 A13）。\n\n- Top20 榜：剔除 ``suspicious``（A12）与**近两年无分红**（§8.3 窗口 [cur-1, cur]，\n  避免僵尸记录污染榜单）；\n- 连续分红榜：``consecutive_years >= 2``，排序\n  ``consecutive_years DESC, dividend_yield DESC, master_id ASC``（§8.3）。\n\n契约：行形状与 /rankings 共用 ``DividendYieldRankItemOut``（filtered=False、\nref_div_ids=null），键集由 wire 比对测试守护。",
         "operationId": "top20_dividend_yield_api_dividend_yield_top20_get",
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/DividendYieldTop20Out"
+                }
               }
             }
           }
@@ -3017,7 +3021,7 @@
           "dividend-yield"
         ],
         "summary": "Implied Price Endpoint",
-        "description": "反推价格（§9）：implied_price = 每股东分子 / target_ratio（小数比率）。",
+        "description": "反推价格（§9）：implied_price = 每股东分子 / target_ratio（小数比率）。\n\n契约：金额/比率字段 Decimal → str（含 target_ratio 与三个对照字段），\n键集由 wire 比对测试守护。",
         "operationId": "implied_price_endpoint_api_dividend_yield__master_id__implied_price_get",
         "security": [
           {
@@ -3051,7 +3055,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ImpliedPriceResultOut"
+                }
               }
             }
           },
@@ -8244,6 +8250,200 @@
         ],
         "title": "DividendType"
       },
+      "DividendYieldMode": {
+        "type": "string",
+        "enum": [
+          "TTM",
+          "LFY"
+        ],
+        "title": "DividendYieldMode",
+        "description": "股息率口径：TTM（滚动 12 个月）/ LFY（最近完整财年）。§2.2。"
+      },
+      "DividendYieldRankItemOut": {
+        "properties": {
+          "master_id": {
+            "type": "string",
+            "title": "Master Id"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "exchange": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exchange"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/DividendYieldMode"
+          },
+          "dividend_yield": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dividend Yield"
+          },
+          "numerator_per_share": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Numerator Per Share"
+          },
+          "latest_price": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Price"
+          },
+          "latest_trade_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Trade Date"
+          },
+          "consecutive_years": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Consecutive Years"
+          },
+          "last_dividend_year": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Dividend Year"
+          },
+          "stale": {
+            "type": "boolean",
+            "title": "Stale"
+          },
+          "suspicious": {
+            "type": "boolean",
+            "title": "Suspicious"
+          },
+          "computed_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Computed At"
+          },
+          "filtered": {
+            "type": "boolean",
+            "title": "Filtered",
+            "default": false
+          },
+          "ref_div_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref Div Ids"
+          }
+        },
+        "type": "object",
+        "required": [
+          "master_id",
+          "mode",
+          "stale",
+          "suspicious",
+          "computed_at"
+        ],
+        "title": "DividendYieldRankItemOut",
+        "description": "股息率榜单行（§8.1）。/rankings 与 /top20 两端点共用。\n\n字段名沿用 wire 实际形状（snake_case，与 DividendSecurityItemOut 同款\n「wire 逐字一致」惯例）；金额类字段 Decimal → str（信封编码器保证）。"
+      },
+      "DividendYieldRankPageOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DividendYieldRankItemOut"
+            },
+            "type": "array",
+            "title": "Items",
+            "default": []
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "pageSize": {
+            "type": "integer",
+            "title": "Pagesize"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total",
+          "page",
+          "pageSize"
+        ],
+        "title": "DividendYieldRankPageOut",
+        "description": "GET /rankings 响应（分页结构）。"
+      },
       "DividendYieldSettingsOut": {
         "properties": {
           "dividend_detail_source": {
@@ -8322,6 +8522,29 @@
         ],
         "title": "DividendYieldSourceRefOut",
         "description": "已 resolve 的数据源接口引用（读侧投影 ``{id, name}``；未配置为 null）。"
+      },
+      "DividendYieldTop20Out": {
+        "properties": {
+          "top": {
+            "items": {
+              "$ref": "#/components/schemas/DividendYieldRankItemOut"
+            },
+            "type": "array",
+            "title": "Top",
+            "default": []
+          },
+          "consecutive": {
+            "items": {
+              "$ref": "#/components/schemas/DividendYieldRankItemOut"
+            },
+            "type": "array",
+            "title": "Consecutive",
+            "default": []
+          }
+        },
+        "type": "object",
+        "title": "DividendYieldTop20Out",
+        "description": "GET /top20 响应（§8.3 双榜，不分页；条数上限 20）。"
       },
       "DrawdownPointOut": {
         "properties": {
@@ -8693,6 +8916,91 @@
         ],
         "title": "HoldingsSummaryOut",
         "description": "概览页「持仓市值」卡数据来源（缺陷4-A）。"
+      },
+      "ImpliedPriceResultOut": {
+        "properties": {
+          "master_id": {
+            "type": "string",
+            "title": "Master Id"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "numerator_per_share": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Numerator Per Share"
+          },
+          "target_ratio": {
+            "type": "string",
+            "title": "Target Ratio"
+          },
+          "implied_price": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Implied Price"
+          },
+          "current_price": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Price"
+          },
+          "current_dividend_yield": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Dividend Yield"
+          }
+        },
+        "type": "object",
+        "required": [
+          "master_id",
+          "target_ratio"
+        ],
+        "title": "ImpliedPriceResultOut",
+        "description": "GET /{master_id}/implied-price 响应（§9 反推价格 + 当前价/股息率对照）。"
       },
       "ImportCommitOut": {
         "properties": {
