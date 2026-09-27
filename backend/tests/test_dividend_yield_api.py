@@ -33,6 +33,7 @@ from app.models.enums import (
     SecurityType,
 )
 from app.schemas_resp import (
+    DividendSecurityItemOut,
     DividendYieldSettingsOut,
     DividendYieldSourceRefOut,
     SeedFailedSecurityOut,
@@ -139,7 +140,11 @@ async def test_rankings_null_yield_excluded(session, client):
 @pytest.mark.asyncio
 async def test_securities_lists_all_dividend_payers_excludes_null(session, client):
     """守护 §10.2：/securities 返回所有有股息率证券（dividend_yield 非 NULL/NaN），
-    排除无股息率行，按代码升序，投影字段为 master_id/code/name/exchange/numerator_per_share。"""
+    排除无股息率行，按代码升序，投影字段为 master_id/code/name/exchange/numerator_per_share。
+
+    契约护栏：wire 键集 == ``DividendSecurityItemOut.model_fields``（response_model 不参与
+    运行时校验，键集漂移只能靠本断言拦截）；``numerator_per_share`` 为 Decimal → str。
+    """
     info = await register_login(client)
     await _seed_snapshot(session, "sh600100", dividend_yield="0.08")
     await _seed_snapshot(session, "sh600200", dividend_yield="0.09")
@@ -151,13 +156,15 @@ async def test_securities_lists_all_dividend_payers_excludes_null(session, clien
     assert status == 200
     codes = [row["code"] for row in data["items"]]
     assert codes == ["sh600100", "sh600200"]  # 仅两只有股息率，且按代码升序
-    assert set(data["items"][0].keys()) == {
-        "master_id",
-        "code",
-        "name",
-        "exchange",
-        "numerator_per_share",
-    }
+    fields = set(DividendSecurityItemOut.model_fields)
+    assert set(data["items"][0].keys()) == fields, (
+        f"securities wire 键集与 DividendSecurityItemOut 不一致："
+        f"多={sorted(set(data['items'][0]) - fields)} 缺={sorted(fields - set(data['items'][0]))}"
+    )
+    nps = data["items"][0]["numerator_per_share"]
+    assert nps is None or isinstance(nps, str), (
+        f"numerator_per_share 须为 str（Decimal 信封编码）或 None，实得 {type(nps)}"
+    )
 
 
 # ───────────────────────── 近两年无分红默认剔除（§8.2/§8.3，P0-3） ─────────────────────────

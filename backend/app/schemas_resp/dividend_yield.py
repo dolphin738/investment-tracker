@@ -112,6 +112,26 @@ class SecurityDividendListOut(BaseModel):
     items: list[SecurityDividendItemOut] = []
 
 
+class DividendSecurityItemOut(BaseModel):
+    """所有有分红证券（GET /securities 列表项；§10.2 股息价格推算选择框候选）。
+
+    字段名沿用 wire 实际形状（snake_case，与 SeedProgressOut 同款「wire 逐字一致」惯例）。
+    """
+
+    master_id: str
+    code: Optional[str] = None
+    name: Optional[str] = None
+    exchange: Optional[str] = None
+    # 每股现金分红（元）：Decimal 经信封编码器 → str（见包 __init__ 契约惯例）。
+    numerator_per_share: Optional[str] = None
+
+
+class DividendSecurityListOut(BaseModel):
+    """GET /securities 响应（无分页上限，全量候选）。"""
+
+    items: list[DividendSecurityItemOut] = []
+
+
 class DividendYieldSourceRefOut(BaseModel):
     """已 resolve 的数据源接口引用（读侧投影 ``{id, name}``；未配置为 null）。"""
 

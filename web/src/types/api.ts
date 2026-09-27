@@ -213,6 +213,26 @@ app_logs（message/trace/detail 均为无界 Text/JSON 列）。 */
 PG 原生枚举类型名同本类名。**无排序约束**（与 ``ReportPeriodType.OTHER`` 不同，
 不依赖定义顺序参与 ``ORDER BY``），故值顺序可自由。 */
     DividendPendingStatus: 'PENDING' | 'ASSIGNED' | 'IGNORED';
+    /** 所有有分红证券（GET /securities 列表项；§10.2 股息价格推算选择框候选）。
+
+字段名沿用 wire 实际形状（snake_case，与 SeedProgressOut 同款「wire 逐字一致」惯例）。 */
+    DividendSecurityItemOut: {
+        /** Master Id */
+        master_id: string;
+        /** Code */
+        code?: string | null;
+        /** Name */
+        name?: string | null;
+        /** Exchange */
+        exchange?: string | null;
+        /** Numerator Per Share */
+        numerator_per_share?: string | null;
+      };
+    /** GET /securities 响应（无分页上限，全量候选）。 */
+    DividendSecurityListOut: {
+        /** Items */
+        items?: components['schemas']['DividendSecurityItemOut'][];
+      };
     /** 分红事件生命周期状态（§3.1）：仅 PROPOSED/PAID 计入分子，REJECTED 剔除。 */
     DividendStatus: 'PROPOSED' | 'PAID' | 'REJECTED';
     /** DividendType */
@@ -1133,6 +1153,10 @@ PG 原生枚举类型名 `interface_direction`（由迁移创建）。
         cashPerShare: string;
         /** Dividendlabel */
         dividendLabel?: string | null;
+        /** Bonusshareratio */
+        bonusShareRatio?: string | null;
+        /** Convertratio */
+        convertRatio?: string | null;
         status: components['schemas']['DividendStatus'];
         /** Exdividenddate */
         exDividendDate?: string | null;

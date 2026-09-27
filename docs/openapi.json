@@ -2768,14 +2768,16 @@
           "dividend-yield"
         ],
         "summary": "List Dividend Securities",
-        "description": "所有有分红的证券（供「股息价格推算」选择框；无分页上限，§10.2）。\n\n- 过滤：``dividend_yield`` 非 NULL 且非 NaN（有股息率即视作有分红）；\n- 排序：按证券代码升序（稳定、可浏览完整列表，前端再按代码/名称本地过滤）；\n- 投影：master_id / code / name / exchange / numerator_per_share（够推算使用，避免大字段）。",
+        "description": "所有有分红的证券（供「股息价格推算」选择框；无分页上限，§10.2）。\n\n- 过滤：``dividend_yield`` 非 NULL 且非 NaN（有股息率即视作有分红）；\n- 排序：按证券代码升序（稳定、可浏览完整列表，前端再按代码/名称本地过滤）；\n- 投影：master_id / code / name / exchange / numerator_per_share（够推算使用，避免大字段）。\n- 契约：字段名沿用 wire 形状（snake_case）；``numerator_per_share`` 为 Decimal → str。\n  response_model 不参与运行时校验（信封机制），键集由 wire 比对测试守护\n  （tests/test_dividend_yield_api.py::test_securities_lists_all_dividend_payers_excludes_null）。",
         "operationId": "list_dividend_securities_api_dividend_yield_securities_get",
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/DividendSecurityListOut"
+                }
               }
             }
           }
@@ -8150,6 +8152,79 @@
         ],
         "title": "DividendPendingStatus",
         "description": "待人工划分分红（staging）行状态（批次 B，§3.1）。\n\n承载巨潮「现金>0 但报告时间不可解析」的行，人工裁定报告期后写回主表。\nPG 原生枚举类型名同本类名。**无排序约束**（与 ``ReportPeriodType.OTHER`` 不同，\n不依赖定义顺序参与 ``ORDER BY``），故值顺序可自由。"
+      },
+      "DividendSecurityItemOut": {
+        "properties": {
+          "master_id": {
+            "type": "string",
+            "title": "Master Id"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "exchange": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exchange"
+          },
+          "numerator_per_share": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Numerator Per Share"
+          }
+        },
+        "type": "object",
+        "required": [
+          "master_id"
+        ],
+        "title": "DividendSecurityItemOut",
+        "description": "所有有分红证券（GET /securities 列表项；§10.2 股息价格推算选择框候选）。\n\n字段名沿用 wire 实际形状（snake_case，与 SeedProgressOut 同款「wire 逐字一致」惯例）。"
+      },
+      "DividendSecurityListOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DividendSecurityItemOut"
+            },
+            "type": "array",
+            "title": "Items",
+            "default": []
+          }
+        },
+        "type": "object",
+        "title": "DividendSecurityListOut",
+        "description": "GET /securities 响应（无分页上限，全量候选）。"
       },
       "DividendStatus": {
         "type": "string",

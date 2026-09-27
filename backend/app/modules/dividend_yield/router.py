@@ -48,7 +48,7 @@ from app.services.dividend_yield import (
 from app.modules.dividend_yield.pending_router import router_pending
 from app.modules.dividend_yield.settings_router import router_settings
 from app.modules.dividend_yield.trigger_router import router_trigger
-from app.schemas_resp import SecurityDividendListOut
+from app.schemas_resp import DividendSecurityListOut, SecurityDividendListOut
 
 router_dividend_yield = APIRouter(
     prefix="/api/dividend-yield", tags=["dividend-yield"], route_class=EnvelopeRoute
@@ -287,7 +287,9 @@ async def top20_dividend_yield(
     }
 
 
-@router_dividend_yield.get("/securities")
+@router_dividend_yield.get(
+    "/securities", response_model=DividendSecurityListOut
+)
 async def list_dividend_securities(
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -297,6 +299,9 @@ async def list_dividend_securities(
     - 过滤：``dividend_yield`` 非 NULL 且非 NaN（有股息率即视作有分红）；
     - 排序：按证券代码升序（稳定、可浏览完整列表，前端再按代码/名称本地过滤）；
     - 投影：master_id / code / name / exchange / numerator_per_share（够推算使用，避免大字段）。
+    - 契约：字段名沿用 wire 形状（snake_case）；``numerator_per_share`` 为 Decimal → str。
+      response_model 不参与运行时校验（信封机制），键集由 wire 比对测试守护
+      （tests/test_dividend_yield_api.py::test_securities_lists_all_dividend_payers_excludes_null）。
     """
     _NAN = Decimal("NaN")
     stmt = (
